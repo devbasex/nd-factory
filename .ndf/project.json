@@ -93,14 +93,6 @@
     "compose_files": [],
     "databases": []
   },
-  "delivery": [
-    {
-      "target": "AWS（設置のコマンド npm run nd-setup と反映のパイプライン）",
-      "kind": "manual",
-      "trigger": "npm run nd-setup -- diff で差分と確認の値を示し、承認の後に npm run nd-setup -- deploy --confirm <確認の値>。運用する環境の縦の切れ端は反映のパイプラインの承認の後に反映される",
-      "versioned": false
-    }
-  ],
   "issues": {
     "primary": "github",
     "others": []
@@ -125,35 +117,82 @@
     "notes": []
   },
   "materials": {
-    "unknown": "立ち上げ前で材料が無い"
+    "unknown": "答えが無い"
+  },
+  "branch_strategy": {
+    "kind": "custom",
+    "release_strategy": "trunk",
+    "branches": {
+      "production": "main",
+      "base": "main"
+    },
+    "sprint": {
+      "start": "production",
+      "integrate": "release",
+      "doc_prs": "sprint"
+    },
+    "release": {
+      "form": "service",
+      "version_store": {
+        "kind": "none"
+      },
+      "tag": null,
+      "github_release": false,
+      "cd": null,
+      "deliveries": [
+        {
+          "target": "AWS（設置のコマンド npm run nd-setup と反映のパイプライン）",
+          "kind": "manual",
+          "trigger": "npm run nd-setup -- diff で差分と確認の値を示し、承認の後に npm run nd-setup -- deploy --confirm <確認の値>。運用する環境の縦の切れ端は反映のパイプラインの承認の後に反映される",
+          "versioned": false
+        }
+      ]
+    },
+    "channels": [
+      {
+        "name": "stable",
+        "ref": "main"
+      }
+    ],
+    "approval": {
+      "target": "production_pr",
+      "via": "gate"
+    },
+    "merge": {
+      "actor": "ndf",
+      "method": "merge-queue",
+      "commit": "squash",
+      "admin": false
+    },
+    "verify": null
   },
   "analysis": {
     "analyzer": 3,
-    "at": "2026-11-17T05:04:18+00:00",
+    "at": "2026-11-17T15:38:54+00:00",
     "inputs": {
       ".github/workflows/ci.yml": "62b26d5f76c07f919a0de3fe05e32a76e81637e4",
-      "AGENTS.md": "79c9ab63e5f4fbd5f4183624f2e497d02dc114f7",
+      "AGENTS.md": "5e3fcaee2d22871e7b56257b56f8f5943e189280",
       "infra/package.json": "6a1c10f6add4d103bc5785bd1cde4f68108fbd5d",
       "package.json": "8d78ae6400727428dc2816f8eecfb3a7b87df7f0",
       "tools/package.json": "0a38cf9cd27005edcc8a5272b1721f4903e2aba6",
       "vitest.config.ts": "bd31b76b81a6f6710cd58ab04194dd107a2a3ab9"
     },
     "branches": {
-      "head": null,
-      "present": []
+      "head": "main",
+      "present": [
+        "main"
+      ]
     },
     "written": {
       "languages": "3f5b223d9f9b61f1699693e3270186198eda3f0943595a4407185b6d6d0811a7",
       "test": "cec1ee7f3c3d33b073c25f331438ddca39db9b5d8262e093e9eb60fabbfeef37",
       "test_duration": "e2eba697a0673ad54c2257dd9f16cc59b075e64aca974937b97b1637abf2ae4e",
-      "ci": "fbacc2b50f80b7c4c91558db565b8f5337e690ccb17b3b6426eabf33b74d69e0",
       "services": "53f4e4c15a04bde773f9d0d89be06cd65f1a9248c0603b06b78bfa8a5f8a0771",
-      "delivery": "dc5962b9508c6cda8fada35daf7e46a6e674cb59241787e6482e651bba02272c",
       "issues": "770eb2c07170f7f7045b8622672b738f90843daad5d23c26178e25195a3fd60e",
       "checks": "9490de709202cf2422b43d4a75177e3a3dd5b3688ee6d8c6a001d9e6ce219e26",
       "ndf_policies": "81c1c2e31df60254dfd66878f3c3b3190c87a2a0b78a2275e13cde3a199e9fa1",
       "instructions": "95b8dcd9f882416b410b0686c1adb76fa373f37de2acc2d6aa3c6d28556642a5",
-      "materials": "dda3a734f291be7e093df3449a9a6abedf1ccf746e4bb38ef54117a2dcba43ff",
+      "materials": "eec1b759fe58ecfcf4c8373becd6975fba410eebb3742cfa3142e56552c8e77b",
       "test.ci.only": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
     }
   }
