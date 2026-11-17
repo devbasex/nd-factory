@@ -52,7 +52,7 @@
 
 ## 承認を拒む方針を AI の主体へ付ける
 
-パイプラインのスタックは、承認の結果を送る操作（`codepipeline:PutApprovalResult`）を拒む管理の方針 `<prefix>-<environment>-deny-approval` を作る。スタックは方針を作るだけで、どの主体にも付けない。付けるのは人で、パイプラインのスタックを初めて反映した後、縦の切れ端を初めて反映する前に行う。
+パイプラインのスタックは、承認の結果を送る操作（`codepipeline:PutApprovalResult`）を拒む管理の方針 `<prefix>-<environment>-deny-approval` を作る。スタックは方針を作るだけで、どの主体にも付けない。付けるのは、パイプラインのスタックを初めて反映した後、縦の切れ端を初めて反映する前である。
 
 1. AI が使う profile の主体と、承認する人の主体が別であることを確かめる。同じ主体なら、AI のための別の主体を先に作る
 2. AI の主体へ方針を付ける。方針の ARN は `arn:aws:iam::<アカウント>:policy/<prefix>-<environment>-deny-approval` である
@@ -87,7 +87,7 @@
 
 ## 接続を有効にする
 
-パイプラインのスタックが作る GitHub との接続 `<prefix>-<environment>-github` は、作った直後は `PENDING` で使えない。組織の持ち主がコンソールで有効にする。手順は [idp-and-apps.md](idp-and-apps.md) の「GitHub との接続（反映のパイプライン）」にある。
+パイプラインのスタックが作る GitHub との接続 `<prefix>-<environment>-github` は、作った直後は `PENDING` で使えないので、有効にする。手順は [idp-and-apps.md](idp-and-apps.md) の「GitHub との接続（反映のパイプライン）」にある。
 
 ## 順序のまとめ
 
