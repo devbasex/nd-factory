@@ -2,11 +2,15 @@
 
 設計文書 [01-rules.md](01-rules.md) の「構成要素」と「データ構造」「入出力の契約」を、関数の粒度へ下ろした文書である。
 
-この文書が決めるのは、子（作り直しの親の課題・[対応表の設計](03-parity.md)・[全体の設計](05-overall.md)・骨組み・#3・#15）が実装する**論理の関数**の責務・事前条件・事後条件・失敗の扱いである。この課題はコードを持たない（設計の「設計の結果」の触るファイルは無い）。関数の名前は役割を指す呼び名で、子は自分の詳細設計で実際のファイルと名前へ対応させる。対応させるときに責務・条件・終了コードを変えない（設計の決定 1）。変えるときはこの文書を改訂する。
+この文書が決めるのは、子が実装する**論理の関数**の責務・事前条件・事後条件・失敗の扱いである。子は、作り直しの親の課題・[対応表の設計](03-parity.md)・[全体の設計](05-overall.md)・骨組み・#3・#15 を指す。
+
+- この課題はコードを持たない（設計の「設計の結果」の触るファイルは無い）
+- 関数の名前は役割を指す呼び名である。子は自分の詳細設計で、実際のファイルと名前へ対応させる
+- 対応させるときに責務・条件・終了コードを変えない（設計の決定 1）。変えるときはこの文書を改訂する
 
 ## ファイル配置
 
-省く: この課題が触るファイルは無い（設計の「設計の結果」の触るファイルは「—」）。関数を置くファイルのパスは、下の「クラスと関数の構造」の置き場の列にある子が、自分の詳細設計で決める
+省く: この課題が触るファイルは無い（設計の「設計の結果」の触るファイルは「—」）。関数を置くファイルのパスは、子が自分の詳細設計で決める。どの子かは、下の「クラスと関数の構造」の置き場の列にある
 
 ## クラスと関数の構造
 
@@ -21,48 +25,75 @@
 | 新しいリポジトリ（[全体の設計](05-overall.md)が形・骨組みが置く） | 参照の検査のモジュール | `load_match_terms`・`find_old_refs`・`find_ndf_pins`・`find_version_compare`・`main_ref_check`（新設） |
 | 作り直しの親の課題（旧い側）の材料を出す段 | やめる判断の材料のモジュール | `build_materials`・`read_cost`・`post_materials`・`count_started_children`（新設） |
 
-`judge_j1`〜`judge_j6` は 6 つの関数を 1 行にまとめた呼び名で、下の表では `judge_j<番号>` の行で 1 つずつ書く。戻しの予行の記録と App とクライアントを作る手順は人が書く文書で、関数を持たない。
+`judge_j1`〜`judge_j6` は 6 つの関数を 1 行にまとめた呼び名である。下の表では `judge_j<番号>` の行で 1 つずつ書く。戻しの予行の記録と App とクライアントを作る手順は人が書く文書で、関数を持たない。
 
 ## 関数の仕様
 
-置き場の列のモジュールは「クラスと関数の構造」の表のとおりで、行は子ごと（対応表の設計・#3・#15・全体の設計・作り直しの親の課題の順）に並べる。
+節はモジュールごとに分け、子ごと（対応表の設計・#3・#15・全体の設計・作り直しの親の課題の順）に並べる。モジュールを実装する子は「クラスと関数の構造」の表のとおりである。
 
-| 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `in_parity_scope` | 対応表の値の集合のモジュール | 新設 | `(row: Row) -> bool` | 行が同等の範囲に入るかを行の値だけから返す | `row` の今の dev での状態と行の種類が値の集合の中にある | 状態が `PARITY_STATES` にあり、種類が「NDF 11 で確かめる」でなく、作らない理由の種類が「捨てる」でないときだけ真 | 無し |
-| `check_row_destination` | 対応表の検査のモジュール | 新設 | `(row: Row) -> list[Violation]` | I1 を 1 行で確かめる | 無し | 行き先の子と「作らない」がちょうど 1 つで、「作らない」なら理由の種類と空でない理由の文があるとき空の一覧 | 無し |
-| `check_not_built_reason` | 対応表の検査のモジュール | 新設 | `(row: Row) -> list[Violation]` | I2 を 1 行で確かめる | 行が「作らない」を持つ | 理由の種類が `NOT_BUILT_KINDS` にあり、種類ごとの条件（下の「処理の手順」）を満たすとき空の一覧 | 無し |
-| `check_required_kinds` | 対応表の検査のモジュール | 新設 | `(rows: list[Row]) -> list[Violation]` | I4 を表の全体で確かめる | 無し | 「既知の不具合の回帰」と「権限の境界」の行がそれぞれ 1 行以上あり、どれも「作らない」を持たないとき空の一覧 | 無し |
-| `check_scope_addition` | 対応表の検査のモジュール | 新設 | `(row: Row, baseline_ids: set[str], switched_on: date \| None) -> list[Violation]` | I6 を 1 行で確かめる | `baseline_ids` は対応表の設計の承認の時点の行の ID の集合 | 基準の集合に無い行が範囲の追加の記録（日付・承認した課題の番号・理由の種類）を持ち、足した日付が入れ替えの日より前なら理由の種類が `SCOPE_REASON_KINDS` にあるとき空の一覧 | 無し |
-| `check_verification` | 対応表の検査のモジュール | 新設 | `(row: Row) -> list[Violation]` | R9 を 1 行で確かめる | 無し | 旧い側のテストのパス（無ければ「無し」の値）と新しいリポジトリでの確かめ方がどちらも空でないとき空の一覧 | 無し |
-| `check_table` | 対応表の検査のモジュール | 新設 | `(rows: list[Row], baseline_ids: set[str], switched_on: date \| None) -> list[Violation]` | 上の 5 つを全行に当て、違反を行の順にまとめる | 行の ID が表の中で重ならない | 戻り値が空なら I1・I2・I4・I6・R9 がすべて成り立つ。行の ID の重なりも違反として返す | 無し |
-| `main_table_check` | 対応表の検査のモジュール | 新設 | `(argv: list[str]) -> int` | 対応表と基準の行の ID を読み、`check_table` の結果を出して終了コードを返す | 作業ツリーが git のリポジトリ | 違反が無ければ 0、あれば 1、読めなければ 2 を返し、違反を 1 件 1 行で標準出力に出した | ファイルを読む・`git show` で設計承認の時点の対応表を読む |
-| `append_run` | 試走の記録のモジュール | 新設 | `(record_path: Path, sprint: str, ran_at: datetime, results: dict[str, RunResult], table_ids: set[str]) -> None` | 試走の 1 回を記録へ追記する | `ran_at` は UTC。`results` の値は `passed`・`failed`・`not_run` のどれか | 前からある回は 1 文字も変わらず、末尾に 1 回が増えた。`table_ids` のうち `results` に無い行は `not_run` で記録された | 記録のファイルを書く |
-| `latest_results` | 試走の記録のモジュール | 新設 | `(runs: list[TrialRun], table_ids: set[str]) -> dict[str, RunResult]` | 行ごとに最も新しい回の結果を返す | `runs` は記録の全回 | `table_ids` のすべての行が鍵にあり、どの回にも無い行は `not_run` | 無し |
-| `regenerate_latest` | 試走の記録のモジュール | 新設 | `(record_path: Path, latest_path: Path, table_ids: set[str]) -> None` | 最新の回の結果のファイルを記録から作り直す | 記録を読める | `latest_path` の中身が `latest_results` の結果と一致する。対応表は変わらない | 生成物のファイルを書く |
-| `passed_counts` | 試走の記録のモジュール | 新設 | `(runs: list[TrialRun], rows: list[Row]) -> list[RunCount]` | 試走の回ごとの `passed` の行の数と同等の範囲の行の数を返す | 無し | 回の順に 1 件ずつ並び、各件の範囲の行の数は `in_parity_scope` で数えた値 | 無し |
-| `read_inputs` | 入れ替えの判定のモジュール | 新設 | `(args: JudgeArgs) -> Inputs` | 対応表・最新の回の結果・凍結の後の PR の一覧を読み、形を確かめる | 引数にそれぞれの置き場がある | 戻り値のすべての入力が形を満たす。満たさない入力は `Unreadable` に入力の名前を添えて投げた | ファイルを読む |
-| `read_issue_states` | 入れ替えの判定のモジュール | 新設 | `(numbers: set[int], issues_repo: str, refs: set[str]) -> dict[str, IssueState]` | 行き先の子の課題と、移す先の課題の開閉を GitHub から読む | GitHub の読み取りの資格情報が手元にある | 渡した番号と参照のすべてが鍵にあり、値は `open`・`closed`・`missing` のどれか | GitHub の API を読む |
-| `run_synth_tests` | 入れ替えの判定のモジュール | 新設 | `(repo_root: Path) -> CommandResult` | 作り物の値（運用する環境と違うアカウント ID とリージョン）で、合成とスタックのテストを打つ | 依存が入っている | 打ったコマンドと終了コードを返した。作り物の値は判定のモジュールの定数だけから渡した | 外部コマンドを起動する |
-| `run_leak_check` | 入れ替えの判定のモジュール | 新設 | `(repo_root: Path, repo: str) -> CommandResult` | #1 の漏れの検査をファイル・全履歴・課題と PR の本文とコメントに打つ | 漏れの検査が入っている。照合する値が環境変数にある | 打った範囲（ファイル・履歴・課題）ごとの当たりの件数を返した。当たった値そのものは持たない | 外部コマンドを起動する・GitHub の API を読む |
-| `judge_j1` | 入れ替えの判定のモジュール | 新設 | `(rows: list[Row], latest: dict[str, RunResult]) -> list[Mismatch]` | J1 を確かめる | 無し | 最新の回が `passed` でなく「作らない」も持たない行を、1 行ずつ合わない行として返した | 無し |
-| `judge_j2` | 入れ替えの判定のモジュール | 新設 | `(rows: list[Row]) -> list[Mismatch]` | J2 を確かめる | 無し | 同等の範囲の行で「作らない」を持つ行と、理由の種類が 3 つの外の行と、今の dev での状態が「未調査」の行と、新しいリポジトリでの確かめ方が「未決」の行を、1 行ずつ返した（試走の結果によらない。[判定の規則](01-rules.md)の R9・J2、[対応表の設計](03-parity.md)の決定 13） | 無し |
-| `judge_j3` | 入れ替えの判定のモジュール | 新設 | `(rows: list[Row], latest: dict[str, RunResult]) -> list[Mismatch]` | J3 を確かめる | 無し | 回帰の行か権限の境界の行が 0 行なら種類ごとに 1 件、どちらかの種類で `passed` でない行を 1 行ずつ返した | 無し |
-| `judge_j4` | 入れ替えの判定のモジュール | 新設 | `(rows: list[Row], latest: dict[str, RunResult], states: dict[str, IssueState]) -> list[Mismatch]` | J4 を確かめる | `states` に行き先の子のすべてがある | 行き先の子が `closed` で最新の回が `passed` でない行を返した | 無し |
-| `judge_j5` | 入れ替えの判定のモジュール | 新設 | `(result: CommandResult) -> list[Mismatch]` | J5 を確かめる | 無し | 終了コードが 0 でなければ、打ったコマンドを対象に 1 件返した | 無し |
-| `judge_j6` | 入れ替えの判定のモジュール | 新設 | `(result: CommandResult) -> list[Mismatch]` | J6 を確かめる | 無し | 当たりのある範囲ごとに 1 件、件数を理由に添えて返した | 無し |
-| `list_records` | 入れ替えの判定のモジュール | 新設 | `(rollback_ref: str \| None, frozen_prs: list[FrozenPr], states: dict[str, IssueState], rows: list[Row]) -> list[RecordLine]` | J7 と J8 の「人が確かめる」一覧を作る | 無し | J7 は記録の場所か「記録なし」の 1 行、J8 は凍結の後の PR ごとに 1 行（移す先の課題の開閉と、回帰の行の行き先かどうか）を返した。合否を持たない | 無し |
-| `decide_exit` | 入れ替えの判定のモジュール | 新設 | `(mismatches: list[Mismatch], unreadable: list[str]) -> int` | 終了コードを決める | 無し | `unreadable` が空でなければ 2、空で `mismatches` が空でなければ 1、どちらも空なら 0 | 無し |
-| `main_judge` | 入れ替えの判定のモジュール | 新設 | `(argv: list[str]) -> int` | 入力を読み、J1〜J6 を判定し、合わない行と一覧を出して終了コードを返す | 無し | 合わない行・一覧を標準出力へ、読めなかった入力を標準エラーへ出し、`decide_exit` の値を返した。入力のファイルと課題は変わらない | 外部コマンドを起動する・GitHub の API を読む・標準出力と標準エラーへ書く |
-| `load_match_terms` | 参照の検査のモジュール | 新設 | `(env: Mapping[str, str]) -> MatchTerms` | 照合の語を、リポジトリの外（環境変数）から読む | 無し | 旧い側のリポジトリの名前・7 表の名前・状態のバケットの名前がそれぞれ 1 つ以上ある。欠ければ `Unreadable` を投げた | 無し |
-| `find_old_refs` | 参照の検査のモジュール | 新設 | `(repo_root: Path, terms: MatchTerms) -> list[Violation]` | I13・I14 の当たりを、追跡しているすべてのファイル（文書と CI の定義を含む）から集める | 作業ツリーが git のリポジトリ | 当たりごとに、照合の語の種類・ファイル・行を返した。当たった語そのものは返さない | 外部コマンド（`git grep`）を起動する |
-| `find_ndf_pins` | 参照の検査のモジュール | 新設 | `(repo_root: Path) -> list[Violation]` | I15 の前半（NDF の版の固定の値が 1 か所）を確かめる | 固定の値の書き方（キーの名前）は[全体の設計](05-overall.md)が決めた 1 つ | 固定の値がちょうど 1 か所なら空の一覧。0 か 2 以上なら場所を添えて 1 件返した | 外部コマンド（`git grep`）を起動する |
-| `find_version_compare` | 参照の検査のモジュール | 新設 | `(repo_root: Path) -> list[Violation]` | I15 の後半（NDF の版の数字を比べる処理が 0 件）を確かめる | 比べる処理の見分け方（下の「内部のデータと定数」）がある | 当たりごとにファイルと行を返した | 外部コマンド（`git grep`）を起動する |
-| `main_ref_check` | 参照の検査のモジュール | 新設 | `(argv: list[str]) -> int` | 上の 4 つを打ち、違反を出して終了コードを返す | 無し | 違反が無ければ 0、あれば 1、照合の語か作業ツリーを読めなければ 2 を返した | 外部コマンドを起動する・標準出力へ書く |
-| `build_materials` | やめる判断の材料のモジュール | 新設 | `(round_no: int, counts: list[RunCount], approved_on: date, today: date, cost: Cost \| None, remaining: Remaining) -> Materials` | 4 つの材料を 1 回分にまとめる | `round_no` は 1 か 2 | 4 つの材料がすべてある。`cost` が `None` なら費用は「読めない」と理由つきで入った | 無し |
-| `read_cost` | やめる判断の材料のモジュール | 新設 | `(tag_key: str, tag_value: str, start: date, end: date) -> Cost \| None` | 新しい側のタグで分けた費用を読む | タグのキーは[全体の設計](05-overall.md)が決めた値。コスト配分タグとして有効にする操作は人が行った | 期間の費用の合計と通貨を返した。読めなければ `None` | AWS の費用の API を読む（読み取りだけ） |
-| `post_materials` | やめる判断の材料のモジュール | 新設 | `(issue: int, materials: Materials) -> str` | 材料のコメントを作り直しの親の課題（旧い側）へ出す | `materials` に 4 つの材料がある | 回の番号の目印を持つコメントが作り直しの親の課題（旧い側）に 1 件だけあり、その URL と日時を返した | GitHub の API を読む・書く |
-| `count_started_children` | やめる判断の材料のモジュール | 新設 | `(children: list[int], posted_at: datetime, answered_at: datetime, tz: tzinfo) -> StartedCount` | 材料のコメントから答えまでの間に着手した機能の子を数える（I11） | `children` は機能の子（#4〜#13）の番号 | 本文の `## 進行` の「設計」以降の工程の時刻が期間に入る子を「着手」、期間の端から時刻帯の幅の内にある子を「要確認」として番号つきで返した | GitHub の API を読む |
+### 対応表の値の集合のモジュール
+
+| 関数 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `in_parity_scope` | 新設 | `(row: Row) -> bool` | 行が同等の範囲に入るかを行の値だけから返す | `row` の今の dev での状態と行の種類が値の集合の中にある | 状態が `PARITY_STATES` にあり、種類が「NDF 11 で確かめる」でなく、作らない理由の種類が「捨てる」でないときだけ真 | 無し |
+
+### 対応表の検査のモジュール
+
+| 関数 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `check_row_destination` | 新設 | `(row: Row) -> list[Violation]` | I1 を 1 行で確かめる | 無し | 行き先の子と「作らない」がちょうど 1 つで、「作らない」なら理由の種類と空でない理由の文があるとき空の一覧 | 無し |
+| `check_not_built_reason` | 新設 | `(row: Row) -> list[Violation]` | I2 を 1 行で確かめる | 行が「作らない」を持つ | 理由の種類が `NOT_BUILT_KINDS` にあり、種類ごとの条件（下の「処理の手順」）を満たすとき空の一覧 | 無し |
+| `check_required_kinds` | 新設 | `(rows: list[Row]) -> list[Violation]` | I4 を表の全体で確かめる | 無し | 「既知の不具合の回帰」と「権限の境界」の行がそれぞれ 1 行以上あり、どれも「作らない」を持たないとき空の一覧 | 無し |
+| `check_scope_addition` | 新設 | `(row: Row, baseline_ids: set[str], switched_on: date \| None) -> list[Violation]` | I6 を 1 行で確かめる | `baseline_ids` は対応表の設計の承認の時点の行の ID の集合 | 基準の集合に無い行が範囲の追加の記録（日付・承認した課題の番号・理由の種類）を持ち、足した日付が入れ替えの日より前なら理由の種類が `SCOPE_REASON_KINDS` にあるとき空の一覧 | 無し |
+| `check_verification` | 新設 | `(row: Row) -> list[Violation]` | R9 を 1 行で確かめる | 無し | 旧い側のテストのパス（無ければ「無し」の値）と新しいリポジトリでの確かめ方がどちらも空でないとき空の一覧 | 無し |
+| `check_table` | 新設 | `(rows: list[Row], baseline_ids: set[str], switched_on: date \| None) -> list[Violation]` | 上の 5 つを全行に当て、違反を行の順にまとめる | 行の ID が表の中で重ならない | 戻り値が空なら I1・I2・I4・I6・R9 がすべて成り立つ。行の ID の重なりも違反として返す | 無し |
+| `main_table_check` | 新設 | `(argv: list[str]) -> int` | 対応表と基準の行の ID を読み、`check_table` の結果を出して終了コードを返す | 作業ツリーが git のリポジトリ | 違反が無ければ 0、あれば 1、読めなければ 2 を返し、違反を 1 件 1 行で標準出力に出した | ファイルを読む・`git show` で設計承認の時点の対応表を読む |
+
+### 試走の記録のモジュール
+
+| 関数 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `append_run` | 新設 | `(record_path: Path, sprint: str, ran_at: datetime, results: dict[str, RunResult], table_ids: set[str]) -> None` | 試走の 1 回を記録へ追記する | `ran_at` は UTC。`results` の値は `passed`・`failed`・`not_run` のどれか | 前からある回は 1 文字も変わらず、末尾に 1 回が増えた。`table_ids` のうち `results` に無い行は `not_run` で記録された | 記録のファイルを書く |
+| `latest_results` | 新設 | `(runs: list[TrialRun], table_ids: set[str]) -> dict[str, RunResult]` | 行ごとに最も新しい回の結果を返す | `runs` は記録の全回 | `table_ids` のすべての行が鍵にあり、どの回にも無い行は `not_run` | 無し |
+| `regenerate_latest` | 新設 | `(record_path: Path, latest_path: Path, table_ids: set[str]) -> None` | 最新の回の結果のファイルを記録から作り直す | 記録を読める | `latest_path` の中身が `latest_results` の結果と一致する。対応表は変わらない | 生成物のファイルを書く |
+| `passed_counts` | 新設 | `(runs: list[TrialRun], rows: list[Row]) -> list[RunCount]` | 試走の回ごとの `passed` の行の数と同等の範囲の行の数を返す | 無し | 回の順に 1 件ずつ並び、各件の範囲の行の数は `in_parity_scope` で数えた値 | 無し |
+
+### 入れ替えの判定のモジュール
+
+| 関数 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `read_inputs` | 新設 | `(args: JudgeArgs) -> Inputs` | 対応表・最新の回の結果・凍結の後の PR の一覧を読み、形を確かめる | 引数にそれぞれの置き場がある | 戻り値のすべての入力が形を満たす。満たさない入力は `Unreadable` に入力の名前を添えて投げた | ファイルを読む |
+| `read_issue_states` | 新設 | `(numbers: set[int], issues_repo: str, refs: set[str]) -> dict[str, IssueState]` | 行き先の子の課題と、移す先の課題の開閉を GitHub から読む | GitHub の読み取りの資格情報が手元にある | 渡した番号と参照のすべてが鍵にあり、値は `open`・`closed`・`missing` のどれか | GitHub の API を読む |
+| `run_synth_tests` | 新設 | `(repo_root: Path) -> CommandResult` | 作り物の値（運用する環境と違うアカウント ID とリージョン）で、合成とスタックのテストを打つ | 依存が入っている | 打ったコマンドと終了コードを返した。作り物の値は判定のモジュールの定数だけから渡した | 外部コマンドを起動する |
+| `run_leak_check` | 新設 | `(repo_root: Path, repo: str) -> CommandResult` | #1 の漏れの検査をファイル・全履歴・課題と PR の本文とコメントに打つ | 漏れの検査が入っている。照合する値が環境変数にある | 打った範囲（ファイル・履歴・課題）ごとの当たりの件数を返した。当たった値そのものは持たない | 外部コマンドを起動する・GitHub の API を読む |
+| `judge_j1` | 新設 | `(rows: list[Row], latest: dict[str, RunResult]) -> list[Mismatch]` | J1 を確かめる | 無し | 最新の回が `passed` でなく「作らない」も持たない行を、1 行ずつ合わない行として返した | 無し |
+| `judge_j2` | 新設 | `(rows: list[Row]) -> list[Mismatch]` | J2 を確かめる | 無し | 同等の範囲の行で「作らない」を持つ行と、理由の種類が 3 つの外の行と、今の dev での状態が「未調査」の行と、新しいリポジトリでの確かめ方が「未決」の行を、1 行ずつ返した（試走の結果によらない。[判定の規則](01-rules.md)の R9・J2、[対応表の設計](03-parity.md)の決定 13） | 無し |
+| `judge_j3` | 新設 | `(rows: list[Row], latest: dict[str, RunResult]) -> list[Mismatch]` | J3 を確かめる | 無し | 回帰の行か権限の境界の行が 0 行なら種類ごとに 1 件、どちらかの種類で `passed` でない行を 1 行ずつ返した | 無し |
+| `judge_j4` | 新設 | `(rows: list[Row], latest: dict[str, RunResult], states: dict[str, IssueState]) -> list[Mismatch]` | J4 を確かめる | `states` に行き先の子のすべてがある | 行き先の子が `closed` で最新の回が `passed` でない行を返した | 無し |
+| `judge_j5` | 新設 | `(result: CommandResult) -> list[Mismatch]` | J5 を確かめる | 無し | 終了コードが 0 でなければ、打ったコマンドを対象に 1 件返した | 無し |
+| `judge_j6` | 新設 | `(result: CommandResult) -> list[Mismatch]` | J6 を確かめる | 無し | 当たりのある範囲ごとに 1 件、件数を理由に添えて返した | 無し |
+| `list_records` | 新設 | `(rollback_ref: str \| None, frozen_prs: list[FrozenPr], states: dict[str, IssueState], rows: list[Row]) -> list[RecordLine]` | J7 と J8 の「人が確かめる」一覧を作る | 無し | J7 は記録の場所か「記録なし」の 1 行、J8 は凍結の後の PR ごとに 1 行（移す先の課題の開閉と、回帰の行の行き先かどうか）を返した。合否を持たない | 無し |
+| `decide_exit` | 新設 | `(mismatches: list[Mismatch], unreadable: list[str]) -> int` | 終了コードを決める | 無し | `unreadable` が空でなければ 2、空で `mismatches` が空でなければ 1、どちらも空なら 0 | 無し |
+| `main_judge` | 新設 | `(argv: list[str]) -> int` | 入力を読み、J1〜J6 を判定し、合わない行と一覧を出して終了コードを返す | 無し | 合わない行・一覧を標準出力へ、読めなかった入力を標準エラーへ出し、`decide_exit` の値を返した。入力のファイルと課題は変わらない | 外部コマンドを起動する・GitHub の API を読む・標準出力と標準エラーへ書く |
+
+### 参照の検査のモジュール
+
+| 関数 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `load_match_terms` | 新設 | `(env: Mapping[str, str]) -> MatchTerms` | 照合の語を、リポジトリの外（環境変数）から読む | 無し | 旧い側のリポジトリの名前・7 表の名前・状態のバケットの名前がそれぞれ 1 つ以上ある。欠ければ `Unreadable` を投げた | 無し |
+| `find_old_refs` | 新設 | `(repo_root: Path, terms: MatchTerms) -> list[Violation]` | I13・I14 の当たりを、追跡しているすべてのファイル（文書と CI の定義を含む）から集める | 作業ツリーが git のリポジトリ | 当たりごとに、照合の語の種類・ファイル・行を返した。当たった語そのものは返さない | 外部コマンド（`git grep`）を起動する |
+| `find_ndf_pins` | 新設 | `(repo_root: Path) -> list[Violation]` | I15 の前半（NDF の版の固定の値が 1 か所）を確かめる | 固定の値の書き方（キーの名前）は[全体の設計](05-overall.md)が決めた 1 つ | 固定の値がちょうど 1 か所なら空の一覧。0 か 2 以上なら場所を添えて 1 件返した | 外部コマンド（`git grep`）を起動する |
+| `find_version_compare` | 新設 | `(repo_root: Path) -> list[Violation]` | I15 の後半（NDF の版の数字を比べる処理が 0 件）を確かめる | 比べる処理の見分け方（下の「内部のデータと定数」）がある | 当たりごとにファイルと行を返した | 外部コマンド（`git grep`）を起動する |
+| `main_ref_check` | 新設 | `(argv: list[str]) -> int` | 上の 4 つを打ち、違反を出して終了コードを返す | 無し | 違反が無ければ 0、あれば 1、照合の語か作業ツリーを読めなければ 2 を返した | 外部コマンドを起動する・標準出力へ書く |
+
+### やめる判断の材料のモジュール
+
+| 関数 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `build_materials` | 新設 | `(round_no: int, counts: list[RunCount], approved_on: date, today: date, cost: Cost \| None, remaining: Remaining) -> Materials` | 4 つの材料を 1 回分にまとめる | `round_no` は 1 か 2 | 4 つの材料がすべてある。`cost` が `None` なら費用は「読めない」と理由つきで入った | 無し |
+| `read_cost` | 新設 | `(tag_key: str, tag_value: str, start: date, end: date) -> Cost \| None` | 新しい側のタグで分けた費用を読む | タグのキーは[全体の設計](05-overall.md)が決めた値。コスト配分タグとして有効にする操作は人が行った | 期間の費用の合計と通貨を返した。読めなければ `None` | AWS の費用の API を読む（読み取りだけ） |
+| `post_materials` | 新設 | `(issue: int, materials: Materials) -> str` | 材料のコメントを作り直しの親の課題（旧い側）へ出す | `materials` に 4 つの材料がある | 回の番号の目印を持つコメントが作り直しの親の課題（旧い側）に 1 件だけあり、その URL と日時を返した | GitHub の API を読む・書く |
+| `count_started_children` | 新設 | `(children: list[int], posted_at: datetime, answered_at: datetime, tz: tzinfo) -> StartedCount` | 材料のコメントから答えまでの間に着手した機能の子を数える（I11） | `children` は機能の子（#4〜#13）の番号 | 本文の `## 進行` の「設計」以降の工程の時刻が期間に入る子を「着手」、期間の端から時刻帯の幅の内にある子を「要確認」として番号つきで返した | GitHub の API を読む |
 
 照合の語をリポジトリのファイルに置かないのは、置いたファイルそのものが I13 の当たりになるためである。
 
@@ -131,7 +162,8 @@
 | `count_started_children` | 時刻が期間の外で、端から幅の外 | 数えない |
 
 - 繰り返しの終わる条件: 検査と判定は対応表の行・試走の回・凍結の後の PR を 1 回ずつ走査して終わる。`read_issue_states` の API のページ送りは、次のページが無くなったときに終わる。再試行は 1 回だけ
-- 計算量の注意: `latest_results` は回を新しい順に読み、すべての行の結果が決まった時点で止める。回の数を R、行の数を N として O(R × N) を超えない。`find_old_refs` は照合の語ごとに `git grep` を 1 回打ち、ファイルの数だけ起動しない
+- 計算量の注意: `latest_results` は回を新しい順に読み、すべての行の結果が決まった時点で止める。回の数を R、行の数を N として O(R × N) を超えない
+- 計算量の注意: `find_old_refs` は照合の語ごとに `git grep` を 1 回打つ。ファイルの数だけ起動しない
 
 ## 内部のデータと定数
 
@@ -161,7 +193,7 @@
 
 **値の集合の定数は、対応表の設計のモジュールの 1 か所だけに置く。** 対応表の検査・試走の記録・入れ替えの判定は、このモジュールを読み込み、集合を写さない。
 
-**行き先の子の課題を読むリポジトリは、判定の引数で受ける。** 機能の子の課題（骨組みか #1〜#16）の置き場を判定のコードに書くと、置き場が旧い側のとき I13 の当たりになるためである。
+**行き先の子の課題を読むリポジトリは、判定の引数で受ける。** 機能の子の課題（骨組みか #1〜#16）の置き場を判定のコードに書くと、置き場が旧い側のときに I13 の当たりになるためである。
 
 ## 並行と排他
 

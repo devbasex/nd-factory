@@ -1,6 +1,6 @@
 # 対応表の詳細設計: 機能の対応表の検査・生成と、網羅の元の抜き出し
 
-設計文書（[対応表の設計](03-parity.md)）の「構成要素」と「データ構造」「入出力の契約」「処理の流れ」を、ファイルと関数の粒度へ下ろした文書である。対応表・網羅の元のコピー・人が読む表の中身（133 行と 639 要素）は設計の段で置いてあり、この文書はそれらを読み書きするスクリプトとテストだけを扱う。スクリプトとテストは旧い側に置き、この文書のパスは、断りの無い限り旧い側のリポジトリの根からの相対のパスである。
+設計文書（[対応表の設計](03-parity.md)）の「構成要素」と「データ構造」「入出力の契約」「処理の流れ」を、ファイルと関数の粒度へ下ろした文書である。対応表・網羅の元のコピー・人が読む表の中身（133 行と 639 要素）は設計の段で置いてある。この文書は、それらを読み書きするスクリプトとテストだけを扱う。スクリプトとテストは旧い側に置く。この文書のパスは、断りの無い限り旧い側のリポジトリの根からの相対のパスである。
 
 この文書の関数の名前は、置き場のモジュールを頭に付けて書く。2 つのスクリプトがどちらも `main` を持つため、名前だけでは置き場が決まらない。
 
@@ -10,7 +10,7 @@
 | `extract.main` | 旧い側の `scripts/parity-extract.py` の `main` |
 | `test_parity.run_cli` | 旧い側の `tests/test_parity.py` の `run_cli` |
 
-### 用語
+## 用語
 
 | 語 | この文書での意味 |
 | --- | --- |
@@ -39,7 +39,15 @@
     └── test_parity.py              *
 ```
 
-依存は一方向である。旧い側の `tests/test_parity.py` は 2 つのスクリプトをサブプロセスで打ち、`scripts/parity.py` は `config/environments.py` だけを import する。`scripts/parity-extract.py` は標準のライブラリだけを使い、`scripts/parity.py` を import しない。`scripts/parity.py` は網羅の元の文書（`docs/` と、全体設計の文書（`issues/` の下））を開かない（非機能の条件の移行性）。2 つのスクリプトの間で共有するのは置き場のファイルの形だけで、関数を共有しない。新しいリポジトリへ移すのは `scripts/parity.py` と `tests/test_parity.py` だけで、そこで import の 1 行を差し替える（設計の決定 3）。
+依存は一方向である。
+
+| ファイル | 使うもの | 使わないもの |
+| --- | --- | --- |
+| 旧い側の `tests/test_parity.py` | 2 つのスクリプト（サブプロセスで打つ） | — |
+| `scripts/parity.py` | `config/environments.py` だけを import する | 網羅の元の文書（`docs/` と、全体設計の文書（`issues/` の下））を開かない（非機能の条件の移行性） |
+| `scripts/parity-extract.py` | 標準のライブラリだけ | `scripts/parity.py` を import しない |
+
+2 つのスクリプトの間で共有するのは置き場のファイルの形だけで、関数を共有しない。新しいリポジトリへ移すのは `scripts/parity.py` と `tests/test_parity.py` だけである。そこで import の 1 行を差し替える（設計の決定 3）。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -107,7 +115,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `parity.main` | 引数の誤り | 副命令が無い・`check` と `render` 以外・`--dir` に値が無い | `argparse` の解析 | 止める | 標準エラーに使い方、終了コード 2 | 書いたものは無い。引数を直して打ち直せる |
 | `parity.main` | 置き場が読めない | `load_dir` が `ParityLoadError` を投げた | `main` の `except ParityLoadError` | 止める | 標準エラーに `error: <理由>`、終了コード 2。違反の行は出さない | 書いたものは無い。ファイルを直して打ち直せる |
-| `parity.main` | `render` の入力の形が違う | 対応表が `check_shape` の違反を持つ | `main` の `render` の分岐で `check_shape` を先に呼ぶ | 止める | 標準出力に `形`・`欠けた列` の違反の行、終了コード 1。人が読む表は書かない。違反の行は `check` と同じく漏れの値を `[伏せた値: <値の種類>]` に置き換えてから出す（I9。形に合わない行の ID や `children` の鍵が値を写しても出さない） | 書いたものは無い。表を直して打ち直せる |
+| `parity.main` | `render` の入力の形が違う | 対応表が `check_shape` の違反を持つ | `main` の `render` の分岐で `check_shape` を先に呼ぶ | 止める | 標準出力に `形`・`欠けた列` の違反の行、終了コード 1。人が読む表は書かない。違反の行は `check` と同じく漏れの値を `[伏せた値: <値の種類>]` に置き換えてから出す（I9。形に合わない行の ID や `children` のキーが値を写しても出さない） | 書いたものは無い。表を直して打ち直せる |
 | `parity.main` | 人が読む表を書けない | 置き場に書く権限が無い・ディスクが一杯 | `Path.write_text` の `OSError` | 止める | 標準エラーに `error: <パス>: <理由>`、終了コード 2 | 一時のファイルへ書いてから `os.replace` で置き換えるため、途中で止まっても前の中身が残る。打ち直せる |
 | `parity.main` | 漏れの値を読めない | `config.environments` の import か `public_leak_values()` が投げた（環境の設定の値が不正で `EnvSettings` の確かめが投げた） | `check` の分岐と、`render` で形の違反を出す分岐の中で import と呼び出しを `try` で囲む（モジュールの頭では import しない。形の違反が無い `render` は読まない） | 止める | 標準エラーに `error: 漏れの値を読めない: <例外の型>`、終了コード 2。違反ありの 1 と見分けられる | 書いたものは無い。環境の設定を直して打ち直せる |
 | `parity.load_dir` | ファイルが無い | 3 つのファイルのどれかが置き場に無い（`render` では人が読む表を要らない） | `Path.read_text` の `FileNotFoundError` | 呼び出し元へ返す（`ParityLoadError`） | `main` が終了コード 2 にする。理由はファイルのパス | 無し |
@@ -134,7 +142,7 @@
 
 ### 違反の並び
 
-違反の並び（`parity.run_checks`）は、設計文書の「入出力の契約」の違反の種類の表の順（`VIOLATION_ORDER`）で並べ、同じ種類の中は見つけた順を保つ（安定な並べ替え）。各規則は行の順か網羅の元のコピーの順に見るため、同じ種類の中は行の順か要素の出所の順になる。
+違反の並び（`parity.run_checks`）は、設計文書の「入出力の契約」の違反の種類の表の順（`VIOLATION_ORDER`）で並べる。同じ種類の中は見つけた順を保つ（安定な並べ替え）。各規則は行の順か網羅の元のコピーの順に見るため、同じ種類の中は行の順か要素の出所の順になる。
 
 ### 表の検査の判定
 
@@ -142,15 +150,15 @@
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `parity.check_shape` | 頭に `version`・`as_of`・`approved_on`・`approved_rows`・`children`・`areas`・`plan_values`・`rows` のどれかが無い | `欠けた列`・対象 `頭`・詳細に欠けた鍵 |
-| `parity.check_shape` | `version` が 1 でない・`as_of` が `YYYY-MM-DD` でない・`rows` が配列でない | `形`・対象 `頭`・詳細に鍵 |
+| `parity.check_shape` | 頭に `version`・`as_of`・`approved_on`・`approved_rows`・`children`・`areas`・`plan_values`・`rows` のどれかが無い | `欠けた列`・対象 `頭`・詳細に欠けたキー |
+| `parity.check_shape` | `version` が 1 でない・`as_of` が `YYYY-MM-DD` でない・`rows` が配列でない | `形`・対象 `頭`・詳細にキー |
 | `parity.check_shape` | `approved_on` が `null` で `approved_rows` が空でない、または `approved_on` が日付で `approved_rows` が空 | `形`・対象 `頭`・詳細 `approved_rows` |
 | `parity.check_shape` | `approved_on` が `null` でも日付でもない | `形`・対象 `頭`・詳細 `approved_on` |
-| `parity.check_shape` | `children` の鍵に骨組みと #1〜#16 の番号の外がある | `形`・対象 `頭`・詳細 `children <番号>` |
+| `parity.check_shape` | `children` のキーに骨組みと #1〜#16 の番号の外がある | `形`・対象 `頭`・詳細 `children <番号>` |
 | `parity.check_shape` | 行が `dict` でない | `形`・対象 `行 <1 始まりの位置>` |
 | `parity.check_shape` | 行に `id`・`area`・`kind`・`behavior`・`source`・`now`・`verify`・`plans`・`trial`・`refs`・`added`・`dev_state`・`verify_new` のどれかが無い（`to`・`not_built` は `check_destination`、`not_built_kind`・`ndf_issue` は `check_not_built_kind` が見る） | `欠けた列`・対象は行の ID（無ければ `行 <位置>`）・詳細に欠けた列 |
 | `parity.check_shape` | `kind` が `behavior`・`regression`・`boundary`・`ndf11` のどれでもない | `形`・詳細 `kind` |
-| `parity.check_shape` | `area` が頭の `areas` の鍵でない | `形`・詳細 `area` |
+| `parity.check_shape` | `area` が頭の `areas` のキーでない | `形`・詳細 `area` |
 | `parity.check_shape` | `id` が行の種類の ID の形（`ID_PATTERNS`）に合わない。振る舞いの行は記号が `area` と違う | `形`・詳細 `id` |
 | `parity.check_shape` | `behavior`・`source`・`now`・`verify` が空の文字列か文字列でない | `形`・詳細に列 |
 | `parity.check_shape` | `trial` が `dict` でない・`result` が `passed`・`failed`・`not_run` のどれでもない | `形`・詳細 `trial.result` |
@@ -164,9 +172,9 @@
 | `parity.check_shape` | `verify_new` が空の文字列か文字列でない | `形`・詳細 `verify_new` |
 | `parity.check_destination` | `to` と `not_built` の両方を持つ | `行き先`・詳細 `両方` |
 | `parity.check_destination` | どちらも無い、または `not_built` が空の文字列（空白だけを含む） | `行き先`・詳細 `無い` |
-| `parity.check_destination` | `to` だけを持ち、頭の `children` の鍵でない | `行き先`・詳細 `範囲の外 <to の値>` |
-| `parity.check_destination` | `to` だけを持ち `children` の鍵である、または空でない `not_built` だけを持つ | 違反なし |
-| `parity.check_not_built_kind` | `not_built` が無いか `to` も持つ行が `not_built_kind`・`ndf_issue` を持つ | `作らない理由`・詳細に鍵 |
+| `parity.check_destination` | `to` だけを持ち、頭の `children` のキーでない | `行き先`・詳細 `範囲の外 <to の値>` |
+| `parity.check_destination` | `to` だけを持ち `children` のキーである、または空でない `not_built` だけを持つ | 違反なし |
+| `parity.check_not_built_kind` | `not_built` が無いか `to` も持つ行が `not_built_kind`・`ndf_issue` を持つ | `作らない理由`・詳細にキー |
 | `parity.check_not_built_kind` | `not_built` だけを持つ行の `not_built_kind` が無いか `NOT_BUILT_KINDS` の外 | `作らない理由`・詳細 `not_built_kind`（その行のほかの条件は見ない） |
 | `parity.check_not_built_kind` | `今も動かない` で `dev_state` が `済`・`済(残)` | `作らない理由`・詳細 `今も動かない dev_state` |
 | `parity.check_not_built_kind` | `NDF 待ち` で `kind` が `ndf11` でない | `作らない理由`・詳細 `NDF 待ち kind` |
@@ -227,7 +235,7 @@
 ### 終わる条件と計算量
 
 - 繰り返しの終わる条件: どの関数も、入力の配列（行・要素・文書の行・漏れの値）を 1 回ずつなめて終わる。再試行と待ちは無い
-- 計算量の注意: `check_leaks` は漏れの値（環境ごとに十数個）× 3 ファイル（合わせて約 200 KB）の部分文字列の探索で、1 秒に収まる。`check_coverage` は網羅の元の ID を集合にしてから行の参照を引く（639 要素 × 133 行を総当たりしない）
+- 計算量の注意: `check_leaks` は漏れの値（環境ごとに十数個）× 3 ファイル（合わせて約 200 KB）の部分文字列の探索である。1 秒に収まる。`check_coverage` は網羅の元の ID を集合にしてから行の参照を引く（639 要素 × 133 行を総当たりしない）
 
 ## 内部のデータと定数
 
@@ -241,15 +249,15 @@
 | `DEFAULT_DIR` | 定数 | `scripts/parity.py` | 旧い側の対応表の置き場（`issues/` の下）の `Path`（リポジトリの根からの相対） |
 | `TABLE_FILE`・`COVERAGE_FILE`・`RENDERED_FILE` | 定数 | `scripts/parity.py` | `parity.json`・`coverage.json`・`parity.md` |
 | `VIOLATION_ORDER` | 定数 | `scripts/parity.py` | `("形", "重なり", "欠けた列", "行き先", "作らない理由", "漏れ", "知らない要素", "必ず要る行", "足した理由", "生成物の食い違い", "中身の漏れ")`（設計文書の違反の種類の表の順） |
-| `HEAD_KEYS` | 定数 | `scripts/parity.py` | 頭の 8 つの鍵（設計文書の「対応表の頭」の順） |
-| `ROW_KEYS` | 定数 | `scripts/parity.py` | 行が必ず持つ 13 の鍵（`id`・`area`・`kind`・`behavior`・`source`・`now`・`verify`・`plans`・`trial`・`refs`・`added`・`dev_state`・`verify_new`） |
+| `HEAD_KEYS` | 定数 | `scripts/parity.py` | 頭の 8 つのキー（設計文書の「対応表の頭」の順） |
+| `ROW_KEYS` | 定数 | `scripts/parity.py` | 行が必ず持つ 13 のキー（`id`・`area`・`kind`・`behavior`・`source`・`now`・`verify`・`plans`・`trial`・`refs`・`added`・`dev_state`・`verify_new`） |
 | `DEV_STATES` | 定数 | `scripts/parity.py` | `("済", "済(残)", "届かず", "未", "未調査")`（判定の規則の今の dev での状態と、子が埋める印。設計の決定 13） |
 | `NOT_BUILT_KINDS` | 定数 | `scripts/parity.py` | `("捨てる", "今も動かない", "NDF 待ち")`（判定の規則の I2 の作らない理由の種類） |
 | `VERIFY_NEW_UNDECIDED` | 定数 | `scripts/parity.py` | `"未決"`。新しいリポジトリでの確かめ方が決まっていない印で、人が読む表の数の表が数える |
-| `KIND_TITLES` | 定数 | `scripts/parity.py` | `{"behavior": "振る舞い", "regression": "既知の不具合の回帰", "boundary": "権限の境界", "ndf11": "NDF 11 で確かめる"}`。行の種類の値の集合もこの鍵が持つ |
-| `TRIAL_TITLES` | 定数 | `scripts/parity.py` | `{"passed": "通った", "failed": "通らない", "not_run": "まだ流していない"}`。試走の結果の値の集合もこの鍵が持つ |
+| `KIND_TITLES` | 定数 | `scripts/parity.py` | `{"behavior": "振る舞い", "regression": "既知の不具合の回帰", "boundary": "権限の境界", "ndf11": "NDF 11 で確かめる"}`。行の種類の値の集合もこのキーが持つ |
+| `TRIAL_TITLES` | 定数 | `scripts/parity.py` | `{"passed": "通った", "failed": "通らない", "not_run": "まだ流していない"}`。試走の結果の値の集合もこのキーが持つ |
 | `ID_PATTERNS` | 定数 | `scripts/parity.py` | `behavior`: `^[A-N]-\d{2}$`・`regression`: `^REG-\d{2}$`・`boundary`: `^BND-\d{2}$`・`ndf11`: `^N11-[0-9A-Z-]+$`（設計の決定 7） |
-| `CHILD_RANGE` | 定数 | `scripts/parity.py` | 骨組みと #1〜#16 の 17 個の課題の番号の範囲（旧い側の番号）。頭の `children` の鍵の許す範囲 |
+| `CHILD_RANGE` | 定数 | `scripts/parity.py` | 骨組みと #1〜#16 の 17 個の課題の番号の範囲（旧い側の番号）。頭の `children` のキーの許す範囲 |
 | `PLANS_UNDECIDED` | 定数 | `scripts/parity.py` | `"未決"` |
 | `REQUIRED_TRACKS` | 定数 | `scripts/parity.py` | `regression`: 旧い側の 4 つの既知の不具合の課題の番号（ECS のレーンの秘密の器・契約の応答の 409 と 503・環境変数の食い違い・確定仕様のデータの行の表の食い違い）。`boundary`: `human-only`・`delegation-scope`・`account-isolation`・`seat-role`・`lane-token-scope`・`job-role-scope`。`ndf11`: 旧い側の課題の番号と確認の番号の組（承認ゲートの通知の通しの G1〜G5・レーンの通しの実環境の A5〜A11・手元のマシンが承認を待つレーンを受け取る確認の 13・同じリポジトリで 2 本の開発ループを回す確認）（設計の決定 8。表の頭には持たない） |
 | `CATEGORY_TITLES` | 定数 | `scripts/parity.py` | `spec`: 確定仕様の常に成り立つ条件・`route`: API の経路・`screen`: 画面・`table`: 表と状態のバケット・`infra`: 全体設計の不変条件・`env`: 環境変数・`config`: 環境の設定の項目（この順で逆引きの節を並べる） |
@@ -263,7 +271,7 @@
 | `STATE_BUCKET` | 定数 | `scripts/parity-extract.py` | `Element("table:state-bucket", "docs/design/database.md", <要旨>)`。要旨は今の `coverage.json` の値に合わせる |
 | `ROOT`・`PARITY_DIR` | 定数 | `tests/test_parity.py` | リポジトリの根と、その下の対応表の置き場（`issues/` の下） |
 
-要旨の作り方（`title_of` と区分ごとの列の選び方）は、今の `coverage.json` を設計の段で作った規則に合わせる。`write` が今の `coverage.json` と同じ要素を書き出すことを `extract.main check` の 0 で確かめる（`tests/test_parity.py` の本物の置き場のテスト）。合わない区分があれば、抜き出しの規則を今の要旨に寄せて直す。今の要旨は設計承認ゲートで人が読む中身であり、抜き出しの都合で変えない。
+要旨の作り方（`title_of` と区分ごとの列の選び方）は、今の `coverage.json` を設計の段で作った規則に合わせる。`write` が今の `coverage.json` と同じ要素を書き出すことは、`extract.main check` の 0 で確かめる。確かめるのは `tests/test_parity.py` の本物の置き場のテストである。合わない区分があれば、抜き出しの規則を今の要旨に寄せて直す。今の要旨は設計承認ゲートで人が読む中身であり、抜き出しの都合で変えない。
 
 ## 並行と排他
 
@@ -330,7 +338,7 @@
 
 ## 単体テストの観点
 
-テストはすべて旧い側の `tests/test_parity.py` に置き、スクリプトをサブプロセスで打つ（CLI の終了コードと出力の行が受け入れ条件の約束であるため）。壊すテストは `copy_dir` で一時の置き場を作ってから書き換える。各行は設計文書の「テスト設計」の行を関数の粒度へ下ろしたもので、受け入れ条件の対応はそちらにある。
+テストはすべて旧い側の `tests/test_parity.py` に置き、スクリプトをサブプロセスで打つ。CLI の終了コードと出力の行が、受け入れ条件の約束であるためである。壊すテストは `copy_dir` で一時の置き場を作ってから書き換える。各行は設計文書の「テスト設計」の行を関数の粒度へ下ろしたもので、受け入れ条件の対応はそちらにある。
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
@@ -360,7 +368,7 @@
 | `extract.extract_config_fields` | 本物の文書で 33 要素 | 無し（表の行の数は文書が決める） | 一時の根で「`EnvSettings` の項目」の見出しを消すと 2 |
 | `extract.tables_under` | 見出しの深さが 2 段目でも 3 段目でも節の表を返す | 節の中に表が 2 つあれば両方。コードブロックの中の表の形の行を含まない。同じか浅い見出しで節が終わる | 当たる見出しが無ければ空の配列 |
 | `extract.title_of` | 90 字以下はそのまま（リンクは文字だけ） | ちょうど 90 字はそのまま、91 字は先頭 89 字と `…` | 無し（失敗しない関数） |
-| `extract.build_copy` | 頭の 4 つの鍵と要素の 3 つの鍵を持つ JSON | 要素が 0 でも JSON として読める | 無し（失敗しない関数） |
+| `extract.build_copy` | 頭の 4 つのキーと要素の 3 つのキーを持つ JSON | 要素が 0 でも JSON として読める | 無し（失敗しない関数） |
 | `extract.diff_elements` | 同じ一覧で空 | 並びだけが違う一覧で空 | `足された`・`消えた`・`要旨の違い` の 3 種類が、この順で出る |
 | `extract.base_commit` | リポジトリの中で短いコミットの名前を返す | 無し | git の作業の木でない一時のディレクトリを根にすると `write` が 2 |
 | `test_parity.run_cli` | 無し（補助の関数。ほかのテストが使う） | 無し | 時間の上限 60 秒を超えるとテストが落ちる |
@@ -370,5 +378,5 @@
 本物の置き場を見るテストには、ほかに次の 3 つを置く（設計文書の「テスト設計」の受け入れ条件 5・14 と移行性の行）。
 
 - 対応表の `approved_on` が `null` の間は、全行の `trial.result` が `not_run` である。`approved_on` が日付なら確かめない（設計の決定 3 で、移すときに外す）
-- 本物の対応表の 1 行から行き先を消した一時の置き場で、`parity.py check` が 1 を返す（ジョブ `test` と同じ `uv run pytest -q` で集まるテストの中で確かめる）
-- 置き場の 3 つのファイルだけを、リポジトリの外の一時のディレクトリへコピーし、`--dir` にそのディレクトリを渡して `parity.py check` が 0 を返す（網羅の元の文書を開かない）
+- 本物の対応表の 1 行から行き先を消した一時の置き場で、`parity.py check` が 1 を返す。ジョブ `test` と同じ `uv run pytest -q` で集まるテストの中で確かめる
+- 置き場の 3 つのファイルだけを、リポジトリの外の一時のディレクトリへコピーする。`--dir` にそのディレクトリを渡して、`parity.py check` が 0 を返す（網羅の元の文書を開かない）
