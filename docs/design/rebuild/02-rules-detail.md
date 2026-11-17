@@ -21,7 +21,7 @@
 | 新しいリポジトリ（[対応表の設計](03-parity.md)） | 対応表の値の集合のモジュール | `ROW_KINDS`・`DEV_STATES`・`NOT_BUILT_KINDS`・`SCOPE_REASON_KINDS`・`PARITY_STATES`（新設の定数）、`in_parity_scope`（新設） |
 | 新しいリポジトリ（[対応表の設計](03-parity.md)） | 対応表の検査のモジュール | `check_row_destination`・`check_not_built_reason`・`check_required_kinds`・`check_scope_addition`・`check_verification`・`check_table`・`main_table_check`（新設） |
 | 新しいリポジトリ（#3） | 試走の記録のモジュール | `append_run`・`latest_results`・`regenerate_latest`・`passed_counts`（新設） |
-| 新しいリポジトリ（#15） | 入れ替えの判定のモジュール | `read_inputs`・`read_issue_states`・`run_synth_tests`・`run_leak_check`・`judge_j1`〜`judge_j6`・`list_records`・`decide_exit`・`main_judge`（新設） |
+| 新しいリポジトリ（#15） | 入れ替えの判定のモジュール | `read_inputs`・`read_issue_states`・`read_frozen_prs`・`run_synth_tests`・`run_leak_check`・`judge_j1`〜`judge_j6`・`list_records`・`decide_exit`・`main_judge`（新設） |
 | 新しいリポジトリ（[全体の設計](05-overall.md)が形・骨組みが置く） | 参照の検査のモジュール | `load_match_terms`・`find_old_refs`・`find_ndf_pins`・`find_version_compare`・`main_ref_check`（新設） |
 | 作り直しの親の課題（旧い側）の材料を出す段 | やめる判断の材料のモジュール | `build_materials`・`read_cost`・`post_materials`・`count_started_children`（新設） |
 
@@ -62,8 +62,9 @@
 
 | 関数 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `read_inputs` | 新設 | `(args: JudgeArgs) -> Inputs` | 対応表・最新の回の結果・凍結の後の PR の一覧を読み、形を確かめる | 引数にそれぞれの置き場がある | 戻り値のすべての入力が形を満たす。満たさない入力は `Unreadable` に入力の名前を添えて投げた | ファイルを読む |
+| `read_inputs` | 新設 | `(args: JudgeArgs) -> Inputs` | 対応表・最新の回の結果を読み、形を確かめる | 引数にそれぞれの置き場がある | 戻り値のすべての入力が形を満たす。満たさない入力は `Unreadable` に入力の名前を添えて投げた | ファイルを読む |
 | `read_issue_states` | 新設 | `(numbers: set[int], issues_repo: str, refs: set[str]) -> dict[str, IssueState]` | 行き先の子の課題と、移す先の課題の開閉を GitHub から読む | GitHub の読み取りの資格情報が手元にある | 渡した番号と参照のすべてが鍵にあり、値は `open`・`closed`・`missing` のどれか | GitHub の API を読む |
+| `read_frozen_prs` | 新設 | `(old_repo: str, frozen_at: datetime) -> list[FrozenPr]` | 凍結（E3）の後に旧い側の main へマージされた PR と、本文の移す先の課題の参照を GitHub から読む | GitHub の読み取りの資格情報が手元にある。`old_repo` と `frozen_at` は判定の引数で受ける | マージの日時が `frozen_at` 以後の PR だけを、マージの順に返した | GitHub の API を読む |
 | `run_synth_tests` | 新設 | `(repo_root: Path) -> CommandResult` | 作り物の値（運用する環境と違うアカウント ID とリージョン）で、合成とスタックのテストを打つ | 依存が入っている | 打ったコマンドと終了コードを返した。作り物の値は判定のモジュールの定数だけから渡した | 外部コマンドを起動する |
 | `run_leak_check` | 新設 | `(repo_root: Path, repo: str) -> CommandResult` | #1 の漏れの検査をファイル・全履歴・課題と PR の本文とコメントに打つ | 漏れの検査が入っている。照合する値が環境変数にある | 打った範囲（ファイル・履歴・課題）ごとの当たりの件数を返した。当たった値そのものは持たない | 外部コマンドを起動する・GitHub の API を読む |
 | `judge_j1` | 新設 | `(rows: list[Row], latest: dict[str, RunResult]) -> list[Mismatch]` | J1 を確かめる | 無し | 最新の回が `passed` でなく「作らない」も持たない行を、1 行ずつ合わない行として返した | 無し |
@@ -112,6 +113,7 @@
 | `read_inputs` | 入力を読めない | ファイルが無い・形が違う・最新の回の結果に対応表の行が欠ける | 読み込みと形の検査 | 呼び出し元へ返す | `main_judge` が標準エラーに入力の名前と理由を出す。終了コード 2 | 書かないため後始末は無い。再実行できる |
 | `read_issue_states` | GitHub に届かない | ネットワーク・資格情報が無い・API の上限 | API の応答 | 1 回だけ再試行し、だめなら呼び出し元へ返す | 標準エラーに「課題の状態」と理由。終了コード 2 | 書かないため後始末は無い。再実行できる |
 | `read_issue_states` | 課題が無い | 番号の誤り・別のリポジトリの番号 | API の 404 | 既定値で続ける（`missing`） | J4 か J8 の行に `missing` と出る。終了コードは他の判定に従う | 無し |
+| `read_frozen_prs` | GitHub に届かない | ネットワーク・資格情報が無い・API の上限 | API の応答 | 1 回だけ再試行し、だめなら呼び出し元へ返す | 標準エラーに「凍結の後の PR」と理由。終了コード 2 | 書かないため後始末は無い。再実行できる |
 | `run_synth_tests` | コマンドを起動できない | 依存が入っていない | 起動の例外 | 呼び出し元へ返す | 標準エラーに「合成とスタックのテスト」と理由、終了コード 2 | 無し。依存を入れて再実行できる |
 | `run_synth_tests` | テストが落ちる | 合成が運用する環境の値を読む・テストの失敗 | コマンドの終了コード | 呼び出し元へ返す | J5 の合わない行、終了コード 1 | 無し |
 | `run_leak_check` | コマンドを起動できない・照合する値が無い | 漏れの検査が無い・環境変数が無い | 起動の例外と環境変数の検査 | 呼び出し元へ返す | 標準エラーに「漏れの検査」と理由、終了コード 2 | 無し |
@@ -176,7 +178,7 @@
 | `Violation` | 型 | 各検査のモジュール | 不変条件の番号・対象（行の ID かファイルと行）・理由 |
 | `Mismatch` | 型 | 入れ替えの判定のモジュール（#15） | `J<番号>`・対象・理由 |
 | `RecordLine` | 型 | 入れ替えの判定のモジュール（#15） | `J7` か `J8`・対象・中身。合否を持たない |
-| `FrozenPr` | 型 | 旧い側の凍結の検査（骨組みが置く）が書き、判定が読む | PR の番号・マージの日時（UTC）・移す先の課題の参照の一覧 |
+| `FrozenPr` | 型 | 入れ替えの判定のモジュール（#15）。`read_frozen_prs` が GitHub から作る | PR の番号・マージの日時（UTC）・移す先の課題の参照の一覧 |
 | `ROW_KINDS` | 定数 | 対応表の値の集合のモジュール（[対応表の設計](03-parity.md)） | 振る舞い・既知の不具合の回帰・権限の境界・NDF 11 で確かめる |
 | `DEV_STATES` | 定数 | 同上 | 済・済(残)・届かず・未・未調査 |
 | `PARITY_STATES` | 定数 | 同上 | 済・済(残) |
@@ -235,6 +237,7 @@
 | `passed_counts` | `in_parity_scope` | この文書の関数 | 使う。同等の範囲の数え方を写さない |
 | `read_inputs` | `check_table` | この文書の関数 | 使う。判定の前に対応表の形を同じ検査で確かめ、違反があれば読めない入力として扱う。ただし I2・I4 の違反は読めない入力にせず、J2・J3 の合わない行として返す（[判定の規則](01-rules.md)の I2〜I4） |
 | `read_issue_states` | GitHub CLI（`gh issue view --json state`） | `gh issue view <番号> --json body`（旧い側の課題で、2026-11-16 に手元で打てた） | 使う。API を直に呼ばない |
+| `read_frozen_prs` | GitHub CLI（`gh pr list --state merged --base main --json`） | `read_issue_states` と同じ手元の `gh` | 使う。API を直に呼ばない |
 | `run_synth_tests` | 新しいリポジトリの合成とスタックのテストのコマンド | [全体の設計](05-overall.md)（未作成） | 使う。コマンドは全体の設計が決め、判定はそれを起動するだけ |
 | `run_leak_check` | 旧い側の `scripts/check-public-leak.py` の `find_hits` | `sed -n 1,45p scripts/check-public-leak.py` | 使えない理由: 照合する値を旧い側の環境の設定から読み、ファイルしか探さない。#1 の漏れの検査を起動する |
 | `judge_j1` | `latest_results` | この文書の関数 | 使う |
@@ -274,6 +277,7 @@
 | `passed_counts` | 回ごとの `passed` の数 | 範囲の外の行の `passed` は範囲の行の数に入らない | 無し |
 | `read_inputs` | すべて読める | 最新の回の結果に行が 1 行欠ける → 読めない入力 | ファイルが無い → 読めない入力に名前が入る |
 | `read_issue_states` | 開閉を返す | 404 の番号 → `missing` | 届かない → 1 回再試行して読めない入力 |
+| `read_frozen_prs` | 凍結の後の PR を返す | 凍結の日時ちょうどにマージした PR は含む | 届かない → 1 回再試行して読めない入力 |
 | `run_synth_tests` | 終了コード 0 | 作り物の値が定数からだけ渡る | 起動できない → 読めない入力 |
 | `run_leak_check` | 当たり 0 件 | 履歴にだけ当たりがある → 履歴の範囲で 1 件 | 照合する値が無い → 読めない入力 |
 | `judge_j1` | すべて `passed` か「作らない」→ 空 | `not_run` の行 1 行 → 1 件 | `failed` の行 1 行 → その行の ID を持つ 1 件 |

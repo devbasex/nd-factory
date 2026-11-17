@@ -28,7 +28,7 @@ arc42 の 12 章と節の対応は、末尾の [arc42 の章立て](#arc42-の�
 | NAT ゲートウェイを置かない。ECS のタスクは公開のサブネットで公開 IP を持つ | 作り直しの決まったこと（NAT なし・Fargate を公開のサブネット） |
 | 誰でも自分の AWS アカウントへ、profile を指定して設置できる。リポジトリには作り物の値だけを置く | 作り直しの決まったこと（誰でも `cdk deploy` で設置できる）、前提 2 |
 | 旧い側のデータを移さない。新しいリポジトリから旧い側を参照しない | 利用者の答え（データを移さない）、[判定の規則](01-rules.md)の R5・R6 |
-| NDF とは NDF 11 の契約ファイルだけでやり取りする。devbasex/ai-plugins は読むだけ | 要求の前提 4、`AGENTS.md` の「境界」 |
+| NDF とは NDF 11 の契約ファイルだけでやり取りする。devbasex/ai-plugins は読むだけ | 要求の前提 4、[NDF との契約](07-overall-contracts.md#ndf-との契約) |
 | 承認ゲートの承認と、C1〜C8・P1〜P3 に当たる操作の確定は人だけが行う | NDF の共通原則、プロジェクト MVV の Value 4 |
 
 ## 一括の入れ替えと段階的な置き換え
@@ -80,7 +80,7 @@ C4 の Container（STD2）。中身の分担を示す。この図の「コンテ
 ```mermaid
 graph TD
     subgraph 利用者の端末
-        WEB[画面<br/>React]
+        WEB[画面<br/>Vite と素の TypeScript]
     end
     subgraph AWS の上の nd-factory
         CDN[画面の配信<br/>CloudFront と S3]
