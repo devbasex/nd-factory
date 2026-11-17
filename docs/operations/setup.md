@@ -26,7 +26,7 @@ bootstrap が無いか版が足りないと、コマンドは求める版と今�
   npx cdk bootstrap aws://123456789012/us-west-2 --profile <profile>
   ```
 
-- 運用する環境: bootstrap はほかのサービスと共有していることがある。AI は上げない。上げるかどうかを人が承認し、人が打つ
+- 運用する環境: bootstrap はほかのサービスと共有していることがある。上げるかどうかはリリース承認ゲートで決める。承認では、コマンドが示した求める版と今の版、打つ bootstrap のコマンド（上と同じ形）を示す。bootstrap はリリース承認ゲートで承認した後にだけ打ち（自動の承認では通さない）、打った後に `diff` を打ち直す。`diff` は bootstrap が足りない間は差分と確認の値を出さないため、この承認は `diff` の差分の承認より先に取る
 
 ## diff: 差分と確認の値を出す
 
@@ -118,8 +118,8 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 ### 運用する環境
 
 - 設置のコマンドで反映するのはパイプラインのスタックだけにする。`diff` に `--stack pipeline` を渡す。縦の切れ端は反映のパイプラインが、人の承認の後に反映する（[pipeline-approval.md](pipeline-approval.md)）
-- `diff` の差分を人が読んで承認した後にだけ、AI か人が `deploy` を打つ
-- パイプラインのスタックを初めて反映した後は、人が GitHub との接続を有効にし、承認を拒む方針を AI の主体へ付けて確かめるまで、起点のブランチへ push しない（[pipeline-approval.md](pipeline-approval.md)）
+- パイプラインのスタックの `diff` の差分をリリース承認ゲートで承認した後にだけ `deploy` を打つ（自動の承認では通さない）。設定を変えるときも同じ（[settings.md](settings.md) の「運用する環境で設定を変える」）
+- パイプラインのスタックを初めて反映した後は、GitHub との接続を有効にし、承認を拒む方針を AI の主体へ付けて確かめるまで、起点のブランチへ push しない（[pipeline-approval.md](pipeline-approval.md)）
 - 設定を変えるときの手順は [settings.md](settings.md) にある
 
 ## 終了コード
