@@ -45,14 +45,14 @@
 | --- | --- | --- |
 | 旧い側の `tests/test_parity.py` | 2 つのスクリプト（サブプロセスで打つ） | — |
 | `scripts/parity.py` | `config/environments.py` だけを import する | 網羅の元の文書（`docs/` と、全体設計の文書（`issues/` の下））を開かない（非機能の条件の移行性） |
-| `scripts/parity-extract.py` | 標準のライブラリだけ | `scripts/parity.py` を import しない |
+| `scripts/parity-extract.py` | 標準のライブラリと、ずれの行を伏せるときだけ `config/environments.py` の `public_leak_values` | `scripts/parity.py` を import しない |
 
 2 つのスクリプトの間で共有するのは置き場のファイルの形だけで、関数を共有しない。新しいリポジトリへ移すのは `scripts/parity.py` と `tests/test_parity.py` だけである。そこで import の 1 行を差し替える（設計の決定 3）。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
 | `scripts/parity.py` | 新設 | 置き場の 3 つのファイルを読み、不変条件 I1〜I10・I12 を確かめる `check` と、人が読む表を書き出す `render` を持つ | `config/environments.py` の `public_leak_values` |
-| `scripts/parity-extract.py` | 新設 | 旧い側の網羅の元の文書から要素を抜き出し、網羅の元のコピーを書き出す `write` と、コピーと照らす `check`（I11）を持つ | 無し（標準のライブラリと `git`） |
+| `scripts/parity-extract.py` | 新設 | 旧い側の網羅の元の文書から要素を抜き出し、網羅の元のコピーを書き出す `write` と、コピーと照らす `check`（I11）を持つ | 標準のライブラリと `git`。ずれの行を伏せるときだけ `config/environments.py` の `public_leak_values` |
 | `tests/test_parity.py` | 新設 | 本物の置き場が 2 つの `check` を通ることと、規則ごとに壊した置き場で止まることを確かめる。CI のジョブ `test` が集める | `scripts/parity.py`・`scripts/parity-extract.py`（サブプロセス）・`config/environments.py` の `ENVIRONMENTS` |
 | `<対応表の置き場>/parity.json` | 変更 | 設計承認の後に、承認の日（`approved_on`）と承認の時点の行の ID（`approved_rows`）を同じコミットで書く（設計の決定 9） | 無し |
 | `<対応表の置き場>/coverage.json` | 変更 | `parity-extract.py write` が書き出す。今の中身と `write` の出力が一致しなければ、`write` の出力に置き換える | 無し |
@@ -250,7 +250,7 @@
 | `TABLE_FILE`・`COVERAGE_FILE`・`RENDERED_FILE` | 定数 | `scripts/parity.py` | `parity.json`・`coverage.json`・`parity.md` |
 | `VIOLATION_ORDER` | 定数 | `scripts/parity.py` | `("形", "重なり", "欠けた列", "行き先", "作らない理由", "漏れ", "知らない要素", "必ず要る行", "足した理由", "生成物の食い違い", "中身の漏れ")`（設計文書の違反の種類の表の順） |
 | `HEAD_KEYS` | 定数 | `scripts/parity.py` | 頭の 8 つのキー（設計文書の「対応表の頭」の順） |
-| `ROW_KEYS` | 定数 | `scripts/parity.py` | 行が必ず持つ 13 のキー（`id`・`area`・`kind`・`behavior`・`source`・`now`・`verify`・`plans`・`trial`・`refs`・`added`・`dev_state`・`verify_new`） |
+| `ROW_KEYS` | 定数 | `scripts/parity.py` | 行が必ず持つ 13 のキー（設計の I2 の 13 の列から行き先（`to`・`not_built`。`check_destination` が見る）を除いた 12 と、足した日。`id`・`area`・`kind`・`behavior`・`source`・`now`・`verify`・`plans`・`trial`・`refs`・`added`・`dev_state`・`verify_new`） |
 | `DEV_STATES` | 定数 | `scripts/parity.py` | `("済", "済(残)", "届かず", "未", "未調査")`（判定の規則の今の dev での状態と、子が埋める印。設計の決定 13） |
 | `NOT_BUILT_KINDS` | 定数 | `scripts/parity.py` | `("捨てる", "今も動かない", "NDF 待ち")`（判定の規則の I2 の作らない理由の種類） |
 | `VERIFY_NEW_UNDECIDED` | 定数 | `scripts/parity.py` | `"未決"`。新しいリポジトリでの確かめ方が決まっていない印で、人が読む表の数の表が数える |
@@ -345,7 +345,7 @@
 | `parity.main` | 本物の置き場で `check` が 0 と `ok:` の 1 行を返す。`render` が 0 を返し、`parity.md` が変わらない | 違反 1 件で終了コード 1 と、違反の行 1 行と `違反 1 件` | 引数なし・未知の副命令で 2 と使い方。置き場に `parity.json` が無いと 2 と違反の行が出ないこと。`render` で形の違反があると 1 で `parity.md` が書かれないこと |
 | `parity.load_dir` | 本物の置き場を読める | `render` では `parity.md` が無くても読める | `parity.json` が JSON として壊れていると 2・`coverage.json` の最上位が配列だと 2。標準エラーにパスが出る |
 | `parity.run_checks` | 本物の置き場で違反なし | 2 つの規則（`重なり` と `行き先`）を同時に破ると 2 行が `VIOLATION_ORDER` の順で出て、どちらも 3 列 | 形の違反がある行で、後の規則が例外を投げずに終わる（`refs` を文字列にした行で `check_coverage` が落ちない） |
-| `parity.check_shape` | 本物の表で違反なし | `plans` が `plan_values` の値の配列で通る（`plan_values` を足した一時の表）。`trial.result` が `failed` で `reason` があれば通る | 13 の列と `added` のそれぞれを消すと `欠けた列` に行の ID と列。`dev_state` を `動く`・空、`verify_new` を空白だけにすると `形`。`kind` を `other`・`trial.result` を `skipped`・`failed` で理由なし・振る舞いの行に `tracks`・回帰の行の `tracks` を消す・`plans` を空の配列・ID を `A-1` にする・`area` を `Z` にする、のそれぞれで `形`。`approved_on` を書いて `approved_rows` を空にすると `形`・対象 `頭` |
+| `parity.check_shape` | 本物の表で違反なし | `plans` が `plan_values` の値の配列で通る（`plan_values` を足した一時の表）。`trial.result` が `failed` で `reason` があれば通る | `ROW_KEYS` の 13 のキーのそれぞれを消すと `欠けた列` に行の ID と列。`dev_state` を `動く`・空、`verify_new` を空白だけにすると `形`。`kind` を `other`・`trial.result` を `skipped`・`failed` で理由なし・振る舞いの行に `tracks`・回帰の行の `tracks` を消す・`plans` を空の配列・ID を `A-1` にする・`area` を `Z` にする、のそれぞれで `形`。`approved_on` を書いて `approved_rows` を空にすると `形`・対象 `頭` |
 | `parity.check_duplicates` | 本物の表で違反なし | 同じ ID が 3 回現れると `重なり` が 2 件 | 2 つの行に同じ ID を付けると `重なり` にその ID |
 | `parity.check_not_built_kind` | 本物の表で違反なし | 「今も動かない」の行の状態が `届かず`・`未`・`未調査` なら通る。NDF 11 で確かめる行を `NDF 待ち` にして課題番号を付けると通り、人が読む表に `作らない（NDF 待ち devbasex/ai-plugins#<番号>）` が出る | 作らない行の種類を消す・3 つの外にする・「今も動かない」の行を `済`・`済(残)` にする・作る行に種類か課題番号を付ける・`NDF 待ち` で課題番号が無い（`0`・文字列・真偽値）・振る舞いの行を `NDF 待ち` にする、のそれぞれで `作らない理由`。今動いている振る舞いの行を作らないとき `捨てる` だけが通る（判定の規則の I3） |
 | `parity.check_destination` | 本物の表で違反なし | `not_built` が空白だけで `無い` | 両方で `両方`・どちらも無いで `無い`・`to` を範囲の外の番号にすると `範囲の外 <その番号>` |
