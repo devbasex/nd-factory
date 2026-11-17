@@ -1,0 +1,13 @@
+node_modules/
+dist/
+cdk.out/
+*.tsbuildinfo
+coverage/
+test-results/
+playwright-report/
+.env
+.env.*
+# 設定のファイルの実物はリポジトリの外に置く（docs/operations/settings.md）
+infra/settings.json
+infra/settings.*.json
+!infra/settings.example.json

@@ -1,0 +1,17 @@
+{
+  "name": "@nd-factory/contracts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./settings": "./src/settings.ts",
+    "./users-api": "./src/users-api.ts",
+    "./web-config": "./src/web-config.ts",
+    "./exit-codes": "./src/exit-codes.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  }
+}

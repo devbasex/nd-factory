@@ -1,0 +1,8 @@
+{
+  "name": "@nd-factory/tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  }
+}

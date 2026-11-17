@@ -1,0 +1,16 @@
+{
+  "name": "@nd-factory/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1170.0",
+    "@aws-sdk/lib-dynamodb": "3.1170.0",
+    "@nd-factory/contracts": "*"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "8.10.164"
+  }
+}

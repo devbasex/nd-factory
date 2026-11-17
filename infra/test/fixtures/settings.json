@@ -1,0 +1,12 @@
+{
+  "prefix": "acme",
+  "environment": "test",
+  "login": {
+    "google": {}
+  },
+  "pipeline": {
+    "repository": "example-org/example-app",
+    "branch": "main",
+    "notify_emails": ["ops@example.com"]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@nd-factory/infra",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "synth": "ND_SETTINGS=test/fixtures/settings.json CDK_DEFAULT_ACCOUNT=123456789012 CDK_DEFAULT_REGION=us-west-2 cdk synth -q -o cdk.out",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@aws-sdk/client-ssm": "3.1170.0",
+    "@aws-sdk/client-sts": "3.1170.0",
+    "@aws-sdk/credential-providers": "3.1170.0",
+    "@nd-factory/contracts": "*",
+    "aws-cdk-lib": "2.277.0",
+    "constructs": "10.8.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

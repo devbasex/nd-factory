@@ -1,0 +1,37 @@
+{
+  "name": "nd-factory",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "infra",
+    "tools"
+  ],
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "generate": "node packages/contracts/scripts/generate.ts write",
+    "generate:check": "node packages/contracts/scripts/generate.ts check",
+    "check": "npm run lint && npm run typecheck && npm run generate:check && npm run test",
+    "build:web": "npm run build -w apps/web",
+    "synth": "npm run synth -w infra",
+    "e2e": "npm run e2e -w apps/web",
+    "nd-setup": "node infra/setup/nd-setup.ts",
+    "ref-check": "node tools/ref-check/src/ref-check.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "aws-cdk": "2.1148.1",
+    "eslint": "10.15.0",
+    "jsdom": "31.0.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.73.0",
+    "vitest": "5.1.0"
+  }
+}

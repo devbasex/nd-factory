@@ -1,0 +1,85 @@
+name: ci
+
+# AWS の資格情報を持たない。合成は作り物のアカウント・リージョン・設定のファイルで行う
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: lint・型検査・生成物の差・単体テストとスタックのテスト
+        run: npm run check
+
+  synth:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # 手元の資格情報や EC2 のメタデータを探しに行かない
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: 画面をビルドする
+        run: npm run build:web
+      - name: 作り物の値で合成する
+        run: npm run synth
+
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: ブラウザーを入れる
+        run: npx playwright install --with-deps chromium
+      - name: 画面の e2e（利用者プールと API は網の手前で差し替える）
+        run: npm run e2e
+
+  ref-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: 参照の検査
+        env:
+          # 照合の語は秘密から受ける。リポジトリのファイルに置かない
+          REF_CHECK_TERMS: ${{ secrets.REF_CHECK_TERMS }}
+          # 語を必須にするのは、変数で有効にした正本のリポジトリの中の実行（main への push と同じリポジトリの枝からの PR）だけ
+          REF_CHECK_REQUIRE_TERMS: ${{ (vars.REF_CHECK_REQUIRE_TERMS == '1' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)) && '1' || '' }}
+        run: npm run ref-check

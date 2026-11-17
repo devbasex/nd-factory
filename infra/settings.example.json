@@ -1,0 +1,7 @@
+{
+  "prefix": "acme",
+  "environment": "test",
+  "login": {
+    "google": {}
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "codes": [
+    {
+      "code": 0,
+      "name": "OK",
+      "meaning": "`diff` は差分を示して止まった。`deploy` は反映した",
+      "aws_write": "`deploy` だけ書いた"
+    },
+    {
+      "code": 2,
+      "name": "USAGE",
+      "meaning": "引数の誤り（サブコマンド・必須の引数が無い・未知の引数）",
+      "aws_write": "書いていない"
+    },
+    {
+      "code": 3,
+      "name": "SETTINGS",
+      "meaning": "設定のファイルが無い・JSON でない・形に合わない（足りない・誤ったキーを 1 件 1 行で示す）。`deploy` では合成の結果の置き場が無い・読めない",
+      "aws_write": "書いていない"
+    },
+    {
+      "code": 4,
+      "name": "PROFILE",
+      "meaning": "profile が無い・資格情報を得られない・リージョンが無い",
+      "aws_write": "書いていない"
+    },
+    {
+      "code": 5,
+      "name": "BOOTSTRAP",
+      "meaning": "bootstrap が無いか版が足りない（求める版と今の版を示す）",
+      "aws_write": "書いていない"
+    },
+    {
+      "code": 6,
+      "name": "BUILD",
+      "meaning": "画面のビルド・合成・差分の作成が失敗した",
+      "aws_write": "書いていない"
+    },
+    {
+      "code": 7,
+      "name": "CONFIRM_MISMATCH",
+      "meaning": "確認の値が `--confirm` と違う（保存した合成の結果が書き換わった・アカウントかリージョンが違う）",
+      "aws_write": "書いていない"
+    },
+    {
+      "code": 8,
+      "name": "DEPLOY_FAILED",
+      "meaning": "反映が失敗した。CloudFormation の戻しで前の状態へ戻る",
+      "aws_write": "書いて戻した"
+    }
+  ]
+}
