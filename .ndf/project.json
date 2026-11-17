@@ -160,7 +160,7 @@
     },
     "merge": {
       "actor": "ndf",
-      "method": "merge-queue",
+      "method": "strict",
       "commit": "squash",
       "admin": false
     },
