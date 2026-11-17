@@ -117,7 +117,7 @@
     "notes": []
   },
   "materials": {
-    "unknown": "答えが無い"
+    "unknown": "答えが形に合わない: materials: 不明は答えの unknown で渡す"
   },
   "branch_strategy": {
     "kind": "custom",
@@ -168,10 +168,10 @@
   },
   "analysis": {
     "analyzer": 3,
-    "at": "2026-11-17T15:38:54+00:00",
+    "at": "2026-11-17T22:51:56+00:00",
     "inputs": {
       ".github/workflows/ci.yml": "62b26d5f76c07f919a0de3fe05e32a76e81637e4",
-      "AGENTS.md": "5e3fcaee2d22871e7b56257b56f8f5943e189280",
+      "AGENTS.md": "1d5657bbccbf944f9dcad05a6be632c786b73139",
       "infra/package.json": "6a1c10f6add4d103bc5785bd1cde4f68108fbd5d",
       "package.json": "8d78ae6400727428dc2816f8eecfb3a7b87df7f0",
       "tools/package.json": "0a38cf9cd27005edcc8a5272b1721f4903e2aba6",
@@ -192,7 +192,7 @@
       "checks": "9490de709202cf2422b43d4a75177e3a3dd5b3688ee6d8c6a001d9e6ce219e26",
       "ndf_policies": "81c1c2e31df60254dfd66878f3c3b3190c87a2a0b78a2275e13cde3a199e9fa1",
       "instructions": "95b8dcd9f882416b410b0686c1adb76fa373f37de2acc2d6aa3c6d28556642a5",
-      "materials": "eec1b759fe58ecfcf4c8373becd6975fba410eebb3742cfa3142e56552c8e77b",
+      "materials": "a8f502db7b3c20fa8bb8b6ad2781f3f2a1231970da9309006e2e918e9265b8d1",
       "test.ci.only": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
     }
   }
