@@ -26,7 +26,7 @@ bootstrap が無いか版が足りないと、コマンドは求める版と今�
   npx cdk bootstrap aws://123456789012/us-west-2 --profile <profile>
   ```
 
-- 運用する環境: bootstrap はほかのサービスと共有していることがある。上げるかどうかをリリース承認で問い、承認の後に AI が打つ
+- 運用する環境: bootstrap はほかのサービスと共有していることがある。上げるかどうかはリリース承認で決める
 
 ## diff: 差分と確認の値を出す
 
@@ -118,8 +118,8 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 ### 運用する環境
 
 - 設置のコマンドで反映するのはパイプラインのスタックだけにする。`diff` に `--stack pipeline` を渡す。縦の切れ端は反映のパイプラインが、人の承認の後に反映する（[pipeline-approval.md](pipeline-approval.md)）
-- `diff` の差分を人が読んで承認した後にだけ、AI が `deploy` を打つ
-- パイプラインのスタックを初めて反映した後は、GitHub との接続を有効にし（コンソールでだけ行えるため人が行う）、承認を拒む方針を AI の主体へ付けて確かめる（承認の後に AI が行う）まで、起点のブランチへ push しない（[pipeline-approval.md](pipeline-approval.md)）
+- `diff` の差分の承認の後にだけ `deploy` を打つ
+- パイプラインのスタックを初めて反映した後は、GitHub との接続を有効にし、承認を拒む方針を AI の主体へ付けて確かめるまで、起点のブランチへ push しない（[pipeline-approval.md](pipeline-approval.md)）
 - 設定を変えるときの手順は [settings.md](settings.md) にある
 
 ## 終了コード

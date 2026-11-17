@@ -1,6 +1,6 @@
 # 設定のファイル
 
-環境ごとに違う値は、リポジトリの外に置く JSON のファイル（設定のファイル）から受ける。AWS のアカウントとリージョンは設定のファイルに書かず、設置のコマンドへ渡す profile から受ける。秘密の値は設定のファイルにも書かず、秘密の器（Secrets Manager）へリリース承認の後に AI が入れる（値は AI が読まずに渡す）。
+環境ごとに違う値は、リポジトリの外に置く JSON のファイル（設定のファイル）から受ける。AWS のアカウントとリージョンは設定のファイルに書かず、設置のコマンドへ渡す profile から受ける。秘密の値は設定のファイルにも書かず、秘密の器（Secrets Manager）に入れる。
 
 形の正本は `packages/contracts/src/settings.ts` の zod の定義である。JSON Schema（`packages/contracts/schema/settings.schema.json`）と作り物の値の見本（`infra/settings.example.json`）はそこから `npm run generate` で作る。
 
@@ -11,7 +11,7 @@
 | `prefix` | 必須 | 資源の接頭辞。小文字の英数字とハイフンで 3〜20 文字。`aws` で始めない | すべてのスタック（名前と利用者プールのドメイン） |
 | `environment` | 必須 | 環境の名前。小文字の英数字で 2〜10 文字 | すべてのスタック（名前とタグ） |
 | `login.google` | 必須 | Google でログインを受ける。`client_id` が無い間は IdP を作らず、画面は「設定の待ち」を示す | 縦の切れ端のスタック |
-| `login.google.client_id` | 任意 | Google の Web アプリのクライアントの ID。secret は秘密の器 `<prefix>/<environment>/google-oauth` へリリース承認の後に AI が入れる。値を入れて確かめた後にだけ書く（[idp-and-apps.md](idp-and-apps.md)） | 縦の切れ端のスタック |
+| `login.google.client_id` | 任意 | Google の Web アプリのクライアントの ID。secret は秘密の器 `<prefix>/<environment>/google-oauth` に入れる。値を入れて確かめた後にだけ書く（[idp-and-apps.md](idp-and-apps.md)） | 縦の切れ端のスタック |
 | `pipeline` | 任意 | あるときだけ反映のパイプラインのスタックを作る | 反映のパイプラインのスタック |
 | `pipeline.repository` | `pipeline` があれば必須 | 起点のリポジトリ（`<組織>/<名前>`） | 同上 |
 | `pipeline.branch` | `pipeline` があれば必須 | 起点のブランチ | 同上 |
@@ -49,7 +49,7 @@
 
 1. 手元のコピーを直す
 2. 設置のコマンドでパイプラインのスタックの差分を見る: `npm run nd-setup -- diff --profile <profile> --settings ~/.config/nd-factory/<environment>.json --out <置き場> --stack pipeline`。差分に SSM のパラメーターの値の変化が出る
-3. 人が差分を承認した後に `deploy` を打つ（[setup.md](setup.md)）
+3. 差分の承認の後に `deploy` を打つ（[setup.md](setup.md)）
 4. パラメーターを書き換えても縦の切れ端はまだ変わらない。次のパイプラインの実行（起点のブランチへの push か実行の開始）と、承認のアクションでの人の承認で反映される
 
 手元のコピーを失ったら、パラメーターから読み直す（`aws ssm get-parameter --name /<prefix>/<environment>/settings`）。
