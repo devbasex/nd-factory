@@ -49,7 +49,7 @@
 
 1. 手元のコピーを直す
 2. 設置のコマンドでパイプラインのスタックの差分を見る: `npm run nd-setup -- diff --profile <profile> --settings ~/.config/nd-factory/<environment>.json --out <置き場> --stack pipeline`。差分に SSM のパラメーターの値の変化が出る
-3. 差分の承認の後に `deploy` を打つ（[setup.md](setup.md)）
+3. 差分をリリース承認ゲートで承認した後にだけ `deploy` を打つ（自動の承認では通さない。[setup.md](setup.md#運用する環境) の「運用する環境」）
 4. パラメーターを書き換えても縦の切れ端はまだ変わらない。次のパイプラインの実行（起点のブランチへの push か実行の開始）と、承認のアクションでの人の承認で反映される
 
 手元のコピーを失ったら、パラメーターから読み直す（`aws ssm get-parameter --name /<prefix>/<environment>/settings`）。

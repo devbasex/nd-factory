@@ -118,7 +118,7 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 ### 運用する環境
 
 - 設置のコマンドで反映するのはパイプラインのスタックだけにする。`diff` に `--stack pipeline` を渡す。縦の切れ端は反映のパイプラインが、人の承認の後に反映する（[pipeline-approval.md](pipeline-approval.md)）
-- `diff` の差分の承認の後にだけ `deploy` を打つ
+- パイプラインのスタックの `diff` の差分をリリース承認ゲートで承認した後にだけ `deploy` を打つ（自動の承認では通さない）。設定を変えるときも同じ（[settings.md](settings.md) の「運用する環境で設定を変える」）
 - パイプラインのスタックを初めて反映した後は、GitHub との接続を有効にし、承認を拒む方針を AI の主体へ付けて確かめるまで、起点のブランチへ push しない（[pipeline-approval.md](pipeline-approval.md)）
 - 設定を変えるときの手順は [settings.md](settings.md) にある
 
