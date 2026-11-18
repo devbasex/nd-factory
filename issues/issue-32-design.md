@@ -102,8 +102,8 @@
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 答えの送達 | 人が確定した答えを、ランナーが NDF へ `ndf answer` で渡し終えるまでの流れ。状態は未渡し・渡し中・届いた・失敗 | 追加（`judgment`） |
-| 資格情報の差し替え | 進行表の DB の役割のパスワードを新しい値へ替え、古い値での接続を断つこと。プロジェクトの差し替えの番号で順を決める | 追加（`platform`） |
+| 答えの送達 | 人が確定した答えを、ランナーが NDF へ `ndf answer` で渡し終えるまでの流れ。状態は未渡し・渡し中・届いた・失敗 | 設計 PR で追加済み（`judgment`。出所は execution.md で、実装の段で変えない） |
+| 資格情報の差し替え | 進行表の DB の役割のパスワードを新しい値へ替え、古い値での接続を断つこと。プロジェクトの差し替えの番号で順を決める | 設計 PR で追加済み（`platform`。出所はこの設計文書で、実装の段で data.md へ替える） |
 
 ## 機能一覧
 
@@ -143,14 +143,22 @@ graph TD
     OV --> DATA[data.md<br/>共通の列・用意・差し替え・失効]
     EX --> API
     EX --> DATA
+    OV --> PF
+    EX --> API
+    API --> EX
     API --> DATA
     PF[platform.md<br/>設定のキー・非機能] --> DATA
+    PF --> DT
     DT[detail.md<br/>クラス図・受け持つ子] --> API
+    DT --> PF
+    DATA -.-> PF
+    DATA -.-> EX
+    DATA -.-> OV
     DATA --> CH[子の課題の本文<br/>列・索引・設定のキー・要素の形]
     API --> CH
 ```
 
-辺は「リンクで指す」向きである。screens.md・decisions.md・用語集は答えを引くだけで指す先を増やさないため、図に描かない。
+実線の辺は「答えをリンクで指す」向きである。点線は data.md から理由（platform.md の決定 80〜99）と流れ（execution.md・overview.md の不変条件）をたどる参照で、答えはコピーしない。辺は詳細設計の「ファイル配置」の依存する先の列と同じにする。screens.md・decisions.md・用語集は答えを引くだけで指す先を増やさないため、図に描かない。
 
 ## 指摘 11 件の扱い
 
@@ -244,7 +252,7 @@ graph TD
 | #5 | F4〜F6 の操作（`projects.*`・`github_installations.*`・`repositories.*`・`project_transfers.*`）の要素と理由のコード（`credential_rotation_in_progress` を含む） | api.md「操作の一覧」・overview.md「割り当てを変える流れ」 | R6 |
 | #6 | F7〜F10・F17 の操作（`waiting_counts.get`・`issue_candidates.list`・`sprints.*`・`lanes.list`・`progress_events.list`・`execution_settings.*`・`model_keys.*`）の要素と理由のコード（`sprints.create` の `credential_rotation_in_progress` を含む）。ランナー向けの 5 つの HTTP の経路の要求と応答の項目（`redeliver` を含む）。実行の設定の値（猶予・寿命・間隔・期限・起票の上限）と推論の手段の可否の設定のファイルのキー | api.md「操作の一覧」「ランナー・手元のマシン・DB の用意のタスクの HTTP の経路」・execution.md「設定の値」・platform.md「環境の値の受け方」 | R1・R6 |
 | #7 | F18 の操作（`machines.*`）と手元のマシン向けの 2 つの HTTP の経路の要求と応答の項目（最初の心拍の応答を含む） | api.md 同上・execution.md「手元のマシン」 | R6 |
-| #8 | F11〜F15 の操作（`approvals.*`・`questions.*`・`notices.*`・`notification_targets.*`）の要素と理由のコード（`reason`・`drop_issues` を含む）。起票の依頼を取り消す理由 `visibility_widened` の事象の形。Web Push の公開鍵の設定のファイルのキー | api.md「操作の一覧」・execution.md「承認と問いの流れ」・platform.md「環境の値の受け方」 | R1・R6 |
+| #8 | F11〜F15 の操作（`approvals.*`・`questions.*`・`notices.*`・`notification_targets.*`）の要素と理由のコード（`reason`・`drop_issues` を含む）。起票の結果を「作らなかった」とする理由 `visibility_widened` の事象の形（承認の依頼は取り消さず「答えた」のまま閉じる。I21）。Web Push の公開鍵の設定のファイルのキー | api.md「操作の一覧」・execution.md「承認と問いの流れ」・platform.md「環境の値の受け方」 | R1・R6 |
 | #11 | F16・F20 の操作（`delegations.*`・`audit_records.list`）の要素と理由のコード | api.md「操作の一覧」 | R6 |
 | #13 | DB の用意のタスク向けの 2 つの HTTP の経路の要求と応答の項目（終わりの `rotation_superseded` と記した番号を含む）。差し替えの起こし直し（I22）の見回りと上限の回数。運用の知らせの SNS のトピックの資源。予算・最大 ACU・運用の知らせの宛先・設置全体の同時のレーンの数・差し替えの起こし直しの上限の設定のファイルのキー | api.md「ランナー・手元のマシン・DB の用意のタスクの HTTP の経路」・data.md「進行表の DB」・platform.md「環境の値の受け方」「非機能の実現方式」 | R1・R6・R13 |
 | #14 | 2 段目の反映の切り戻しの手順（書き手だけを前の版へ戻す・1 段目は次の版の項目が 0 件のときだけ戻す）を設置の手順に書く | platform.md「非機能の実現方式」・data.md「形の版と移し方」 | R13 |
@@ -510,9 +518,9 @@ sequenceDiagram
     opt 差し替えのタスクが起動しない・途中で落ちた・期限を過ぎた
         PT->>TK: StopTask（動いていれば）
         PT->>PT: DescribeTasks で STOPPED を読む
-        alt 起こし直しが上限の回数より少ない
+        alt 起こし直しの回数が上限の回数を超えない
             PT->>API: 同じ番号 n と保留の版の同じパスワードで起こし直す（I22）
-        else 上限の回数に達した
+        else 上限の回数を超えた
             PT->>API: 保留を残し（I20 の 409 を続ける）運用の知らせへ送る
         end
     end
@@ -611,7 +619,7 @@ detail.md の冒頭に置く表である。detail.md 自身が持つのは横断
 
 ## 決定の記録
 
-決定は実装の段で `docs/design/` の決定の記録へも書く。書き先の番号は各決定の「書き先」にある。実行の文書（60〜79）と画面の文書（20〜39）の決定の番号は埋まっている。そのため decisions.md の「決定の置き場」に、100〜119 を実行の続き、120〜139 を画面の続き、140〜159 を土台の続きとして足す。
+決定は実装の段で `docs/design/` の決定の記録へも書く。書き先の番号は各決定の「書き先」にある。決定 16 は #32 の進め方の決定で、全体の設計の答えを変えないため、書き先を持たない。実行の文書（60〜79）と画面の文書（20〜39）の決定の番号は埋まっている。そのため decisions.md の「決定の置き場」に、100〜119 を実行の続き、120〜139 を画面の続き、140〜159 を土台の続きとして足す。
 
 書き先の番号が空いていることは、各文書の決定の見出しの番号を並べて確かめた（2026-11-18、このブランチの `docs/design/`）。
 
@@ -815,6 +823,8 @@ API の要素の項目・型・必須か・理由のコードは、形の正本�
 | 渡した欠けごとに本文に中身とリンクがある | 実装の PR（追記は実装の段で行い、実装の PR の本文に追記した課題の番号を並べる） | `gh issue view` の本文の「#32 から渡された欠け」の節 |
 
 採らなかった案: 設計の工程で子の課題の本文へ先に追記する形は、差し戻しのたびに 12 件の本文を直し戻す。
+
+書き先: 無し（#32 の進め方の決定で、全体の設計の答えを変えない。この設計文書の決定の記録にだけ置く）。
 
 根拠: 根拠なし（MVV 版 1）
 
