@@ -197,7 +197,7 @@
       "term": "資格情報の差し替え",
       "context": "platform",
       "meaning": "進行表の DB の役割のパスワードを新しい値へ替え、古い値での接続を断つこと。プロジェクトの差し替えの番号で順を決める",
-      "source": "issues/issue-32-design.md"
+      "source": "docs/design/data.md"
     }
   ]
 }
