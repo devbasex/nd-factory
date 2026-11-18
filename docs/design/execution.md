@@ -248,7 +248,7 @@ NDF（devbasex/ai-plugins の `ndf-next` プラグイン）は上流である。
 | 項目 | 決まり | 契約の置き場 |
 | --- | --- | --- |
 | 固定の置き場 | 使う NDF のコミットは `ndf-pin.json` のキー `ndf_ref` の 1 か所だけに置く。ランナーのイメージはその版の NDF を入れて作る | `ndf-pin.json`（このリポジトリ） |
-| NDF 11 の名前 | この文書の NDF の名前（記録の ID `ask-journal`・口 `file-journals`・答えの語 `request_changes`）は NDF 11 の契約の名前で、旧い名前（NDF 11 の前の契約の名前）を書かない。今の `ndf_ref` の点の契約は旧い名前を持つため、`ndf_ref` を NDF 11.0.0 の配布のコミットへ付け替え、受ける契約の版と sha256 の組を同じ変更で直す（#1。版の数字は比べない）。それまでは今の点の NDF でランナーを作らない | `C/domains/ndf-files.json`・`C/domains/entrypoints.json`・`C/facts/answers.json`・`C/schemas/io/answer.args.schema.json` |
+| NDF 11 の名前 | この文書の NDF の名前（記録の ID `ask-journal`・口 `file-journals`・答えの語 `request_changes`）は NDF 11 の契約の名前で、旧い名前（NDF 11 の前の契約の名前）を書かない。今の `ndf_ref` の点の契約は旧い名前を持つため、`ndf_ref` を NDF 11.0.0 の配布のコミットへ付け替え、受ける契約の版と sha256 の組を同じ変更で直す（#1。版の数字は比べない） | `C/domains/ndf-files.json`・`C/domains/entrypoints.json`・`C/facts/answers.json`・`C/schemas/io/answer.args.schema.json` |
 | 契約の版の照らし | 契約の版は `C/version.json` の `history` の最後の行（版と sha256）。nd-factory は「受ける契約の版と sha256 の組」の集合を形の正本のデータに 1 か所だけ置き、ランナーは起動の時に照らす。集合に無ければ claude を起こさずにレーンを「失敗」（理由 `contract_mismatch`）にする | `C/version.json`（今の `ndf_ref` の点で版 4。NDF 11.0.0 へ付け替えるときに受ける組を直す） |
 | 版の数字を比べない | NDF の版の数字（`NDF_VERSION` の値・プラグインの版）を読んで大小を比べる処理を書かない。参照の検査が落とす。機能の有無は契約の版と sha256 で判断する | — |
 | 呼べる口 | `C/domains/entrypoints.json` の 15 行の口だけ。nd-factory が使うのは下の「使う口」の表の行だけ | `C/domains/entrypoints.json` |
