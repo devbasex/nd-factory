@@ -1,19 +1,19 @@
-# 詳細設計: 横断の部品が 1 か所にあり、画面・API・MCP の要求が同じ振り分けで同じ判定と記録を通る（#24）
+# 詳細設計: 横断の部品が 1 か所にあり、画面・API・MCP の要求が同じ振り分けで同じ判定と記録を通る
 
-この文書は、次の項目をモジュールと関数の粒度へ下ろす。
+次の項目を、モジュールと関数の粒度へ下ろす。
 
-| 文書 | 受ける項目 |
+| 設計 | 受ける項目 |
 | --- | --- |
-| [頭の文書](issue-24-design.md) | 不変条件 I2・I4・I5・I8・I9・I12〜I15 |
+| [全体の設計](issue-24-design.md) | 不変条件 I2・I4・I5・I8・I9・I12〜I15 |
 | [土台](issue-24-design-platform.md) | 「横断の部品と定数の置き場」「アーキテクチャ」 |
 | [API と MCP](issue-24-design-api.md) | 「呼び出しの規約」「認証と主体」「認可」「操作の記録」「形の正本」 |
 
 扱うのは、リポジトリのモジュールの置き場と依存の向き、横断の部品の最上位の関数の仕様・異常系・並行と排他・記録の出し方・テストの観点である。
-各コンテキストのモジュール（利用者とチーム・プロジェクト・実行の制御ほか）の関数は、受け持つ子の課題（K6〜K12）の詳細設計が持つ。横断の部品の形の細部（ファイルの単位・型の項目の並び）は K2 の詳細設計が決める（[子ごとの詳細設計で書くこと](issue-24-design-children.md#子ごとの詳細設計で書くこと)）。
+各コンテキストのモジュール（利用者とチーム・プロジェクト・実行の制御ほか）の関数と、横断の部品の形の細部（ファイルの単位・型の項目の並び）は、ここでは決めない。
 
 ## ファイル配置
 
-省く: ファイルの単位の配置は子の課題（K2 ほか）の詳細設計が持つ。#24 は実装のファイルを触らない。モジュールの置き場と依存の向きは「クラスと関数の構造」にある
+省く: ファイルの単位の配置は決めず、置き場をディレクトリの単位で決める。モジュールの置き場と依存の向きは「クラスと関数の構造」にある
 
 ## クラスと関数の構造
 
@@ -22,7 +22,7 @@
 ```text
 nd-factory/
 ├── packages/
-│   ├── contracts/          形の正本（ある）。操作の表・値の形・設定の形・終了コード・生成
+│   ├── contracts/          形の正本。操作の表・値の形・設定の形・終了コード・生成
 │   │   ├── src/
 │   │   ├── data/           事実と方針のデータ（料金プラン・再試行の方針・秘密の形・終了コード）
 │   │   ├── schema/         生成した JSON Schema と OpenAPI
@@ -30,23 +30,23 @@ nd-factory/
 │   └── core/             * 横断の部品（時計・ID と冪等の鍵・ログと伏せ字・外部の呼び出しと再試行・
 │       └── src/              条件つきの書き込み・認証・認可の判定・使える量の判定・操作の記録の書き手・操作の振り分け）
 ├── apps/
-│   ├── api/                API と MCP の 1 つの関数・見回り・知らせの送り手・表の移し（ある。広げる）
+│   ├── api/                API と MCP の 1 つの関数・見回り・知らせの送り手・表の移し
 │   │   └── src/
 │   │       ├── entries/  * Lambda ごとの起点（api-fn・patrol・notifier・migrate）
 │   │       └── modules/  * コンテキストごとのモジュール（操作のハンドラーと、認可の判定へ渡す読み手）
-│   ├── web/                画面（ある）
+│   ├── web/                画面
 │   ├── runner/           * ランナー（ECS のタスクと手元のコンテナで同じものが動く）
 │   ├── nd-runtime/       * nd ランタイム（手元のマシンで動く）
 │   └── db-prep/          * DB の用意（ECS のタスク。claude と NDF を含まない）
-├── infra/                  CDK のスタックと設置のコマンド（ある）
+├── infra/                  CDK のスタックと設置のコマンド
 │   ├── bin/
 │   ├── lib/
 │   ├── setup/
 │   └── test/
-└── tools/                  検査（ある。広げる）
-    ├── ref-check/          参照の検査（ある）
+└── tools/                  検査
+    ├── ref-check/          参照の検査
     ├── checks/           * 漏れ・境界・使える量の判定の外の比べ・I14 の対応・NDF の契約の照合
-    └── test/               CI の定義のテスト（ある）
+    └── test/               CI の定義のテスト
 ```
 
 依存は一方向で、循環を持たない。
@@ -62,8 +62,8 @@ nd-factory/
 
 | 置き場 | モジュール | 最上位の関数 |
 | --- | --- | --- |
-| `packages/contracts/` | 操作の表・値の形・ID の頭・理由のコード・設定の形（ある。広げる） | 生成のスクリプトの関数（K2 の詳細設計が持つ）。操作の定義の型 `OperationDef` を `core` へ出す |
-| `packages/core/`（この文書で決めた） | `clock` | `createClock`（新設） |
+| `packages/contracts/` | 操作の表・値の形・ID の頭・理由のコード・設定の形 | 生成のスクリプトの関数。操作の定義の型 `OperationDef` を `core` へ出す |
+| `packages/core/` | `clock` | `createClock`（新設） |
 | `packages/core/` | `ids` | `newId`・`parseId`（新設） |
 | `packages/core/` | `idempotency` | `claimIdempotency`・`settleIdempotency`（新設） |
 | `packages/core/` | `redact` | `redact`（新設） |
@@ -76,16 +76,16 @@ nd-factory/
 | `packages/core/` | `usage-limit` | `judgeUsage`・`usageAddItem`（新設） |
 | `packages/core/` | `audit` | `auditItem`・`appendAudit`（新設） |
 | `packages/core/` | `dispatch` | `readHttpCall`・`readMcpCall`・`dispatch`・`writeHttpResponse`・`writeMcpResponse`（新設） |
-| `apps/api/src/entries/`（この文書で決めた） | API と MCP の 1 つの関数の起点・見回り・知らせの送り手・表の移し | 起点の関数（`readHttpCall` か `readMcpCall` → `dispatch` → 応答の組み立てを呼ぶだけ）。中身は K2・K8・K10 の詳細設計 |
-| `apps/api/src/modules/`（この文書で決めた） | コンテキストごとのモジュール | 操作ごとのハンドラーと、`authorize` へ渡す読み手。K6〜K12 の詳細設計 |
-| `apps/web/` | 画面 | [画面](issue-24-design-screens.md) と K3・K4 の詳細設計 |
-| `apps/runner/`（この文書で決めた） | ランナー | K8 の詳細設計。API への送信は `callHttp` を通す |
-| `apps/nd-runtime/`（この文書で決めた） | nd ランタイム | K9 の詳細設計。API への送信は `callHttp` を通す |
-| `apps/db-prep/`（この文書で決めた） | DB の用意 | K5・K8 の詳細設計 |
-| `infra/` | スタックと設置のコマンド | 骨組みのまま。足す資源は K5 ほか |
-| `tools/checks/`（この文書で決めた） | 足す検査 | K1 の詳細設計。境界の検査は [土台の横断の部品の置き場の基準](issue-24-design-platform.md#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」を `apps/` と `packages/core` の外の実行時のコードで探す |
+| `apps/api/src/entries/` | API と MCP の 1 つの関数の起点・見回り・知らせの送り手・表の移し | 起点の関数（`readHttpCall` か `readMcpCall` → `dispatch` → 応答の組み立てを呼ぶだけ） |
+| `apps/api/src/modules/` | コンテキストごとのモジュール | 操作ごとのハンドラーと、`authorize` へ渡す読み手 |
+| `apps/web/` | 画面 | 画面ごとの関数（[画面](issue-24-design-screens.md)） |
+| `apps/runner/` | ランナー | ランナーの関数。API への送信は `callHttp` を通す |
+| `apps/nd-runtime/` | nd ランタイム | nd ランタイムの関数。API への送信は `callHttp` を通す |
+| `apps/db-prep/` | DB の用意 | DB の用意の関数。API への送信は `callHttp` を通す |
+| `infra/` | スタックと設置のコマンド | スタックの構築子と設置のコマンドの関数。`packages/core` の関数を使わない |
+| `tools/checks/` | 足す検査 | 検査の関数。境界の検査は [土台の横断の部品の置き場の基準](issue-24-design-platform.md#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」を `apps/` と `packages/core` の外の実行時のコードで探す |
 
-境界の検査の対象は、実行の時に動くコード（`apps/` の 5 つの置き場）である。`infra/` と `tools/` は組み立てと反映の時だけ動くため、対象から外す。`infra/setup/` の AWS SDK のクライアントの直の生成は今のまま使う（この文書で決めた）。
+境界の検査の対象は、実行の時に動くコード（`apps/` の 5 つの置き場）である。`infra/` と `tools/` は組み立てと反映の時だけ動くため、対象から外す。`infra/setup/` は AWS SDK のクライアントを直に作ってよい。
 
 ## 関数の仕様
 
@@ -220,11 +220,11 @@ nd-factory/
 | `IdempotencyClaimInput` | 型 | `packages/core`（`idempotency`） | `{ principalKey, operation, key, fingerprint, requestId }` |
 | `IdempotencyClaim` | 型 | `packages/core`（`idempotency`） | `fresh`・`replay`・`in_progress`・`reused` の 4 つの形 |
 | `IDEMPOTENCY_TTL_SECONDS` | 定数 | `packages/contracts`（操作の規約の値） | 86400（24 時間） |
-| `IDEMPOTENCY_LEASE_MS` | 定数 | `packages/core`（`idempotency`） | API の関数の時間切れ（今 10 秒）の 2 倍。時間切れの値は形の正本の設定から読み、ここで数を重ねて持たない |
+| `IDEMPOTENCY_LEASE_MS` | 定数 | `packages/core`（`idempotency`） | API の関数の時間切れの 2 倍。時間切れの値は形の正本の設定から読み、ここで数を重ねて持たない |
 | `LogContext`・`Logger` | 型 | `packages/core`（`log`） | 文脈は `request_id`・`fn`・`endpoint`（受け口）。項目は `level`・`msg`・`time` と任意の ID と数 |
-| 秘密の形のデータ | 設定値（データ） | `packages/contracts/data/`（秘密の形） | 鍵の名前（`authorization`・`token`・`secret`・`password`・`credentials`・`private_key`・`dsn` を含む名前）と値の形（`ndfd_`・`ndfm_`・JWT の形・`ghs_` などの GitHub の token・私有鍵の頭・利用者と合言葉を含む接続の URL・AWS の一時の鍵の形）。漏れの検査（K1）も同じデータを読み、2 か所に持たない |
+| 秘密の形のデータ | 設定値（データ） | `packages/contracts/data/`（秘密の形） | 鍵の名前（`authorization`・`token`・`secret`・`password`・`credentials`・`private_key`・`dsn` を含む名前）と値の形（`ndfd_`・`ndfm_`・JWT の形・`ghs_` などの GitHub の token・私有鍵の頭・利用者と合言葉を含む接続の URL・AWS の一時の鍵の形）。漏れの検査も同じデータを読み、2 か所に持たない |
 | `RetryPolicy` | 型 | `packages/contracts`（形） | `{ max_attempts, base_ms, cap_ms, timeout_ms, honor_retry_after }`。待ちは上限つきの指数と全幅のゆらぎ |
-| 再試行の方針の表 | 設定値（データ） | `packages/contracts/data/`（再試行の方針） | `dynamodb` 3 回・50〜1000 ミリ秒・2 秒、`aws-control`（ECS・Secrets Manager・STS）3 回・200〜2000 ミリ秒・5 秒、`http-github` 3 回・500〜5000 ミリ秒・10 秒、`http-idp-keys` 2 回・200〜1000 ミリ秒・3 秒、`http-notify`（Web Push・Slack）3 回・500〜5000 ミリ秒・5 秒、`runner-to-api` 5 回・1000〜30000 ミリ秒・10 秒。値の調整は K2 の詳細設計 |
+| 再試行の方針の表 | 設定値（データ） | `packages/contracts/data/`（再試行の方針） | `dynamodb` 3 回・50〜1000 ミリ秒・2 秒、`aws-control`（ECS・Secrets Manager・STS）3 回・200〜2000 ミリ秒・5 秒、`http-github` 3 回・500〜5000 ミリ秒・10 秒、`http-idp-keys` 2 回・200〜1000 ミリ秒・3 秒、`http-notify`（Web Push・Slack）3 回・500〜5000 ミリ秒・5 秒、`runner-to-api` 5 回・1000〜30000 ミリ秒・10 秒 |
 | `FailureClass` | 型 | `packages/core`（`retry`） | `retryable`・`conflict`・`not_found`・`rejected`・`unknown` |
 | `OutboundRequest`・`OutboundResult` | 型 | `packages/core`（`outbound`） | 要求は `{ method, url, headers, body, idempotent }`、結果は `{ status, headers, body, class }` |
 | `TransactItem` | 型 | `packages/core`（`conditional-write`） | SDK の 1 件と、外れたときの扱い `onConflict`（`version_mismatch`・`state_mismatch`・`return_existing`・`fail`） |
@@ -232,16 +232,16 @@ nd-factory/
 | `WriteOutcome` | 型 | `packages/core`（`conditional-write`） | `{ ok: true }` か `{ ok: false; failed: { index, onConflict }[] }` |
 | `Principal` | 型 | `packages/core`（`auth`） | `human`（利用者の ID）・`delegation`（利用者の ID・委任の ID・範囲・クライアントの名前）・`runner`（レーンの ID・世代）・`machine`（チームの ID・マシンの ID）・`github`・`db_prep`（プロジェクトの ID・用意の ID）・`patrol` |
 | `AuthDeps` | 型 | `packages/core`（`auth`） | IdP の発行元とクライアント ID（設定）・レーンの検証の鍵（秘密の器から起動のときに 1 回読む）・Webhook の秘密・委任とマシンとレーンの行の読み手・時計 |
-| 委任の token の形 | 定数（形） | `packages/contracts`（token の形） | `ndfd_<利用者の ID>.<委任の ID>.<秘密の部分 32 バイトの base64url>`（この文書で決めた。行を区切りの鍵で強い整合で読むため） |
-| 登録の token の形 | 定数（形） | `packages/contracts`（token の形） | `ndfm_<チームの ID>.<マシンの ID>.<秘密の部分 32 バイトの base64url>`（この文書で決めた） |
+| 委任の token の形 | 定数（形） | `packages/contracts`（token の形） | `ndfd_<利用者の ID>.<委任の ID>.<秘密の部分 32 バイトの base64url>`（行を区切りの鍵で強い整合で読むため） |
+| 登録の token の形 | 定数（形） | `packages/contracts`（token の形） | `ndfm_<チームの ID>.<マシンの ID>.<秘密の部分 32 バイトの base64url>`（委任の token と同じ理由） |
 | `JWKS_CACHE_MS` | 定数 | `packages/core`（`auth`） | 3600000（1 時間）。`kid` が無いときの取り直しは 60000 ミリ秒に 1 回まで |
 | `DELEGATION_TOUCH_MS` | 定数 | `packages/core`（`auth`） | 3600000（最後に使った時刻を、前の値から 1 時間以上たったときだけ書く） |
 | `ScopeReader` | 型（ポート） | `packages/core`（`authorize`） | `seatsOf`・`projectsOfTeams`・`projectOfTarget`・`laneOf`・`transferTargetOf`・`isHumanOnlyItem`。中身は `apps/api/src/modules/` |
 | `AuthzDecision` | 型 | `packages/core`（`authorize`） | `{ reject: "human_only" \| "scope_insufficient" }` か `{ items: ItemAuthz[] }` |
-| 料金プランの表 | 設定値（データ） | `packages/contracts/data/`（料金プラン） | 自分で設置した環境の既定は「上限なし」の行（[料金プランと月の上限額](issue-24-design-execution.md#料金プランと月の上限額)）。値の集合は K12 |
+| 料金プランの表 | 設定値（データ） | `packages/contracts/data/`（料金プラン） | 自分で設置した環境の既定は「上限なし」の行（[料金プランと月の上限額](issue-24-design-execution.md#料金プランと月の上限額)） |
 | `UsageInput`・`UsageVerdict` | 型 | `packages/core`（`usage-limit`） | 入力は時点・実行の場所・推論の手段・使った額・上限額・同時に動くレーンの数。結果は `allowed` と理由のコードと `waitable` |
 | `AuditEntry` | 型 | `packages/core`（`audit`） | 記録の ID・要求の ID・時刻・主体・委任・クライアント（委任の名前と MCP の名乗り）・入口・操作・対象の ID・プロジェクト・結果・要素の番号（要約の行は空） |
-| 記録の区切りの鍵 | 定数（形） | `packages/core`（`audit`） | 見られたプロジェクトがあれば `PROJECT#<ID>`、無ければ主体の `USER#<ID>`、主体の無い 401 は `ANON#<UTC の年月日>`（この文書で決めた。土台の表と鍵にも写した） |
+| 記録の区切りの鍵 | 定数（形） | `packages/core`（`audit`） | 見られたプロジェクトがあれば `PROJECT#<ID>`、無ければ主体の `USER#<ID>`、主体の無い 401 は `ANON#<UTC の年月日>`（[土台](issue-24-design-platform.md) の表と鍵と同じ） |
 | `AUDIT_RETENTION_DAYS` | 設定値 | 設置の設定のファイル（形は `packages/contracts`） | 365 |
 | `OperationCall` | 型 | `packages/core`（`dispatch`） | `{ endpoint, channel: "screen" \| "api" \| "mcp" \| "runner" \| "machine" \| "github" \| "patrol" \| "db_prep", operation, token, items, requestId, mcpClientName? }`。`endpoint` は受け口、`channel` は入口。人の token の入口は「画面」 |
 | `DispatchDeps` | 型 | `packages/core`（`dispatch`） | 操作の表・ハンドラーの表・`ScopeReader`・`AuthDeps`・`Db`・時計・ログ・残り時間の読み手 |
@@ -281,41 +281,36 @@ nd-factory/
 
 ## 既存の部品の再利用
 
-確かめた範囲は、worktree の次の 8 つの置き場と、依存のライブラリ（各 `package.json` と `package-lock.json`）である。下の「骨組みの範囲」はこの 8 つの置き場を指す。
-
-- `apps/` の `api/src/`・`web/src/`
-- `packages/contracts/` の `src/`・`scripts/`
-- `infra/` の `lib/`・`setup/`・`bin/`
-- `tools/` の `ref-check/src/`
+再利用の候補は、依存のライブラリ（各 `package.json` と `package-lock.json`）と Node 24 の組み込みである。
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `createClock` | `apps/api/src/users-handler.ts` の依存の注入 `now: () => new Date()` | `grep -rnE 'Date.now\|new Date\(' <骨組みの範囲>` → 1 件 | 使う（注入で差し替える形を引き継ぐ）。時計そのものは無いため作る |
-| `newId` | `node:crypto` の `randomUUID`・`uuid` の依存 | `grep -rnE 'randomUUID\|getRandomValues\|uuid' <骨組みの範囲>` → 0 件。`grep -oE '"node_modules/[^"]*uuid[^"]*"' package-lock.json` → 0 件 | 使えない（`randomUUID` は UUIDv4 で時刻の順に並ばない。UUIDv7 のライブラリは依存に無い）。Web Crypto の `getRandomValues` で RFC 9562 の形を組む |
-| `parseId` | `packages/contracts/src/users-api.ts` の zod の形 | `grep -n 'export' packages/contracts/src/*.ts` | 使う（形は zod の正規表現で持ち、`parseId` はその検証を呼ぶ） |
-| `claimIdempotency` | `apps/api/src/user-store.ts` の `ensureUser`（無いときだけ作る条件つきの書き込み） | `grep -rnE 'ConditionExpression\|ConditionalCheckFailed\|TransactWrite' <骨組みの範囲>` → `user-store.ts` の 3 件 | 使う（無いときだけ書く形と強い整合の読み直しを引き継ぐ）。冪等の鍵の表と期限は無いため作る |
-| `settleIdempotency` | 同上 | 同上 | 使えない（済みの行へ書き換える部品は無い）。`updateIfVersion` と同じ組み方で作る |
-| `redact` | 伏せ字の部品・ライブラリ | `grep -rnE 'redact\|mask\|伏せ' <骨組みの範囲>` → 0 件。`users-handler.ts` はログへ token と本文を出さない方針の注記だけを持つ | 使えない（無い）。秘密の形は漏れの検査と共有するデータから読む |
-| `createLogger` | `users-handler.ts` の `LogFields` と `JSON.stringify` の 1 行のログ。ログのライブラリ | `grep -rnE 'console\.log\|JSON.stringify\(\{' <骨組みの範囲>` → `users-handler.ts` の 2 件。`grep -oE '"node_modules/[^"]*(pino\|powertools)[^"]*"' package-lock.json` → 0 件 | 使う（1 行の JSON・要求の ID・`level` の形を引き継ぎ、`core` へ移す）。ライブラリは依存に無く足さない |
-| `withRetry` | AWS SDK の既定の再試行（`@smithy/core`）・`@humanwhocodes/retry` | `grep -oE '"node_modules/[^"]*(retry\|smithy)[^"]*"' package-lock.json` → `@smithy/core` と `@humanwhocodes/retry`。`grep -rnE 'retry\|backoff\|maxAttempts' <骨組みの範囲>` → 0 件 | SDK の呼び出しは SDK の再試行を使う（`awsClient` が回数を方針から渡す）。`@humanwhocodes/retry` は ESLint の開発の依存で実行の時に入らないため使えない。HTTP の呼び出しの繰り返しは作る |
-| `classifyFailure` | `user-store.ts` の `isConditionFailure` | `grep -rn 'ConditionalCheckFailed' apps/api/src` → 2 件 | 使う（例外の型と名前の両方で見る形を引き継ぎ、分類を広げる） |
-| `callHttp` | `fetch` の直の利用・HTTP のライブラリ | `grep -rnE 'fetch\(\|AbortSignal' <骨組みの範囲>` → 0 件（`timeout` は CDK の `Duration` だけ） | 使う（Node 24 の組み込みの `fetch` と `AbortSignal.timeout` を包む）。包む部品は無いため作る |
-| `awsClient` | `users-handler.ts` の `DynamoDBDocumentClient.from(new DynamoDBClient({}))` の使い回し・`infra/setup/aws-reader.ts` の STS と SSM のクライアント | `grep -rnE 'new .*Client\(' <骨組みの範囲>` → 3 件 | 使う（実行環境ごとに 1 回作って使い回す形を引き継ぐ）。`infra/setup/` は境界の検査の外で、そのまま使う |
-| `putIfAbsent` | `ensureUser` の `attribute_not_exists(pk)` | `grep -rn 'attribute_not_exists' apps/api/src` → 1 件 | 使う（条件式を移し、`TransactItem` を組む形にする） |
-| `updateIfVersion` | 版の条件の書き込み | `grep -rnE 'version' apps/api/src` → `SCHEMA_VERSION`（形の版）だけ | 使えない（エンティティの版の条件は無い）。作る |
-| `writeAtomically` | `@aws-sdk/lib-dynamodb` の `TransactWriteCommand` | `apps/api/package.json` の依存に `@aws-sdk/lib-dynamodb` 3.1170.0。`grep -rn 'Transact' <骨組みの範囲>` → 0 件 | 使う（ライブラリのコマンドで送る）。外れた件の訳しは作る |
-| `authenticate` | API Gateway の JWT の前段（`infra/lib/app-stack.ts` の `HttpJwtAuthorizer`）・`jwt-decode`・`aws-jwt-verify`・`node:crypto` | `grep -rnE 'jwt\|jose\|verify\|authorizer' <骨組みの範囲>` → `app-stack.ts` と `users-handler.ts`。`jwt-decode` は `oidc-client-ts` の依存（画面だけ）。`grep -oE '"node_modules/(aws-jwt-verify\|jose)"' package-lock.json` → 0 件。`timingSafeEqual` → 0 件 | JWT の前段は使えない（委任の token を読めない。[認証と主体](issue-24-design-api.md#認証と主体)）。`jwt-decode` は署名を確かめないため使えない。`node:crypto` の `createPublicKey`（JWK）・`verify`（RS256 と Ed25519）・`timingSafeEqual`・`createHash` を使う（`infra/lib/assembly-digest.ts` が `createHash` を既に使う） |
-| `visibleProjectIds` | 席・割り当ての読み | `grep -rnE 'authorize\|permission\|role' apps/api/src` → JWT の前段の `sub` を読む 1 件だけ | 使えない（無い）。作る |
-| `authorize` | `users-handler.ts` の `answerItems`（他人の ID に表を読まず `not_found` を返す） | `grep -n 'not_found' apps/api/src/users-handler.ts` | 使う（見えないものを無いものと同じに返す形を引き継ぐ）。判定の本体は作る |
-| `judgeUsage` | 料金プラン・上限の比べ | `grep -rnE 'limit\|quota\|plan' <骨組みの範囲>` → 0 件 | 使えない（無い）。作る |
+| `createClock` | 時計のライブラリ | 依存のライブラリの一覧 | 使えない（無い）。依存の注入で時刻の元を差し替える形で作る |
+| `newId` | `node:crypto` の `randomUUID`・`uuid` のライブラリ | 依存のライブラリの一覧と Node 24 の組み込み | 使えない（`randomUUID` は UUIDv4 で時刻の順に並ばない。UUIDv7 のライブラリは依存に無い）。Web Crypto の `getRandomValues` で RFC 9562 の形を組む |
+| `parseId` | `zod` の正規表現の検証 | 形の正本の依存 | 使う（形は zod の正規表現で持ち、`parseId` はその検証を呼ぶ） |
+| `claimIdempotency` | `@aws-sdk/lib-dynamodb` の条件つきの書き込みと強い整合の読み | `apps/api/package.json` の依存 | 使う（`attribute_not_exists` の条件と強い整合の読みで組む）。冪等の鍵の表と期限は作る |
+| `settleIdempotency` | 同上 | 同上 | 使う（`updateIfVersion` と同じ組み方で、持ち主を条件にした更新の 1 件を組む） |
+| `redact` | 伏せ字のライブラリ | 依存のライブラリの一覧 | 使えない（無い）。秘密の形は漏れの検査と共有するデータから読む |
+| `createLogger` | ログのライブラリ（`pino`・Powertools） | 依存のライブラリの一覧 | 使えない（依存に無く、1 行の JSON は `JSON.stringify` で足りるため足さない）。作る |
+| `withRetry` | AWS SDK の既定の再試行（`@smithy/core`）・`@humanwhocodes/retry` | 依存のライブラリの一覧 | SDK の呼び出しは SDK の再試行を使う（`awsClient` が回数を方針から渡す）。`@humanwhocodes/retry` は ESLint の開発の依存で実行の時に入らないため使えない。HTTP の呼び出しの繰り返しは作る |
+| `classifyFailure` | AWS SDK の例外の型と名前 | `@aws-sdk/client-dynamodb` の例外の型 | 使う（例外の型と名前の両方で見る）。分類は作る |
+| `callHttp` | Node 24 の組み込みの `fetch` と `AbortSignal.timeout`・HTTP のライブラリ | Node 24 の組み込みと依存のライブラリの一覧 | 使う（組み込みの `fetch` と `AbortSignal.timeout` を包む）。HTTP のライブラリは足さない。包む部品は作る |
+| `awsClient` | AWS SDK のクライアントの構築子 | `apps/api/package.json` の依存 | 使う（実行環境ごとに 1 回作って使い回す）。方針の回数と時間切れを渡す包みは作る |
+| `putIfAbsent` | `@aws-sdk/lib-dynamodb` の条件式 `attribute_not_exists(pk)` | `apps/api/package.json` の依存 | 使う（条件式で `TransactItem` を組む） |
+| `updateIfVersion` | エンティティの版の条件の部品 | 依存のライブラリの一覧 | 使えない（無い）。作る |
+| `writeAtomically` | `@aws-sdk/lib-dynamodb` の `TransactWriteCommand` | `apps/api/package.json` の依存（`@aws-sdk/lib-dynamodb` 3.1170.0） | 使う（ライブラリのコマンドで送る）。外れた件の訳しは作る |
+| `authenticate` | API Gateway の JWT の前段（`HttpJwtAuthorizer`）・`jwt-decode`・`aws-jwt-verify`・`jose`・`node:crypto` | 依存のライブラリの一覧と Node 24 の組み込み | JWT の前段は使えない（委任の token を読めない。[認証と主体](issue-24-design-api.md#認証と主体)）。`jwt-decode` は署名を確かめないため使えない（画面の依存だけにある）。`aws-jwt-verify` と `jose` は依存に無い。`node:crypto` の `createPublicKey`（JWK）・`verify`（RS256 と Ed25519）・`timingSafeEqual`・`createHash` を使う |
+| `visibleProjectIds` | 席・割り当ての判定の部品 | 依存のライブラリの一覧 | 使えない（無い）。作る |
+| `authorize` | 認可のライブラリ | 依存のライブラリの一覧 | 使えない（無い）。見えないものを無いものと同じに返す判定を作る |
+| `judgeUsage` | 料金プラン・上限の比べの部品 | 依存のライブラリの一覧 | 使えない（無い）。作る |
 | `usageAddItem` | 同上 | 同上 | 使えない（無い）。`updateIfVersion` と同じ組み方で作る |
-| `auditItem` | 操作の記録 | `grep -rni 'audit' <骨組みの範囲>` → 0 件 | 使えない（無い）。作る |
+| `auditItem` | 操作の記録の部品 | 依存のライブラリの一覧 | 使えない（無い）。作る |
 | `appendAudit` | 同上 | 同上 | 使えない（無い）。`writeAtomically` を通して作る |
-| `readHttpCall` | `packages/contracts/src/users-api.ts` の `parseUsersRequest`（JSON でない・配列でない・空・数の上限の順の検査）と `users-handler.ts` の `decodeBody` | `grep -rn 'parseUsersRequest\|decodeBody' <骨組みの範囲>` → 3 件 | 使う（理由のコードの順と base64 の本文の読み方を引き継ぎ、操作の表の共通の検査へ広げる。要素の上限は 10 から 100、重なりの検査を足す） |
-| `readMcpCall` | MCP の受け口・JSON-RPC のライブラリ | `grep -rnE 'jsonrpc\|tools/list\|mcp' <骨組みの範囲>` → 0 件。`grep -oE '"node_modules/@modelcontextprotocol[^"]*"' package-lock.json` → 0 件 | 使えない（無い）。セッションを持たない JSON の 1 応答だけを受けるため、SDK を足さず作る（[MCP](issue-24-design-api.md#mcp)） |
-| `dispatch` | `users-handler.ts` の `createHandler`（依存の注入・401・400・503 の扱い） | `grep -rnE 'dispatch\|route\|handler' <骨組みの範囲>` → `users-handler.ts` と `app-stack.ts` の起点の指定 | 使う（依存を注入して起点を作る形と、想定しない失敗を 503 にする扱いを引き継ぐ）。振り分けの本体は作る |
-| `writeHttpResponse` | `users-handler.ts` の `json` | `grep -n 'function json' apps/api/src/users-handler.ts` → 1 件。`grep -rnE 'problem\+json\|about:blank' <骨組みの範囲>` → 0 件 | 使う（`content-type` と本文の組み立てを引き継ぐ）。problem の形と `no-store` を足す |
-| `writeMcpResponse` | MCP の応答の組み立て | `grep -rnE 'structuredContent\|jsonrpc' <骨組みの範囲>` → 0 件 | 使えない（無い）。作る |
+| `readHttpCall` | `zod` の検証 | 形の正本の依存 | 使う（要素の形は zod で照らす）。本文の検査の順（JSON でない・配列でない・空・数の上限・重なり）と base64 の本文の読みは作る |
+| `readMcpCall` | MCP の SDK（`@modelcontextprotocol/sdk`）・JSON-RPC のライブラリ | 依存のライブラリの一覧 | 使えない（依存に無い）。セッションを持たない JSON の 1 応答だけを受けるため、SDK を足さず作る（[MCP](issue-24-design-api.md#mcp)） |
+| `dispatch` | 振り分けのライブラリ | 依存のライブラリの一覧 | 使えない（無い）。依存を注入して起点を作り、想定しない失敗を 503 にする振り分けを作る |
+| `writeHttpResponse` | problem の形の部品 | 依存のライブラリの一覧 | 使えない（無い）。`content-type`・problem の形・`no-store` を組んで作る |
+| `writeMcpResponse` | MCP の応答の組み立て | 依存のライブラリの一覧 | 使えない（無い）。作る |
 
 ## 単体テストの観点
 
