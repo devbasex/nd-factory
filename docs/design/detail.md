@@ -9,7 +9,22 @@
 | [API と MCP](api.md) | 「呼び出しの規約」「認証と主体」「認可」「操作の記録」「形の正本」 |
 
 扱うのは、リポジトリのモジュールの置き場と依存の向き、横断の部品の最上位の関数の仕様・異常系・並行と排他・記録の出し方・テストの観点である。
-各コンテキストのモジュール（利用者とチーム・プロジェクト・実行の制御ほか）の関数と、横断の部品の形の細部（ファイルの単位・型の項目の並び）は、ここでは決めない。
+各コンテキストのモジュール（利用者とチーム・プロジェクト・実行の制御ほか）の関数と、横断の部品の形の細部（ファイルの単位・型の項目の並び）は、ここでは決めず、下の受け持つ子の課題が詳細設計を書く。
+
+## 受け持つ子の課題
+
+この文書が持つのは横断の部品（`packages/core/`）だけで、ほかの置き場の詳細設計は次の子の課題が書く。全体の設計が「詳細設計が持つ」と回した中身は、この表の子の課題か、この文書の節が受ける。
+
+| 置き場 | 中身 | 受け持つ子の課題 |
+| --- | --- | --- |
+| `packages/core/`・`packages/contracts/` | 横断の部品・操作の表の枠・サービスの表の列と索引・表の移し | detail.md（この文書）と #2 |
+| `apps/runner/` | ランナー | #6 |
+| `apps/nd-runtime/` | nd ランタイム | #7 |
+| `apps/db-prep/` | DB の用意 | #13 |
+| `apps/api/src/entries/` の見回り | 見回りの起点と予定。処理ごとの中身は持ち主の子（失効のやり直し #5・マシンの途切れ #7・送達のやり直し #8） | #6 |
+| `apps/api/src/entries/` の知らせの送り手・`apps/api/src/modules/` の知らせ | 知らせ | #8 |
+| 要素の項目・型・理由のコード | 操作ごとの形の正本 | [API の文書の操作の一覧](api.md#操作の一覧) の受け持つ子の表 |
+| 設定のファイルのキー | 読む構成要素ごとのキー | [土台の文書の環境の値の受け方](platform.md#環境の値の受け方) の表 |
 
 ## ファイル配置
 
@@ -17,7 +32,34 @@
 
 ## クラスと関数の構造
 
-型の関係は [形の正本](api.md#形の正本) のクラス図と [コンテナの図](platform.md#コンテナの図) を指し、ここでは描き直さない。モジュールの置き場はディレクトリの単位で決める（`*` は新設）。
+横断の部品の型の関係と多重度は次のとおりである。型だけを描き、項目の並びは描かない（項目は [内部のデータと定数](#内部のデータと定数)）。型の名前はコードの型の名前と照らすため識別子のまま載せる。操作の表の型は [形の正本](api.md#形の正本) のクラス図、配置は [コンテナの図](platform.md#コンテナの図) にある。
+
+```mermaid
+classDiagram
+    class OperationCall
+    class Principal
+    class OperationDef
+    class DispatchDeps
+    class ScopeReader
+    class AuthzDecision
+    class ItemAuthz
+    class TransactItem
+    class WriteOutcome
+    class AuditEntry
+    class IdempotencyClaim
+    OperationCall "1" --> "0..1" Principal : MCP で決めた主体
+    OperationCall "1" --> "1" OperationDef : 操作の名前で引く
+    DispatchDeps "1" --> "1" ScopeReader : 読み手を注入
+    DispatchDeps "1" --> "1..*" OperationDef : 操作の表
+    AuthzDecision "1" --> "0..100" ItemAuthz : 要素ごと
+    OperationCall "1" --> "1" AuthzDecision : authorize の結果
+    OperationCall "1" --> "1..100" IdempotencyClaim : 鍵を持つ要素ごと
+    TransactItem "1..100" --> "1" WriteOutcome : writeAtomically
+    AuditEntry "1" --> "1" TransactItem : auditItem
+    ScopeReader ..> Principal : 主体ごとに見える集まり
+```
+
+モジュールの置き場はディレクトリの単位で決める（`*` は新設）。
 
 ```text
 nd-factory/
@@ -83,7 +125,7 @@ nd-factory/
 | `apps/nd-runtime/` | nd ランタイム | nd ランタイムの関数。API への送信は `callHttp` を通す |
 | `apps/db-prep/` | DB の用意 | DB の用意の関数。API への送信は `callHttp` を通す |
 | `infra/` | スタックと設置のコマンド | スタックの構築子と設置のコマンドの関数。`packages/core` の関数を使わない |
-| `tools/checks/` | 足す検査 | 検査の関数。境界の検査は [土台の横断の部品の置き場の基準](platform.md#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」を `apps/` と `packages/core` の外の実行時のコードで探す |
+| `tools/checks/` | 足す検査 | 検査の関数。境界の検査は [土台の横断の部品の置き場の基準](platform.md#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」を、`apps/` の 5 つの置き場の実行時のコードでだけ探す。`packages/core` は部品の置き場そのもので、`infra/`・`tools/` は組み立てと反映の時だけ動くため対象から外す（土台の決定 91） |
 
 境界の検査の対象は、実行の時に動くコード（`apps/` の 5 つの置き場）である。`infra/` と `tools/` は組み立てと反映の時だけ動くため、対象から外す。`infra/setup/` は AWS SDK のクライアントを直に作ってよい。
 
@@ -258,7 +300,7 @@ nd-factory/
 | 料金プランの表 | 設定値（データ） | `packages/contracts/data/`（料金プラン） | 自分で設置した環境の既定は「上限なし」の行（[料金プランと月の上限額](execution.md#料金プランと月の上限額)） |
 | `UsageInput`・`UsageVerdict` | 型 | `packages/core`（`usage-limit`） | 入力は時点・実行の場所・推論の手段・使った額・上限額・同時に動くレーンの数。結果は `allowed` と理由のコードと `waitable` |
 | `AuditEntry` | 型 | `packages/core`（`audit`） | 記録の ID・要求の ID・時刻・主体・委任・クライアント（委任の名前と MCP の名乗り）・入口・操作・対象の ID・プロジェクト・結果・要素の番号（要約の行は空） |
-| 記録の区切りの鍵 | 定数（形） | `packages/core`（`audit`） | 見られたプロジェクトがあれば `PROJECT#<ID>`、無ければ主体の `USER#<ID>`、主体の無い 401 は `ANON#<UTC の年月日>`（[土台](platform.md) の表と鍵と同じ） |
+| 記録の区切りの鍵 | 定数（形） | `packages/core`（`audit`） | 見られたプロジェクトがあれば `PROJECT#<ID>`、無ければ主体の `USER#<ID>`、主体の無い 401 は `ANON#<UTC の年月日>`（[データの表と鍵](data.md#表と鍵) と同じ） |
 | `AUDIT_RETENTION_DAYS` | 設定値 | 設置の設定のファイル（形は `packages/contracts`） | 365 |
 | `OperationCall` | 型 | `packages/core`（`dispatch`） | `{ endpoint, channel: "screen" \| "api" \| "mcp" \| "runner" \| "machine" \| "github" \| "patrol" \| "db_prep", operation, token, principal?, items, requestId, mcpClientName? }`。`endpoint` は受け口、`channel` は入口。人の token の入口は「画面」。`principal` は MCP で `serveMcp` が決めた主体だけが入れる |
 | `McpCall`・`McpReply`・`McpHandler`・`McpTool`・`McpContext`・`McpDeps` | 型 | `packages/core`（`dispatch`） | `McpCall` は `{ request: Request, token, requestId }`（SDK へ渡す Web 標準の要求）。`McpReply` は SDK へ渡さずに返す `{ status: 403 \| 405 }`。`McpHandler` は `(request: Request, ctx: McpContext) => Promise<Response>`。`McpTool` は道具の名前・入力の形・出力の形・注記と操作の定義。`McpContext` は `{ principal, requestId, mcpClientName?, call, dispatched }`（`call` は `dispatch` を呼ぶ関数）。`McpDeps` は `McpHandler`・`AuthDeps`・`Db`・時計・ログ・`DispatchDeps`。`CallToolResult` と `McpServer` は SDK の型を使う |
@@ -328,7 +370,7 @@ nd-factory/
 | `appendAudit` | 同上 | 同上 | 使えない（無い）。`writeAtomically` を通して作る |
 | `readHttpCall` | `zod` の検証 | 形の正本の依存 | 使う（要素の形は zod で照らす）。本文の検査の順（JSON でない・配列でない・空・数の上限・重なり）と base64 の本文の読みは作る |
 | `readMcpCall` | MCP の SDK（`@modelcontextprotocol/server`・LIB40） | 決定 51 | JSON-RPC の読みは SDK に任せる。`Origin` と方法の照らしだけを SDK の前に作る |
-| `createMcpHandler` | MCP の SDK（`@modelcontextprotocol/server`・LIB40。v1 の `@modelcontextprotocol/sdk`・LIB45 は採らない）の HTTP のハンドラーと要求ごとのファクトリー | 決定 51・SDK の HTTP の案内（要求ごとのファクトリー） | 使う（`@modelcontextprotocol/server` を足し、セッションを持たない JSON の 1 応答の設定で受ける。JSON-RPC と streamable HTTP を自前で書かない）。ハンドラーと道具の定義は実行環境で使い回し、サーバーは要求ごとにファクトリーで作る。道具の定義を操作の表から作る部分を作る |
+| `createMcpHandler` | MCP の SDK（`@modelcontextprotocol/server`・LIB40。v1 の `@modelcontextprotocol/sdk` は採らない。LIB40 の行）の HTTP のハンドラーと要求ごとのファクトリー | 決定 51・SDK の HTTP の案内（要求ごとのファクトリー） | 使う（`@modelcontextprotocol/server` を足し、セッションを持たない JSON の 1 応答の設定で受ける。JSON-RPC と streamable HTTP を自前で書かない）。ハンドラーと道具の定義は実行環境で使い回し、サーバーは要求ごとにファクトリーで作る。道具の定義を操作の表から作る部分を作る |
 | `createMcpServer` | MCP の SDK の `McpServer` と道具の登録 | 決定 51 | 使う。道具の処理を共通の `dispatch` へつなぐ部分を作る |
 | `serveMcp` | MCP の SDK の認証の渡し方（ハンドラーの前で主体を決めて要求の文脈へ入れる） | SDK の HTTP の案内（認証の渡し方） | 使う（SDK の外で `authenticate` を呼び、決めた主体を `McpContext` で渡す）。`dispatch` を通らなかった応答の記録は SDK に無いため作る |
 | `dispatch` | 振り分けのライブラリ | 依存のライブラリの一覧 | 使えない（無い）。依存を注入して起点を作り、想定しない失敗を 503 にする振り分けを作る |
