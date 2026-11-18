@@ -138,6 +138,8 @@ nd-factory/
 | `withRetry` | 再試行してはいけない失敗 | 分類が `conflict`・`not_found`・`rejected` | `classify` の戻り値 | 呼び出し元へ返す（最初の失敗のまま） | 呼び手が決める | 繰り返さない |
 | `withRetry` | 期限に届く | 次の待ちが `deadline` を越える | 待つ前の残り時間の照らし | 呼び出し元へ返す（`RetryExhausted`、理由は期限） | 呼び手が決める。API では 503 `unavailable` | 後から再実行できる |
 | `callHttp` | 時間切れ | 相手が遅い・網の不調 | `AbortSignal` の時間切れ | 冪等な要求は再試行、冪等でない要求は呼び出し元へ返す（届いたか分からない） | 呼び手が決める。届いたか分からない外への作成は「行う予定」の行に印を残し、作り直さない（[起票の依頼](issue-24-design-execution.md#起票の依頼)） | 冪等なら再実行できる |
+| `createJwksCache` | 公開鍵を取れない | IdP の遅れ・網の不調・JWKS の形の誤り | `fetchJwks`（`callHttp` の時間切れと失敗） | 控えを変えずに取得の失敗を投げる。同じ時に待っていた取り直しも同じ失敗で終わる | `authenticate` が `unavailable` にし、API は 503 `unavailable` | 控えは前のまま残る。次の要求で取り直せる |
+| `createJwksCache` | 取り直した JWKS にも `kid` が無い | 知らない鍵か偽の token | 取り直した後の控えの引き当て | 控えを新しい集まりに置き換え、鍵が無いと答える。次の取り直しは `JWKS_REFETCH_MS` の後まで起こさない | `authenticate` が `unauthorized` にし、API は 401 | 再実行しても同じ。鍵が回った後なら次の取り直しで通る |
 | `callHttp` | 相手の 429・5xx | 呼びすぎ・相手の障害 | 応答の状態 | 再試行（`Retry-After` を方針の上限まで守る） | 使い切れば呼び手へ `retryable` の結果 | 再実行できる |
 | `callHttp` | 相手の 4xx（429 を除く） | 要求の誤り・権限の無さ | 応答の状態 | 呼び出し元へ返す（`rejected`・`not_found`・`conflict`） | 呼び手が決める | 同じ要求の再実行は同じ結果 |
 | `callHttp` | `https:` でない URL | 呼び手の誤り | 送る前の照らし | 止める（例外） | API では 503 `unavailable` とログの error | 直すまで再実行しない |
@@ -191,8 +193,6 @@ nd-factory/
 | `authenticate` | 受け口 `db_prep` | Ed25519 の JWT で宛先「DB の用意」。引き換えの HTTP の経路だけ引き換えの token、終わりの報告の HTTP の経路だけ終わりの報告の token。どちらも 1 回だけで、そのプロジェクトの進行表の DB が作成中か差し替えの途中であることを照らす |
 | `authenticate` | Cognito の JWT の `kid` が控えに無い | `createJwksCache` の控えが、前の取得から `JWKS_REFETCH_MS` 以上たっていれば公開鍵を 1 回だけ取り直す。たっていないか、取り直しても無ければ `unauthorized` |
 | `authenticate` | Cognito の公開鍵の控えが `JWKS_MAX_AGE_MS` を過ぎた | 控えを使わずに取り直してから照らす。取り直せなければ `unavailable` |
-| `createJwksCache` | 公開鍵の取得が時間切れか失敗した | 控えを変えずに、取得の失敗を呼び手（`aws-jwt-verify` の検証）へ投げる。`authenticate` はこれを `unavailable` にする。同じ時に待っていた取り直しも同じ失敗で終わる |
-| `createJwksCache` | 取り直した JWKS にも `kid` が無い | 控えを新しい集まりに置き換え、鍵が無いと答える。次の取り直しは `JWKS_REFETCH_MS` の後まで起こさない |
 | `authenticate` | ランナーと DB の用意のタスクの JWT（Ed25519） | `aws-jwt-verify` を通さない。`node:crypto` の `verify` で、秘密の器から起動のときに 1 回読んだ nd-factory 自身の検証の鍵と照らす。IdP の鍵の取得は起きない |
 | `authorize` | 主体が人 | 見える集まり = 席を持つチームの今の割り当て。役割は席の役割 |
 | `authorize` | 主体が委任 | 見える集まり = 委任した人の今の集まり ∩ 委任の範囲のプロジェクト。役割は委任した人の席の役割 |
