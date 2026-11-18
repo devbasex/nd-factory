@@ -18,10 +18,8 @@
 
 ## コードの決まり
 
-- TypeScript で書き、Node 24 の型の剥がしでそのまま打つ。enum・引数のプロパティ・namespace を使わない（`erasableSyntaxOnly`）
+- 言語・画面の組み方・TypeScript の書き方・テストの置き方・NDF の版の扱いの細則は、[土台の文書の言語と書き方の決まり](docs/design/platform.md#言語と書き方の決まり) に従う
 - 形を変えるときは `packages/contracts/` を直し、`npm run generate` で生成物を作り直してコミットする。CI の `check` が生成物の古さを落とす
-- 振る舞いを足すときは、先に落ちるテストを書く
-- NDF の版の数字を読んで大小を比べる処理を書かない。参照の検査が落とす
 - 手元の確かめは `npm run check`（lint・型検査・生成物の差・単体テスト）と `npm run e2e`
 
 ## 反映の経路

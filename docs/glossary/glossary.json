@@ -186,6 +186,18 @@
       "context": "platform",
       "meaning": "取り消せない操作を、押した時点の版とともに控え、つながってからサーバーの今の状態と照らして確定する扱い",
       "source": "docs/design/overview.md"
+    },
+    {
+      "term": "答えの送達",
+      "context": "judgment",
+      "meaning": "確定した答えを、ランナーが NDF へ ndf answer で渡し終えるまでの流れ。状態は未渡し・渡し中・届いた・失敗。対象は NDF の区間の報告から作った承認の依頼（ndf-gate:* と ndf-ask:redline:<番号>）の答えと、ndf-ask:human-action を除く問いの答え（委任が確定したものも含む）。ndf-ask:human-action の答えと起票の依頼の答えは対象外",
+      "source": "docs/design/execution.md"
+    },
+    {
+      "term": "資格情報の差し替え",
+      "context": "platform",
+      "meaning": "進行表の DB の役割のパスワードを新しい値へ替え、古い値での接続を断つこと。プロジェクトの差し替えの番号で順を決める",
+      "source": "docs/design/data.md"
     }
   ]
 }
