@@ -115,7 +115,7 @@ graph TD
 | 3 | 始める | 今のプロジェクトの R4（同じ） | — |
 | 4 | 設定 | R14。PC の帯では、席の役割が持ち主のときチームの行き先（R9・R11・R12・R13）を区切りの下に足す | — |
 
-- Web アプリのアイコンの数（Badging）にも、同じ「人を待つものの数」を出す（PRD20・STD28）。知らせの許可が無い端末では出さない
+- Web アプリのアイコンの数（Badging）にも、同じ「人を待つものの数」を出す（PRD20・STD27）。知らせの許可が無い端末では出さない
 - 帯の各項目は 44 px 以上で、今の行き先に `aria-current="page"` を付ける
 
 ### チームとプロジェクトの切り替え
@@ -166,7 +166,7 @@ graph TD
 | 終わった | 終わった・承認された・答えた | 完了（紫） |
 | 止まった | 上限で止まった・予定外に止まった | 注意（黄） |
 | 失敗 | 失敗した・差し戻された・送達できなかった | 危険（赤） |
-| 中立 | 待っている（始まっていない）・取り消した | 中立（灰） |
+| 中立 | 待っている（始まっていない）・取り消した・手元のマシンの登録待ち | 中立（灰） |
 | 確定待ち | つながってから確定する操作がある | 中立の地に点線の枠（色だけに頼らず形で分ける） |
 
 ### デザインの規約
@@ -225,7 +225,7 @@ graph TD
 - 14 日を過ぎた写しは、Web アプリを開いたときに消す。消したものは「控えが古いので消しました」を出さず、空の状態として出す
 - Web アプリを開いたとき、ストレージを消されにくくする許し（`navigator.storage.persist()`）を求める。断られても動く（PRD21）
 - ブラウザのタブで使う Safari では、使わない日が 7 日続くと控えが消されうる。ホーム画面に加えた Web アプリはこの数え方が別である（PRD21）。画面は控えが消えていても空の状態として動き、ホーム画面に加えることを自分の設定の通知先の節で勧める
-- 端末に入れる Web アプリとして、Web App Manifest（名前・`start_url: "/"`・`display: "standalone"`・`scope: "/"`・アイコン・`lang`）と Service Worker を持つ（STD20・STD21）。画面の設定の値はつながっていれば毎回読み、読めなければ Service Worker の控えを使う（決定 28）
+- 端末に入れる Web アプリとして、Web App Manifest（名前・`start_url: "/"`・`display: "standalone"`・`scope: "/"`・アイコン・`lang`）と Service Worker を持つ（STD20・STD20）。画面の設定の値はつながっていれば毎回読み、読めなければ Service Worker の控えを使う（決定 28）
 
 ### 暗号化
 
@@ -461,15 +461,17 @@ F1〜F20 はどれも 1 回以上この表に現れる。画面にしか無い�
 
 ### 設定の各画面
 
+メンバーに許されない操作（[API の文書の席の役割ごとの操作](api.md#席の役割ごとの操作)）は画面に出さず、読む項目は出す（決定 120）。押せなくした操作は置かない。項目の型・上限・外れたときの文言のキーは #28 が決め、409 `credential_rotation_in_progress`・`project_transfer_in_progress` を受けたときの文言のキーも #28 が決める。
+
 | 画面 | 主な項目 | 主な操作 | 失敗と状態の見せ方 |
 | --- | --- | --- | --- |
 | 自分の設定（R14） | 呼び名（0〜32 字）・言語（選択）・時刻帯（選択）・サインインの手段（Google・GitHub）・通知先（この端末の Web Push・Slack）・委任の一覧（クライアントの名前・範囲・期限・最後に使った時刻・状態）・サインアウト | 設定を変える（`users.update`。控えて送る）・サインインの手段をつなぐ・外す（`logins.create`・`logins.delete`。つなぐは IdP へ移って戻る。最後の 1 つは外せない）・この端末へ知らせを受ける（`notification_targets.create`。押したときだけ許可を求める）・試す（`notification_targets.test`）・外す（`notification_targets.delete`）・委任を発行する（`delegations.create`。ダイアログ。token は 1 度だけ出し、写す操作を置く）・取り消す（`delegations.revoke`。確かめのダイアログ）・サインアウト（`sessions.delete`） | Web Push の許可を断られた: 端末の設定から許す案内。iOS でホーム画面に加えていない: 「ホーム画面に加えると知らせを受けられます」と手順（PRD20）。Slack の宛先の値は保存の後に出さず、末尾 4 字だけ |
 | チーム（R9） | チームの名前・席の一覧（呼び名・役割・加えた時刻）・招待の一覧・プロジェクトの一覧・受け入れ待ちの割り当て | 名前を変える（`teams.update`）・人を招く（`invitations.create`）・招待を取り下げる（`invitations.delete`）・役割を変える（`seats.update`）・外す（`seats.delete`。確かめ）・チームを作る（`teams.create`。ダイアログ）・プロジェクトを作る（R10 へ）・割り当てを受け入れる（`project_transfers.accept`。人だけ・確かめ）。招かれた人が招待のリンクから開いたときは、招待を受ける（`invitations.accept`）だけを出す | メンバーには操作を出さず読むだけ。最後の持ち主を外す・メンバーにする: 409 の理由を出す |
-| プロジェクトを作る（R10） | 名前（1〜100 字）・割り当てるチーム（今のチーム）・GitHub App の導入の状態・リポジトリの候補（主を 1 つ、サブを 0 以上選ぶ） | GitHub App を入れる（GitHub へ移り R10 へ戻る。戻りで `github_installations.link`）・作る（`projects.create`） | 主が 0 か 2 つ: 「主のリポジトリを 1 つ選んでください」（I1） |
-| プロジェクトの設定（R8） | 名前・リポジトリ（主・サブ）・割り当てたチーム・移す先と状態 | 名前を変える（`projects.update`）・リポジトリを足す（`repositories.add`）・外す（`repositories.remove`。主は外せない）・割り当てを移す（`project_transfers.create`。移す先のチームを選び、確かめ）・取り下げる（`project_transfers.delete`）・閉じる（`projects.close`。確かめ。閉じた後は見えなくなる） | 移す・閉じるは止まるスプリントの数を確かめのダイアログに出す。409（スプリントが止まりきっていない）: 理由を出す |
+| プロジェクトを作る（R10） | 名前（1〜100 字）・割り当てるチーム（今のチーム）・GitHub App の導入の状態・リポジトリの候補（主を 1 つ、サブを 0 以上選ぶ） | GitHub App を入れる（GitHub へ移り R10 へ戻る。戻りで `github_installations.link`）・作る（`projects.create`） | 主が 0 か 2 つ: 「主のリポジトリを 1 つ選んでください」（I1）。メンバーには画面への導線を出さず、直に開いたら「チームの持ち主に作成を頼んでください」と案内する |
+| プロジェクトの設定（R8） | 名前・リポジトリ（主・サブ）・割り当てたチーム・移す先と状態 | 名前を変える（`projects.update`）・リポジトリを足す（`repositories.add`）・外す（`repositories.remove`。主は外せない）・割り当てを移す（`project_transfers.create`。移す先のチームを選び、確かめ）・取り下げる（`project_transfers.delete`）・閉じる（`projects.close`。確かめ。閉じた後は見えなくなる） | 移す・閉じるは止まるスプリントの数を確かめのダイアログに出す。409（スプリントが止まりきっていない・移しの途中・資格情報の差し替えの途中）: 理由を出す。メンバーには操作を出さず、名前・リポジトリ・割り当てたチーム・移す先と状態を読むだけ |
 | 実行の場所（R11） | 既定の実行の場所（ホステッド・手元のマシン）・推論の手段（`managed`・`byok`）・持ち込みのキーの一覧・手元のマシンの一覧（名前・状態の札・最後の心拍・同時のレーンの数） | 変える（`execution_settings.update`）・持ち込みのキーを足す（`model_keys.create`）・外す（`model_keys.delete`）・手元のマシンを登録する（`machines.create`。ダイアログ。登録の token は 1 度だけ出す）・外す（`machines.delete`。確かめ） | メンバーには読むだけ。`byok` の鍵の値は出さない |
-| 使える量と費用（R12） | 料金プランの名前・今月の使った額と上限額・使える量（判定が返す残り）・費用の記録（スプリントごと、新しい順） | 月の上限額を変える（`spend_caps.update`。通貨はチームの通貨で固定） | 上限額が使った額より小さい: 「今月はこの後スプリントを始められなくなります」を確かめのダイアログで出す |
-| 操作の記録（R13） | 時刻・主体（人か、だれの委任のどのクライアントか）・入口（画面・API・MCP・ランナー・手元のマシン・GitHub・見回り・DB の用意）・操作・対象・結果 | 絞り込み（`audit_records.list`。プロジェクト・主体・入口・期間）・古い分を読み足す | 秘密と個人情報の値は記録に無いので、画面も出さない（I9） |
+| 使える量と費用（R12） | 料金プランの名前・今月の使った額と上限額・使える量（判定が返す残り）・費用の記録（スプリントごと、新しい順） | 月の上限額を変える（`spend_caps.update`。通貨はチームの通貨で固定） | 上限額が使った額より小さい: 「今月はこの後スプリントを始められなくなります」を確かめのダイアログで出す。メンバーには上限額を変える操作を出さず、項目を読むだけ |
+| 操作の記録（R13） | 時刻・主体（人か、だれの委任のどのクライアントか）・入口（画面・API・MCP・ランナー・手元のマシン・GitHub・見回り・DB の用意）・操作・対象・結果 | 絞り込み（`audit_records.list`。プロジェクト・主体・入口・期間）・古い分を読み足す | 秘密と個人情報の値は記録に無いので、画面も出さない（I9）。メンバーには自分と自分の委任の記録だけを出し、主体の絞り込みを出さない |
 
 ## ダミーデータで作り切る段
 
@@ -498,15 +500,12 @@ Value 2 の順で、機能の画面を API の中身より先に、ダミーデ�
 
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
-| STD20 | Web Application Manifest（W3C Working Draft、2026-11-16） | 端末に入れる Web アプリの `name`・`short_name`・`start_url`・`display`・`scope`・`icons`・`lang`・`dir`・`shortcuts` | Manifest の項目（オフラインの「端末に控えるもの」） | https://www.w3.org/TR/appmanifest/ （2026-11-17） |
-| STD21 | Service Workers（W3C Candidate Recommendation Draft、2026-11-17） | `fetch` の事象と Cache の置き場でオフラインを作る。安全な文脈だけ。登録の範囲。待つ版から有効な版へ移る順 | 画面の殻だけを控える（決定 28） | https://www.w3.org/TR/service-workers/ （2026-11-17） |
+| STD20 | Web Application Manifest（W3C Working Draft、2026-11-16） と Service Workers（W3C Candidate Recommendation Draft、2026-11-17） | 端末に入れる Web アプリの `name`・`short_name`・`start_url`・`display`・`scope`・`icons`・`lang`・`dir`・`shortcuts`。`fetch` の事象と Cache の置き場でオフラインを作る。安全な文脈だけ。登録の範囲。待つ版から有効な版へ移る順 | Manifest の項目（オフラインの「端末に控えるもの」）。画面の殻だけを控える（決定 28） | https://www.w3.org/TR/appmanifest/ （2026-11-17） ・ https://www.w3.org/TR/service-workers/ （2026-11-17） |
 | STD22 | Push API（W3C Working Draft、2026-11-16） | `PushManager.subscribe`・`userVisibleOnly`・`applicationServerKey`（VAPID の P-256 公開鍵）・`push` の事象・購読の失効と `pushsubscriptionchange` | 自分の設定の通知先・サインアウトで購読を外す | https://www.w3.org/TR/push-api/ （2026-11-17） |
 | STD23 | WCAG 2.2（W3C 勧告、2024-12-12） | 1.4.3 文字のコントラスト 4.5:1・1.4.11 文字でないもの 3:1・1.4.10 320 CSS px で崩れない・2.4.11 フォーカスを隠さない（AA）・2.5.8 触れる大きさ 24 px（AA）・2.5.5 44 px（拡張） | 水準を AA にし、触れる大きさは 44 px（決定 25） | https://www.w3.org/TR/WCAG22/ ・ https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html （2026-11-17） |
-| STD24 | Web Cryptography API（W3C First Public Working Draft、2025-04-22） | `extractable` が偽の鍵は生の値を取り出せない。`CryptoKey` は直列化でき、IndexedDB に置ける。AES-GCM | 端末の控えの鍵（決定 30） | https://www.w3.org/TR/WebCryptoAPI/ （2026-11-17） |
-| STD25 | Indexed Database API 3.0（W3C Working Draft、2026-10-30） | 値を構造化の写しで保存する。トランザクションは途中で止めると変更をすべて戻す | 写しと確定待ちの置き場（決定 29・32） | https://www.w3.org/TR/IndexedDB/ （2026-11-17） |
+| STD24 | Web Cryptography API（W3C First Public Working Draft、2025-04-22） と Indexed Database API 3.0（W3C Working Draft、2026-10-30） | `extractable` が偽の鍵は生の値を取り出せない。`CryptoKey` は直列化でき、IndexedDB に置ける。AES-GCM。値を構造化の写しで保存する。トランザクションは途中で止めると変更をすべて戻す | 端末の控えの鍵（決定 30）。写しと確定待ちの置き場（決定 29・32） | https://www.w3.org/TR/WebCryptoAPI/ （2026-11-17） ・ https://www.w3.org/TR/IndexedDB/ （2026-11-17） |
 | STD26 | ECMA-402（ECMAScript 2027 Internationalization API、草案 2026-11-16） | `Intl.DateTimeFormat` の `timeZone`（IANA）・`RelativeTimeFormat`・`NumberFormat` の通貨（ISO 4217）・`PluralRules`・`Locale` | 日時・数・金額・複数の形の出し方（決定 34・36） | https://tc39.es/ecma402/ （2026-11-17） |
-| STD27 | Web Background Synchronization（WICG の Draft Community Group Report、2021-11-10） | 裏で送る予約。W3C の標準の道に無いと文書が書く | 確定待ちは Web アプリが開いている間だけ送る（決定 32） | https://wicg.github.io/background-sync/spec/ （2026-11-17） |
-| STD28 | Badging API（W3C Working Draft、2026-04-27） | `setAppBadge` で入れた Web アプリのアイコンに数を出す。知らせの許可が要ることがある | ナビゲーションの「いま」と同じ数をアイコンに出す | https://www.w3.org/TR/badging/ （2026-11-17） |
+| STD27 | Web Background Synchronization（WICG の Draft Community Group Report、2021-11-10） と Badging API（W3C Working Draft、2026-04-27） | 裏で送る予約。W3C の標準の道に無いと文書が書く。`setAppBadge` で入れた Web アプリのアイコンに数を出す。知らせの許可が要ることがある | 確定待ちは Web アプリが開いている間だけ送る（決定 32）。ナビゲーションの「いま」と同じ数をアイコンに出す | https://wicg.github.io/background-sync/spec/ （2026-11-17） ・ https://www.w3.org/TR/badging/ （2026-11-17） |
 
 ### 主要な製品
 
@@ -613,12 +612,12 @@ Primer の 5 つの区切りに合わせる形は、e2e で確かめる幅の組
 
 ### 決定 28: 暗号化されない置き場に中身を残さないよう、Service Worker は画面の殻と設定の値だけを控え、API の応答は画面が暗号化して IndexedDB へ置く
 
-Service Worker の Cache Storage は応答をそのまま置き、暗号化の層を持たない（STD21）。API の応答をそこへ置くと、Value 3 の「端末に残すデータは暗号化して保存する」を満たせない。画面の殻（HTML・JS・CSS・翻訳）と画面の設定の値（公開の値だけ）は、プロジェクトの中身を含まない。この 2 つは Cache Storage に置き、オフラインで開けるようにする。Service Worker の登録と版の切り替えは自前の数十行で足り、包みのライブラリは足さない。
+Service Worker の Cache Storage は応答をそのまま置き、暗号化の層を持たない（STD20）。API の応答をそこへ置くと、Value 3 の「端末に残すデータは暗号化して保存する」を満たせない。画面の殻（HTML・JS・CSS・翻訳）と画面の設定の値（公開の値だけ）は、プロジェクトの中身を含まない。この 2 つは Cache Storage に置き、オフラインで開けるようにする。Service Worker の登録と版の切り替えは自前の数十行で足り、包みのライブラリは足さない。
 
 API の応答を Service Worker の控えの戦略で置く形は、暗号化されず、サインアウトで消し忘れる置き場が 2 つになるので採らなかった。
 
 - 作り方: 自前で作る・標準に倣う
-- 比べた候補: STD21 / LIB22
+- 比べた候補: STD20 / LIB22
 
 根拠: Value 3 / Value 6（MVV 版 1）
 
@@ -629,7 +628,7 @@ S6 で読みたいのは、ホーム（いま）・スプリントの一覧と�
 期間を決めずに残す形は、サインアウトしない端末に中身が残り続けるので採らなかった。
 
 - 作り方: 自前で作る
-- 比べた候補: STD25 / PRD21
+- 比べた候補: STD24 / PRD21
 
 根拠: Value 3 / Value 9（MVV 版 1）
 
@@ -640,7 +639,7 @@ S6 で読みたいのは、ホーム（いま）・スプリントの一覧と�
 暗号化を省いて IndexedDB に平文で置く形は Value 3 に反し、合言葉から鍵を作る形は手数を増やすので採らなかった。
 
 - 作り方: 標準に倣う・ライブラリやサービスを使う
-- 比べた候補: STD24 / STD25 / LIB21
+- 比べた候補: STD24 / LIB21
 
 根拠: Value 3（MVV 版 1）
 
@@ -654,7 +653,7 @@ token をタブの `sessionStorage` に置くと、ホーム画面の Web アプ
 | `localStorage` に平文で置く | 暗号化の決まりに反する |
 
 - 作り方: 標準に倣う
-- 比べた候補: STD24 / STD25
+- 比べた候補: STD24
 
 根拠: Value 1 / Value 3（MVV 版 1）
 
@@ -668,7 +667,7 @@ token をタブの `sessionStorage` に置くと、ホーム画面の Web アプ
 | メモリだけに控える | Web アプリを閉じると判断が消える |
 
 - 作り方: 自前で作る
-- 比べた候補: STD25 / STD27
+- 比べた候補: STD24 / STD27
 
 根拠: Value 3 / Value 4（MVV 版 1）
 
@@ -733,6 +732,14 @@ Value 2 は、機能の画面をダミーデータで作り切ってから API �
 画面の中に手書きのダミーデータを置く形は、形の正本と 2 つの正本になるので採らなかった。
 
 根拠: Value 2（MVV 版 1）
+
+### 決定 120: メンバーが押せない操作に迷わないため、メンバーに許されない操作は画面から出さず、読む項目は出す
+
+チームの画面と実行の場所の画面は既に「メンバーには操作を出さず読むだけ」で、ほかの設定の画面も同じ決まりにそろえる。押せないボタンを残すと、押せない理由を読む手数が増える（Value 1）。読み出しはメンバーにも許されているため（[API の文書の席の役割ごとの操作](api.md#席の役割ごとの操作)）、項目は出す。操作の記録の画面は、メンバーには自分と自分の委任の記録だけを出し、主体の絞り込みを出さない。プロジェクトを作る画面は、メンバーには画面への導線を出さず、直に開いたら持ち主へ頼む案内を出す。
+
+押せなくして理由を添える形は、画面ごとに理由の文言が要り、手数も減らないので採らなかった。
+
+根拠: Value 1（MVV 版 1）
 
 ## 未確認のまま残ること
 
