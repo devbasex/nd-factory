@@ -560,7 +560,7 @@ classDiagram
 | --- | --- | --- |
 | 標準・仕様 | 調べる | MCP・OAuth 2.1・誤りの形・冪等の鍵・日時と通貨と言語の形に、多くの実装が従う仕様がある |
 | 主要な製品 | 調べる | 冪等の鍵の扱いと、範囲と期限を持つ委任の token と、遠くの MCP の認証の解き方を比べる |
-| ライブラリとサービス | 調べる | MCP のサーバーの SDK・Cognito の token の検証・zod から OpenAPI を作るものを使うかを決める |
+| ライブラリとサービス | 調べる | MCP のサーバーの SDK・Cognito の token の検証・zod から OpenAPI を作るもの・UUIDv7 を組むものを使うかを決める |
 
 ### 標準・仕様
 
@@ -591,6 +591,7 @@ classDiagram
 | LIB43 | `@asteasolutions/zod-to-openapi` | 9.1.0 | MIT | 2026-07-19 | 無し | 満たす。zod から OpenAPI を作る。依存が 1 つ増える | https://registry.npmjs.org/@asteasolutions/zod-to-openapi （2026-11-17） |
 | LIB44 | Amazon Cognito の利用者プール（認可の端点） | —（サービス） | —（AWS のサービス） | — | 無し | 一部。PKCE（S256）と RFC 8707 の `resource` で宛先を縛れる。クライアントの動的な登録とクライアント ID の資料は第三者の資料が持たないとする（公式の文書では確かめていない） | https://docs.aws.amazon.com/cognito/latest/developerguide/authorization-endpoint.html （2026-11-17） |
 | LIB45 | `@modelcontextprotocol/sdk` | 1.32.2 | MIT | 2026-10-23 | 無し | 満たさない。v1 の系列で、LIB40 が置き換える | https://registry.npmjs.org/@modelcontextprotocol/sdk （2026-11-17） |
+| LIB46 | `uuid`（`v7`） | 14.0.3 | MIT | 2026-10-10 | 無し | 満たす。RFC 9562 の UUIDv7 を組む。`msecs` と `seq` を渡すと内側の状態を使わずにバイト列だけを組むため、注入した時計で作れる。実行の時の依存は無い | https://registry.npmjs.org/uuid ・ https://github.com/uuidjs/uuid/blob/main/src/v7.ts （2026-11-18） |
 
 ### 確かめられなかったこと
 
@@ -600,7 +601,7 @@ classDiagram
 | Cognito がクライアントの動的な登録を持たないこと | 検索の語「Amazon Cognito user pool dynamic client registration RFC 7591 MCP authorization resource indicator」 | 第三者の資料だけが見つかった。公式の文書での確かめは試していない |
 | OAuth 2.1 の草案の後半（refresh token の扱い） | https://datatracker.ietf.org/doc/draft-ietf-oauth-v2-1/ | 頁が長く、前半だけを読んだ。上限のため続きを読んでいない |
 
-調べた量: 候補 15 件・取得の試み 24 回。
+調べた量: 候補 16 件・取得の試み 26 回。
 
 ## 決定の記録
 
@@ -695,8 +696,10 @@ classDiagram
 | 金額を小数で持つ | 通貨ごとの桁と丸めで食い違う |
 | ID を UUIDv4 にする | 作った順に並ばず、表の並びの鍵に別の時刻が要る |
 
-- 作り方: 標準に倣う
-- 比べた候補: STD44 / STD45
+UUIDv7 のバイト列は `uuid` の `v7`（LIB46）で組み、単調性の状態と時計は `newId` が持つ（[詳細設計の関数の仕様](issue-24-design-detail.md#関数の仕様)）。
+
+- 作り方: 標準に倣う・ライブラリやサービスを使う
+- 比べた候補: STD44 / STD45 / LIB46
 
 根拠: Value 5（MVV 版 1）
 
