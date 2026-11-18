@@ -21,7 +21,7 @@ API と MCP の外で決めるもの:
 | [呼び出しの規約](#呼び出しの規約) | ページ送りは不透明なカーソルで行い、全体の件数を返さない | 43 |
 | [呼び出しの規約](#呼び出しの規約) | 版を経路の頭の `/v1` に置く。書くエンティティに版の数を持たせ、条件つきで書く | 44・45 |
 | [値の形](#値の形) | 日時・金額・言語・時刻帯・ID を 1 つの形に決める | 47 |
-| [操作の一覧](#操作の一覧) | F1〜F20 を操作へ割り、人だけの操作を決める | — |
+| [操作の一覧](#操作の一覧) | F1〜F20 を操作へ割り、人だけの操作を決める。要素の形と理由のコードは形の正本だけに置き、受け持つ子の課題を決める。問いの人だけの範囲は実行の文書の区分の表に従う | 56・57 |
 | [認証と主体](#認証と主体) | 認証を API の Lambda の中の 1 か所に置く | 48 |
 | [認可](#認可) | 一覧は見えるプロジェクトの ID から表を引き、知らせは送る直前にも照らす | 53 |
 | [委任](#委任) | 範囲をプロジェクトと 3 つの操作の種類にし、期限を 1 時間〜30 日にする。MCP は画面で発行した token を貼り、OAuth 2.1 を後に回す | 49・50 |
@@ -75,7 +75,7 @@ API の操作は 1 つの画面に合わせず、エンティティ（スプリ�
 | 401 の本文 | 理由によらず同じ `{"type": "about:blank", "status": 401, "reason": "unauthorized"}` | token の形・期限・取り消しのどれでも同じにし、何が違ったかを明かさない |
 | 500 | 返さない | 想定しない失敗はハンドラーの外側で受けて 503 `unavailable` にし、要求の ID とともにログへ残す（決定 46） |
 
-理由のコードは形の正本の 1 か所に操作ごとの一覧として置き、一覧に無いコードを返すと単体テストが落ちる。
+理由のコードは形の正本の 1 か所に操作ごとの一覧として置き、一覧に無いコードを返すと単体テストが落ちる。全体の設計の文が名を挙げる理由のコード（`project_transfer_in_progress`・`credential_rotation_in_progress`・`human_only`・`visibility_widened`・`destination_unregistered`・`rotation_superseded`・`answer_seq_unknown` など）も、その操作の一覧に置く（決定 56）。
 
 ### 冪等の鍵
 
@@ -102,7 +102,7 @@ API の操作は 1 つの画面に合わせず、エンティティ（スプリ�
 | 決まり | 中身 |
 | --- | --- |
 | API の版 | HTTP の経路の頭の `/v1`。項目を足すことは `/v1` のまま行い、呼び手は知らない項目を読み飛ばす。項目を消す・意味を変えるときは `/v2` を並べて出し、`/v1` を残す期間を決めてから消す |
-| エンティティの版 | 書き換えられる各エンティティは `version`（1 から始まる整数）を持つ。書くたびに 1 つ上げる |
+| エンティティの版 | 書き換えられる各エンティティ（上書きの行）は `version`（1 から始まる整数）を持つ。書くたびに 1 つ上げる。持つ行と列は [データの共通の列](data.md#共通の列) が正本 |
 | 条件つきの更新 | `update`・`delete` と状態を変える動詞の要素は、読んだときの `version` を持つ。サーバーの今の値と違えば 409 `version_mismatch` で書かない |
 | 承認の確定 | `approvals.answer` の要素は `version` に加えて、読んだ承認資料の要約値 `material_digest` を持つ。どちらかが今と違えば 409（I4） |
 | オフラインの確定待ち | 画面はつながった後に、読んだときの `version` と `material_digest` のまま送る。サーバーは今の状態と照らし、合わなければ 409 を返す（[オフライン](screens.md#オフライン)） |
@@ -146,6 +146,19 @@ ID の種類の頭:
 ## 操作の一覧
 
 機能一覧の F1〜F20 を、エンティティごとの操作へ 1 行ずつ割る。HTTP の経路のメソッドはすべて `POST` で、表では HTTP の経路の path だけを書く。本文はすべて配列で受け渡す（[本文は配列](#本文は配列)）。
+
+要素の項目・型・必須か・操作ごとの理由のコードは、形の正本の操作の定義（`packages/contracts/`）だけに置き、この文書に表を写さない（決定 56）。この文書は、全体の設計の文が答えを決めた変わり目（[入出力の変わり目](#入出力の変わり目)）だけを書く。形の正本へ書くのは次の子の課題である。
+
+| 操作と HTTP の経路 | 受け持つ子の課題 |
+| --- | --- |
+| F1〜F3（`sessions.*`・`users.*`・`logins.*`・`teams.*`・`seats.*`・`invitations.*`） | #4 |
+| F4〜F6（`projects.*`・`github_installations.*`・`repositories.*`・`project_transfers.*`） | #5 |
+| F7〜F10・F17（`waiting_counts.get`・`issue_candidates.list`・`sprints.*`・`lanes.list`・`progress_events.list`・`execution_settings.*`・`model_keys.*`）とランナー向けの 5 つの HTTP の経路 | #6 |
+| F18（`machines.*`）と手元のマシン向けの 2 つの HTTP の経路 | #7 |
+| F11〜F15（`approvals.*`・`questions.*`・`notices.*`・`notification_targets.*`） | #8 |
+| F16・F20（`delegations.*`・`audit_records.list`） | #11 |
+| DB の用意のタスク向けの 2 つの HTTP の経路 | #13 |
+| F19（`usage.get`・`usage_records.list`・`spend_caps.update`） | #29 |
 
 表の列の読み方:
 
@@ -207,10 +220,10 @@ ID の種類の頭:
 | `sprints.cancel` | `/v1/sprints/cancel` | F10 | 道具 | — | 書く（run） |
 | `approvals.list` | `/v1/approvals/list` | F7・F11 | 道具 | — | 読む（read） |
 | `approvals.get` | `/v1/approvals/get` | F11 | 道具（承認資料を含む） | — | 読む（read） |
-| `approvals.answer` | `/v1/approvals/answer` | F12 | 依頼と材料の読み出しだけ（`approvals.get`） | 人だけ | 書く |
+| `approvals.answer` | `/v1/approvals/answer` | F12 | 依頼と材料の読み出しだけ（`approvals.get`） | 人だけ | 書く（要素は理由 `reason` と、設計承認ゲートだけ外す課題 `drop_issues` を持つ。[入出力の変わり目](#入出力の変わり目)） |
 | `questions.list` | `/v1/questions/list` | F7・F13 | 道具 | — | 読む（read） |
 | `questions.get` | `/v1/questions/get` | F13 | 道具 | — | 読む（read） |
-| `questions.answer` | `/v1/questions/answer` | F13 | 道具（レッドラインに当たる問いは、要素ごとに 403 `human_only`） | レッドラインに当たる問いだけ人だけ | 書く（run） |
+| `questions.answer` | `/v1/questions/answer` | F13 | 道具（「人だけか」が真の問いの要素は 403 `human_only`） | 「人だけか」が真の問いだけ人だけ（[実行の文書の区分の表](execution.md#区分とだれが答えられるか)） | 書く（run） |
 | `notices.list` | `/v1/notices/list` | F14 | 道具 | — | 読む（read） |
 | `notices.mark_read` | `/v1/notices/mark_read` | F14 | 道具 | — | 書く（run） |
 
@@ -242,7 +255,7 @@ ID の種類の頭:
 
 | 操作 | 理由（MVV の項目） |
 | --- | --- |
-| `approvals.answer`・レッドラインに当たる `questions.answer` | 承認ゲートとレッドラインの承認は人だけ（Value 4、I4） |
+| `approvals.answer`・「人だけか」が真の問いの `questions.answer` | 承認ゲートとレッドラインの承認と、人だけの区分の問いの答えは人だけ（Value 4、I4）。問いの「人だけか」は、問いを作るときに [実行の文書の区分の表](execution.md#区分とだれが答えられるか) で決めて問いの行に持つ。区分の一覧はその表が正本で、この文書は写さない（決定 57） |
 | `projects.create`・`project_transfers.*`・`projects.close` | プロジェクトの割り当ての作成・変更・外しは人だけ（P2、I3） |
 | `teams.create`・`seats.update`・`seats.delete`・`invitations.create`・`invitations.accept`・`invitations.delete` | 席はプロジェクトを見られる人を決める。席を足すことはチームの外の人へ見せることに当たる（P2）。席を変える・外す操作も、同じ判断の流れに置くため人だけにそろえる |
 | `delegations.create`・`delegations.revoke` | 委任が委任を作ると、人の確かめない範囲が広がる（Value 4） |
@@ -255,21 +268,39 @@ ID の種類の頭:
 
 ### ランナー・手元のマシン・DB の用意のタスクの HTTP の経路
 
-ランナー・手元のマシン・DB の用意のタスクは、利用者向けの操作の表に入らず、自分向けの HTTP の経路だけを通る。本文は利用者向けと同じく配列で受け渡す（I12）。中の項目と順序は [実行](execution.md) が持つ。
+ランナー・手元のマシン・DB の用意のタスクは、利用者向けの操作の表に入らず、自分向けの HTTP の経路だけを通る。本文は利用者向けと同じく配列で受け渡す（I12）。順序は [実行](execution.md) と [データの用意と差し替えの順](data.md#用意と差し替えの順) が持ち、要求と応答の項目は形の正本に受け持つ子の課題（上の操作の一覧の表）が書く。
 
 | HTTP の経路 | 主体 | 要求の要素 | 応答の要素 | 何をするか |
 | --- | --- | --- | --- | --- |
 | `/v1/runner/exchanges/create` | ランナー（引き換えの token） | 要素 1 個（中身なし） | レーンの token・指示・プロジェクトの進行表の DB の接続の値・1 つのリポジトリに絞った GitHub の token・`managed` なら推論の一時の資格情報 | 起動の直後に 1 回だけ引き換える |
 | `/v1/runner/events/create` | ランナー（レーンの token） | 進捗の事象（連番つき） | 事象ごとの受け取り | 進捗の事象を送る。同じ連番は 1 件だけ（I13） |
 | `/v1/runner/heartbeats/create` | ランナー（レーンの token） | レーンの今の区切り | 取り直した token と資格情報・止める指示 | 生きていることを知らせ、期限の前に取り直す |
-| `/v1/runner/answers/list` | ランナー（レーンの token） | レーンの ID | 渡す答え（答えの ID を冪等の鍵として） | 人の答えを受け取る |
-| `/v1/runner/answer_deliveries/create` | ランナー（レーンの token） | 答えの ID | 受け取り | 答えを NDF へ渡したことを知らせる（E14、I5） |
-| `/v1/machine/heartbeats/create` | 手元のマシン（登録の token） | マシンの状態・受けられるレーンの数 | 割り当てたレーン・差し替えた登録の token | 心拍。割り当てを受け取る |
+| `/v1/runner/answers/list` | ランナー（レーンの token） | レーンの ID | 渡す答え（答えの ID を冪等の鍵として。前の世代が受け取って渡し中のままの答えは `redeliver` が真）と、そのレーンの届いた答えの行に記した NDF の答えの事象の番号の並び（`delivered_seqs`） | 人の答えを受け取る。送達の対象外の答えは載せない（[実行の文書の答えの送達](execution.md#答えの送達)） |
+| `/v1/runner/answer_deliveries/create` | ランナー（レーンの token） | 答えの ID と、`ndf answer` の結果の `metrics.seqs`（NDF の答えの事象の番号） | 受け取り | 答えを NDF へ渡したことを知らせる（E14、I5）。番号は答えの行の `ndf_event_seqs` に記す |
+| `/v1/machine/heartbeats/create` | 手元のマシン（登録の token） | マシンの状態・受けられるレーンの数 | 割り当てたレーン・差し替えた登録の token。最初の心拍（マシンが登録待ち）の応答はマシンの ID・心拍の間隔・差し替えた登録の token を持つ | 心拍。割り当てを受け取る。最初の心拍が登録を兼ねる（[実行の文書の決定 102](execution.md#決定の記録)） |
 | `/v1/machine/lane_claims/create` | 手元のマシン（登録の token） | 受けるレーンの ID | 引き換えの token | 割り当てたレーンを受け、ランナーを起こす |
-| `/v1/db_prep/exchanges/create` | DB の用意のタスク（引き換えの token） | 要素 1 個（中身なし） | 管理の接続の値・用意するプロジェクトの役割の値（作る種類なら役割の名前とパスワード、差し替えの種類なら新しいパスワードと差し替えの ID）・終わりの報告の token | 起動の直後に 1 回だけ引き換える。秘密の器を作り値を入れるのは API で、タスクは秘密の器に触れない（[土台の文書の用意の手順](data.md#用意の手順)） |
-| `/v1/db_prep/completions/create` | DB の用意のタスク（終わりの報告の token） | 終わりの結果（成功か失敗と理由のコード。差し替えの種類なら差し替えの ID） | 受け取り | 用意か差し替えの終わりを知らせる。API は差し替えの ID が合う知らせだけを受け、保留の版を今の版へ移す |
+| `/v1/db_prep/exchanges/create` | DB の用意のタスク（引き換えの token） | 要素 1 個。タスクのメタデータの端点から読んだ自分のタスクの ID | 管理の接続の値・用意するプロジェクトの役割の値（作る種類・差し替えの種類のどちらもデータベースの名前と役割の名前とパスワード。差し替えの種類は差し替えの番号も）・終わりの報告の token | 起動の直後に 1 回だけ引き換える。API は管理の接続を返す前に、添えられたタスクの ID を `DescribeTasks` で読み、`startedBy` が今の用意の ID で止まっていないことを確かめてプロジェクトの行へ記す。確かめられないか、記した ID と違えば 409 で返さない（I18）。秘密の器を作り値を入れるのは API で、タスクは秘密の器に触れない（[土台の文書の用意の手順](data.md#用意の手順)） |
+| `/v1/db_prep/completions/create` | DB の用意のタスク（終わりの報告の token） | 終わりの結果（成功か失敗と理由のコード。差し替えの種類なら差し替えの番号。`rotation_superseded` なら記した番号） | 受け取り | 用意か差し替えの終わりを知らせる。API は用意の ID と今の差し替えの番号が合う知らせ（適用か、記した番号が今の番号と同じ `rotation_superseded`）だけを受け、保留の版を今の版へ移す（I17・I22） |
 
 見回りは HTTP の経路を持たない。スケジュールで起きた関数が、持ち主のモジュールの操作を関数の中から呼び（HTTP で API を呼び直さない）、記録は同じ操作の記録の書き手で残す。
+
+### 入出力の変わり目
+
+全体の設計の不変条件（I4・I5・I17〜I22）が、操作と HTTP の経路の要素に足した変わり目である。
+
+| 操作・HTTP の経路 | 変える所 |
+| --- | --- |
+| `approvals.answer` | 要素に `reason`（文字列、0〜2,000 字、任意）と `drop_issues`（整数の配列、任意、設計承認ゲートの依頼だけ）を足す。外れたら要素の 400 `item_invalid` |
+| `questions.answer` | 問いの「人だけか」が真の要素を 403 `human_only`。委任でない主体（人）の要素は受ける |
+| `sprints.create`・`project_transfers.create` | 移しの間は要素の 409 `project_transfer_in_progress`、差し替えの保留の間は要素の 409 `credential_rotation_in_progress`（I20） |
+| `project_transfers.create`・`project_transfers.accept`・`project_transfers.delete` | 作成は移し中の印と止める依頼（移す途中の状態の「止め終えたか」が偽）を 1 つの書き込みで書いてから E18 を出す。受け入れは、印が対象の移しの ID と同じで「取り下げたか」が偽であることを条件に入れ、今の割り当ての差し替えと同じ書き込みで印を空にして E17 を出す（条件が外れたら 409 `state_mismatch` で割り当てを変えない）。取り下げは「取り下げたか」を真にし、印を空にするのは[全体の設計の割り当てを変える流れ](overview.md#割り当てを変える流れ) の条件がそろった後だけ |
+| `/v1/runner/answer_deliveries/create` | 要求の要素に、`ndf answer` の結果の `metrics.seqs`（NDF の答えの事象の番号）を足す（I5） |
+| `/v1/runner/answers/list` | 応答の要素に `redeliver`（真偽）を足す。前の世代が受け取って渡し中のままの答えで真。応答に、そのレーンの「届いた」答えの行に記した NDF の答えの事象の番号の並び（`delivered_seqs`）を足す。届いた答えは要素に載せないが、番号はこの並びで返す（照らす守りの控え。I5） |
+| `/v1/machine/heartbeats/create` | 最初の心拍（マシンが登録待ち）の応答に、マシンの ID・心拍の間隔・差し替えた登録の token を持たせる |
+| `/v1/db_prep/exchanges/create` | 要求に、タスクのメタデータの端点から読んだタスクの ID を足す。API は管理の接続を返す前に、その ID のタスクを `DescribeTasks` で読んで `startedBy` が今の用意の ID で止まっていないことを確かめ、プロジェクトの行へ記す。確かめられないか、記した ID と違えば 409 で返さない（I18）。応答の役割の値に、データベースの名前・役割の名前・差し替えの番号（差し替えの種類だけ）を足す |
+| `/v1/db_prep/completions/create` | 要求に差し替えの番号を持たせ、今の番号と同じときだけ受ける。`rotation_superseded` の終わりも受ける |
+
+要素の項目の型と理由のコードの一覧は、形の正本の操作の定義が正本である（決定 56）。上の表は全体の設計の文に書く変わり目だけを示す。
 
 ### GitHub の Webhook
 
@@ -448,7 +479,7 @@ AI のエージェントが、画面と同じ操作を MCP の道具として呼
 | 道具 | 人だけの操作は MCP の道具にしない。対になる読み出しの道具（操作の一覧の括弧）で、依頼と材料を読める |
 | 読み出しの結果 | 人の確定を待つ対象は `needs_human: true` と、画面で確定する場所のリンク（`confirm_url`）を持つ。エージェントは人へリンクを渡して待つ |
 | API から呼んだとき | 委任の token で人だけの操作の HTTP の経路を呼ぶと、要求全体を 403 `human_only` で断り、何も保存しない |
-| 要素ごとに人だけになる操作 | `questions.answer` は道具にある。レッドラインに当たる問いの要素だけを 403 `human_only` にし、ほかの要素は答えを受ける |
+| 要素ごとに人だけになる操作 | `questions.answer` は道具にある。問いの「人だけか」が真の要素だけを 403 `human_only` にし、ほかの要素は答えを受ける。「人だけか」は [実行の文書の区分の表](execution.md#区分とだれが答えられるか) で決まる（`ndf-ask:human-action` と知らない区分を含む） |
 
 ## 操作の記録
 
@@ -585,12 +616,11 @@ classDiagram
 
 | # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB40 | `@modelcontextprotocol/server` | 2.4.0 | Apache-2.0 | 2026-10-23 | 無し | 満たす。2026-07-28 版を実装する v2 の安定の系列。依存は zod 4 | https://registry.npmjs.org/@modelcontextprotocol/server （2026-11-17） |
+| LIB40 | `@modelcontextprotocol/server` | 2.4.0 | Apache-2.0 | 2026-10-23 | 無し | 満たす。2026-07-28 版を実装する v2 の安定の系列。依存は zod 4。v1 の系列 `@modelcontextprotocol/sdk` 1.32.2（2026-10-23、MIT）は 2026-07-28 版の前の系列で、LIB40 が置き換える | https://registry.npmjs.org/@modelcontextprotocol/server （2026-11-17） |
 | LIB41 | `aws-jwt-verify` | 5.2.1 | Apache-2.0 | 2026-06-05 | 無し | 満たす。Cognito の access token の署名・発行元・クライアント・`token_use` を確かめる | https://registry.npmjs.org/aws-jwt-verify （2026-11-17） |
 | LIB42 | `zod-openapi` | 6.0.2 | MIT | 2026-08-31 | 無し | 満たす。zod 4 から OpenAPI を作る。依存が 1 つ増える | https://registry.npmjs.org/zod-openapi （2026-11-17） |
 | LIB43 | `@asteasolutions/zod-to-openapi` | 9.1.0 | MIT | 2026-07-19 | 無し | 満たす。zod から OpenAPI を作る。依存が 1 つ増える | https://registry.npmjs.org/@asteasolutions/zod-to-openapi （2026-11-17） |
 | LIB44 | Amazon Cognito の利用者プール（認可の端点） | —（サービス） | —（AWS のサービス） | — | 無し | 一部。PKCE（S256）と RFC 8707 の `resource` で宛先を縛れる。クライアントの動的な登録とクライアント ID の資料は第三者の資料が持たないとする（公式の文書では確かめていない） | https://docs.aws.amazon.com/cognito/latest/developerguide/authorization-endpoint.html （2026-11-17） |
-| LIB45 | `@modelcontextprotocol/sdk` | 1.32.2 | MIT | 2026-10-23 | 無し | 満たさない。v1 の系列で、LIB40 が置き換える | https://registry.npmjs.org/@modelcontextprotocol/sdk （2026-11-17） |
 | LIB46 | `uuid`（`v7`） | 14.0.3 | MIT | 2026-10-10 | 無し | 満たす。RFC 9562 の UUIDv7 を組む。`msecs` と `seq` を渡すと内側の状態を使わずにバイト列だけを組むため、注入した時計で作れる。実行の時の依存は無い | https://registry.npmjs.org/uuid ・ https://github.com/uuidjs/uuid/blob/main/src/v7.ts （2026-11-18） |
 
 ### 確かめられなかったこと
@@ -745,10 +775,10 @@ Cognito はクライアントの動的な登録とクライアント ID の資�
 
 道具は操作の表から生成し、呼び出しは API と同じ操作の振り分けへ渡す。MCP の 2026-07-28 版はセッションと GET の流れを外したため、Lambda で要求ごとに閉じて受けられる。資源（resources）は使わず、読むものを道具で出す。SDK は 2026-07-28 版を実装する `@modelcontextprotocol/server` を使う。道具の説明は英語の 1 通りにする（[道具の説明を国際化しない理由](#道具の説明を国際化しない理由)）。
 
-採らなかった案: JSON-RPC と streamable HTTP を自前で書く形は、仕様の改訂に追い付く手間が増える。v1 の SDK は 2026-07-28 版の前の系列である（LIB45）。
+採らなかった案: JSON-RPC と streamable HTTP を自前で書く形は、仕様の改訂に追い付く手間が増える。v1 の SDK（`@modelcontextprotocol/sdk`）は 2026-07-28 版の前の系列である（LIB40）。
 
 - 作り方: ライブラリやサービスを使う
-- 比べた候補: LIB40 / LIB45 / STD40
+- 比べた候補: LIB40 / STD40
 
 根拠: Value 4 / Value 6（MVV 版 1）
 
@@ -786,6 +816,22 @@ HTTP の経路はすべて `POST` と配列の本文の 1 つの形で、OpenAPI
 - 比べた候補: LIB42 / LIB43
 
 根拠: Value 6 / Value 2（MVV 版 1）
+
+### 決定 56: 要素の形と理由のコードを 2 か所に持たないため、形の正本の操作の定義だけに置き、全体の設計には決まりと受け持つ子を書く
+
+API の要素の項目・型・必須か・理由のコードは、形の正本の zod の操作の定義から型・JSON Schema・OpenAPI・MCP の道具が生成される（決定 55）。全体の設計に同じ表をコピーすると、正本と文書の 2 か所になる。全体の設計は、変わり目（[入出力の変わり目](#入出力の変わり目) の項目と理由のコード）だけを文に書き、残りは受け持つ子の課題が形の正本へ書く。テーブル定義の無い列と索引の列も、#2 の対象範囲（サービスの表と鍵の索引・列の細部）に入っているため #2 が書く（[データのテーブル定義](data.md#テーブル定義)）。
+
+採らなかった案: api.md に全操作の要素の表を書く形は、利用者向けの 66 の操作の要素の表で api.md が 1,000 行を超え、形の正本との食い違いの検査がもう 1 つ要る。
+
+根拠: Value 2 / Value 4（MVV 版 1）
+
+### 決定 57: 問いに人だけが答える範囲を 1 つにするため、問いを作るときに実行の文書の区分の表で「人だけか」を決め、API はその値で要素ごとに断る
+
+[実行の文書の区分の表](execution.md#区分とだれが答えられるか)（実行の文書の決定 72）は `ndf-ask:human-action` と知らない区分を人だけにし、API の文書は「レッドラインに当たる問い」だけを人だけにしていた。レッドラインの区分は承認の依頼になり問いにならないため、API の文書の文では人だけの問いが 0 件になる。区分の表を正本にすると、知らない区分も人だけ（強い側）になり Value 4 を弱めない。
+
+採らなかった案: API の文書に区分の一覧をコピーする形は、答えが 2 か所になり、片方だけを直したときに食い違いが戻る（[決定 1](decisions.md#決定の記録)）。
+
+根拠: Value 4（MVV 版 1）
 
 ## 未確認のまま残ること
 
