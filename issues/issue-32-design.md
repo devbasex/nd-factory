@@ -8,7 +8,7 @@
 
 ## 適用範囲
 
-- **働く範囲**: このリポジトリの全体の設計（`docs/design/`）・用語集（`docs/glossary/`）と、子の課題の本文。コード・形の正本・インフラの定義は変えない
+- **働く範囲**: このリポジトリの全体の設計（`docs/design/`）・用語集（`docs/glossary/`）・`AGENTS.md` の「コードの決まり」の 1 行と、子の課題の本文。コード・形の正本・インフラの定義は変えない
 - **プロジェクトごとに違うもの**: 無し（設計の文書の改訂で、設定も引数も受けない）
 - **当たるモード**: `standard`
 
@@ -109,9 +109,9 @@
 
 | 種類 | 調べるか | 理由 |
 | --- | --- | --- |
-| 標準・仕様 | 調べる | `ndf answer` の引数は NDF の契約が決め、DB の側の排他は PostgreSQL の機能で決まる |
+| 標準・仕様 | 調べる | `ndf answer` の引数は NDF の契約が決め、DB の側の排他は PostgreSQL の機能で決まる。TypeScript の書き方の細則は、Node の型の剥がしが打てる構文で決まる |
 | 主要な製品 | 調べない | 直す中身は自分の設計の文書の間の食い違いで、他の製品の作りで答えが変わらない |
-| ライブラリとサービス | 調べる | 一意の行・条件つきの書き込み・リポジトリの公開範囲・タスクの停止は、使うサービスの一次情報で決まる |
+| ライブラリとサービス | 調べる | 一意の行・条件つきの書き込み・リポジトリの公開範囲・タスクの停止は、使うサービスの一次情報で決まる。画面の組み方は、UI のフレームワークの候補と比べて決める |
 
 ### 標準・仕様
 
@@ -119,6 +119,7 @@
 | --- | --- | --- | --- | --- |
 | STD1 | NDF の契約の `ndf answer` の引数（`C/schemas/io/answer.args.schema.json`、固定の点） | 必須は `table_id`・`--gate`・`--result`・`--reason`・`--by`・`--key`。`--drop` は整数の配列で「設計承認ゲートで外す課題の番号」。`--key` は「同じ鍵の答え直しは書かない」 | 確定から NDF への図に `--reason` と `--drop` を足す（指摘 1）。起こし直しの打ち直しを `--key` に任せる（指摘 4） | `gh api repos/devbasex/ai-plugins/contents/plugins/ndf-next/contracts/schemas/io/answer.args.schema.json`（`ref` は `ndf-pin.json` の固定の値）（2026-11-18） |
 | STD2 | PostgreSQL 16 の advisory lock | `pg_advisory_xact_lock` はトランザクションの単位の排他の鎖を取り、要れば待つ。トランザクションの終わりで外れる | 差し替えの番号を照らして書く間、同じ役割の差し替えを DB の側で 1 つにする（指摘 9） | https://www.postgresql.org/docs/16/functions-admin.html （2026-11-18） |
+| STD3 | Node の型の剥がし（type stripping）と TypeScript の `erasableSyntaxOnly` | Node は型の注釈を消すだけで `.ts` を打つ。enum・引数のプロパティ・namespace のような JavaScript へ消すだけでは戻らない構文と、`.tsx` の JSX は打てない。`erasableSyntaxOnly` はそれらの構文を型検査で落とす | 書き方の細則を「消すだけで打てる構文だけを使う」にそろえ、型検査で縛る（決定 19） | https://nodejs.org/api/typescript.html ・ https://www.typescriptlang.org/tsconfig/#erasableSyntaxOnly 。手元の Node v26.13.1 で `.ts` の型の注釈は打て、enum・引数のプロパティ・`.tsx` の JSX は構文の誤りで止まることを確かめた（2026-11-18）。このリポジトリの CI（Node 24）は `.ts` を直に打っている |
 
 ### ライブラリとサービス
 
@@ -128,6 +129,10 @@
 | LIB2 | GitHub の REST のリポジトリの取得 | —（サービス） | —（サービス） | — | 無し | 満たす。応答にリポジトリの `visibility`（`public` など）を持つ | https://docs.github.com/en/rest/repos/repos （2026-11-18） |
 | LIB3 | ECS の `StopTask`・`DescribeTasks` | —（サービス） | —（AWS のサービス） | — | 無し | 満たす。`StopTask` は SIGTERM を送り、既定 30 秒の後に SIGKILL で止める。`DescribeTasks` はタスクの `lastStatus` を返す | https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_StopTask.html ・ https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DescribeTasks.html （2026-11-18） |
 | LIB4 | Amazon SNS | —（サービス） | —（AWS のサービス） | — | 無し | 満たす。月 100 万回の要求とメールの 1,000 通までは無料の枠。時間の課金を持たない | https://aws.amazon.com/sns/pricing/ （2026-11-18） |
+| LIB5 | `vite` | 8.3.8 | MIT | 2026-11-11 | 無し | 満たす。素の TypeScript の画面を束ね、開発のサーバーを持つ。開発の依存だけで、配る画面に実行の時の依存を足さない。今の `apps/web` が使っている | https://registry.npmjs.org/vite （2026-11-18） |
+| LIB6 | `react`・`react-dom` | 19.3.1 | MIT | 2026-10-14 | 無し | 満たす。ただし実行の時の依存が 2 つ増え（`react-dom` の展開後 約 7.7 MiB）、部品を JSX で書くと Node の型の剥がしで打てない（STD3） | https://registry.npmjs.org/react ・ https://registry.npmjs.org/react-dom （2026-11-18） |
+| LIB7 | `preact` | 11.2.0 | MIT | 2026-11-06 | 無し | 満たす。小さいが、実行の時の依存が 1 つ増え、JSX は LIB6 と同じく型の剥がしで打てない | https://registry.npmjs.org/preact （2026-11-18） |
+| LIB8 | `lit` | 3.3.3 | BSD-3-Clause | 2026-05-14 | 無し | 満たす。Web Components の上で JSX を使わずに書ける。実行の時の依存が 1 つ増え、宣言の書き方の多くがデコレーターに寄る | https://registry.npmjs.org/lit （2026-11-18） |
 
 ### 確かめられなかったこと
 
@@ -137,7 +142,7 @@
 | AWS のクォータ（Lambda の同時実行・Fargate の vCPU）の既定の値 | 試していない | 値はアカウントとリージョンで違い、設置する人が Service Quotas で読む。未確認のまま残すことへ移した |
 | 同じ鍵で `ndf answer` を 2 回打ったときの終了コードと出力（STD1） | 試していない。読んだのはスキーマの説明（「同じ鍵の答え直しは書かない」）だけ | 打つと NDF の進行表へ答えが書かれるため、設計の工程では打っていない。#6 の詳細設計で、試しの進行表に対して実測する（扱いは「ホステッドの起こし直し」の図の下と、未確認のまま残すこと） |
 
-調べた量: 候補 6 件・取得の試み 7 回。
+調べた量: 候補 11 件・取得の試み 13 回。
 
 ## 機能一覧
 
@@ -224,7 +229,7 @@ graph TD
 | R12 | 全体で直す | screens.md「設定の各画面」の前文に「メンバーに許されない操作は出さない」の決まりを置き、R8・R10・R12・R13 の「失敗と状態の見せ方」の列にメンバーの見せ方を足す | 決定 14 |
 | R13 | 決まりを全体に置き、コード・インフラ・CI の変更を子へ渡す | platform.md「非機能の実現方式」に #24 の非機能の条件の 2 行・運用の知らせの行・増えたときの上限の行を足し、data.md「形の版と移し方」に 2 段目の切り戻しの行を足す。渡す: #1（漏れの検査を docs/ へ）・#2・#14（切り戻し）・#13（SNS のトピックと設定のキー）・#29（同時のレーンの数の判定） | 決定 18 |
 | R14 | 全体で直す | detail.md の冒頭に「受け持つ子の課題」の表（下の「詳細設計の受け持ち」）を置く | — |
-| R15 | 全体で直す（依存の向きの検査だけ子へ渡す） | overview.md: H1 に `（#24）`、目的に「今どうなっているか」、適用範囲に「当たるモード」、人へ残す判断に「なぜ当たるか」の列、コンテキストに `id` の列、関係の語、E1〜E4 の文。decisions.md: 決定 3 に `比べた候補: STD62`。api.md: LIB45 を LIB40 の行へ畳む。screens.md: 標準・仕様の 9 行を 6 行へ畳む。platform.md「設計の決まりを縛る検査」に依存の向きの行を足す。渡す: #1（依存の向きの検査） | — |
+| R15 | 全体で直す（依存の向きの検査だけ子へ渡す） | overview.md: H1 に `（#24）`、目的に「今どうなっているか」、適用範囲に「当たるモード」、人へ残す判断に「なぜ当たるか」の列、コンテキストに `id` の列、関係の語、E1〜E4 の文。decisions.md: 決定 3 に `比べた候補: STD62`。api.md: LIB45 を LIB40 の行へ畳む。screens.md: 標準・仕様の 9 行を 6 行へ畳む。platform.md「設計の決まりを縛る検査」に依存の向きの行を足す。platform.md「横断の部品と定数の置き場」の後に「言語と書き方の決まり」の節（画面の組み方・TypeScript の細則・テストの置き方。下の「言語と書き方の決まり」）を置き、`AGENTS.md`「コードの決まり」の細則の行をその節へのリンクに替える。渡す: #1（依存の向きの検査） | 決定 19 |
 
 15 行のうち、全体の設計だけで直すのは 10 行（R2〜R5・R7〜R10・R12・R14）、子へ渡すのは R11 の 1 行、全体で決まりを置いて残りを子へ渡すのは 4 行（R1・R6・R13・R15）である。
 
@@ -234,6 +239,23 @@ graph TD
 | --- | --- | --- | --- |
 | api.md | ライブラリとサービス | 7 行（LIB40〜LIB46） | LIB45（v1 の系列）を LIB40 の「要件を満たすか」へ「v1 の系列 `@modelcontextprotocol/sdk` 1.32.2 は LIB40 が置き換える」として畳む。決定 51 の比べた候補と detail.md の再利用の表の LIB45 を LIB40 へ替える |
 | screens.md | 標準・仕様 | 9 行（STD20〜STD28） | STD21 を STD20 へ（端末に入れる Web アプリとオフライン）、STD25 を STD24 へ（暗号化した端末の控え）、STD28 を STD27 へ（使わないと決めた Web アプリの機能）畳み、本文の STD21・STD25・STD28 を畳んだ先の番号へ替える |
+
+### 言語と書き方の決まり（R15）
+
+全体の設計は言語とライブラリを文書ごとに決めているが、画面のフレームワークと TypeScript の書き方の細則は `AGENTS.md` にしか無い（`docs/design/` を `Vite`・`フレームワーク` で探して 0 件、2026-11-18）。子の課題が詳細設計で引けるよう、platform.md に次の節を置く。値は今のリポジトリの設定（根の `tsconfig.json`・`eslint.config.js`・`apps/web/package.json`・`apps/web/vite.config.ts`）と同じで、設定は変えない。
+
+| 項目 | 決まり | 縛るもの |
+| --- | --- | --- |
+| 言語 | コードは TypeScript だけで書く。Node 24 の型の剥がしで直に打ち、出力のための変換の段を持たない（Lambda の束ねは esbuild、画面は Vite） | 根の `tsconfig.json`（`noEmit`） |
+| 使う構文 | 型の注釈を消すだけで JavaScript に戻る構文だけを使う。enum・引数のプロパティ・namespace を使わない。閉じた語の集まりは zod の列挙で持つ（「定数とデータの置き場の基準」） | `erasableSyntaxOnly`（型検査が落とす） |
+| 型の厳しさ | `strict` と `noUncheckedIndexedAccess` を外さない | 根の `tsconfig.json` |
+| import | 型だけの import は `import type` で書く。相対の import は拡張子 `.ts` まで書く | `verbatimModuleSyntax`・`allowImportingTsExtensions`、ESLint の `consistent-type-imports` |
+| 使わない名前 | 使わない引数と変数は `_` で始める | ESLint の `no-unused-vars` |
+| 画面の組み方 | UI のフレームワークを入れず、素の TypeScript と DOM の API で部品を組む。JSX を使わない。束ねと開発のサーバーは Vite（LIB5） | `apps/web/package.json` の実行の時の依存。足すときは Value 6 の表（「費用」）と決定 19 の見直し |
+| テスト | 振る舞いを足すときは先に落ちるテストを書く。単体は vitest、画面は Playwright の e2e | `npm run check`・`npm run e2e`（「基本の検査」） |
+| NDF の版 | NDF の版の数字を読んで大小を比べない | 参照の検査 |
+
+`AGENTS.md` は作業の約束として手順（`npm run generate`・`npm run check`）を残し、細則の正本はこの節にする。2 か所に同じ細則を持たない。
 
 ## 構造
 
@@ -601,7 +623,7 @@ detail.md の冒頭に置く表である。detail.md 自身が持つのは横断
 
 ## 決定の記録
 
-決定は実装の段で `docs/design/` の決定の記録へも書く。書き先の番号は各決定の「書き先」にある。実行の文書（60〜79）と画面の文書（20〜39）の決定の番号は埋まっているため、100〜119 を実行の続き、120〜139 を画面の続きとして decisions.md の「決定の置き場」に足す。
+決定は実装の段で `docs/design/` の決定の記録へも書く。書き先の番号は各決定の「書き先」にある。実行の文書（60〜79）と画面の文書（20〜39）の決定の番号は埋まっているため、100〜119 を実行の続き、120〜139 を画面の続き、140〜159 を土台の続きとして decisions.md の「決定の置き場」に足す。
 
 書き先の番号が空いていることは、各文書の決定の見出しの番号を並べて確かめた（2026-11-18、このブランチの `docs/design/`）。
 
@@ -616,7 +638,7 @@ done
 | decisions.md | 1〜10 | 2・3・4・5・8・10 | 1・6・7・9 | 空いている |
 | api.md | 40〜59 | 40〜55 | 56・57 | 空いている |
 | screens.md | 20〜39 | 20〜39 | 120（続きの範囲） | 20〜39 は空きが無いため、続きの範囲に置く |
-| platform.md | 80〜99 | 80〜94 | 95〜99 | 空いている |
+| platform.md | 80〜99 | 80〜94 | 95〜99・140（続きの範囲） | 95〜99 は空いている。決定 19 は 95〜99 が埋まるため続きの範囲に置く |
 | execution.md | 60〜79 | 60〜79 | 100〜103（続きの範囲）・78 の本文へ足す | 100 以上はどの文書の見出しにも無い |
 
 本文で `決定 1`・`決定 6`・`決定 7`・`決定 9`・`決定 56`・`決定 57`・`決定 95`〜`決定 99`・`決定 100` 以上を引く箇所も、`docs/design/*.md` を `grep -rnoE '決定 (1|6|7|9|56|57|9[5-9]|1[0-9]{2})[^0-9]'` で探して 0 件だった。
@@ -831,6 +853,21 @@ API の要素の項目・型・必須か・理由のコードは、形の正本�
 
 根拠: Value 6（MVV 版 1）
 
+### 決定 19: 子の課題が言語と画面の組み方を 1 か所から読めるよう、書き方の細則を土台の文書に置き、画面は UI のフレームワークを入れずに素の TypeScript で組む
+
+画面の部品は UX の土台として先に固める（Value 2）。部品の数は画面の文書の部品の一覧に収まり、状態の持ち方も確定待ちと控えに限られるため、フレームワークの仮想 DOM や状態の管理の仕組みを使う場面が少ない。フレームワークを入れると配る画面に実行の時の依存が増え（Value 6）、JSX で書いた部品は Node の型の剥がしで打てず、単体テストに変換の段が要る（STD3）。
+
+採らなかった案: React（LIB6）は依存が 2 つ増え、JSX が型の剥がしで打てない。Preact（LIB7）は小さいが JSX の事情が同じ。Lit（LIB8）は JSX を使わずに書けるが、依存が 1 つ増え、宣言の書き方の多くがデコレーターに寄る。どれも要件は満たすが、部品の数と状態の範囲に対して依存を足す分の得が無い。
+
+見直す条件: 部品の一覧が画面の文書の範囲を超えて増え、DOM の差分の更新を自前で書く箇所が出てきたとき。足すときは Value 6 の表を置き、この決定を改める。
+
+- 作り方: 自前で作る
+- 比べた候補: LIB5 / LIB6 / LIB7 / LIB8 / STD3
+
+書き先: platform.md 決定 140（土台の続きの範囲）。
+
+根拠: Value 2 / Value 6（MVV 版 1）
+
 ## テスト設計
 
 この変更は文書の改訂で、受け入れ条件は検索と検査で確かめる。不変条件 I4・I5・I16〜I22 は、全体の設計のテスト設計の表へ載せ、受け持つ子の課題の実装のテストが縛る。
@@ -863,7 +900,7 @@ API の要素の項目・型・必須か・理由のコードは、形の正本�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #32 | 実装する | — | `docs/design/overview.md`、`docs/design/execution.md`、`docs/design/api.md`、`docs/design/platform.md`、`docs/design/data.md`（新設）、`docs/design/detail.md`、`docs/design/screens.md`、`docs/design/decisions.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #32 | 実装する | — | `docs/design/overview.md`、`docs/design/execution.md`、`docs/design/api.md`、`docs/design/platform.md`、`docs/design/data.md`（新設）、`docs/design/detail.md`、`docs/design/screens.md`、`docs/design/decisions.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`AGENTS.md` |
 
 子の課題の本文への追記（12 件）はファイルを触らない。
 
@@ -875,6 +912,7 @@ API の要素の項目・型・必須か・理由のコードは、形の正本�
 | --- | --- | --- |
 | `docs/design/` の改訂と子の課題への追記を設計承認ゲートの後の実装の段で行い、受け入れ条件を設計 PR と実装の PR に読み替える（決定 16） | E5 の前提を E2・E3・E4 とし、追記を設計 PR のマージの前に行う | 承認していない振り分けを子の課題へ渡さない。直す中身はこの設計の表に置くため、承認する人は同じ中身を設計承認ゲートで読める |
 | 渡す先に #1・#28・#29 を選ぶ（「子の課題へ渡す欠け」） | 前提 4 は渡す先を #2〜#16 から選ぶ | 3 件の主題をその課題が受け持つ。どれも既にある開いた課題で、新しく起票しない |
+| R15 に画面の組み方と TypeScript の書き方の細則を足し、`AGENTS.md` の細則の行を全体の設計へのリンクに替える（決定 19） | 要求の R15 の行は形の欠け（承認する人が読む欄・用語集の `id` ほか）を挙げ、言語と書き方を含まない。働く範囲は `docs/design/` | 利用者の指示（2026-11-18）。細則が `AGENTS.md` にしか無く、子の課題が詳細設計で引けない |
 
 ## 人へ残す判断
 
