@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "contexts": [
+    {
+      "id": "identity",
+      "name": "利用者とチーム",
+      "meaning": "利用者・ログインの組・チーム・席・委任・利用者の設定"
+    },
+    {
+      "id": "project",
+      "name": "プロジェクト",
+      "meaning": "プロジェクト・リポジトリ・割り当て"
+    },
+    {
+      "id": "execution",
+      "name": "実行",
+      "meaning": "スプリント・レーン・区間・実行の場所・推論の手段・進捗の事象"
+    },
+    {
+      "id": "judgment",
+      "name": "人の判断",
+      "meaning": "承認の依頼・問い・答え・承認資料"
+    },
+    {
+      "id": "notice",
+      "name": "知らせ",
+      "meaning": "知らせ・通知先・既読"
+    },
+    {
+      "id": "usage",
+      "name": "使える量と費用",
+      "meaning": "料金プラン・使える量・月の上限額・費用の記録"
+    },
+    {
+      "id": "audit",
+      "name": "操作の記録",
+      "meaning": "操作の記録・主体・入口"
+    },
+    {
+      "id": "platform",
+      "name": "土台",
+      "meaning": "画面・状態の置き場・形の正本など、コンテキストをまたぐ土台"
+    }
+  ],
+  "terms": [
+    {
+      "term": "チーム",
+      "context": "identity",
+      "meaning": "プロジェクトを割り当てる単位で、席を持つ人の集まり。個人で使う人は 1 人のチーム",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "席",
+      "context": "identity",
+      "meaning": "利用者がチームに属すること。役割（持ち主・メンバー）を持つ",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "プロジェクト",
+      "context": "project",
+      "meaning": "主リポジトリ 1 つとサブリポジトリ 0 以上の集まり。1 つのチームに割り当てる",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "プロジェクトの割り当て",
+      "context": "project",
+      "meaning": "プロジェクトを見られるチームを決める関係。作る・変える・外すのは人だけ（P2）",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "委任",
+      "context": "identity",
+      "meaning": "利用者が AI のエージェントか連携するシステムへ、範囲と期限を決めて自分の操作を任せること。承認の確定は含まない",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "スプリント",
+      "context": "execution",
+      "meaning": "1 つのプロジェクトで、選んだ課題を NDF の工程で通す 1 回の実行。1 つ以上のレーンからなる",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "レーン",
+      "context": "execution",
+      "meaning": "スプリントの中で、1 つのリポジトリの課題を NDF の工程で回す単位。同時に 1 つのコンテナで動く。NDF の契約が複数の課題を 1 回で渡す口を持つまでは、レーンの中の課題を順に流し、並列はリポジトリの間だけになる",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "区間",
+      "context": "execution",
+      "meaning": "レーンの中で、ランナーが claude（`NDF_FACTORY_RUN` を入れた人のいない実行）を 1 回起動して次の区切り（承認・問い・終わり）まで動かした分",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "実行の場所",
+      "context": "execution",
+      "meaning": "レーンを動かす所。ホステッド（サービスが起こすコンテナ）か手元のマシン",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "手元のマシン",
+      "context": "execution",
+      "meaning": "チームが登録し、nd ランタイムがレーンを受けて動かす利用者のマシン",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "推論の手段",
+      "context": "execution",
+      "meaning": "レーンの claude が推論を呼ぶ手段。サービスの推論（`managed`）か持ち込みのキー（`byok`）",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "承認の依頼",
+      "context": "judgment",
+      "meaning": "NDF の承認ゲート（設計・リリース）か、レッドラインに当たる操作で、人の承認を求めるもの",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "問い",
+      "context": "judgment",
+      "meaning": "NDF が区分を付けて人へ出す、承認の依頼でない問い",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "承認資料",
+      "context": "judgment",
+      "meaning": "承認の依頼が添える、承認の判断に要る材料（題・目的・差分の要約・リンク）。要約値で版を見分ける",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "知らせ",
+      "context": "notice",
+      "meaning": "人を待つものができた・終わった・止まったことを、利用者へ届けるもの。通知先へ送り、画面に並ぶ",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "進行表の DB",
+      "context": "execution",
+      "meaning": "NDF の進行表と耐久の記録を置く PostgreSQL。プロジェクトごとに分ける",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "サービスの表",
+      "context": "platform",
+      "meaning": "サービスの状態を置く DynamoDB の表。持ち主のモジュールごとに分け、区切りの鍵の頭にプロジェクトかチームの ID を置く",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "状態の S3",
+      "context": "platform",
+      "meaning": "承認資料の本文と、休止したレーンの NDF のファイルを置く S3 のバケット",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "形の正本",
+      "context": "platform",
+      "meaning": "API の HTTP の経路と形・型・JSON Schema・MCP の道具・環境変数・終了コードを定義し、ほかの表現を生成する元（`packages/contracts/`）",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "入口",
+      "context": "audit",
+      "meaning": "要求が入ってきた所の種類（画面・API・MCP・ランナー・手元のマシン・GitHub・見回り・DB の用意）。操作の記録の項目。URL の道筋は「HTTP の経路」と書いて分ける",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "ホーム（いま）",
+      "context": "platform",
+      "meaning": "人を待つものと動いているスプリントを 1 枚に並べる、ログインの後に最初に開く画面",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "端末の控え",
+      "context": "platform",
+      "meaning": "画面が受け取った API の応答を、端末の IndexedDB に暗号化して置いた写し。つながらない間に読む",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "控えて送る",
+      "context": "platform",
+      "meaning": "取り消せる操作を、先に端末の控えへ映し、つながってから送る扱い",
+      "source": "issues/issue-24-design.md"
+    },
+    {
+      "term": "確定待ち",
+      "context": "platform",
+      "meaning": "取り消せない操作を、押した時点の版とともに控え、つながってからサーバーの今の状態と照らして確定する扱い",
+      "source": "issues/issue-24-design.md"
+    }
+  ]
+}
