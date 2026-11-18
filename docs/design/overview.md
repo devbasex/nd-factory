@@ -15,7 +15,7 @@
 ## 適用範囲
 
 - **働く範囲**: このリポジトリ（devbasex/nd-factory）の画面・API・MCP・形の正本・インフラの定義・設置のコマンド。NDF（devbasex/ai-plugins のプラグイン）は外部の系で、この設計は NDF を変えない
-- **プロジェクトごとに違うもの**: AWS のアカウントとリージョンは profile から受ける。ほかの環境の値は、リポジトリの外の設定のファイルから受ける（[docs/operations/settings.md](../docs/operations/settings.md) ）。秘密の値は秘密の器から受ける
+- **プロジェクトごとに違うもの**: AWS のアカウントとリージョンは profile から受ける。ほかの環境の値は、リポジトリの外の設定のファイルから受ける（[docs/operations/settings.md](../operations/settings.md) ）。秘密の値は秘密の器から受ける
 
 ## あるべき姿
 
@@ -27,7 +27,7 @@
 | 姿 4 | プロジェクトは 1 つのチームに割り当て、その席を持つ人と委任だけが中身と存在を見られる。認可はサーバーの側の 1 か所がプロジェクトの単位で判定する |
 | 姿 5 | だれでも公開のコードから自分の AWS へ、設置のコマンドで差分と確認の値を見て反映できる。常駐する計算と NAT を持たず、使わない間の費用は 0 に近い。運用する環境は反映のパイプラインで人が承認した差分だけを反映する |
 
-要求と受け入れ条件は #24 の本文にある（コピーは [issue-24-requirements.md](issue-24-requirements.md)）。この文書は「どう作るか」だけを扱う。
+要求と受け入れ条件は #24 の本文にある（コピーは [requirements.md](../design-process/issue-24/requirements.md)）。この文書は「どう作るか」だけを扱う。
 
 ## あるべき姿の根拠
 
@@ -35,18 +35,18 @@
 
 | 支える姿 | 根拠 | 種類 | 何を示すか |
 | --- | --- | --- | --- |
-| 姿 1〜5 | [プロジェクト MVV 版 1](../.ndf/mvv.md)（Mission・Vision・Value 1〜9・P1・P2） | 利用者が承認した MVV | 目指す姿と判断の基準。項目ごとの受け先は下の「MVV と設計の節の対応」 |
-| 姿 1 | NDF の契約のファイル（`plugins/ndf-next/contracts/`、[実行の文書の NDF との契約](issue-24-design-execution.md#ndf-との契約)、調査の番号 STD62） | 外部の一次情報 | 外の呼び手が NDF を起動する口・環境変数・結果の行の形。レーンが NDF の工程をこの口だけで回せる |
-| 姿 1 | [GitHub Actions の自前のランナー](https://docs.github.com/en/actions/reference/runners/self-hosted-runners)（[実行の文書の主要な製品](issue-24-design-execution.md#主要な製品)、PRD60） | 外部の一次情報 | 利用者のマシンを外から開かず、外向きの HTTPS だけで仕事を受ける形が広く使われている。手元のマシンを実行の場所にできる |
-| 姿 2 | W3C の [Web Application Manifest](https://www.w3.org/TR/appmanifest/)・[Service Workers](https://www.w3.org/TR/service-workers/)・[Push API](https://www.w3.org/TR/push-api/)（[画面の文書の標準・仕様](issue-24-design-screens.md#標準仕様)、STD20〜STD22） | 外部の一次情報 | Web の画面を端末に入れ、つながらなくても読め、承認待ちの知らせを受けられる標準がある |
-| 姿 2 | [iOS・iPadOS の Safari の Web Push](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)（[画面の文書の主要な製品](issue-24-design-screens.md#主要な製品)、PRD20） | 外部の一次情報 | ホーム画面に加えた Web アプリなら iPhone にも知らせが届く |
-| 姿 2 | [Slack の Incoming Webhook](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks)（[実行の文書のライブラリとサービス](issue-24-design-execution.md#ライブラリとサービス)、LIB64） | 外部の一次情報 | チャンネルへ知らせを送る口があり、送る量の上限と失敗の扱いが決まっている |
-| 姿 3 | [Model Context Protocol の仕様 2026-07-28 版](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)（[API の文書の標準・仕様](issue-24-design-api.md#標準仕様)、STD40） | 外部の一次情報 | AI のエージェントが外の道具を呼ぶ標準の形。API と同じ操作を道具として出せる |
-| 姿 3 | [GitHub の遠くの MCP サーバー](https://github.com/github/github-mcp-server)（[API の文書の主要な製品](issue-24-design-api.md#主要な製品)、PRD42） | 外部の一次情報 | GitHub が自分のサービスの操作を遠くの MCP サーバーとして出し、OAuth と貼る token の両方で使わせている例 |
-| 姿 4 | [プロジェクト MVV 版 1](../.ndf/mvv.md) の Value 9 と P2 | 利用者が承認した MVV | 割り当てたチームの外へ存在も見せない。割り当てを変えるのは人の承認 |
-| 姿 5 | [Aurora Serverless v2 の自動の一時停止](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html)（[土台の文書のライブラリとサービス](issue-24-design-platform.md#ライブラリとサービス)、LIB80） | 外部の一次情報 | 接続が無い間は DB の計算の費用が止まる |
+| 姿 1〜5 | [プロジェクト MVV 版 1](../../.ndf/mvv.md)（Mission・Vision・Value 1〜9・P1・P2） | 利用者が承認した MVV | 目指す姿と判断の基準。項目ごとの受け先は下の「MVV と設計の節の対応」 |
+| 姿 1 | NDF の契約のファイル（`plugins/ndf-next/contracts/`、[実行の文書の NDF との契約](execution.md#ndf-との契約)、調査の番号 STD62） | 外部の一次情報 | 外の呼び手が NDF を起動する口・環境変数・結果の行の形。レーンが NDF の工程をこの口だけで回せる |
+| 姿 1 | [GitHub Actions の自前のランナー](https://docs.github.com/en/actions/reference/runners/self-hosted-runners)（[実行の文書の主要な製品](execution.md#主要な製品)、PRD60） | 外部の一次情報 | 利用者のマシンを外から開かず、外向きの HTTPS だけで仕事を受ける形が広く使われている。手元のマシンを実行の場所にできる |
+| 姿 2 | W3C の [Web Application Manifest](https://www.w3.org/TR/appmanifest/)・[Service Workers](https://www.w3.org/TR/service-workers/)・[Push API](https://www.w3.org/TR/push-api/)（[画面の文書の標準・仕様](screens.md#標準仕様)、STD20〜STD22） | 外部の一次情報 | Web の画面を端末に入れ、つながらなくても読め、承認待ちの知らせを受けられる標準がある |
+| 姿 2 | [iOS・iPadOS の Safari の Web Push](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)（[画面の文書の主要な製品](screens.md#主要な製品)、PRD20） | 外部の一次情報 | ホーム画面に加えた Web アプリなら iPhone にも知らせが届く |
+| 姿 2 | [Slack の Incoming Webhook](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks)（[実行の文書のライブラリとサービス](execution.md#ライブラリとサービス)、LIB64） | 外部の一次情報 | チャンネルへ知らせを送る口があり、送る量の上限と失敗の扱いが決まっている |
+| 姿 3 | [Model Context Protocol の仕様 2026-07-28 版](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)（[API の文書の標準・仕様](api.md#標準仕様)、STD40） | 外部の一次情報 | AI のエージェントが外の道具を呼ぶ標準の形。API と同じ操作を道具として出せる |
+| 姿 3 | [GitHub の遠くの MCP サーバー](https://github.com/github/github-mcp-server)（[API の文書の主要な製品](api.md#主要な製品)、PRD42） | 外部の一次情報 | GitHub が自分のサービスの操作を遠くの MCP サーバーとして出し、OAuth と貼る token の両方で使わせている例 |
+| 姿 4 | [プロジェクト MVV 版 1](../../.ndf/mvv.md) の Value 9 と P2 | 利用者が承認した MVV | 割り当てたチームの外へ存在も見せない。割り当てを変えるのは人の承認 |
+| 姿 5 | [Aurora Serverless v2 の自動の一時停止](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html)（[土台の文書のライブラリとサービス](platform.md#ライブラリとサービス)、LIB80） | 外部の一次情報 | 接続が無い間は DB の計算の費用が止まる |
 | 姿 5 | [ECS Fargate のタスクの網](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-task-networking.html)（同、LIB82）と [DynamoDB の要求の数の課金](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/capacity-mode.html)（同、LIB81） | 外部の一次情報 | 公開のサブネットで公開 IP を付ければ NAT なしで外へ出られ、表は使った分だけ課金される |
-| 姿 5 | [プロジェクト MVV 版 1](../.ndf/mvv.md) の Value 7・Value 8・P1 | 利用者が承認した MVV | 公開を前提に実際の値を置かない。反映はパイプラインか設置のコマンドだけで、人が差分を見て承認する |
+| 姿 5 | [プロジェクト MVV 版 1](../../.ndf/mvv.md) の Value 7・Value 8・P1 | 利用者が承認した MVV | 公開を前提に実際の値を置かない。反映はパイプラインか設置のコマンドだけで、人が差分を見て承認する |
 
 ## 文書の地図
 
@@ -54,13 +54,13 @@
 
 | 文書 | 主題 |
 | --- | --- |
-| [issue-24-design.md](issue-24-design.md) | 目的・MVV との対応・利用者と場面・ドメインモデル・機能一覧・不変条件のテスト設計 |
-| [issue-24-design-screens.md](issue-24-design-screens.md) | 画面: 画面の地図・共通の部品・端末の幅・オフライン・国際化・画面ごとの項目 |
-| [issue-24-design-api.md](issue-24-design-api.md) | API と MCP: 呼び出しの規約・操作の一覧・認可・委任・操作の記録・形の正本 |
-| [issue-24-design-execution.md](issue-24-design-execution.md) | 実行: スプリントとレーン・実行の場所・NDF との契約・承認と問いの流れ・知らせ |
-| [issue-24-design-platform.md](issue-24-design-platform.md) | 土台: アーキテクチャ（arc42・C4）・データと状態の置き場・インフラ・反映と設置・費用・非機能 |
-| [issue-24-design-decisions.md](issue-24-design-decisions.md) | 外部の調査と決定の記録 |
-| [issue-24-design-detail.md](issue-24-design-detail.md) | 詳細設計: モジュールの置き場と依存の向き・横断の部品の関数の仕様と異常系 |
+| [overview.md](overview.md) | 目的・MVV との対応・利用者と場面・ドメインモデル・機能一覧・不変条件のテスト設計 |
+| [screens.md](screens.md) | 画面: 画面の地図・共通の部品・端末の幅・オフライン・国際化・画面ごとの項目 |
+| [api.md](api.md) | API と MCP: 呼び出しの規約・操作の一覧・認可・委任・操作の記録・形の正本 |
+| [execution.md](execution.md) | 実行: スプリントとレーン・実行の場所・NDF との契約・承認と問いの流れ・知らせ |
+| [platform.md](platform.md) | 土台: アーキテクチャ（arc42・C4）・データと状態の置き場・インフラ・反映と設置・費用・非機能 |
+| [decisions.md](decisions.md) | 外部の調査と決定の記録 |
+| [detail.md](detail.md) | 詳細設計: モジュールの置き場と依存の向き・横断の部品の関数の仕様と異常系 |
 
 ## 人へ残す判断
 
@@ -69,8 +69,8 @@
 | 判断 | 当たるレッドライン | 推しの案 | 詳しい置き場 |
 | --- | --- | --- | --- |
 | プロジェクトの割り当ての作り | P2 | 1 つのプロジェクトは同時に 1 チームだけに割り当てる。作成と同じ操作で割り当てる。移すときは今のチームと移す先のチームの持ち主が両方とも画面で確定する。チームの外へ見せる操作は作らない | [プロジェクトとチーム](#プロジェクトとチーム)・I2・I3 |
-| 認可と委任の作り | C2 / P2 | 認可はプロジェクトの単位でサーバーの 1 か所が判定する。委任の範囲はプロジェクトの並びと操作の種類 `read`・`run`・`manage`、期限は 1 時間〜30 日（既定 7 日）。承認の確定・割り当て・委任の発行など「人だけ」の操作は委任から 403。問いは NDF の区分で分け、承認ゲート・レッドライン・人の手の要る区分と知らない区分だけを人だけにする | [API の文書の認可](issue-24-design-api.md#認可)・[委任](issue-24-design-api.md#委任)・決定 49・決定 72 |
-| NDF の起票の依頼の扱い | C5 | NDF がスプリントの中で他のリポジトリへ課題を起こそうとしたら、承認の依頼として承認の画面に並べる。人が承認したものだけ、サービスが 1 リポジトリに絞った token で起こす。1 スプリントで 10 件まで | [起票の依頼](issue-24-design-execution.md#起票の依頼)・決定 78 |
+| 認可と委任の作り | C2 / P2 | 認可はプロジェクトの単位でサーバーの 1 か所が判定する。委任の範囲はプロジェクトの並びと操作の種類 `read`・`run`・`manage`、期限は 1 時間〜30 日（既定 7 日）。承認の確定・割り当て・委任の発行など「人だけ」の操作は委任から 403。問いは NDF の区分で分け、承認ゲート・レッドライン・人の手の要る区分と知らない区分だけを人だけにする | [API の文書の認可](api.md#認可)・[委任](api.md#委任)・決定 49・決定 72 |
+| NDF の起票の依頼の扱い | C5 | NDF がスプリントの中で他のリポジトリへ課題を起こそうとしたら、承認の依頼として承認の画面に並べる。人が承認したものだけ、サービスが 1 リポジトリに絞った token で起こす。1 スプリントで 10 件まで | [起票の依頼](execution.md#起票の依頼)・決定 78 |
 | 秘密の置き方と渡し方 | C1 | 秘密の器を用途ごと（サービス・プロジェクトごとの進行表の DB・通知先ごと）に分け、読めるのは API の関数だけにする。レーンの token はレーンが動く間だけ、GitHub の token は 1 リポジトリに絞って 1 時間。端末のログインの控え（refresh token）は取り出せない鍵で暗号化して IndexedDB に置く | 決定 90・決定 69・決定 31・I10・I11 |
 | NDF への課題の起票（複数の課題を 1 回で受ける起動の口） | C5 | 最初の版はレーンの中の課題を順に流し、並列はリポジトリの間だけにする。NDF（devbasex/ai-plugins）へ口を求める課題を出すかは、他のリポジトリへの起票なので人が決める | [未確認のまま残ること](#未確認のまま残ること) |
 
@@ -91,17 +91,17 @@ MVV の各項目を、それを受ける設計の節へ対応づける。設計�
 | MVV の項目 | 要点 | 受ける設計の節 |
 | --- | --- | --- |
 | Mission | 工程を Web の画面から、人も AI も同じく回す。承認は人。待ちと手間を減らす | [利用者と利用の場面](#利用者と利用の場面)・[機能一覧](#機能一覧) |
-| Vision | 課題を指せば並列に回り、人を待つのは承認だけ。どこでも何が動き何が待つかが分かる。チームにだけ見える。API と MCP。国を越える。公開で安く設置。承認した範囲だけ反映 | [ホーム（いま）](issue-24-design-screens.md#ホームいま)・[スプリントを始める流れ](issue-24-design-execution.md#スプリントを始める流れ) |
-| Value 1 操作を速く分かりやすく | 機能の数より迷わない速さ | [手数の目標](issue-24-design-screens.md#手数の目標) |
-| Value 2 画面先行 | UX の土台 → 機能の画面をダミーデータで → API をつなぐ。API は機能から起こし常に配列 | [呼び出しの規約](issue-24-design-api.md#呼び出しの規約) |
-| Value 3 どこでも、つながらなくても | スマートフォンとタブレット。オフラインで読める。端末のデータは暗号化。取り消せない操作はつながってから確定 | [オフライン](issue-24-design-screens.md#オフライン)・[端末の幅](issue-24-design-screens.md#端末の幅) |
-| Value 4 AI からも人と同じく | 画面の操作はすべて API と MCP にも。承認の確定は人だけ。委任とクライアントを確かめる。すべての操作を記録 | [操作の一覧](issue-24-design-api.md#操作の一覧)・[MCP](issue-24-design-api.md#mcp)・[操作の記録](issue-24-design-api.md#操作の記録) |
-| Value 5 国や地域を越えて | 翻訳のファイル・UTC で保存・通貨とともに・法令に応じられる作り。先回りしない | [国際化](issue-24-design-screens.md#国際化)・[値の形](issue-24-design-api.md#値の形) |
-| Value 6 自前の構成で安く | 相乗りしない。NAT なし・Lambda は VPC の外・Fargate は公開のサブネット。費用が増える構成は理由と代案 | [インフラ](issue-24-design-platform.md#インフラ)・[費用](issue-24-design-platform.md#費用) |
-| Value 7 公開を前提に値を置かない | 実際の値・秘密を置かない。検査で止める | [検査](issue-24-design-platform.md#検査) |
-| Value 8 承認した範囲だけ反映 | パイプラインか設置のコマンドだけ。CI は資格情報を持たない | [反映と設置](issue-24-design-platform.md#反映と設置) |
-| Value 9 割り当てたチームにだけ見せる | 認可はプロジェクトの単位でサーバーの側。存在も見せない | [認可](issue-24-design-api.md#認可) |
-| P1 パイプラインと設置のコマンドの外の AWS の変更 | 人の承認 | [反映と設置](issue-24-design-platform.md#反映と設置)・[人へ残す判断](#人へ残す判断) |
+| Vision | 課題を指せば並列に回り、人を待つのは承認だけ。どこでも何が動き何が待つかが分かる。チームにだけ見える。API と MCP。国を越える。公開で安く設置。承認した範囲だけ反映 | [ホーム（いま）](screens.md#ホームいま)・[スプリントを始める流れ](execution.md#スプリントを始める流れ) |
+| Value 1 操作を速く分かりやすく | 機能の数より迷わない速さ | [手数の目標](screens.md#手数の目標) |
+| Value 2 画面先行 | UX の土台 → 機能の画面をダミーデータで → API をつなぐ。API は機能から起こし常に配列 | [呼び出しの規約](api.md#呼び出しの規約) |
+| Value 3 どこでも、つながらなくても | スマートフォンとタブレット。オフラインで読める。端末のデータは暗号化。取り消せない操作はつながってから確定 | [オフライン](screens.md#オフライン)・[端末の幅](screens.md#端末の幅) |
+| Value 4 AI からも人と同じく | 画面の操作はすべて API と MCP にも。承認の確定は人だけ。委任とクライアントを確かめる。すべての操作を記録 | [操作の一覧](api.md#操作の一覧)・[MCP](api.md#mcp)・[操作の記録](api.md#操作の記録) |
+| Value 5 国や地域を越えて | 翻訳のファイル・UTC で保存・通貨とともに・法令に応じられる作り。先回りしない | [国際化](screens.md#国際化)・[値の形](api.md#値の形) |
+| Value 6 自前の構成で安く | 相乗りしない。NAT なし・Lambda は VPC の外・Fargate は公開のサブネット。費用が増える構成は理由と代案 | [インフラ](platform.md#インフラ)・[費用](platform.md#費用) |
+| Value 7 公開を前提に値を置かない | 実際の値・秘密を置かない。検査で止める | [検査](platform.md#検査) |
+| Value 8 承認した範囲だけ反映 | パイプラインか設置のコマンドだけ。CI は資格情報を持たない | [反映と設置](platform.md#反映と設置) |
+| Value 9 割り当てたチームにだけ見せる | 認可はプロジェクトの単位でサーバーの側。存在も見せない | [認可](api.md#認可) |
+| P1 パイプラインと設置のコマンドの外の AWS の変更 | 人の承認 | [反映と設置](platform.md#反映と設置)・[人へ残す判断](#人へ残す判断) |
 | P2 プロジェクトの割り当てと見せる範囲 | 人の承認 | [割り当てを変える流れ](#割り当てを変える流れ)・[人へ残す判断](#人へ残す判断) |
 
 ## 利用者と利用の場面
@@ -118,7 +118,7 @@ MVV の各項目を、それを受ける設計の節へ対応づける。設計�
 | A6 | 自分で設置する人 | 自分の AWS へ設置のコマンドで設置し、自分のチームで使う | PC |
 | A7 | 運用する人 | 運用する環境を反映のパイプラインで反映し、費用と障害を見る | PC |
 
-A1〜A3 は同じ人が兼ねてよい。A1 と A2 は使い方の違いで、権限は同じである。権限はチームの席の役割（持ち主・メンバー）だけで決まり、持ち主は A3 の操作も行える。承認ゲートの承認と問いへの答えは、プロジェクトを割り当てたチームの席を持つ人なら役割によらず確定できる（[席の役割ごとの操作](issue-24-design-api.md#席の役割ごとの操作)）。
+A1〜A3 は同じ人が兼ねてよい。A1 と A2 は使い方の違いで、権限は同じである。権限はチームの席の役割（持ち主・メンバー）だけで決まり、持ち主は A3 の操作も行える。承認ゲートの承認と問いへの答えは、プロジェクトを割り当てたチームの席を持つ人なら役割によらず確定できる（[席の役割ごとの操作](api.md#席の役割ごとの操作)）。
 
 ### 利用の場面
 
@@ -160,7 +160,7 @@ A1〜A3 は同じ人が兼ねてよい。A1 と A2 は使い方の違いで、�
 
 | 上流 | 下流 | 関係 | 中身 |
 | --- | --- | --- | --- |
-| NDF | 実行・人の判断 | 公開された言語 | NDF の契約（[NDF との契約](issue-24-design-execution.md#ndf-との契約)）だけでやり取りする。ランナーが腐敗防止層として、NDF の結果の行と承認ゲート・問いを進捗の事象と承認の依頼・問いへ翻訳する |
+| NDF | 実行・人の判断 | 公開された言語 | NDF の契約（[NDF との契約](execution.md#ndf-との契約)）だけでやり取りする。ランナーが腐敗防止層として、NDF の結果の行と承認ゲート・問いを進捗の事象と承認の依頼・問いへ翻訳する |
 | 利用者とチーム | ほかのすべて | 顧客 / 供給者 | 下流は利用者とチームを ID で参照する |
 | プロジェクト | 実行・人の判断・知らせ・操作の記録の読み出し | 顧客 / 供給者 | 下流は「この主体がこのプロジェクトを見られるか」を、プロジェクトの認可の判定 1 か所へ問う（I2） |
 | 実行 | 人の判断 | パートナーシップ | 実行は承認の依頼・問いを出し、人の判断は答えを実行へ返す。両者の事象の形は形の正本に置く |
@@ -207,7 +207,7 @@ A1〜A3 は同じ人が兼ねてよい。A1 と A2 は使い方の違いで、�
 | 始める | 今のチームの持ち主が画面で「移す」を確定する（人だけ）。終わっていないスプリントを取り消しと同じ手順で止め、レーンの token と渡し済みの GitHub の token を断つ |
 | 受け入れる | 移す先のチームの持ち主が画面で受け入れる（人だけ）。止め終えたことと token が残っていないことを、割り当ての行の差し替えと同じ条件つきの書き込みで照らす。残っていれば 409 |
 | 取り下げる | 受け入れの前なら、今のチームの持ち主が取り下げられる。止めたスプリントは戻らず、始め直す |
-| 移した後 | レーンは移す先のチームの実行の場所にだけ割り当てる。進行表の DB の資格情報は差し替える（[状態の置き場](issue-24-design-platform.md#状態の置き場)） |
+| 移した後 | レーンは移す先のチームの実行の場所にだけ割り当てる。進行表の DB の資格情報は差し替える（[状態の置き場](platform.md#状態の置き場)） |
 
 ### 不変条件
 
@@ -281,7 +281,7 @@ A1〜A3 は同じ人が兼ねてよい。A1 と A2 は使い方の違いで、�
 
 ## 機能一覧
 
-利用者から見た単位で並べる。各行は場面（S）から来て、画面と API の操作の両方を持つ（[画面一覧](issue-24-design-screens.md#画面一覧)・[操作の一覧](issue-24-design-api.md#操作の一覧)）。「人だけ」の行は API と MCP からは確定できず、依頼と材料の読み出しだけができる。
+利用者から見た単位で並べる。各行は場面（S）から来て、画面と API の操作の両方を持つ（[画面一覧](screens.md#画面一覧)・[操作の一覧](api.md#操作の一覧)）。「人だけ」の行は API と MCP からは確定できず、依頼と材料の読み出しだけができる。
 
 | # | 機能 | 誰が使うか | 場面 |
 | --- | --- | --- | --- |
@@ -346,9 +346,9 @@ F21〜F23 は画面と API を持たない（設置のコマンド・パイプ�
 
 | 項目 | 内容 |
 | --- | --- |
-| iOS の Safari での Web Push | ホーム画面に加えた Web アプリでだけ届く（PRD20。[画面の文書の外部の調査](issue-24-design-screens.md#外部の調査)）。実機で、加えた後に知らせが届くことを確かめる |
+| iOS の Safari での Web Push | ホーム画面に加えた Web アプリでだけ届く（PRD20。[画面の文書の外部の調査](screens.md#外部の調査)）。実機で、加えた後に知らせが届くことを確かめる |
 | 端末のデータの暗号化の鍵の置き場 | Web Crypto の取り出せない鍵を IndexedDB に置く形で、ブラウザのデータの消去で読めなくなること・他のサイトから読めないことを、実機で確かめる |
 | MCP の認可の仕様の版 | MCP の認可（OAuth 2.1 に基づく）の仕様が改訂中である（STD40）。作る時点の版で確かめる |
 | Aurora の一時停止と進行表の DB | レーンが動いていない間に接続が 0 本になって一時停止に入ること、再開の待ちがレーンの起動に収まることを実測する |
 | NDF が複数の課題を 1 回で受ける起動の口 | 固定した NDF の契約は Factory の実行に課題を 1 つずつ（`#N`）しか渡せない。口が足されればレーンの中でも課題が並列に回る（Vision）。口は NDF の課題 devbasex/ai-plugins#3783 で求めている。足されたら、ランナーの起動の組み立てだけを差し替える（決定 61） |
-| 1 か月の費用 | 見込みは [費用](issue-24-design-platform.md#費用) にある。反映した後の 1 か月の請求で確かめる |
+| 1 か月の費用 | 見込みは [費用](platform.md#費用) にある。反映した後の 1 か月の請求で確かめる |

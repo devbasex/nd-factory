@@ -1,13 +1,13 @@
 # 設計の作り方: 全体の設計をどう分け、どこに置き、何で確かめるか
 
-全体の設計（[issue-24-design.md](../issue-24-design.md) ほか 6 本）を、どの規約で書き、どう分け、どこに置き、何で確かめたかを置く。設計そのものは設計文書にある。
+全体の設計（[overview.md](../../design/overview.md) ほか 6 本）を、どの規約で書き、どう分け、どこに置き、何で確かめたかを置く。設計そのものは設計文書にある。
 
 ## 工程と要求
 
 | 項目 | 中身 |
 | --- | --- |
 | 当たるモード | `standard`（NDF の工程の振り分けの区分）。設計と詳細設計を書き、設計承認ゲートで人が承認してから実装へ進む |
-| 要求と受け入れ条件 | #24 の本文にある。写しは [issue-24-requirements.md](../issue-24-requirements.md)（`spec-copy.py write` で作り直す） |
+| 要求と受け入れ条件 | #24 の本文にある。写しは [requirements.md](requirements.md)（`spec-copy.py write` で作り直す） |
 | 設計文書が扱うこと | 「どう作るか」だけ。要求は写しを読む |
 | 成果物 | 設計文書。#24 は実装の Pull Request を持たず、実装のファイルを触らない。設計を実装するのは子の課題である（[plan.md](plan.md)） |
 | ドメインイベントの番号 | E1〜E4 は要求（#24）の番号で、設計の工程のイベントである。nd-factory の振る舞いのイベントは E5 から振る |
@@ -55,13 +55,13 @@
 
 | 文書 | 主題 | 全体の設計から受けるもの |
 | --- | --- | --- |
-| [issue-24-design.md](../issue-24-design.md) | 全体の設計: 目的・MVV との対応・利用者と場面・ドメインモデル・機能一覧・不変条件のテスト設計 | — |
-| [issue-24-design-screens.md](../issue-24-design-screens.md) | 画面 | 利用の場面（S1〜S6・S12）と機能一覧（F1〜F20）。API の操作の名前は API の文書の操作の一覧が決め、画面の文書はその名前で書く |
-| [issue-24-design-api.md](../issue-24-design-api.md) | API と MCP | 機能一覧（F1〜F20）・不変条件（I2〜I5・I9・I12・I14・I15）・集約 |
-| [issue-24-design-execution.md](../issue-24-design-execution.md) | 実行 | スプリントとレーン・実行の場所・NDF との契約・承認の依頼と問いの流れ・知らせ・使える量の判定にかかわる項目 |
-| [issue-24-design-platform.md](../issue-24-design-platform.md) | 土台 | ドメインモデル（集約・不変条件 I1〜I16）を置き場とインフラへ下ろす。「MVV と設計の節の対応」のうち 3 つの行を受ける |
-| [issue-24-design-decisions.md](../issue-24-design-decisions.md) | 外部の調査と決定の記録 | 文書をまたぐ決定と、全体の設計が引く外部の調査（STD1〜STD2） |
-| [issue-24-design-detail.md](../issue-24-design-detail.md) | 詳細設計 | 全体の設計の項目を、モジュールと関数の粒度へ下ろす |
+| [overview.md](../../design/overview.md) | 全体の設計: 目的・MVV との対応・利用者と場面・ドメインモデル・機能一覧・不変条件のテスト設計 | — |
+| [screens.md](../../design/screens.md) | 画面 | 利用の場面（S1〜S6・S12）と機能一覧（F1〜F20）。API の操作の名前は API の文書の操作の一覧が決め、画面の文書はその名前で書く |
+| [api.md](../../design/api.md) | API と MCP | 機能一覧（F1〜F20）・不変条件（I2〜I5・I9・I12・I14・I15）・集約 |
+| [execution.md](../../design/execution.md) | 実行 | スプリントとレーン・実行の場所・NDF との契約・承認の依頼と問いの流れ・知らせ・使える量の判定にかかわる項目 |
+| [platform.md](../../design/platform.md) | 土台 | ドメインモデル（集約・不変条件 I1〜I16）を置き場とインフラへ下ろす。「MVV と設計の節の対応」のうち 3 つの行を受ける |
+| [decisions.md](../../design/decisions.md) | 外部の調査と決定の記録 | 文書をまたぐ決定と、全体の設計が引く外部の調査（STD1〜STD2） |
+| [detail.md](../../design/detail.md) | 詳細設計 | 全体の設計の項目を、モジュールと関数の粒度へ下ろす |
 | [plan.md](plan.md)（もと `issue-24-design-children.md`） | 子の切り方と順序 | 機能一覧（F1〜F23）と不変条件（I1〜I16） |
 | [legacy.md](legacy.md)（もと `issue-24-design-legacy.md`） | 付録: 旧い側の機能の採否・骨組みからの移り方 | 「MVV と設計の節の対応」の Value 1 の行 |
 
@@ -106,7 +106,7 @@ NDF との契約は、固定の点のコミットの内容を `gh api` で読ん
 
 ## 受け入れ条件との照らし方
 
-#24 の成果物は文書で、受け入れ条件は設計文書を読んで判定する。受け入れ条件 1〜14 の本文は [要求の写し](../issue-24-requirements.md) にある。全体の設計のテスト設計の表は不変条件 I1〜I16 だけを持ち、受け入れ条件の行はここに置く。
+#24 の成果物は文書で、受け入れ条件は設計文書を読んで判定する。受け入れ条件 1〜14 の本文は [要求の写し](requirements.md) にある。全体の設計のテスト設計の表は不変条件 I1〜I16 だけを持ち、受け入れ条件の行はここに置く。
 
 | 受け入れ条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
@@ -130,12 +130,12 @@ NDF との契約は、固定の点のコミットの内容を `gh api` で読ん
 
 | 検査 | 打ち方 | 何を見るか |
 | --- | --- | --- |
-| 行の数 | `wc -l issues/issue-24-design*.md issues/issue-24-process/*.md` | 各 1,000 行以下 |
+| 行の数 | `wc -l docs/design/*.md docs/design-process/issue-24/*.md` | 各 1,000 行以下 |
 | 用語集の検査 | `glossary.py check --file <設計文書>` | 用語集（`.ndf/glossary.json`）に無い語の当たり 0 件 |
 | 詳細設計の検査 | `design-survey.py check --require-detail` | 詳細設計の必須の節と、関数ごとの異常系 |
-| 要求の写し | `spec-copy.py write` | #24 の本文から [issue-24-requirements.md](../issue-24-requirements.md) を作り直す。手で直さない |
+| 要求の写し | `spec-copy.py write` | #24 の本文から [requirements.md](requirements.md) を作り直す。手で直さない |
 | 参照の検査 | `npm run -s ref-check`（照合の語を見るのは CI の「参照の検査」のジョブ） | 旧い側の名前（リポジトリ・表・バケット）の照合の語が設計文書を含む作業の木に無いこと、NDF の固定の値が 1 か所であること、版の数字の比べが無いこと。照合の語の照合が走るのは、環境変数 `REF_CHECK_TERMS` が渡ったときだけである。CI は秘密 `REF_CHECK_TERMS` から渡し、変数 `REF_CHECK_REQUIRE_TERMS` が `1` のリポジトリでの main への push と同じリポジトリの枝からの PR では、語が無ければ終了コード 2 で落ちる。手元で語を渡さずに打つと照合を飛ばし（`skip:` の行）、要求 12 を確かめたことにならない。要求 12 の判定は、PR の CI の「参照の検査」のジョブが語ありで通った記録で行う |
-| 実際のインフラの値の確かめ | `grep -rnoE '\b[0-9]{12}\b\|arn:aws[a-z-]*:\|[a-z0-9.-]+\.amazonaws\.com' issues/ \| grep -v 123456789012` と、目での読み | 参照の検査は、アカウント ID・ARN・資源の ID・端点・実在の profile と運用する環境の名前を探さない。これらを形で探す漏れの検査（[土台の決定 92](../issue-24-design-platform.md#決定の記録)）は子の課題で足すため、それまでは左の grep で形の当たりが作り物の値（`123456789012`・UUID の一部）だけであることを確かめ、profile と環境の名前は作り物（`acme`・`test`）だけであることを PR の差分を読んで確かめる |
+| 実際のインフラの値の確かめ | `grep -rnoE '\b[0-9]{12}\b\|arn:aws[a-z-]*:\|[a-z0-9.-]+\.amazonaws\.com' issues/ \| grep -v 123456789012` と、目での読み | 参照の検査は、アカウント ID・ARN・資源の ID・端点・実在の profile と運用する環境の名前を探さない。これらを形で探す漏れの検査（[土台の決定 92](../../design/platform.md#決定の記録)）は子の課題で足すため、それまでは左の grep で形の当たりが作り物の値（`123456789012`・UUID の一部）だけであることを確かめ、profile と環境の名前は作り物（`acme`・`test`）だけであることを PR の差分を読んで確かめる |
 | 設計の検査（レッドライン） | NDF の設計の検査 | 全体の設計の「人へ残す判断」のレッドラインの定義の表を、列「レッドライン」で読む |
 
 ## cross-review と設計承認ゲート

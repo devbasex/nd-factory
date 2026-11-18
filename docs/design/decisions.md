@@ -1,16 +1,16 @@
 # 外部の調査と決定の記録: 全体にかかる判断を、理由と採らなかった案とともに読める
 
-文書をまたぐ決定と、[全体の設計](issue-24-design.md) が引く外部の調査（STD1〜STD2）を置く。主題ごとの決定と外部の調査は、それぞれの文書にある（下の「決定の置き場」）。
+文書をまたぐ決定と、[全体の設計](overview.md) が引く外部の調査（STD1〜STD2）を置く。主題ごとの決定と外部の調査は、それぞれの文書にある（下の「決定の置き場」）。
 
 ## 決定の置き場
 
 | 決定の番号 | 主題 | 置き場 |
 | --- | --- | --- |
-| 1〜10 | 全体にかかる判断 | [issue-24-design-decisions.md](issue-24-design-decisions.md) |
-| 20〜39 | 画面 | [issue-24-design-screens.md](issue-24-design-screens.md#決定の記録) |
-| 40〜59 | API と MCP | [issue-24-design-api.md](issue-24-design-api.md#決定の記録) |
-| 60〜79 | 実行 | [issue-24-design-execution.md](issue-24-design-execution.md#決定の記録) |
-| 80〜99 | 土台 | [issue-24-design-platform.md](issue-24-design-platform.md#決定の記録) |
+| 1〜10 | 全体にかかる判断 | [decisions.md](decisions.md) |
+| 20〜39 | 画面 | [screens.md](screens.md#決定の記録) |
+| 40〜59 | API と MCP | [api.md](api.md#決定の記録) |
+| 60〜79 | 実行 | [execution.md](execution.md#決定の記録) |
+| 80〜99 | 土台 | [platform.md](platform.md#決定の記録) |
 
 ## 決定の記録
 
@@ -30,7 +30,7 @@
 
 レーンの中では、既存の NDF の流れ（`supervise.py new sprint` のプランとキュー）をそのまま使う。
 
-理由: Vision は「課題を指せばスプリントが並列に回る」ことを求め、NDF は 1 つのスプリントの中の並列を既に持つ。ただし固定した NDF の契約は、Factory の実行に複数の課題を 1 回で渡す口を持たない（[決定 61](issue-24-design-execution.md#決定の記録)）。口が足されるまでは、レーンの中の課題を順に流し、並列はリポジトリの間だけになる。サービスが工程の中身を持たなければ、NDF との境界は契約だけになる。
+理由: Vision は「課題を指せばスプリントが並列に回る」ことを求め、NDF は 1 つのスプリントの中の並列を既に持つ。ただし固定した NDF の契約は、Factory の実行に複数の課題を 1 回で渡す口を持たない（[決定 61](execution.md#決定の記録)）。口が足されるまでは、レーンの中の課題を順に流し、並列はリポジトリの間だけになる。サービスが工程の中身を持たなければ、NDF との境界は契約だけになる。
 
 採らなかった案:
 
@@ -91,7 +91,7 @@
 
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
-| STD1 | arc42 | 12 章の章立て（導入と目標・制約・文脈と範囲・解決の方針・構成要素の見方・実行時の見方・配置の見方・横断の概念・設計の決定・品質の要求・リスクと技術的負債・用語集） | アーキテクチャをこの 12 章に当てる（[土台](issue-24-design-platform.md)） | https://arc42.org/overview （2026-11-16） |
+| STD1 | arc42 | 12 章の章立て（導入と目標・制約・文脈と範囲・解決の方針・構成要素の見方・実行時の見方・配置の見方・横断の概念・設計の決定・品質の要求・リスクと技術的負債・用語集） | アーキテクチャをこの 12 章に当てる（[土台](platform.md)） | https://arc42.org/overview （2026-11-16） |
 | STD2 | C4 model | 4 階層の図（System context・Container・Component・Code）と補助の図（Deployment など） | 文脈の図・コンテナの図・配置の図を全体の設計で描き、Component と Code は詳細設計へ回す | https://c4model.com/ （2026-11-16） |
 
 ### 確かめられなかったこと
