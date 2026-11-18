@@ -1,6 +1,6 @@
 # 経緯: 全体の設計を MVV から書き直すことになった理由と、そのときの nd-factory
 
-全体の設計（[issue-24-design.md](../issue-24-design.md) ほか 6 本）を書いたときの nd-factory の状態、利用者の指示、作り直しに至った理由を置く。設計そのものは設計文書にある。設計文書は、ここに置いた比べや状態を理由にせず、MVV の項目・利用者と場面・外部の一次情報・費用や性能で決定を書く。
+全体の設計（[overview.md](../../design/overview.md) ほか 6 本）を書いたときの nd-factory の状態、利用者の指示、作り直しに至った理由を置く。設計そのものは設計文書にある。設計文書は、ここに置いた比べや状態を理由にせず、MVV の項目・利用者と場面・外部の一次情報・費用や性能で決定を書く。
 
 ## 設計を書いたときの nd-factory
 
@@ -101,7 +101,7 @@ nd-factory は、全体の設計・詳細設計・実装計画が無いまま機
 | パイプラインの失敗の知らせ | ある |
 | スタック | ある |
 | 利用者プール・ドメイン・クライアント | ある。Google（と GitHub）の IdP からだけ入る |
-| HTTP API・JWT の認可 | ある。JWT の認可は利用者向けの HTTP の経路から外し、token は API の関数の中で確かめる（[API の決定の記録](../issue-24-design-api.md#決定の記録)） |
+| HTTP API・JWT の認可 | ある。JWT の認可は利用者向けの HTTP の経路から外し、token は API の関数の中で確かめる（[API の決定の記録](../../design/api.md#決定の記録)） |
 | Lambda | 骨組みの `acme-test-users-api` がある。束ねは esbuild。`api-fn` へまとめる |
 | サービスの表 | 骨組みの利用者の表 `acme-test-accounts` がある。「アカウント」を AWS のアカウントの意味だけで使うため `db-users` へ移す |
 | CloudFront と画面の S3 | ある。価格の区分は 100 |
@@ -169,7 +169,7 @@ API の関数の時間切れは 10 秒である（冪等の鍵の `IDEMPOTENCY_L
 | `putIfAbsent` | `ensureUser` の `attribute_not_exists(pk)` | `grep -rn 'attribute_not_exists' apps/api/src` → 1 件 | 使う（条件式を移し、`TransactItem` を組む形にする） |
 | `updateIfVersion` | 版の条件の書き込み | `grep -rnE 'version' apps/api/src` → `SCHEMA_VERSION`（形の版）だけ | 使えない（エンティティの版の条件は無い）。作る |
 | `writeAtomically` | `@aws-sdk/lib-dynamodb` の `TransactWriteCommand` | `apps/api/package.json` の依存に `@aws-sdk/lib-dynamodb` 3.1170.0。`grep -rn 'Transact' <骨組みの範囲>` → 0 件 | 使う（ライブラリのコマンドで送る）。外れた件の訳しは作る |
-| `authenticate` | API Gateway の JWT の前段（`infra/lib/app-stack.ts` の `HttpJwtAuthorizer`）・`jwt-decode`・`aws-jwt-verify`・`node:crypto` | `grep -rnE 'jwt\|jose\|verify\|authorizer' <骨組みの範囲>` → `app-stack.ts` と `users-handler.ts`。`jwt-decode` は `oidc-client-ts` の依存（画面だけ）。`grep -oE '"node_modules/(aws-jwt-verify\|jose)"' package-lock.json` → 0 件。`timingSafeEqual` → 0 件 | JWT の前段は使えない（委任の token を読めない。[認証と主体](../issue-24-design-api.md#認証と主体)）。`jwt-decode` は署名を確かめないため使えない。`node:crypto` の `createPublicKey`（JWK）・`verify`（RS256 と Ed25519）・`timingSafeEqual`・`createHash` を使う（`infra/lib/assembly-digest.ts` が `createHash` を既に使う） |
+| `authenticate` | API Gateway の JWT の前段（`infra/lib/app-stack.ts` の `HttpJwtAuthorizer`）・`jwt-decode`・`aws-jwt-verify`・`node:crypto` | `grep -rnE 'jwt\|jose\|verify\|authorizer' <骨組みの範囲>` → `app-stack.ts` と `users-handler.ts`。`jwt-decode` は `oidc-client-ts` の依存（画面だけ）。`grep -oE '"node_modules/(aws-jwt-verify\|jose)"' package-lock.json` → 0 件。`timingSafeEqual` → 0 件 | JWT の前段は使えない（委任の token を読めない。[認証と主体](../../design/api.md#認証と主体)）。`jwt-decode` は署名を確かめないため使えない。`node:crypto` の `createPublicKey`（JWK）・`verify`（RS256 と Ed25519）・`timingSafeEqual`・`createHash` を使う（`infra/lib/assembly-digest.ts` が `createHash` を既に使う） |
 | `visibleProjectIds` | 席・割り当ての読み | `grep -rnE 'authorize\|permission\|role' apps/api/src` → JWT の前段の `sub` を読む 1 件だけ | 使えない（無い）。作る |
 | `authorize` | `users-handler.ts` の `answerItems`（他人の ID に表を読まず `not_found` を返す） | `grep -n 'not_found' apps/api/src/users-handler.ts` | 使う（見えないものを無いものと同じに返す形を引き継ぐ）。判定の本体は作る |
 | `judgeUsage` | 料金プラン・上限の比べ | `grep -rnE 'limit\|quota\|plan' <骨組みの範囲>` → 0 件 | 使えない（無い）。作る |
@@ -177,7 +177,7 @@ API の関数の時間切れは 10 秒である（冪等の鍵の `IDEMPOTENCY_L
 | `auditItem` | 操作の記録 | `grep -rni 'audit' <骨組みの範囲>` → 0 件 | 使えない（無い）。作る |
 | `appendAudit` | 同上 | 同上 | 使えない（無い）。`writeAtomically` を通して作る |
 | `readHttpCall` | `packages/contracts/src/users-api.ts` の `parseUsersRequest`（JSON でない・配列でない・空・数の上限の順の検査）と `users-handler.ts` の `decodeBody` | `grep -rn 'parseUsersRequest\|decodeBody' <骨組みの範囲>` → 3 件 | 使う（理由のコードの順と base64 の本文の読み方を引き継ぎ、操作の表の共通の検査へ広げる。要素の上限は 10 から 100、重なりの検査を足す） |
-| `readMcpCall` | MCP の受け口・JSON-RPC のライブラリ | `grep -rnE 'jsonrpc\|tools/list\|mcp' <骨組みの範囲>` → 0 件。`grep -oE '"node_modules/@modelcontextprotocol[^"]*"' package-lock.json` → 0 件 | 使えない（無い）。セッションを持たない JSON の 1 応答だけを受けるため、SDK を足さず作る（[MCP](../issue-24-design-api.md#mcp)） |
+| `readMcpCall` | MCP の受け口・JSON-RPC のライブラリ | `grep -rnE 'jsonrpc\|tools/list\|mcp' <骨組みの範囲>` → 0 件。`grep -oE '"node_modules/@modelcontextprotocol[^"]*"' package-lock.json` → 0 件 | 使えない（無い）。セッションを持たない JSON の 1 応答だけを受けるため、SDK を足さず作る（[MCP](../../design/api.md#mcp)） |
 | `dispatch` | `users-handler.ts` の `createHandler`（依存の注入・401・400・503 の扱い） | `grep -rnE 'dispatch\|route\|handler' <骨組みの範囲>` → `users-handler.ts` と `app-stack.ts` の起点の指定 | 使う（依存を注入して起点を作る形と、想定しない失敗を 503 にする扱いを引き継ぐ）。振り分けの本体は作る |
 | `writeHttpResponse` | `users-handler.ts` の `json` | `grep -n 'function json' apps/api/src/users-handler.ts` → 1 件。`grep -rnE 'problem\+json\|about:blank' <骨組みの範囲>` → 0 件 | 使う（`content-type` と本文の組み立てを引き継ぐ）。problem の形と `no-store` を足す |
 | `writeMcpResponse` | MCP の応答の組み立て | `grep -rnE 'structuredContent\|jsonrpc' <骨組みの範囲>` → 0 件 | 使えない（無い）。作る |
