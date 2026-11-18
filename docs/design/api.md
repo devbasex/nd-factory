@@ -292,8 +292,8 @@ ID の種類の頭:
 | --- | --- |
 | `approvals.answer` | 要素に `reason`（文字列、0〜2,000 字、任意）と `drop_issues`（整数の配列、任意、設計承認ゲートの依頼だけ）を足す。外れたら要素の 400 `item_invalid` |
 | `questions.answer` | 問いの「人だけか」が真の要素を 403 `human_only`。委任でない主体（人）の要素は受ける |
-| `sprints.create`・`project_transfers.create` | 移しの間は要素の 409 `project_transfer_in_progress`、差し替えの保留の間は要素の 409 `credential_rotation_in_progress`（I20） |
-| `project_transfers.create`・`project_transfers.accept`・`project_transfers.delete` | 作成は移し中の印と止める依頼（移す途中の状態の「止め終えたか」が偽）を 1 つの書き込みで書いてから E18 を出す。受け入れは、印が対象の移しの ID と同じで「取り下げたか」が偽であることを条件に入れ、今の割り当ての差し替えと同じ書き込みで印を空にして E17 を出す（条件が外れたら 409 `state_mismatch` で割り当てを変えない）。取り下げは「取り下げたか」を真にし、印を空にするのは[全体の設計の割り当てを変える流れ](overview.md#割り当てを変える流れ) の条件がそろった後だけ |
+| `sprints.create`・`project_transfers.create` | 移しの間は要素の 409 `project_transfer_in_progress`、差し替えの保留の間は要素の 409 `credential_rotation_in_progress`（I20）。認可の判定に使った今の割り当ての ID（`current_assign_id`）が書き込みの時点で変わっていれば、存在しないときと同じ 404 で書かない（I20・I2） |
+| `project_transfers.create`・`project_transfers.accept`・`project_transfers.delete` | 作成は移し中の印と止める依頼（移す途中の状態の「止め終えたか」が偽）を 1 つの書き込みで書いてから E18 を出す。受け入れは、印が対象の移しの ID と同じで「取り下げたか」が偽であることを条件に入れ、割り当ての行の追加・今の割り当ての差し替え・印を空にする更新を 1 つのトランザクションで書いて E17 を出す（条件が外れたら 409 `state_mismatch` で割り当てを変えない）。取り下げは「取り下げたか」を真にし、印を空にするのは[全体の設計の割り当てを変える流れ](overview.md#割り当てを変える流れ) の条件がそろった後だけ |
 | `/v1/runner/answer_deliveries/create` | 要求の要素に、`ndf answer` の結果の `metrics.seqs`（NDF の答えの事象の番号）を足す（I5） |
 | `/v1/runner/answers/list` | 応答の要素に `redeliver`（真偽）を足す。前の世代が受け取って渡し中のままの答えで真。応答に、そのレーンの「届いた」答えの行に記した NDF の答えの事象の番号の並び（`delivered_seqs`）を足す。届いた答えは要素に載せないが、番号はこの並びで返す（照らす守りの控え。I5） |
 | `/v1/machine/heartbeats/create` | 最初の心拍（マシンが登録待ち）の応答に、マシンの ID・心拍の間隔・差し替えた登録の token を持たせる |
