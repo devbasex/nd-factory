@@ -1,6 +1,13 @@
 # 詳細設計: 横断の部品が 1 か所にあり、画面・API・MCP の要求が同じ振り分けで同じ判定と記録を通る（#24）
 
-[頭の文書](issue-24-design.md)の不変条件（I2・I4・I5・I8・I9・I12〜I15）と、[土台](issue-24-design-platform.md)の「横断の部品と定数の置き場」「アーキテクチャ」、[API と MCP](issue-24-design-api.md)の「呼び出しの規約」「認証と主体」「認可」「操作の記録」「形の正本」を、モジュールと関数の粒度へ下ろす。
+この文書は、次の項目をモジュールと関数の粒度へ下ろす。
+
+| 文書 | 受ける項目 |
+| --- | --- |
+| [頭の文書](issue-24-design.md) | 不変条件 I2・I4・I5・I8・I9・I12〜I15 |
+| [土台](issue-24-design-platform.md) | 「横断の部品と定数の置き場」「アーキテクチャ」 |
+| [API と MCP](issue-24-design-api.md) | 「呼び出しの規約」「認証と主体」「認可」「操作の記録」「形の正本」 |
+
 扱うのは、リポジトリのモジュールの置き場と依存の向き、横断の部品の最上位の関数の仕様・異常系・並行と排他・記録の出し方・テストの観点である。
 各コンテキストのモジュール（利用者とチーム・プロジェクト・実行の制御ほか）の関数は、受け持つ子の課題（K6〜K12）の詳細設計が持つ。横断の部品の形の細部（ファイルの単位・型の項目の並び）は K2 の詳細設計が決める（[子ごとの詳細設計で書くこと](issue-24-design-children.md#子ごとの詳細設計で書くこと)）。
 
@@ -42,7 +49,16 @@ nd-factory/
     └── test/               CI の定義のテスト（ある）
 ```
 
-依存は一方向で、循環を持たない。`packages/contracts` は zod のほかに何にも依らない。`packages/core` は `packages/contracts` だけに依る。`apps/api`・`apps/runner`・`apps/nd-runtime`・`apps/db-prep` は `packages/core` と `packages/contracts` に依り、`apps/*` どうしは互いに import しない（ランナーと API は HTTP の経路だけでつながる）。`apps/web` は `packages/contracts` と、`packages/core` のうちブラウザーで動くモジュール（`clock`・`ids`・`redact`・`log`）だけに依る。`infra` は `packages/contracts` に依り、`apps/*` を import せずに起点のファイルのパスを資産として束ねるだけにする。`tools` は `packages/contracts` に依り、ほかの置き場のコードを文字として読む。`packages/core` が各コンテキストの表の行を読む所（席・割り当て・委任・マシン・レーン）は、`core` が読み手の型（ポート）だけを持ち、`apps/api/src/modules/` が中身を渡す。これで `core` から `apps` への向きの依存を作らない。
+依存は一方向で、循環を持たない。
+
+| 置き場 | 依る先 | 決まり |
+| --- | --- | --- |
+| `packages/contracts` | zod だけ | ほかに何にも依らない |
+| `packages/core` | `packages/contracts` だけ | 各コンテキストの表の行を読む所（席・割り当て・委任・マシン・レーン）は、`core` が読み手の型（ポート）だけを持ち、`apps/api/src/modules/` が中身を渡す。これで `core` から `apps` への向きの依存を作らない |
+| `apps/api`・`apps/runner`・`apps/nd-runtime`・`apps/db-prep` | `packages/core` と `packages/contracts` | `apps/*` どうしは互いに import しない（ランナーと API は HTTP の経路だけでつながる） |
+| `apps/web` | `packages/contracts` と、`packages/core` のうちブラウザーで動くモジュール（`clock`・`ids`・`redact`・`log`）だけ | — |
+| `infra` | `packages/contracts` | `apps/*` を import せず、起点のファイルのパスを資産として束ねるだけにする |
+| `tools` | `packages/contracts` | ほかの置き場のコードを文字として読む |
 
 | 置き場 | モジュール | 最上位の関数 |
 | --- | --- | --- |
@@ -67,9 +83,9 @@ nd-factory/
 | `apps/nd-runtime/`（この文書で決めた） | nd ランタイム | K9 の詳細設計。API への送信は `callHttp` を通す |
 | `apps/db-prep/`（この文書で決めた） | DB の用意 | K5・K8 の詳細設計 |
 | `infra/` | スタックと設置のコマンド | 骨組みのまま。足す資源は K5 ほか |
-| `tools/checks/`（この文書で決めた） | 足す検査 | K1 の詳細設計。境界の検査は下の「横断の部品の外で直に使わないもの」を `apps/` と `packages/core` の外の実行時のコードで探す |
+| `tools/checks/`（この文書で決めた） | 足す検査 | K1 の詳細設計。境界の検査は [土台の横断の部品の置き場の基準](issue-24-design-platform.md#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」を `apps/` と `packages/core` の外の実行時のコードで探す |
 
-境界の検査の対象は、実行の時に動くコード（`apps/` の 6 つの置き場）である。`infra/` と `tools/` は組み立てと反映の時だけ動くため対象から外し、`infra/setup/` の AWS SDK のクライアントの直の生成は今のまま使う（この文書で決めた）。
+境界の検査の対象は、実行の時に動くコード（`apps/` の 5 つの置き場）である。`infra/` と `tools/` は組み立てと反映の時だけ動くため、対象から外す。`infra/setup/` の AWS SDK のクライアントの直の生成は今のまま使う（この文書で決めた）。
 
 ## 関数の仕様
 
@@ -104,7 +120,7 @@ nd-factory/
 | `writeHttpResponse` | `packages/core`（`dispatch`） | 新設 | `(result: DispatchResult) => HttpResponse` | 振り分けの結果を HTTP の応答へ書く | 無し | 要素の結果は 200 と配列、要求全体の誤りは `application/problem+json`。どの応答も `Cache-Control: no-store`。500 を返さない | 無し |
 | `writeMcpResponse` | `packages/core`（`dispatch`） | 新設 | `(result: DispatchResult \| McpReply, rpcId: string \| number \| null) => HttpResponse` | 振り分けの結果を MCP の JSON の 1 応答へ書く | 無し | 要素の結果は `structuredContent` と同じ値の JSON の文字列の `content`。要求全体の誤りは `isError: true` と problem の JSON | 無し |
 
-ハンドラーは状態を自分で書かない。`dispatch` から要素を 1 つ受け、要素の結果と、組んだ書き込み（`putIfAbsent`・`updateIfVersion`・`usageAddItem` の戻り値）を返す。確定は `dispatch` が記録の行と冪等の鍵の済みの行と一緒に `writeAtomically` で行う。これで記録の無い状態の書き込み（I9）と、済みにならない冪等の鍵が起こらない。
+ハンドラーは状態を自分で書かない。`dispatch` から要素を 1 つ受け、要素の結果と組んだ書き込みを返す。組んだ書き込みは `putIfAbsent`・`updateIfVersion`・`usageAddItem` の戻り値である。確定は `dispatch` が記録の行と冪等の鍵の済みの行と一緒に `writeAtomically` で行う。これで記録の無い状態の書き込み（I9）と、済みにならない冪等の鍵が起こらない。
 
 ## 異常系の処理
 
@@ -192,7 +208,7 @@ nd-factory/
 | `readMcpCall` | 方法が `tools/call` で、名前が道具の一覧に無い | JSON-RPC の誤り `-32602`。記録の行を 1 件（操作は空） |
 | `readMcpCall` | 方法が知らせ（`notifications/` で始まる） | 202 で本文なし |
 
-- 繰り返しの終わる条件: `withRetry` は `policy.max_attempts` 回か `deadline` で終わる。`dispatch` の要素の繰り返しは要素の数（1〜100）で終わり、各要素の前に関数の残り時間が `DISPATCH_RESERVE_MS` を下回れば打ち切る。`claimIdempotency` の取り直しは 1 回だけ。
+- 繰り返しの終わる条件: `withRetry` は `policy.max_attempts` 回か `deadline` で終わる。`dispatch` の要素の繰り返しは要素の数（1〜100）で終わる。各要素の前に関数の残り時間が `DISPATCH_RESERVE_MS` を下回れば打ち切る。`claimIdempotency` の取り直しは 1 回だけ。
 - 計算量の注意: `dispatch` は書く要素ごとに 1 つのトランザクションを順に確定する（100 要素で 100 回）。`visibleProjectIds` は要求ごとに 1 回だけ求め、要素ごとに求め直さない。委任の照らしと見える集まりは要求をまたいで控えない（取り消しと席の変化を次の要求から効かせるため）。
 
 ## 内部のデータと定数
@@ -265,7 +281,12 @@ nd-factory/
 
 ## 既存の部品の再利用
 
-確かめた範囲は、worktree の `apps/api/src/`・`packages/contracts/src/`・`packages/contracts/scripts/`・`infra/lib/`・`infra/setup/`・`infra/bin/`・`apps/web/src/`・`tools/ref-check/src/` と、依存のライブラリ（各 `package.json` と `package-lock.json`）である。下の「骨組みの範囲」はこの 8 つの置き場を指す。
+確かめた範囲は、worktree の次の 8 つの置き場と、依存のライブラリ（各 `package.json` と `package-lock.json`）である。下の「骨組みの範囲」はこの 8 つの置き場を指す。
+
+- `apps/` の `api/src/`・`web/src/`
+- `packages/contracts/` の `src/`・`scripts/`
+- `infra/` の `lib/`・`setup/`・`bin/`
+- `tools/` の `ref-check/src/`
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
@@ -314,7 +335,7 @@ nd-factory/
 | `putIfAbsent` | 条件 `attribute_not_exists(pk)` と扱いを持つ 1 件 | `schema_version` の無い行を型で弾く | 無し |
 | `updateIfVersion` | 版の条件と `version + 1` を持つ 1 件 | `version` が 1・`extra` あり | `set` に `version` を含むと型で弾く |
 | `writeAtomically` | 全件が書かれ `ok` | 1 件と 100 件 | 条件の外れの件の番号と扱いを返す、衝突は再試行、届かないは再試行の後に投げる、101 件で止まる |
-| `authenticate` | 人・委任・ランナー・手元のマシン・GitHub の 5 つが決まる | 期限の 1 秒前と 1 秒後・`kid` の取り直しが 1 分に 1 回 | 形・署名・期限・取り消し・受け口の違いはすべて同じ `unauthorized`、鍵と表に届かないは `unavailable`、最後に使った時刻を書けなくても続く |
+| `authenticate` | 人・委任・ランナー・手元のマシン・GitHub・DB の用意のタスクの 6 つが決まる（見回りは HTTP の経路を持たず、認証を通らない） | 期限の 1 秒前と 1 秒後・`kid` の取り直しが 1 分に 1 回 | 形・署名・期限・取り消し・受け口の違いはすべて同じ `unauthorized`、鍵と表に届かないは `unavailable`、最後に使った時刻を書けなくても続く |
 | `visibleProjectIds` | 人・委任・ランナーの集まり | 委任した人がチームを外れた次の要求で集まりから消える | 読み手の失敗を投げる |
 | `authorize` | 見える要素を `allow` | 見える要素と見えない要素の混ざり・移す途中の名前だけの読み | 見えないは 404、委任の人だけは要求全体の 403、種類の不足は 403、メンバーの持ち主だけの操作は要素の 403、読み手の失敗は投げる |
 | `judgeUsage` | 上限の内で `allowed` | 使った額が上限額ちょうど・同時の数がちょうど・上限なしの行 | 上限額に当たる、場所と推論の手段が許されない、同時の数が満ちる、通貨の違い |

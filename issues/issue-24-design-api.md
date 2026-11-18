@@ -1,8 +1,33 @@
 # API と MCP: 画面でできる操作を、人も AI のエージェントも同じ操作の表から同じ認可で行える（#24）
 
-頭の文書 [issue-24-design.md](issue-24-design.md) の機能一覧（F1〜F20）・不変条件（I2〜I5・I9・I12・I14・I15）・集約を受け、API と MCP の形を決める。
-扱うのは、呼び出しの規約・値の形・操作の一覧・認証と主体・認可・委任・MCP・操作の記録・形の正本である。
-画面の項目は [issue-24-design-screens.md](issue-24-design-screens.md)、ランナーと手元のマシンの振る舞いは [issue-24-design-execution.md](issue-24-design-execution.md)、資源と費用は [issue-24-design-platform.md](issue-24-design-platform.md) が持つ。
+この文書は API と MCP の形を決める。受けるのは、頭の文書 [issue-24-design.md](issue-24-design.md) の機能一覧（F1〜F20）・不変条件（I2〜I5・I9・I12・I14・I15）・集約である。
+ほかの文書が持つもの:
+
+| 中身 | 文書 |
+| --- | --- |
+| 画面の項目 | [issue-24-design-screens.md](issue-24-design-screens.md) |
+| ランナーと手元のマシンの振る舞い | [issue-24-design-execution.md](issue-24-design-execution.md) |
+| 資源と費用 | [issue-24-design-platform.md](issue-24-design-platform.md) |
+
+## この文書で決めること
+
+理由は各決定の節にある。
+
+| 節 | 決めること | 決定 |
+| --- | --- | --- |
+| [呼び出しの規約](#呼び出しの規約) | 操作の名前・HTTP の経路・MCP の道具の名前を 1 対 1 にし、メソッドを POST にそろえる | 40 |
+| [呼び出しの規約](#呼び出しの規約) | 応答は要素ごとの結果を既定にし、誤りは理由のコードだけを返す。500 を返さず 503 にそろえる | 41・46 |
+| [呼び出しの規約](#呼び出しの規約) | 冪等の鍵を要素ごとに持たせ、24 時間同じ結果を返す | 42 |
+| [呼び出しの規約](#呼び出しの規約) | ページ送りは不透明なカーソルで行い、全体の件数を返さない | 43 |
+| [呼び出しの規約](#呼び出しの規約) | 版を経路の頭の `/v1` に置く。書くエンティティに版の数を持たせ、条件つきで書く | 44・45 |
+| [値の形](#値の形) | 日時・金額・言語・時刻帯・ID を 1 つの形に決める | 47 |
+| [操作の一覧](#操作の一覧) | F1〜F20 を操作へ割り、人だけの操作を決める | — |
+| [認証と主体](#認証と主体) | 認証を API の Lambda の中の 1 か所に置く | 48 |
+| [認可](#認可) | 一覧は見えるプロジェクトの ID から表を引き、知らせは送る直前にも照らす | 53 |
+| [委任](#委任) | 範囲をプロジェクトと 3 つの操作の種類にし、期限を 1 時間〜30 日にする。MCP は画面で発行した token を貼り、OAuth 2.1 を後に回す | 49・50 |
+| [MCP](#mcp) | 道具を操作の表から生成し、セッションを持たない。人だけの操作を道具にしない | 51・52 |
+| [操作の記録](#操作の記録) | 状態の書き込みと同じトランザクションで追記する | 54 |
+| [形の正本](#形の正本) | zod の操作の表を正本にし、OpenAPI は自前の生成のスクリプトで組む | 55 |
 
 ## 呼び出しの規約
 
@@ -122,9 +147,17 @@ ID の種類の頭:
 
 機能一覧の F1〜F20 を、エンティティごとの操作へ 1 行ずつ割る。HTTP の経路のメソッドはすべて `POST` で、表では HTTP の経路の path だけを書く。本文はすべて配列で受け渡す（[本文は配列](#本文は配列)）。
 
-「MCP の道具か」の列の「道具」は同じ名前の道具があることを、「依頼と材料の読み出しだけ」は人だけの操作で、MCP では対になる読み出しの道具だけを持つことを示す（[人だけの操作の扱い](#人だけの操作の扱い)）。「読む / 書く」の列の括弧は、委任で呼ぶときに要る委任の種類（[委任](#委任)）である。
+表の列の読み方:
+
+| 列の値 | 意味 |
+| --- | --- |
+| 「MCP の道具か」の「道具」 | 同じ名前の道具がある |
+| 「MCP の道具か」の「依頼と材料の読み出しだけ」 | 人だけの操作で、MCP では対になる読み出しの道具だけを持つ（[人だけの操作の扱い](#人だけの操作の扱い)） |
+| 「読む / 書く」の括弧 | 委任で呼ぶときに要る委任の種類（[委任](#委任)） |
 
 ### 利用者向けの操作
+
+#### 利用者・チーム・プロジェクト（F1〜F6）
 
 | 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | 人だけか | 読む / 書く |
 | --- | --- | --- | --- | --- | --- |
@@ -159,6 +192,11 @@ ID の種類の頭:
 | `project_transfers.accept` | `/v1/project_transfers/accept` | F6 | 依頼と材料の読み出しだけ（`project_transfers.list`） | 人だけ | 書く |
 | `project_transfers.delete` | `/v1/project_transfers/delete` | F6 | 依頼と材料の読み出しだけ（`project_transfers.list`） | 人だけ | 書く |
 | `projects.close` | `/v1/projects/close` | F6 | 依頼と材料の読み出しだけ（`projects.get`） | 人だけ | 書く |
+
+#### スプリント・承認・問い・知らせ（F7〜F14）
+
+| 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | 人だけか | 読む / 書く |
+| --- | --- | --- | --- | --- | --- |
 | `waiting_counts.get` | `/v1/waiting_counts/get` | F7・F14 | 道具 | — | 読む（read） |
 | `issue_candidates.list` | `/v1/issue_candidates/list` | F8 | 道具 | — | 読む（read） |
 | `sprints.create` | `/v1/sprints/create` | F8 | 道具 | — | 書く（run） |
@@ -175,6 +213,11 @@ ID の種類の頭:
 | `questions.answer` | `/v1/questions/answer` | F13 | 道具（レッドラインに当たる問いは、要素ごとに 403 `human_only`） | レッドラインに当たる問いだけ人だけ | 書く（run） |
 | `notices.list` | `/v1/notices/list` | F14 | 道具 | — | 読む（read） |
 | `notices.mark_read` | `/v1/notices/mark_read` | F14 | 道具 | — | 書く（run） |
+
+#### 通知先・委任・実行・費用・記録（F15〜F20）
+
+| 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | 人だけか | 読む / 書く |
+| --- | --- | --- | --- | --- | --- |
 | `notification_targets.list` | `/v1/notification_targets/list` | F15 | 道具 | — | 読む（read） |
 | `notification_targets.create` | `/v1/notification_targets/create` | F15 | 依頼と材料の読み出しだけ（`notification_targets.list`） | 人だけ | 書く |
 | `notification_targets.test` | `/v1/notification_targets/test` | F15 | 道具 | — | 書く（manage） |
@@ -195,7 +238,7 @@ ID の種類の頭:
 | `spend_caps.update` | `/v1/spend_caps/update` | F19 | 依頼と材料の読み出しだけ（`usage.get`） | 人だけ | 書く |
 | `audit_records.list` | `/v1/audit_records/list` | F20 | 道具 | — | 読む（read） |
 
-人だけにした操作と、その理由:
+### 人だけにした理由
 
 | 操作 | 理由（MVV の項目） |
 | --- | --- |
@@ -208,7 +251,7 @@ ID の種類の頭:
 | `machines.create` | 登録の token（秘密）を発行する |
 | `sessions.create`・`sessions.delete`・`logins.create`・`logins.delete`・`github_installations.link` | 人のブラウザーの中の流れ（サインイン・IdP のログインをつなぐ戻り・GitHub の導入の戻り）で、委任の主体が通る流れでない。`logins.delete` は最後の 1 つのログインを外す要求を 409 で拒む |
 
-外す・狭める操作（`repositories.remove`・`notification_targets.delete`・`model_keys.delete`・`machines.delete`）は、見える範囲も費用も広げないため委任から呼べる。
+外す・狭める操作は、見える範囲も費用も広げないため委任から呼べる。当たるのは `repositories.remove`・`notification_targets.delete`・`model_keys.delete`・`machines.delete` である。
 
 ### ランナー・手元のマシン・DB の用意のタスクの HTTP の経路
 
@@ -511,7 +554,16 @@ classDiagram
 | 値の形 | 時刻帯の無い日時・通貨の無い金額を受ける形（I15） |
 | 配列 | 要求か応答の形が配列でない利用者向けの操作（I12） |
 
-今の骨組みの `PUT /v1/users`（`packages/contracts/src/users-api.ts`）は、本文が配列で要素ごとに答える形を既に持つ。この設計では、HTTP の経路を `POST /v1/sessions/create` に、要素の結果を `{"ok": true, "item"}` の形に、要素の誤りを要求全体の 400 から要素の 400 `item_invalid` に、要素の上限を 10 から 100 に直す（決定 41・47）。
+### 今の骨組みの API と合わない所
+
+今の骨組みの `PUT /v1/users`（`packages/contracts/src/users-api.ts`）は、本文が配列で要素ごとに答える形を既に持つ。この設計では次の 4 つを直す（決定 41・47）。
+
+| 項目 | 今 | 直す先 |
+| --- | --- | --- |
+| HTTP の経路 | `PUT /v1/users` | `POST /v1/sessions/create` |
+| 要素の結果 | `{"status": "ok", "item"}`（決定 41） | `{"ok": true, "item"}` の形 |
+| 要素の誤り | 要求全体の 400 | 要素の 400 `item_invalid` |
+| 要素の上限 | 10 | 100 |
 
 ## 外部の調査
 
@@ -567,15 +619,25 @@ classDiagram
 
 操作の名前 `sprints.create` を、HTTP の経路 `POST /v1/sprints/create` と MCP の道具の名前にそのまま使う。3 つの面の対応を名前の照らし合わせだけで検査でき（I14）、記録の操作の名前も 1 通りになる。読む操作も本文に配列を持つため（I12）、本文を持てない GET を使わず POST にそろえる。
 
-採らなかった案: 読むを GET と query の繰り返し、書くを POST・PATCH・DELETE にする形は、GET だけ本文が配列でなく形が 2 通りになり、query の長さの上限で要素の数が縛られる。1 つの端点で JSON-RPC を受ける形は、API Gateway で操作ごとに HTTP の経路と呼ぶ回数の上限を分けられない。
+採らなかった案:
+
+| 形 | 理由 |
+| --- | --- |
+| 読むを GET と query の繰り返し、書くを POST・PATCH・DELETE にする | GET だけ本文が配列でなく、形が 2 通りになる。query の長さの上限で要素の数が縛られる |
+| 1 つの端点で JSON-RPC を受ける | API Gateway で、操作ごとに HTTP の経路と呼ぶ回数の上限を分けられない |
 
 根拠: Value 2 / Value 4（MVV 版 1）
 
 ### 決定 41: 一部の失敗で成功した分を失わないよう、応答は要素ごとの結果を既定にし、誤りは理由のコードだけを返す
 
-要素ごとに成功と失敗を返し、HTTP の状態は 200 にする。1 つの要素の失敗で全体を投げると、1 回しか返せない値（委任の token）や成功した作成の結果を失う。要素どうしで 1 つの変化になる `projects.create` と `repositories.add` だけを全部か無かにする。要求全体の誤りは RFC 9457 の形に理由のコードを拡張で足し、文言の `title`・`detail` を持たない。文言は画面の翻訳のファイルが持ち、API が言語を持たないためである。今の骨組みの `{"status": "ok", "item"}` の形は、成功の判定と HTTP の状態の数が同じ名前になるため `{"ok": true, "item"}` に直す。
+要素ごとに成功と失敗を返し、HTTP の状態は 200 にする。1 つの要素の失敗で全体を投げると、1 回しか返せない値（委任の token）や成功した作成の結果を失う。要素どうしで 1 つの変化になる `projects.create` と `repositories.add` だけを全部か無かにする。要求全体の誤りは RFC 9457 の形に理由のコードを拡張で足し、文言の `title`・`detail` を持たない。文言は画面の翻訳のファイルが持ち、API が言語を持たないためである。今の骨組みの `{"status": "ok", "item"}` の形は、成功の判定と HTTP の状態の数が同じ名前になる。そのため `{"ok": true, "item"}` に直す。
 
-採らなかった案: すべての操作を全部か無かにする形は、通知の既読や複数のスプリントの取り消しで、関係の無い 1 件の失敗が全部を止める。誤りに文言を入れる形は、言語を足すたびに API を直すことになる。
+採らなかった案:
+
+| 形 | 理由 |
+| --- | --- |
+| すべての操作を全部か無かにする | 通知の既読や複数のスプリントの取り消しで、関係の無い 1 件の失敗が全部を止める |
+| 誤りに文言を入れる | 言語を足すたびに API を直すことになる |
 
 - 作り方: 標準に倣う・自前で作る
 - 比べた候補: STD42
@@ -627,9 +689,22 @@ classDiagram
 
 ### 決定 47: 国や地域で読み違えないよう、日時・金額・言語・時刻帯・ID を 1 つの形に決める
 
-日時は `Z` の UTC の RFC 3339、金額は最小単位の整数と ISO 4217 の英字 3 字、言語は BCP 47、時刻帯は IANA の名前に決め、形の正本の検証で外れた値を拒む（I15）。ID は種類の頭と UUIDv7 にし、頭で取り違えを読めるようにし、作った順に並べられるようにする。
+| 値 | 形 |
+| --- | --- |
+| 日時 | `Z` の UTC の RFC 3339 |
+| 金額 | 最小単位の整数と ISO 4217 の英字 3 字 |
+| 言語 | BCP 47 |
+| 時刻帯 | IANA の名前 |
+| ID | 種類の頭と UUIDv7。頭で取り違えを読め、作った順に並べられる |
 
-採らなかった案: 金額を小数で持つ形は、通貨ごとの桁と丸めで食い違う。ID を UUIDv4 にする形は、作った順に並ばず、表の並びの鍵に別の時刻が要る。
+形の正本の検証で、外れた値を拒む（I15）。
+
+採らなかった案:
+
+| 形 | 理由 |
+| --- | --- |
+| 金額を小数で持つ | 通貨ごとの桁と丸めで食い違う |
+| ID を UUIDv4 にする | 作った順に並ばず、表の並びの鍵に別の時刻が要る |
 
 - 作り方: 標準に倣う
 - 比べた候補: STD44 / STD45
@@ -638,9 +713,14 @@ classDiagram
 
 ### 決定 48: 人の token と委任の token を同じ操作で受けるよう、認証を API の Lambda の中の 1 か所に置く
 
-同じ HTTP の経路が Cognito の access token と委任の token の両方を受けるため、API Gateway の JWT の前段（今の骨組みの `infra/lib/app-stack.ts`）を利用者向けの HTTP の経路から外し、Lambda の中で token の種類を見分けて確かめる。Cognito の token は `aws-jwt-verify` で確かめる。委任の token は毎回、表を強い整合で読み、取り消しを次の要求から効かせる。
+同じ HTTP の経路が、Cognito の access token と委任の token の両方を受ける。そのため API Gateway の JWT の前段（今の骨組みの `infra/lib/app-stack.ts`）を、利用者向けの HTTP の経路から外す。Lambda の中で token の種類を見分けて確かめる。Cognito の token は `aws-jwt-verify` で確かめる。委任の token は毎回、表を強い整合で読み、取り消しを次の要求から効かせる。
 
-採らなかった案: Lambda の前段（authorizer）は呼び出しが 1 段増え、結果のキャッシュが取り消しを遅らせる。人と委任で HTTP の経路を分ける形は、同じ操作が 2 つの HTTP の経路に分かれる（Value 4）。
+採らなかった案:
+
+| 形 | 理由 |
+| --- | --- |
+| Lambda の前段（authorizer） | 呼び出しが 1 段増え、結果のキャッシュが取り消しを遅らせる |
+| 人と委任で HTTP の経路を分ける | 同じ操作が 2 つの HTTP の経路に分かれる（Value 4） |
 
 - 作り方: ライブラリやサービスを使う・自前で作る
 - 比べた候補: LIB41 / LIB44
@@ -660,7 +740,7 @@ classDiagram
 
 ### 決定 50: 最初の版で MCP を使い始められるよう、MCP の認可は画面で発行した委任の token を貼る形にし、OAuth 2.1 の流れを後に回す
 
-Cognito はクライアントの動的な登録とクライアント ID の資料を持たず（LIB44）、OAuth の流れには認可サーバー（認可の端点・token の端点・同意の画面・refresh token）を自前で作るか前に置く層が要る。OAuth 2.1 自体がまだ草案である（STD41）。MCP の仕様は認可を任意とし（STD40）、主要な遠くの MCP サーバーも貼る token を受ける（PRD42）。委任の表・範囲・人だけの判定は OAuth を足しても同じに使えるため、後から足しても捨てるものが無い。
+Cognito はクライアントの動的な登録とクライアント ID の資料を持たない（LIB44）。OAuth の流れには、認可サーバー（認可の端点・token の端点・同意の画面・refresh token）を自前で作るか、前に置く層が要る。OAuth 2.1 自体がまだ草案である（STD41）。MCP の仕様は認可を任意とし（STD40）、主要な遠くの MCP サーバーも貼る token を受ける（PRD42）。委任の表・範囲・人だけの判定は OAuth を足しても同じに使えるため、後から足しても捨てるものが無い。
 
 採らなかった案: 最初から OAuth 2.1 の流れを持つ形は、認可サーバーを作る分だけ MCP を使える時期が遅れ、運用する資源も増える（Value 6）。
 
@@ -708,7 +788,7 @@ Cognito はクライアントの動的な登録とクライアント ID の資�
 
 HTTP の経路はすべて `POST` と配列の本文の 1 つの形で、OpenAPI の文書は操作の表と `z.toJSONSchema` の結果を並べるだけで組める。生成のスクリプトは既に設定のファイルの JSON Schema を作っている（`packages/contracts/scripts/generate.ts`）。差の検査は今の `check` の生成物の差がそのまま担う。
 
-採らなかった案: `zod-openapi` と `@asteasolutions/zod-to-openapi` はどちらも要件を満たすが、HTTP の経路の形が 1 つしか無いこの API では、依存を 1 つ増やす分の得が無い。
+採らなかった案: `zod-openapi` と `@asteasolutions/zod-to-openapi` はどちらも要件を満たす。ただ HTTP の経路の形が 1 つしか無いこの API では、依存を 1 つ増やす分の得が無い。
 
 - 作り方: 自前で作る
 - 比べた候補: LIB42 / LIB43

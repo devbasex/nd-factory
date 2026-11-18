@@ -1,7 +1,16 @@
 # 土台: 誰でも自分の AWS へ安く設置でき、承認した差分だけが反映され、値の漏れを検査で止められる（#24）
 
-[頭の文書](issue-24-design.md)の「MVV と設計の節の対応」のうち、Value 6（インフラ・費用）・Value 7（検査）・Value 8 と P1（反映と設置）を受け、頭の文書のドメインモデル（集約・不変条件 I1〜I16）を置き場とインフラへ下ろす。
-アーキテクチャは arc42（STD1）の 12 章と C4（STD2）の図で書く。画面・API・実行の振る舞いは [画面](issue-24-design-screens.md)・[API と MCP](issue-24-design-api.md)・[実行](issue-24-design-execution.md) にあり、この文書はそれらが動く土台だけを扱う。
+この文書は、頭の文書のドメインモデル（集約・不変条件 I1〜I16）を、置き場とインフラへ下ろす。
+受けるのは、[頭の文書](issue-24-design.md)の「MVV と設計の節の対応」のうち次の 3 つである。
+
+| 受ける項目 | 受ける節 |
+| --- | --- |
+| Value 6 | インフラ・費用 |
+| Value 7 | 検査 |
+| Value 8 と P1 | 反映と設置 |
+
+画面・API・実行の振る舞いは [画面](issue-24-design-screens.md)・[API と MCP](issue-24-design-api.md)・[実行](issue-24-design-execution.md) にあり、この文書はそれらが動く土台だけを扱う。
+アーキテクチャは arc42（STD1）の 12 章と C4（STD2）の図で書く。
 値はすべて作り物（AWS のアカウント `123456789012`・リージョン `us-west-2`・接頭辞 `acme`・環境 `test`）か設計の既定値である。
 
 ## アーキテクチャ
@@ -315,7 +324,13 @@ erDiagram
 | `target_ids` | 文字列の配列 | 許さない | 対象の ID。空の配列は「対象を持たない操作」（サインインなど） |
 | `result` | 地図 | 許さない | 結果（`ok`・`partial`・`rejected`）と、HTTP の状態・理由のコードの並び（[API の文書の操作の記録](issue-24-design-api.md#何を書くか)） |
 
-秘密と個人情報の値は記録に書かない（I9）。1 つの要求は 1 つの記録の ID で、要求の要約の行 1 件と、書いた要素ごとの行（要素の確定と同じトランザクション）で残す。要約の行を書けなければ要求を 503 で失敗させる（[API の文書の書き方と失敗](issue-24-design-api.md#書き方と失敗)）。区切りの鍵は、見られたプロジェクトがあれば `PROJECT#`、無ければ主体の `USER#`、主体の決まらない 401 は `ANON#<UTC の年月日>` にする（[詳細設計](issue-24-design-detail.md#内部のデータと定数)）。
+秘密と個人情報の値は記録に書かない（I9）。1 つの要求は 1 つの記録の ID で、要求の要約の行 1 件と、書いた要素ごとの行（要素の確定と同じトランザクション）で残す。要約の行を書けなければ要求を 503 で失敗させる（[API の文書の書き方と失敗](issue-24-design-api.md#書き方と失敗)）。区切りの鍵は次のとおりにする（[詳細設計](issue-24-design-detail.md#内部のデータと定数)）。
+
+| 場合 | 区切りの鍵 |
+| --- | --- |
+| 見られたプロジェクトがある | `PROJECT#` |
+| 見られたプロジェクトが無い | 主体の `USER#` |
+| 主体の決まらない 401 | `ANON#<UTC の年月日>` |
 
 ### 状態の S3
 
@@ -408,7 +423,7 @@ DB の用意のタスクは、API から引き換えの token で管理の接続
 | 見回り | — | R | U | R | U | — | U | — | C | — | — |
 | 知らせの送り手 | — | — | — | — | — | — | — | — | U | — | — |
 
-F6 は 6 つのデータを書く。割り当てを移す流れは、止める（スプリント）・断つ（token・DB の資格情報）・差し替える（割り当て）を 1 つの確定に束ねるためで、各データの更新は持ち主のモジュールの操作を順に呼ぶ（ドメインイベント E17）。1 つの書き込みで複数の集約を書かない。
+F6 は 6 つのデータを書く。割り当てを移す流れが、止める（スプリント）・断つ（token・DB の資格情報）・差し替える（割り当て）を 1 つの確定に束ねるためである。各データの更新は、持ち主のモジュールの操作を順に呼ぶ（ドメインイベント E17）。1 つの書き込みで複数の集約を書かない。
 
 ## インフラ
 
@@ -435,7 +450,7 @@ F6 は 6 つのデータを書く。割り当てを移す流れは、止める�
 
 ### ECS.2 と公開 IP
 
-Security Hub の ECS.2 は ECS のサービス（`AWS::ECS::Service`）で公開 IP の自動の割り当てが有効なときに失敗し、ECS.16 は同じことをタスクセット（`AWS::ECS::TaskSet`）で見る（STD81）。nd-factory は `RunTask` だけでタスクを起こし、どちらの資源も作らないため、2 つのコントロールの対象を持たない。
+Security Hub の ECS.2 は、ECS のサービス（`AWS::ECS::Service`）で公開 IP の自動の割り当てが有効なときに失敗する。ECS.16 は同じことをタスクセット（`AWS::ECS::TaskSet`）で見る（STD81）。nd-factory は `RunTask` だけでタスクを起こし、どちらの資源も作らないため、2 つのコントロールの対象を持たない。
 
 | 扱い | 中身 |
 | --- | --- |
@@ -458,7 +473,7 @@ Security Hub の ECS.2 は ECS のサービス（`AWS::ECS::Service`）で公開
 
 ### 資源の名前
 
-資源の名前は `<prefix>-<environment>-<用途>`、秘密の器と SSM のパラメーターは `<prefix>/<environment>/<用途>` にする（`infra/lib/naming.ts`）。すべての資源にタグ `app-prefix` と `app-env` を付け、費用をこのタグで分けて読む。S3 のバケットは名前を付けず（全リージョンで一意のため）、タグで見分ける。
+資源の名前は `<prefix>-<environment>-<用途>` にする。秘密の器と SSM のパラメーターは `<prefix>/<environment>/<用途>` にする（`infra/lib/naming.ts`）。すべての資源にタグ `app-prefix` と `app-env` を付け、費用をこのタグで分けて読む。S3 のバケットは名前を付けず（全リージョンで一意のため）、タグで見分ける。
 
 | 用途 | 例（作り物） | 状態 |
 | --- | --- | --- |
@@ -523,7 +538,21 @@ Security Hub の ECS.2 は ECS のサービス（`AWS::ECS::Service`）で公開
 
 読み方: 使わない月は秘密の器が大半で、使う月は Aurora の起きている時間が最も効く。Aurora の起きている時間はタスクの動く時間に比例し、承認の待ちの間はタスクも接続も持たないため増えない。ACU の平均・保守で起きる時間・ログの量は実測で確かめる（[未確認のまま残ること](#未確認のまま残ること)）。
 
-単価の出典（取得日 2026-11-17）: [Fargate](https://aws.amazon.com/fargate/pricing/)・[Aurora](https://aws.amazon.com/rds/aurora/pricing/)・[VPC（公開 IP・NAT・Gateway のエンドポイント）](https://aws.amazon.com/vpc/pricing/)・[DynamoDB](https://aws.amazon.com/dynamodb/pricing/on-demand/)・[Secrets Manager](https://aws.amazon.com/secrets-manager/pricing/)・[ECR](https://aws.amazon.com/ecr/pricing/)・[API Gateway](https://aws.amazon.com/api-gateway/pricing/)・[Lambda](https://aws.amazon.com/lambda/pricing/)・[Cognito](https://aws.amazon.com/cognito/pricing/)・[CloudWatch](https://aws.amazon.com/cloudwatch/pricing/)・[CloudFront](https://aws.amazon.com/cloudfront/pricing/)。頁の多くは単価の表が取得の結果に出ず、例の計算の中の単価を読んだ（[確かめられなかったこと](#確かめられなかったこと)）。
+単価の出典（取得日 2026-11-17）は次の頁である。頁の多くは単価の表が取得の結果に出ず、例の計算の中の単価を読んだ（[確かめられなかったこと](#確かめられなかったこと)）。
+
+| 費用の項目 | 出典 |
+| --- | --- |
+| Fargate | [Fargate](https://aws.amazon.com/fargate/pricing/) |
+| Aurora | [Aurora](https://aws.amazon.com/rds/aurora/pricing/) |
+| 公開 IP・NAT・Gateway のエンドポイント | [VPC](https://aws.amazon.com/vpc/pricing/) |
+| DynamoDB | [DynamoDB](https://aws.amazon.com/dynamodb/pricing/on-demand/) |
+| 秘密の器 | [Secrets Manager](https://aws.amazon.com/secrets-manager/pricing/) |
+| ECR | [ECR](https://aws.amazon.com/ecr/pricing/) |
+| HTTP API | [API Gateway](https://aws.amazon.com/api-gateway/pricing/) |
+| Lambda | [Lambda](https://aws.amazon.com/lambda/pricing/) |
+| Cognito | [Cognito](https://aws.amazon.com/cognito/pricing/) |
+| ログ | [CloudWatch](https://aws.amazon.com/cloudwatch/pricing/) |
+| CloudFront | [CloudFront](https://aws.amazon.com/cloudfront/pricing/) |
 
 ### 費用が増える構成を足すとき
 
@@ -692,7 +721,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 ### 決定 80: 使わない間の費用を 0 に近づけるため、常駐する計算を持たない構成にする
 
-結論: 画面は CloudFront と S3 の静的な配信、API と MCP と見回りと知らせの送り手は Lambda、レーンは `RunTask` の Fargate のタスク、進行表の DB は 0 ACU で止まる Aurora にする。API と MCP は 1 つの関数にまとめ、同じ操作の表と認可の判定を通す。見回り・知らせの送り手・表の移しは起動の仕方が違うため別の関数にする。
+結論: 画面は CloudFront と S3 の静的な配信にする。API と MCP と見回りと知らせの送り手は Lambda、レーンは `RunTask` の Fargate のタスク、進行表の DB は 0 ACU で止まる Aurora にする。API と MCP は 1 つの関数にまとめ、同じ操作の表と認可の判定を通す。見回り・知らせの送り手・表の移しは起動の仕方が違うため別の関数にする。
 
 理由: Value 6 は誰でも安く運用できることを求める。どの部品も使った分だけの課金で、使わない月は秘密の器とストレージだけになる（[見込み](#見込み)）。API と MCP を 1 つの関数にすると、Value 4 の「画面と API と MCP が同じ操作と認可を通る」を配置の単位でも崩さない。
 
@@ -724,7 +753,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 採らなかった案: 状態の行も二重時間軸で持つ形は、書き込みが倍になり、事象の記録と同じ過去を 2 か所で持つ。反映のときに全件を書き換える形は、反映の途中に読めない項目ができる。
 
-根拠: Value 4 / Value 3（MVV 版 1）
+根拠: Value 4・Value 8・P2（MVV 版 1）
 
 ### 決定 83: 使わない間の費用を止めつつ NDF の進行表を動かすため、進行表の DB を Aurora Serverless v2 の 0 ACU にし、触れるのを ECS のタスクだけにする
 
@@ -802,7 +831,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 結論: VPC・Aurora・ECS・ECR・サービスの表・状態の S3・予算は `app` のスタックに入れ、スタックの種類（`app`・`pipeline`）を増やさない。状態を持つ資源（表・バケット・クラスタ）は、スタックから消しても残る設定にする。
 
-理由: Value 8 の反映の道筋は、反映のパイプラインが `app` だけを反映し、パイプライン自身は設置のコマンドで反映する形で骨組みにある（[pipeline-approval.md](../docs/operations/pipeline-approval.md)）。スタックを増やすと、確認の値・反映のアクション・承認の資料の作りを変えることになる。消しても残す設定で、1 つのスタックに状態を持つ資源を置いても、差分の誤りで消えない。
+理由: Value 8 の反映の道筋は、骨組みにすでにある（[pipeline-approval.md](../docs/operations/pipeline-approval.md)）。反映のパイプラインが `app` だけを反映し、パイプライン自身は設置のコマンドで反映する形である。スタックを増やすと、確認の値・反映のアクション・承認の資料の作りを変えることになる。消しても残す設定で、1 つのスタックに状態を持つ資源を置いても、差分の誤りで消えない。
 
 採らなかった案: 網と状態を別のスタックに分ける形は、パイプラインが複数のスタックの順序と差分を扱うように変わり、承認する人が読む差分が分かれる。
 
@@ -810,7 +839,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 ### 決定 90: 秘密を受け取れる主体を絞るため、秘密の器を用途ごとに分け、API の関数だけが自分の環境の頭の器を読む
 
-結論: 秘密の器は `<prefix>/<environment>/<用途>` で、サービスの秘密（OAuth・App・Web Push・DB の管理）と、プロジェクトごとの進行表の DB の URL、通知先ごとの宛先の値（Slack）を別の器にする。読めるのは API の関数（`<prefix>/<environment>/` の頭だけ）で、タスクの役割は読めない。値はログ・応答・合成の出力に出さない。
+結論: 秘密の器は `<prefix>/<environment>/<用途>` にする。サービスの秘密（OAuth・App・Web Push・DB の管理）・プロジェクトごとの進行表の DB の URL・通知先ごとの宛先の値（Slack）を、別の器にする。読めるのは API の関数（`<prefix>/<environment>/` の頭だけ）で、タスクの役割は読めない。値はログ・応答・合成の出力に出さない。
 
 理由: Value 7 は秘密を秘密の器から受けることを、頭の文書の I10・I11 は渡し先を絞ることを求める。器を分けると、割り当てを移したときの差し替え・通知先を外したときの削除が 1 つの器で閉じる。1 つ月 0.40 ドルで、3 プロジェクトと 1 つの通知先で月 1.60 ドルの増えに留まる（[見込み](#見込み)）。
 
@@ -830,7 +859,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 ### 決定 92: 実際の値の混入を CI で止めるため、漏れの検査を形と照合の語の 2 つで行う
 
-結論: 漏れの検査は、作り物の値でない AWS のアカウント ID の形・ARN・資源の ID・端点・秘密の形を形で探すことと、CI の秘密から受ける実際の値（アカウント・profile・環境の名前）を照合することの 2 つで行う。照合の語はリポジトリに置かず、出力に語そのものを出さない（参照の検査と同じ扱い）。
+結論: 漏れの検査は 2 つで行う。1 つは、作り物の値でない AWS のアカウント ID の形・ARN・資源の ID・端点・秘密の形を、形で探すことである。もう 1 つは、CI の秘密から受ける実際の値（アカウント・profile・環境の名前）との照合である。照合の語はリポジトリに置かず、出力に語そのものを出さない（参照の検査と同じ扱い）。
 
 理由: Value 7 はリポジトリが公開されている前提で、混入を検査で機械的に止めることを求める。形だけでは profile と環境の名前を見つけられず、照合だけでは知らない値を見つけられない。
 
