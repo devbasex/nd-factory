@@ -19,22 +19,34 @@
 
 ## あるべき姿
 
-- チームの人は、スマートフォン・タブレット・PC の Web の画面から、プロジェクトの課題を指して 1 回の確定でスプリントを始める。リポジトリごとのレーンが、選んだ実行の場所（サービスのコンテナか手元のマシン）で NDF の工程を並列に回す
-- ログインの後のホーム 1 枚に、人を待つ承認の依頼と問いが先頭に、動いているスプリントが続けて並ぶ。待つものができると Web Push か Slack で知らせが届き、知らせから 2 手で承認を確定できる。つながらない間も読め、取り消せない確定はつながってから行う
-- 画面で行える操作はすべて同じ API と MCP の道具にもあり、人が委任した AI のエージェントが同じ操作を行える。承認ゲートとレッドラインに当たる確定だけは人が行う。読み取りを含むすべての操作が、だれが・いつ・どの入口から・何をしたかの追記だけの記録に残る
-- プロジェクトは 1 つのチームに割り当て、その席を持つ人と委任だけが中身と存在を見られる。認可はサーバーの側の 1 か所がプロジェクトの単位で判定する
-- だれでも公開のコードから自分の AWS へ、設置のコマンドで差分と確認の値を見て反映できる。常駐する計算と NAT を持たず、使わない間の費用は 0 に近い。運用する環境は反映のパイプラインで人が承認した差分だけを反映する
+| # | あるべき姿 |
+| --- | --- |
+| 姿 1 | チームの人は、スマートフォン・タブレット・PC の Web の画面から、プロジェクトの課題を指して 1 回の確定でスプリントを始める。リポジトリごとのレーンが、選んだ実行の場所（サービスのコンテナか手元のマシン）で NDF の工程を並列に回す |
+| 姿 2 | ログインの後のホーム 1 枚に、人を待つ承認の依頼と問いが先頭に、動いているスプリントが続けて並ぶ。待つものができると Web Push か Slack で知らせが届き、知らせから 2 手で承認を確定できる。つながらない間も読め、取り消せない確定はつながってから行う |
+| 姿 3 | 画面で行える操作はすべて同じ API と MCP の道具にもあり、人が委任した AI のエージェントが同じ操作を行える。承認ゲートとレッドラインに当たる確定だけは人が行う。読み取りを含むすべての操作が、だれが・いつ・どの入口から・何をしたかの追記だけの記録に残る |
+| 姿 4 | プロジェクトは 1 つのチームに割り当て、その席を持つ人と委任だけが中身と存在を見られる。認可はサーバーの側の 1 か所がプロジェクトの単位で判定する |
+| 姿 5 | だれでも公開のコードから自分の AWS へ、設置のコマンドで差分と確認の値を見て反映できる。常駐する計算と NAT を持たず、使わない間の費用は 0 に近い。運用する環境は反映のパイプラインで人が承認した差分だけを反映する |
 
 要求と受け入れ条件は #24 の本文にある（コピーは [issue-24-requirements.md](issue-24-requirements.md)）。この文書は「どう作るか」だけを扱う。
 
 ## あるべき姿の根拠
 
-| 根拠 | 種類 | 何を示すか |
-| --- | --- | --- |
-| プロジェクト MVV 版 1（`.ndf/mvv.md`） | プロジェクトの MVV | 目指す姿と判断の基準。下の「MVV と設計の節の対応」 |
-| STD1・STD2（arc42・C4） | 外部の一次情報 | アーキテクチャを 12 章と 4 階層の図で書く（[外部の調査](issue-24-design-decisions.md#外部の調査)） |
-| STD40（MCP の仕様。[API の文書の外部の調査](issue-24-design-api.md#外部の調査)） | 外部の一次情報 | AI のエージェントが道具を呼ぶ標準の形。API と同じ操作を道具として出す（Value 4） |
-| STD20〜STD22（Web App Manifest・Service Worker・Push API。[画面の文書の外部の調査](issue-24-design-screens.md#外部の調査)） | 外部の一次情報 | 端末に入れて、つながらなくても読め、承認待ちの知らせを受けられる Web の画面の標準（Value 3） |
+各行の「支える姿」は、上の表のどの行の根拠かを示す。外部の一次情報の行は、出典へのリンクと、比べた中身を載せた外部の調査の表（番号つき）を添える。
+
+| 支える姿 | 根拠 | 種類 | 何を示すか |
+| --- | --- | --- | --- |
+| 姿 1〜5 | [プロジェクト MVV 版 1](../.ndf/mvv.md)（Mission・Vision・Value 1〜9・P1・P2） | 利用者が承認した MVV | 目指す姿と判断の基準。項目ごとの受け先は下の「MVV と設計の節の対応」 |
+| 姿 1 | NDF の契約のファイル（`plugins/ndf-next/contracts/`、[実行の文書の NDF との契約](issue-24-design-execution.md#ndf-との契約)、調査の番号 STD62） | 外部の一次情報 | 外の呼び手が NDF を起動する口・環境変数・結果の行の形。レーンが NDF の工程をこの口だけで回せる |
+| 姿 1 | [GitHub Actions の自前のランナー](https://docs.github.com/en/actions/reference/runners/self-hosted-runners)（[実行の文書の主要な製品](issue-24-design-execution.md#主要な製品)、PRD60） | 外部の一次情報 | 利用者のマシンを外から開かず、外向きの HTTPS だけで仕事を受ける形が広く使われている。手元のマシンを実行の場所にできる |
+| 姿 2 | W3C の [Web Application Manifest](https://www.w3.org/TR/appmanifest/)・[Service Workers](https://www.w3.org/TR/service-workers/)・[Push API](https://www.w3.org/TR/push-api/)（[画面の文書の標準・仕様](issue-24-design-screens.md#標準仕様)、STD20〜STD22） | 外部の一次情報 | Web の画面を端末に入れ、つながらなくても読め、承認待ちの知らせを受けられる標準がある |
+| 姿 2 | [iOS・iPadOS の Safari の Web Push](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)（[画面の文書の主要な製品](issue-24-design-screens.md#主要な製品)、PRD20） | 外部の一次情報 | ホーム画面に加えた Web アプリなら iPhone にも知らせが届く |
+| 姿 2 | [Slack の Incoming Webhook](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks)（[実行の文書のライブラリとサービス](issue-24-design-execution.md#ライブラリとサービス)、LIB64） | 外部の一次情報 | チャンネルへ知らせを送る口があり、送る量の上限と失敗の扱いが決まっている |
+| 姿 3 | [Model Context Protocol の仕様 2026-07-28 版](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)（[API の文書の標準・仕様](issue-24-design-api.md#標準仕様)、STD40） | 外部の一次情報 | AI のエージェントが外の道具を呼ぶ標準の形。API と同じ操作を道具として出せる |
+| 姿 3 | [GitHub の遠くの MCP サーバー](https://github.com/github/github-mcp-server)（[API の文書の主要な製品](issue-24-design-api.md#主要な製品)、PRD42） | 外部の一次情報 | GitHub が自分のサービスの操作を遠くの MCP サーバーとして出し、OAuth と貼る token の両方で使わせている例 |
+| 姿 4 | [プロジェクト MVV 版 1](../.ndf/mvv.md) の Value 9 と P2 | 利用者が承認した MVV | 割り当てたチームの外へ存在も見せない。割り当てを変えるのは人の承認 |
+| 姿 5 | [Aurora Serverless v2 の自動の一時停止](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html)（[土台の文書のライブラリとサービス](issue-24-design-platform.md#ライブラリとサービス)、LIB80） | 外部の一次情報 | 接続が無い間は DB の計算の費用が止まる |
+| 姿 5 | [ECS Fargate のタスクの網](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-task-networking.html)（同、LIB82）と [DynamoDB の要求の数の課金](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/capacity-mode.html)（同、LIB81） | 外部の一次情報 | 公開のサブネットで公開 IP を付ければ NAT なしで外へ出られ、表は使った分だけ課金される |
+| 姿 5 | [プロジェクト MVV 版 1](../.ndf/mvv.md) の Value 7・Value 8・P1 | 利用者が承認した MVV | 公開を前提に実際の値を置かない。反映はパイプラインか設置のコマンドだけで、人が差分を見て承認する |
 
 ## 文書の地図
 
