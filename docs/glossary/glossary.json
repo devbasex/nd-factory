@@ -190,7 +190,7 @@
     {
       "term": "答えの送達",
       "context": "judgment",
-      "meaning": "人が確定した答えを、ランナーが NDF へ ndf answer で渡し終えるまでの流れ。状態は未渡し・渡し中・届いた・失敗",
+      "meaning": "確定した答えを、ランナーが NDF へ ndf answer で渡し終えるまでの流れ。状態は未渡し・渡し中・届いた・失敗。対象は承認ゲートの承認の依頼の答えと、ndf-ask:human-action を除く問いの答え（委任が確定したものも含む）。ndf-ask:human-action の答えと起票の依頼の答えは対象外",
       "source": "docs/design/execution.md"
     },
     {
