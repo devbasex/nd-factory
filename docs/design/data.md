@@ -82,7 +82,7 @@ erDiagram
 
 | 表（用途） | 区切りの鍵 / 並びの鍵 | 持つ集約 | 時系列の扱い |
 | --- | --- | --- | --- |
-| `db-users` | `USER#<利用者>` / `USER`・`LOGIN#<IdP>#<主体>`・`DELEGATION#<委任>`。IdP の主体の一意の行は `LOGIN#<IdP>#<主体>` / `LOGIN`（下の [IdP の主体の一意の行](#idp-の主体の一意の行)） | 利用者・ログインの組・委任 | 上書き。変更の履歴は操作の記録が持つ |
+| `db-users` | `USER#<利用者>` / `USER`・`LOGIN#<IdP>#<主体>`・`DELEGATION#<委任>`。IdP の主体の一意の行は `LOGIN#<IdP>#<主体>` / `LOGIN`（下の [IdP の主体の一意の行](#idp-の主体の一意の行)）、Cognito の主体の対応の行は `COGNITO#<Cognito の sub>` / `COGNITO`（下の [Cognito の主体の対応の行](#cognito-の主体の対応の行)） | 利用者・ログインの組・委任 | 上書き。変更の履歴は操作の記録が持つ |
 | `db-teams` | `TEAM#<チーム>` / `TEAM`・`SEAT#<利用者>`・`MACHINE#<マシン>`・`USAGE#<UTC の年月>` | チーム・席・手元のマシン・月の使った量 | 上書き。席と役割の変更は操作の記録、使った量の元は費用の記録 |
 | `db-projects` | `PROJECT#<プロジェクト>` / `PROJECT`・`REPO#<リポジトリ>`・`ASSIGN#<時刻>#<ID>`・`GHTOKEN#<期限>#<レーン>#<連番>` | プロジェクト・リポジトリ・割り当て・渡した GitHub の token の記録 | 割り当ては履歴保持型（変更ごとに行を足し、プロジェクトの行が今の割り当てを指す）。token の記録は期限で TTL |
 | `db-sprints` | `PROJECT#<プロジェクト>` / `SPRINT#<スプリント>`・`SPRINT#<スプリント>#LANE#<レーン>`・`…#SEG#<連番>` | スプリント・レーン・区間 | 状態は上書き。状態の移りは進捗の事象が持つ |
@@ -121,6 +121,16 @@ erDiagram
 | `db-users` | `LOGIN#<IdP>#<主体>` / `LOGIN` | `user_id`・`schema_version` | ログインの組の行（`USER#<利用者>` / `LOGIN#<IdP>#<主体>`）と同じトランザクションで、無いときだけ書く（`putIfAbsent`）。既にあれば 409。外すときは 2 行を同じトランザクションで消す |
 
 サインインは IdP の主体からこの行を強い整合で読み、利用者を引く（決定 99）。
+
+### Cognito の主体の対応の行
+
+人の要求が持つ Cognito の access token は、IdP の主体でなく Cognito の利用者の `sub` を持つ。上の行の区切りの鍵（`LOGIN#<IdP>#<主体>`。IdP は `google` か `github`、主体は各 IdP の識別子）は `sub` から組めないため、`sub` から利用者を引く行を別に置く。Cognito は IdP のアカウントごとに別の Cognito の利用者（別の `sub`）を作るため、この行はログインの組と 1 対 1 に当たる。
+
+| 表 | 区切りの鍵 / 並びの鍵 | 持つ列 | 書き方 |
+| --- | --- | --- | --- |
+| `db-users` | `COGNITO#<Cognito の sub>` / `COGNITO` | `cognito_sub`・`user_id`・`idp`・`subject`・`schema_version` | ログインの組の行と IdP の主体の一意の行を作るのと同じトランザクションで、無いときだけ書く（`putIfAbsent`。初めてのサインインの `sessions.create` と、ログインをつなぐ `logins.create`）。既にあれば 409。ログインを外す `logins.delete` は、3 行を同じトランザクションで消す |
+
+認証（`authenticate` の読み手 `userOfSubject`）は、検証した access token の `sub` で `COGNITO#<sub>` / `COGNITO` を強い整合で読み、`user_id` を利用者にする。行が無い主体は、利用者を作る `sessions.create` にだけ「まだ結んでいない人」として渡り、ほかの操作では 401 になる。
 
 ### テーブル定義
 

@@ -106,8 +106,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-// 署名・宛先・期限を照らし、通れば主張を返す。期限は exp の秒が今より後のときだけ通す
+// 署名・宛先・期限を照らし、通れば主張を返す。期限は exp の秒が今より後のときだけ通す。
+// verify(null, …) は渡された鍵の種別で方式を選ぶため、鍵が Ed25519 でなければ照らさない（ヘッダーの alg だけでは方式を固定できない）。
+// 鍵の種別の誤りは設定の誤りのため、token の外れ（401）でなく依存先の失敗（503）にする
 export function verifySignedJwt(token: string, key: KeyObject, audience: string, nowMs: number): CheckResult<SignedClaims> {
+  if (key.type !== "public" || key.asymmetricKeyType !== "ed25519") return { ok: false, reason: "unavailable", cause: "signing_key_not_ed25519" };
   if (!isJwtShape(token)) return unauthorized("shape");
   const [headerB64 = "", payloadB64 = "", signatureB64 = ""] = token.split(".");
   const header = decodeSegment(headerB64);
@@ -139,8 +142,8 @@ export function dbPrepClaimsOf(claims: SignedClaims): DbPrepTokenClaims | null {
 }
 
 // Cognito の access token の照らし。aws-jwt-verify の Cognito の検証で、署名（kid の公開鍵）・発行元・client_id・token_use を照らす。
-// 期限（exp。必須）と nbf は、ほかの token と同じく authenticate の注入した時計（nowMs）で照らす。aws-jwt-verify も exp・nbf がある
-// ときだけ実時刻で照らすが、本番の注入した時計は実時刻のため同じ判定になる（テストは実時刻を注入した時計に揃える）。
+// 期限（exp。必須）と nbf は、ほかの token と同じく authenticate の注入した時計（nowMs）だけで照らす。aws-jwt-verify は exp・nbf を
+// 実時刻（Date.now）で照らし、時計を受けないため、その照らしは graceSeconds を無限にして止める（ほかの照らしには graceSeconds が効かない）。
 // 公開鍵の控えは組み込みの SimpleJwksCache と SimplePenaltyBox を既定のまま使い、取り手 SimpleFetcher には方針 http-idp-keys の
 // responseTimeout だけを渡す（決定 17。全体の設計の決定 48）。控えは実行環境ごとに 1 つで、起点が 1 回だけ作る
 export type CognitoConfig = { readonly userPoolId: string; readonly clientId: string };
@@ -188,7 +191,10 @@ function issuerOf(token: string): unknown {
 export function createCognitoCheck(config: CognitoConfig, options: CognitoCheckOptions = {}): CognitoCheck {
   const issuers = issuersOf(config.userPoolId);
   const fetcher = options.fetcher ?? new SimpleFetcher({ defaultRequestOptions: { responseTimeout: IDP_KEYS_POLICY.response_timeout_ms } });
-  const verifier = CognitoJwtVerifier.create({ userPoolId: config.userPoolId, tokenUse: "access", clientId: config.clientId }, { jwksCache: new SimpleJwksCache({ fetcher }) });
+  const verifier = CognitoJwtVerifier.create(
+    { userPoolId: config.userPoolId, tokenUse: "access", clientId: config.clientId, graceSeconds: Number.POSITIVE_INFINITY },
+    { jwksCache: new SimpleJwksCache({ fetcher }) },
+  );
   return async (token, nowMs) => {
     const iss = issuerOf(token);
     if (typeof iss !== "string") return unauthorized("shape");

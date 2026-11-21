@@ -34,6 +34,8 @@ const DETAIL_ROWS = [
   "idempotency",
 ];
 const OVERALL_ROWS = ["login_subject", "project", "assignment", "lane", "approval", "audit"];
+// 認証（Cognito の sub から利用者を引く読み手）のために足した行。19 の行に数えない
+const AUTH_ROWS = ["cognito_subject"];
 
 const ajv = new Ajv2020({ strict: true, validateFormats: false });
 
@@ -57,9 +59,9 @@ function tableOfRow(name: string): TableSpec {
 const cases = Object.entries(ROW_CASES);
 
 describe("行の形（受け入れ条件 8）", () => {
-  it("19 の行と全体の設計の 6 つの行がそろい、どの表の行の種類とも 1 対 1 に当たる", () => {
+  it("19 の行と全体の設計の 6 つの行と認証の行がそろい、どの表の行の種類とも 1 対 1 に当たる", () => {
     expect(DETAIL_ROWS).toHaveLength(19);
-    expect(Object.keys(ROW_CASES).sort()).toEqual([...DETAIL_ROWS, ...OVERALL_ROWS].sort());
+    expect(Object.keys(ROW_CASES).sort()).toEqual([...DETAIL_ROWS, ...OVERALL_ROWS, ...AUTH_ROWS].sort());
     const specRows = Object.values(TABLES).flatMap((t) => t.rows.map((r) => r.name));
     expect(specRows.sort()).toEqual(Object.keys(ROW_CASES).sort());
   });

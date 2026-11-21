@@ -10,6 +10,7 @@ import {
   projectsRename,
   questionsAnswer,
   runnerEventsAppend,
+  sessionsCreate,
   sprintsCreate,
   teamsRename,
 } from "./fixtures/operations.ts";
@@ -250,6 +251,14 @@ describe("authorize: ランナー・手元のマシン・DB の用意のタス�
     const table = world();
     const prep: Principal = { kind: "db_prep", projectId: P_A, prepId: "prep-1" };
     expect(items(await authorize(prep, dbPrepSecretsGet, [{ project_id: P_A }, { project_id: P_B }], fakeScope(table)))).toEqual([{ decision: "allow", projectId: P_A, role: null }, NOT_FOUND]);
+  });
+
+  it("まだ結んでいない人は sessions.create だけを通り、見えるプロジェクトを持たない", async () => {
+    const table = world();
+    const newcomer: Principal = { kind: "newcomer", cognitoSub: "cognito-sub-new" };
+    expect(await visibleProjectIds(newcomer, fakeScope(table))).toEqual([]);
+    expect(items(await authorize(newcomer, sessionsCreate, [{}], fakeScope(table)))).toEqual([{ decision: "allow", projectId: null, role: null }]);
+    expect(await authorize(newcomer, projectsGet, [{ project_id: P_A }], fakeScope(table))).toEqual({ reject: "scope_insufficient" });
   });
 
   it("GitHub と見回りは利用者向けの操作を要求全体で断られる", async () => {

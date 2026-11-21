@@ -77,9 +77,10 @@ export function auditPartitionOf(entry: AuditEntry): string {
     case "runner":
     case "db_prep":
       return `PROJECT#${principal.projectId}`;
+    case "newcomer":
     case "github":
     case "patrol":
-      // 利用者・チーム・プロジェクトを持たない主体は、主体の無い 401 と同じ日ごとの区切りに置く
+      // 利用者・チーム・プロジェクトを持たない主体（まだ利用者へ結んでいない人を含む）は、主体の無い 401 と同じ日ごとの区切りに置く
       return `ANON#${entry.at.slice(0, 10)}`;
   }
 }
@@ -100,6 +101,8 @@ function actorColumns(actor: AuditActor): Record<string, unknown> {
       return { kind: p.kind, team_id: p.teamId, machine_id: p.machineId, ...mcp };
     case "db_prep":
       return { kind: p.kind, project_id: p.projectId, prep_id: p.prepId, ...mcp };
+    // まだ利用者へ結んでいない人は種類だけ（Cognito の sub は写さない。作った利用者は要素の記録の対象の ID が持つ）
+    case "newcomer":
     case "github":
     case "patrol":
       return { kind: p.kind, ...mcp };

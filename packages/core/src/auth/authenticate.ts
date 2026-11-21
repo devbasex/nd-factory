@@ -28,6 +28,8 @@ export { createCognitoCheck, DB_PREP_AUDIENCE, RUNNER_AUDIENCE, type CognitoChec
 
 export type Principal =
   | { readonly kind: "human"; readonly userId: Id<"usr"> }
+  // Cognito の token は正しいが、まだ利用者へ結んでいない主体（初めてのサインイン）。sessions.create だけに渡し、そのハンドラーが利用者と対応の行を作る
+  | { readonly kind: "newcomer"; readonly cognitoSub: string }
   | {
       readonly kind: "delegation";
       readonly userId: Id<"usr">;
@@ -84,14 +86,18 @@ export type DbPrepRecord = { readonly prepId: string; readonly inProgress: boole
 
 // 1 回だけの token（ランナーの引き換え・DB の用意の引き換えと終わりの報告）の使い終えの印:
 // authenticate は読んだ印で使い終えた token を断つだけで、印を書かない（読むだけでは同じ時の 2 つの要求を分けられない）。
-// 1 回だけを守るのはその経路のハンドラーで、返す値の書き込みと同じ writeAtomically に、印の無いときだけ印を付ける条件つきの書き込みを入れる
-// （ランナー: exchangedGeneration が token の世代でないときだけ token の世代にする。DB の用意: consumed にその用途が無く prepId が同じときだけ足す）。
+// 1 回だけを守るのはその経路のハンドラーで、返す値の書き込みと同じ writeAtomically に、印の無いときだけ印を付ける条件つきの書き込みを入れる。
+// 認証の読みの後に行が変わり得るため、その条件には authenticate が照らした状態も同じく入れ直す:
+// - ランナー: レーンが終わっておらず（終了・取り消し済みでない）、今の世代が token の世代と同じで、exchangedGeneration が token の世代でないときだけ token の世代にする
+// - DB の用意: 進行表の DB が作成中か差し替えの途中で、prepId が token の用意と同じで、consumed にその用途が無いときだけ足す
 // 条件に外れたら、authenticate の外れと同じ 401 unauthorized を返し、値を返さない
 
 // 行の読み手（ポート）。どれも表の本体を強い整合で読む。中身は行の持ち主の子が書く（core から apps へ依存しない）
 export type AuthReaders = {
-  // Cognito の主体から利用者を引く（IdP の主体の一意の行。#4）。結んでいなければ null
-  userOfSubject(sub: string): Promise<Id<"usr"> | null>;
+  // Cognito の access token の sub から利用者を引く。読むのは db-users の Cognito の主体の対応の行
+  // （COGNITO#<sub> / COGNITO の user_id。docs/design/data.md の「Cognito の主体の対応の行」）で、LOGIN#<IdP>#<主体> の行は読まない
+  // （sub は Cognito の利用者の ID で、IdP の主体ではない）。行が無ければ null
+  userOfSubject(cognitoSub: string): Promise<Id<"usr"> | null>;
   delegation(userId: Id<"usr">, delegationId: Id<"dlg">): Promise<DelegationRecord | null>;
   // 最後に使った時刻を at にする。今の値が ifBefore より前（か無い）ときだけ書く条件つきの更新
   touchDelegation(userId: Id<"usr">, delegationId: Id<"dlg">, at: string, ifBefore: string): Promise<void>;
@@ -112,6 +118,9 @@ export type AuthDeps = {
   readonly log?: Logger;
 };
 
+// 利用者へ結んでいない人の主体を受ける唯一の経路（初めてのサインインで利用者を作る）
+export const SESSIONS_CREATE = "sessions.create";
+
 // 引き換えの token を受ける経路。ほかの経路は用途ごとの token（レーン・終わりの報告）だけを受ける
 const RUNNER_EXCHANGE = "runner.exchanges.create";
 const DB_PREP_EXCHANGE = "db_prep.exchanges.create";
@@ -126,12 +135,15 @@ function isExpired(iso: string, nowMs: number): boolean {
   return !Number.isFinite(at) || at <= nowMs;
 }
 
-async function human(token: string, deps: AuthDeps): Promise<Outcome> {
+async function human(token: string, operation: string, deps: AuthDeps): Promise<Outcome> {
   if (deps.cognito === null) return unauthorized("endpoint");
   const checked = await deps.cognito(token, deps.clock.epochMs());
   if (!checked.ok) return checked;
-  const userId = await deps.readers.userOfSubject(checked.value.sub);
-  return userId === null ? unauthorized("unknown_principal") : ok({ kind: "human", userId });
+  const cognitoSub = checked.value.sub;
+  const userId = await deps.readers.userOfSubject(cognitoSub);
+  if (userId !== null) return ok({ kind: "human", userId });
+  // 結んでいない主体は sessions.create へだけ渡す（ほかの操作は利用者を持たないため断る）
+  return operation === SESSIONS_CREATE ? ok({ kind: "newcomer", cognitoSub }) : unauthorized("unknown_principal");
 }
 
 async function delegation(token: string, deps: AuthDeps): Promise<Outcome> {
@@ -231,7 +243,7 @@ async function decide(req: InboundRequest, deps: AuthDeps): Promise<Outcome> {
   switch (req.endpoint) {
     case "user":
       if (token.startsWith("ndfd_")) return delegation(token, deps);
-      return isJwtShape(token) ? human(token, deps) : unauthorized("shape");
+      return isJwtShape(token) ? human(token, req.operation, deps) : unauthorized("shape");
     case "mcp":
       // MCP は委任の token だけ。人の JWT は断る
       return token.startsWith("ndfd_") ? delegation(token, deps) : unauthorized("endpoint");

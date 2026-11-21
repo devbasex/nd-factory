@@ -225,20 +225,21 @@ nd-factory/
 | `dispatch` | 書く操作の要素で、ハンドラーが書き込みを返した | 書き込み・`auditItem` の要素の行・`settleIdempotency` を 1 つの `writeAtomically` で確定する |
 | `dispatch` | 読む操作 | ハンドラーの値を集め、`appendAudit` が成功してから返す |
 | `dispatch` | 全部か無かの印のある操作 | すべての要素の書き込みを 1 つの `writeAtomically` に集め、要素の失敗が 1 つでもあれば確定しない |
-| `authenticate` | 受け口 `user` で、token が 3 つの部分の JWT | Cognito の access token として、`aws-jwt-verify` の Cognito の検証（決定 48・LIB41）で署名（`kid` の公開鍵、RS256）・発行元・`client_id`・`token_use` が `access` を照らし、期限（`exp` は必須）と `nbf` はほかの token と同じく注入した時計で照らす。公開鍵の控えは組み込みの `SimpleJwksCache` と `SimplePenaltyBox` を既定のまま使い、取り手 `SimpleFetcher` に方針 `http-idp-keys` の `responseTimeout` だけを渡す。通れば人 |
+| `authenticate` | 受け口 `user` で、token が 3 つの部分の JWT | Cognito の access token として、`aws-jwt-verify` の Cognito の検証（決定 48・LIB41）で署名（`kid` の公開鍵、RS256）・発行元・`client_id`・`token_use` が `access` を照らし、期限（`exp` は必須）と `nbf` はほかの token と同じく注入した時計だけで照らす（`aws-jwt-verify` は時計を受けず実時刻で照らすため、その照らしを `graceSeconds` を無限にして止める）。公開鍵の控えは組み込みの `SimpleJwksCache` と `SimplePenaltyBox` を既定のまま使い、取り手 `SimpleFetcher` に方針 `http-idp-keys` の `responseTimeout` だけを渡す。通れば `sub` で [Cognito の主体の対応の行](data.md#cognito-の主体の対応の行)（`COGNITO#<sub>` / `COGNITO`）を強い整合で読み、行があれば人。行が無ければ、操作が `sessions.create` のときだけ「まだ結んでいない人」（`newcomer`。Cognito の `sub` を持つ）にして、そのハンドラーが利用者と対応の行を作る。ほかの操作は `unauthorized` |
 | `authenticate` | 受け口 `user` か `mcp` で、token が `ndfd_` で始まる | 委任として、中の利用者と委任の ID で行を強い整合で読み、秘密の部分の SHA-256 を一定時間で比べ、期限と取り消しを照らす。入口は受け口で `API` か `MCP` |
 | `authenticate` | 受け口 `mcp` で、token が JWT | `unauthorized` |
-| `authenticate` | 受け口 `runner` | Ed25519 の JWT で宛先「レーン」。引き換えの HTTP の経路だけ引き換えの token、ほかはレーンの token。レーンの行が終わっていないことと世代の番号とプロジェクトを照らし、引き換えの token はレーンの行がその世代を引き換え済みと記していれば `unauthorized`。`authenticate` は読んで断るだけで、1 回だけを守るのは引き換えのハンドラーが返す値と同じ `writeAtomically` に入れる条件つきの書き込み（その世代を引き換え済みと記していないときだけ記す）。条件に外れれば値を返さずに `unauthorized` |
+| `authenticate` | 受け口 `runner` | Ed25519 の JWT で宛先「レーン」。引き換えの HTTP の経路だけ引き換えの token、ほかはレーンの token。レーンの行が終わっていないことと世代の番号とプロジェクトを照らし、引き換えの token はレーンの行がその世代を引き換え済みと記していれば `unauthorized`。`authenticate` は読んで断るだけで、1 回だけを守るのは引き換えのハンドラーが返す値と同じ `writeAtomically` に入れる条件つきの書き込みで、条件は、レーンが終わっておらず（終了・取り消し済みでない）、今の世代が token の世代と同じで、その世代を引き換え済みと記していないこと（認証の読みの後の取り消しと世代の進みも断つ）。満たすときだけ引き換え済みと記す。条件に外れれば値を返さずに `unauthorized` |
 | `authenticate` | 受け口 `machine` で、token が `ndfm_` で始まる | 中のチームとマシンの ID で行を強い整合で読み、要約を一定時間で比べ、取り消しと期限を照らす |
 | `authenticate` | 受け口 `github` | `Authorization` を読まず、本文の HMAC-SHA256 を秘密の器の値と一定時間で比べる。本文は受けたままのバイト列で受け、受け口が文字列に直さない（API Gateway の base64 の本文は base64 から戻す） |
-| `authenticate` | 受け口 `db_prep` | Ed25519 の JWT で宛先「DB の用意」。引き換えの HTTP の経路だけ引き換えの token、終わりの報告の HTTP の経路だけ終わりの報告の token。どちらも 1 回だけで、そのプロジェクトの進行表の DB が作成中か差し替えの途中で、token の用意の ID が今の用意と合い、その用途を使い終えていないことを照らす。`authenticate` は読んで断るだけで、1 回だけを守るのは各経路のハンドラーが返す値と同じ `writeAtomically` に入れる条件つきの書き込み（同じ用意で、その用途を使い終えたと記していないときだけ記す）。条件に外れれば値を返さずに `unauthorized` |
+| `authenticate` | 受け口 `db_prep` | Ed25519 の JWT で宛先「DB の用意」。引き換えの HTTP の経路だけ引き換えの token、終わりの報告の HTTP の経路だけ終わりの報告の token。どちらも 1 回だけで、そのプロジェクトの進行表の DB が作成中か差し替えの途中で、token の用意の ID が今の用意と合い、その用途を使い終えていないことを照らす。`authenticate` は読んで断るだけで、1 回だけを守るのは各経路のハンドラーが返す値と同じ `writeAtomically` に入れる条件つきの書き込みで、条件は、進行表の DB が作成中か差し替えの途中で、用意の ID が token の用意と同じで、その用途を使い終えたと記していないこと（認証の読みの後に終えた用意への確定と更新も断つ）。満たすときだけ使い終えたと記す。条件に外れれば値を返さずに `unauthorized` |
 | `authenticate` | Cognito の JWT の `kid` が控えに無い | 組み込みの控えが公開鍵を取り直す（同じ時の取り直しは 1 つにまとまる）。取り直しても無ければ `unauthorized` で、その後は `SimplePenaltyBox` の待ち（既定 10 秒）が過ぎるまで同じ IdP の取り直しを待たせる |
-| `authenticate` | ランナーと DB の用意のタスクの JWT（Ed25519） | `aws-jwt-verify` を通さない。`node:crypto` の `verify` で、秘密の器から起動のときに 1 回読んだ nd-factory 自身の検証の鍵と照らす。IdP の鍵の取得は起きない |
+| `authenticate` | ランナーと DB の用意のタスクの JWT（Ed25519） | `aws-jwt-verify` を通さない。`node:crypto` の `verify` で、秘密の器から起動のときに 1 回読んだ nd-factory 自身の検証の鍵と照らす。`verify` は鍵の種別で方式を選ぶため、鍵が Ed25519 の公開鍵（`asymmetricKeyType` が `ed25519`）でなければ照らさずに `unavailable`（設定の誤り）にし、ヘッダーの `alg` は `EdDSA` だけを受ける。IdP の鍵の取得は起きない |
 | `authorize` | 主体が人 | 見える集まり = 席を持つチームの今の割り当て。役割は席の役割 |
 | `authorize` | 主体が委任 | 見える集まり = 委任した人の今の集まり ∩ 委任の範囲のプロジェクト。役割は委任した人の席の役割 |
 | `authorize` | 主体がランナーか手元のマシン | 自分向けの HTTP の経路の操作だけ。見える集まりは自分のレーンのプロジェクトだけ |
 | `authorize` | 主体が DB の用意のタスク | 自分向けの HTTP の経路の操作だけ。見える集まりは token に結んだ用意するプロジェクトだけ |
 | `authorize` | 主体が見回り | 保守の操作だけ。利用者向けの操作は要求全体で拒む |
+| `authorize` | 主体がまだ結んでいない人（`newcomer`） | `sessions.create` だけ。見える集まりは空で、ほかの操作は要求全体で拒む |
 | `authorize` | 要素の対象が割り当てを移す途中のプロジェクトで、主体が移す先のチームの持ち主 | 名前だけを読む操作の要素だけ通す（I2 の例外）。ほかは 404 |
 | `authorize` | 対象の ID の種類の頭が操作と合わない | 404 `not_found`（`parseId` が `null`） |
 | `claimIdempotency` | 行が無い | 借りの行（持ち主の要求の ID・`fingerprint`・借りの期限）を条件つきで書き、`fresh` |
@@ -289,7 +290,7 @@ nd-factory/
 | `TransactItem` | 型 | `packages/core`（`conditional-write`） | SDK の 1 件と、外れたときの扱い `onConflict`（`version_mismatch`・`state_mismatch`・`return_existing`・`fail`） |
 | `TRANSACT_MAX_ITEMS` | 定数（外部の仕様の値） | `packages/core`（`conditional-write`） | 100（DynamoDB の 1 つのトランザクションの件の上限。出所を添える） |
 | `WriteOutcome` | 型 | `packages/core`（`conditional-write`） | `{ ok: true }` か `{ ok: false; failed: { index, onConflict }[] }` |
-| `Principal` | 型 | `packages/core`（`auth`） | `human`（利用者の ID）・`delegation`（利用者の ID・委任の ID・範囲・クライアントの名前）・`runner`（レーンの ID・世代）・`machine`（チームの ID・マシンの ID）・`github`・`db_prep`（プロジェクトの ID・用意の ID）・`patrol` |
+| `Principal` | 型 | `packages/core`（`auth`） | `human`（利用者の ID）・`newcomer`（Cognito の `sub`。まだ利用者へ結んでいない人で、`sessions.create` だけに渡る）・`delegation`（利用者の ID・委任の ID・範囲・クライアントの名前）・`runner`（レーンの ID・世代）・`machine`（チームの ID・マシンの ID）・`github`・`db_prep`（プロジェクトの ID・用意の ID）・`patrol` |
 | `AuthDeps` | 型 | `packages/core`（`auth`） | IdP の発行元とクライアント ID（設定）・レーンの検証の鍵（秘密の器から起動のときに 1 回読む）・Webhook の秘密・委任とマシンとレーンの行の読み手・時計 |
 | 委任の token の形 | 定数（形） | `packages/contracts`（token の形） | `ndfd_<利用者の ID>.<委任の ID>.<秘密の部分 32 バイトの base64url>`（行を区切りの鍵で強い整合で読むため） |
 | 登録の token の形 | 定数（形） | `packages/contracts`（token の形） | `ndfm_<チームの ID>.<マシンの ID>.<秘密の部分 32 バイトの base64url>`（委任の token と同じ理由） |

@@ -3,7 +3,7 @@ import { idOf } from "../ids.ts";
 import { languageTag, timeZone, utcDateTime } from "../values.ts";
 import { overwriteRow, type RowKey, sha256Hex, versionlessRow } from "./common.ts";
 
-// db-users の行（利用者・ログインの組・IdP の主体の一意の行・委任）
+// db-users の行（利用者・ログインの組・IdP の主体の一意の行・Cognito の主体の対応の行・委任）
 
 export const idp = z.enum(["google", "github"]);
 
@@ -37,6 +37,19 @@ export const loginSubjectRow = versionlessRow(1, {
 });
 export type LoginSubjectRow = z.infer<typeof loginSubjectRow>;
 export const loginSubjectKey = (row: LoginSubjectRow): RowKey => ({ pk: `LOGIN#${row.idp}#${row.subject}`, sk: "LOGIN" });
+
+// Cognito の主体の対応の行（COGNITO#<Cognito の sub> / COGNITO）。作ると消すだけ。
+// Cognito の access token は IdP の主体でなく Cognito の利用者の sub を持つため、認証（userOfSubject）はこの行を強い整合で読んで利用者を引く。
+// Cognito は IdP のアカウントごとに別の利用者（別の sub）を作るため、ログインの組と 1 対 1 に当たる。
+// ログインの組と IdP の主体の一意の行と同じトランザクションで、無いときだけ書き（putIfAbsent）、外すときは 3 行を同じトランザクションで消す
+export const cognitoSubjectRow = versionlessRow(1, {
+  cognito_sub: z.string().min(1),
+  user_id: idOf("usr"),
+  idp,
+  subject: z.string().min(1),
+});
+export type CognitoSubjectRow = z.infer<typeof cognitoSubjectRow>;
+export const cognitoSubjectKey = (row: CognitoSubjectRow): RowKey => ({ pk: `COGNITO#${row.cognito_sub}`, sk: "COGNITO" });
 
 // 委任（USER#<利用者> / DELEGATION#<委任>）。上書き。状態は expires_at・revoked_at から導き、列に持たない
 export const delegationRow = overwriteRow(1, {

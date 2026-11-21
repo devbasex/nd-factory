@@ -18,7 +18,7 @@ import { createClock } from "../src/clock.ts";
 import { createLogger } from "../src/log.ts";
 
 // IdP と表には触れない。Cognito の公開鍵は差し替えた取り手が返し、鍵と token はテストの中で作った作り物にする。
-// 時刻は注入した時計の NOW に揃える（aws-jwt-verify が実時刻でも照らすため、実時刻も NOW に止める）
+// 時刻は注入した時計の NOW を使う。実時刻も NOW に止め、注入した時計と実時刻が違うときの照らしは個別に実時刻をずらして確かめる
 
 const NOW = Date.parse("2026-11-21T03:04:05.000Z");
 const clock = createClock(() => NOW);
@@ -207,6 +207,36 @@ describe("authenticate: 人（Cognito の access token）", () => {
     await expect(authenticate(req("user", token), deps)).resolves.toEqual(UNAUTHORIZED);
   });
 
+  it("結んでいない主体は sessions.create にだけ、まだ結んでいない人として渡る", async () => {
+    const { deps } = setup();
+    const token = cognitoToken({ sub: "cognito-sub-new" });
+    await expect(authenticate(req("user", token, "sessions.create"), deps)).resolves.toEqual({ ok: true, principal: { kind: "newcomer", cognitoSub: "cognito-sub-new" } });
+    await expect(authenticate(req("user", token, "users.get"), deps)).resolves.toEqual(UNAUTHORIZED);
+    // 結んだ主体は sessions.create でも人
+    await expect(authenticate(req("user", cognitoToken(), "sessions.create"), deps)).resolves.toEqual({ ok: true, principal: { kind: "human", userId: USER } });
+    // 検証に外れた token は sessions.create でも断る
+    await expect(authenticate(req("user", cognitoToken({ sub: "cognito-sub-new", exp: NOW_SEC - 1 }), "sessions.create"), deps)).resolves.toEqual(UNAUTHORIZED);
+  });
+
+  it("期限と nbf は実時刻でなく注入した時計だけで照らす", async () => {
+    const { deps } = setup();
+    try {
+      // 実時刻が期限より後でも、注入した時計で期限の前なら通る
+      vi.setSystemTime(NOW + 86_400_000);
+      await expect(authenticate(req("user", cognitoToken({ exp: NOW_SEC + 600, nbf: NOW_SEC - 60 })), deps)).resolves.toMatchObject({ ok: true });
+      // 実時刻が nbf より前でも、注入した時計で nbf を過ぎていれば通る
+      vi.setSystemTime(NOW - 86_400_000);
+      await expect(authenticate(req("user", cognitoToken({ exp: NOW_SEC + 600, nbf: NOW_SEC - 60 })), deps)).resolves.toMatchObject({ ok: true });
+      // 実時刻では有効でも、注入した時計で期限切れか nbf の前なら断る
+      vi.setSystemTime(NOW + 86_400_000);
+      await expect(authenticate(req("user", cognitoToken({ exp: NOW_SEC - 1 })), deps)).resolves.toEqual(UNAUTHORIZED);
+      vi.setSystemTime(NOW - 86_400_000);
+      await expect(authenticate(req("user", cognitoToken({ nbf: NOW_SEC + 60 })), deps)).resolves.toEqual(UNAUTHORIZED);
+    } finally {
+      vi.setSystemTime(NOW);
+    }
+  });
+
   it("期限の 1 秒前は通り、期限は注入した時計で照らす", async () => {
     const { deps } = setup();
     await expect(authenticate(req("user", cognitoToken({ exp: NOW_SEC + 1 })), deps)).resolves.toMatchObject({ ok: true });
@@ -371,6 +401,15 @@ describe("authenticate: ランナー", () => {
     const exchanged = { ...lane, exchangedGeneration: 2 };
     await expect(authenticate(req("runner", signedToken(laneClaims({ token_use: "exchange" })), "runner.exchanges.create"), setup({ lane: exchanged }).deps)).resolves.toEqual(UNAUTHORIZED);
     await expect(authenticate(req("runner", signedToken(laneClaims()), "runner.events.create"), setup({ lane: exchanged }).deps)).resolves.toMatchObject({ ok: true });
+  });
+
+  it("検証の鍵が Ed25519 の公開鍵でなければ、ヘッダーが EdDSA で署名が鍵に合っても照らさず unavailable", async () => {
+    const rsaSigned = signedToken(laneClaims(), rsa.privateKey);
+    const { deps, lines } = setup({ lane });
+    await expect(authenticate(req("runner", rsaSigned, "runner.events.create"), { ...deps, signingKey: rsa.publicKey })).resolves.toEqual(UNAVAILABLE);
+    expect(JSON.parse(lines.at(-1) ?? "{}")).toMatchObject({ level: "warn", result: "unavailable", error: "signing_key_not_ed25519" });
+    // 私有鍵を検証の鍵に渡しても照らさない
+    await expect(authenticate(req("runner", signedToken(laneClaims()), "runner.events.create"), { ...deps, signingKey: ed.privateKey })).resolves.toEqual(UNAVAILABLE);
   });
 
   it("検証の鍵の無い環境は unauthorized", async () => {
