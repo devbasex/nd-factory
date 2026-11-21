@@ -348,6 +348,21 @@ async function terminateSessions(
   }
 }
 
+// 用意の手順の 4。渡したデータベースで、CATALOG_READS のうち版にあるものの読み取りを PUBLIC から外し、外れたことを読み直す。
+// 読み取りの既定の役割（pg_read_all_stats など）へは入れない
+async function revokeCatalogReads(sql: SqlExecutor, inProject: { database: string }): Promise<void> {
+  const nameParam = [{ name: "names", value: CATALOG_READS.join(",") }];
+  const catalogs = await sql.execute(EXISTING_CATALOG_READS, nameParam, inProject);
+  const names = catalogs.flatMap((r) => (typeof r.name === "string" ? [r.name] : []));
+  if (names.length > 0) {
+    const list = names.map((n) => `pg_catalog.${escapeIdentifier(n)}`).join(", ");
+    await sql.execute(`REVOKE SELECT ON ${list} FROM PUBLIC`, undefined, inProject);
+  }
+  if ((await readCount(sql, PUBLIC_CATALOG_READS, nameParam, inProject)).remaining !== 0) {
+    throw new Error("PUBLIC からカタログの読み取りを外せなかった");
+  }
+}
+
 // docs/design/data.md の用意の手順の 1〜6。何度打っても、最後に渡したパスワードで同じ結果になる。
 // パスワードの平文は SQL の文にも引数にも載せず、SCRAM-SHA-256 の検証子も文の本文に載せない（失敗した文は DB の側のログに
 // 書かれうるため。role-password.ts）。
@@ -391,18 +406,8 @@ export async function provisionProject(
     await sql.execute(`ALTER DATABASE ${db} WITH ALLOW_CONNECTIONS true`, undefined, opts);
   });
 
-  // 4. プロジェクトのデータベースで、他のデータベースと役割の名前と数を返すカタログと統計の読み取りを PUBLIC から外す（I2）。
-  // 読み取りの既定の役割（pg_read_all_stats など）へは入れない
-  const nameParam = [{ name: "names", value: CATALOG_READS.join(",") }];
-  const catalogs = await sql.execute(EXISTING_CATALOG_READS, nameParam, inProject);
-  const names = catalogs.flatMap((r) => (typeof r.name === "string" ? [r.name] : []));
-  if (names.length > 0) {
-    const list = names.map((n) => `pg_catalog.${escapeIdentifier(n)}`).join(", ");
-    await sql.execute(`REVOKE SELECT ON ${list} FROM PUBLIC`, undefined, inProject);
-  }
-  if ((await readCount(sql, PUBLIC_CATALOG_READS, nameParam, inProject)).remaining !== 0) {
-    throw new Error("PUBLIC からカタログの読み取りを外せなかった");
-  }
+  // 4. プロジェクトのデータベースで、他のデータベースと役割の名前と数を返すカタログと統計の読み取りを PUBLIC から外す（I2）
+  await revokeCatalogReads(sql, inProject);
 
   // 5. 作り直しのとき、権限を整える前から残る接続を断ち、終わったことを確かめる
   await terminateSessions(
