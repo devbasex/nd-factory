@@ -32,21 +32,38 @@ describe("rolePasswordStatement", () => {
 });
 
 describe("pgAudit の設定の読み", () => {
-  it("分類の並びを左から読み、all と none と引き算を受ける", () => {
-    expect([...auditClasses("ddl, role")].sort()).toEqual(["ddl", "role"]);
-    expect(auditClasses("all, -role").has("role")).toBe(false);
-    expect(auditClasses("ALL").has("role")).toBe(true);
-    expect(auditClasses("role, none").size).toBe(0);
-    expect(auditClasses("").size).toBe(0);
+  it("分類の並びを pgAudit と同じく左から読み、all と none と引き算と引用符を受ける", () => {
+    expect([...(auditClasses("ddl, role") ?? [])].sort()).toEqual(["ddl", "role"]);
+    expect(auditClasses("all, -role")?.has("role")).toBe(false);
+    expect(auditClasses("ALL")?.has("role")).toBe(true);
+    // none はビットを足さないだけで、先に効いた分類を消さない
+    expect([...(auditClasses("role, none") ?? [])]).toEqual(["role"]);
+    expect(auditClasses("none, role")?.has("role")).toBe(true);
+    expect(auditClasses("all, -none")?.has("role")).toBe(true);
+    expect(auditClasses("none")?.size).toBe(0);
+    // 引用符の付いた名前も分類として読み、大小を問わない
+    expect(auditClasses('"role"')?.has("role")).toBe(true);
+    expect(auditClasses('ddl,"ROLE"')?.has("role")).toBe(true);
+    expect(auditClasses('all, "-role"')?.has("role")).toBe(false);
+    expect(auditClasses(" ddl ,\twrite ")?.has("write")).toBe(true);
+    expect(auditClasses("")?.size).toBe(0);
+    expect(auditClasses("  ")?.size).toBe(0);
+  });
+
+  it("pgAudit が受けない並び（形の誤り・知らない分類）は読めないとする", () => {
+    for (const list of ["ddl,", ",ddl", "ddl role", '"role', '""', "-\"role\"", "roles", "ddl,,role", '" role"']) {
+      expect(auditClasses(list)).toBeUndefined();
+    }
   });
 
   it("pgAudit が無いか、引数の値も役割の文も書かない設定なら通す", () => {
-    const safe = { normal: "0", on_error: "0" };
+    const safe = { normal: "0", on_error: "0", print_plan: "off", explain_min_duration: null };
     for (const audit of [
       { audit_log: null, audit_parameter: null },
       { audit_log: "none", audit_parameter: "off" },
       { audit_log: "ddl, write", audit_parameter: "off" },
       { audit_log: "all, -role", audit_parameter: "off" },
+      { audit_log: "ddl, none", audit_parameter: "off" },
     ]) {
       expect(paramLogProblem({ ...safe, ...audit })).toBeUndefined();
     }
@@ -64,6 +81,8 @@ describe("prepareRolePassword（作り物の SqlExecutor）", () => {
     expect(ex[0]!.sql).toContain("current_setting('log_parameter_max_length')");
     expect(ex[0]!.sql).not.toContain("set_config('log_parameter_max_length'");
     expect(ex[0]!.sql).toContain("set_config('log_parameter_max_length_on_error', '0', true)");
+    expect(ex[0]!.sql).toContain("set_config('debug_print_plan', 'off', true)");
+    expect(ex[0]!.sql).toContain("current_setting('auto_explain.log_min_duration', true)");
     expect(ex[0]!.sql).toContain("current_setting('pgaudit.log', true)");
     expect(ex[0]!.sql).toContain("current_setting('pgaudit.log_parameter', true)");
     expect(ex[0]!.params).toBeUndefined();
@@ -78,14 +97,20 @@ describe("prepareRolePassword（作り物の SqlExecutor）", () => {
   });
 
   it("引数の値を記録しない設定か pgAudit の設定が安全と読めなければ、検証子を送らずに投げる", async () => {
-    const safe = { normal: "0", on_error: "0", audit_log: null, audit_parameter: null };
+    const safe = { normal: "0", on_error: "0", print_plan: "off", explain_min_duration: null, audit_log: null, audit_parameter: null };
     const rows: Row[] = [
       { ...safe, normal: "-1" },
       { ...safe, normal: "64B" },
       { ...safe, on_error: "64B" },
+      { ...safe, print_plan: "on" },
+      { ...safe, explain_min_duration: "0" },
+      { ...safe, explain_min_duration: "100ms" },
       { ...safe, audit_parameter: "on" },
       { ...safe, audit_log: "ddl, role" },
       { ...safe, audit_log: "all, -misc" },
+      { ...safe, audit_log: "role, none" },
+      { ...safe, audit_log: '"role"' },
+      { ...safe, audit_log: "ddl, roles" },
       {},
     ];
     for (const row of rows) {
@@ -194,10 +219,16 @@ function failingStage(inner: SqlExecutor): SqlExecutor {
   };
 }
 
+// debug_print_plan は定数をバイトの並び（例: "83 67 82 65 77"）で書くため、空白と改行を詰めてその並びも探す
+const bytesOf = (text: string): string => [...Buffer.from(text)].join(" ");
+
 function expectNoSecretIn(texts: string[], password: string): void {
   for (const t of texts) {
     expect(t).not.toContain("SCRAM-SHA-256");
     expect(t).not.toContain(password);
+    const flat = t.replace(/(\\n|\s)+/g, " ");
+    expect(flat).not.toContain(bytesOf("SCRAM-SHA-256"));
+    expect(flat).not.toContain(bytesOf(password));
   }
 }
 
@@ -241,14 +272,34 @@ describePg("prepareRolePassword のログ（PostgreSQL）", () => {
     });
   });
 
-  it.each([
-    ["通常の文のログが引数の値を書く設定", "SET log_parameter_max_length = -1"],
-    ["pgAudit が引数の値を書く設定", "SET pgaudit.log_parameter = 'on'"],
-    ["pgAudit が役割の文を書く設定", "SET pgaudit.log = 'ddl, role'"],
-  ])("%sでは、検証子を送らずに止まり、パスワードを書かない", async (_, stmt) => {
+  it("実行計画を書く設定（debug_print_plan）でも、トランザクションの中で切り、計画のログに検証子も平文も出ない", async () => {
     await withTestDatabase(async (db) => {
       const notices: string[] = [];
-      const sql = loggingExecutor(db, notices, "statement", [stmt]);
+      const sql = loggingExecutor(db, notices, "statement", ["SET debug_print_plan = on"]);
+      const role = newRole(db);
+      const password = newPassword();
+      try {
+        await inTx(sql, (opts) => prepareRolePassword(role, password, "create_login")(sql, opts));
+      } finally {
+        await sql.close();
+      }
+      // 確かめの文の計画はまだ書かれる（設定が効いていたことを確かめてから、値の無いことを見る）
+      expect(notices.some((n) => n.includes("PLANNEDSTMT"))).toBe(true);
+      expectNoSecretIn(notices, password);
+    });
+  });
+
+  it.each([
+    ["通常の文のログが引数の値を書く設定", ["SET log_parameter_max_length = -1"]],
+    ["auto_explain が実行計画を書く設定", ["LOAD 'auto_explain'", "SET auto_explain.log_min_duration = 0", "SET auto_explain.log_verbose = on"]],
+    ["pgAudit が引数の値を書く設定", ["SET pgaudit.log_parameter = 'on'"]],
+    ["pgAudit が役割の文を書く設定", ["SET pgaudit.log = 'ddl, role'"]],
+    ["pgAudit が none の後にも役割の文を書く設定", ["SET pgaudit.log = 'role, none'"]],
+    ["pgAudit が引用符の付いた role で役割の文を書く設定", [`SET pgaudit.log = '"role"'`]],
+  ])("%sでは、検証子を送らずに止まり、パスワードを書かない", async (_, stmts) => {
+    await withTestDatabase(async (db) => {
+      const notices: string[] = [];
+      const sql = loggingExecutor(db, notices, "statement", stmts);
       const role = newRole(db);
       const password = newPassword();
       const e = await inTx(sql, (opts) => prepareRolePassword(role, password, "create_login")(sql, opts))

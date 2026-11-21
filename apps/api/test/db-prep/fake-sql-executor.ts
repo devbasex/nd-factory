@@ -24,9 +24,9 @@ export class FakeSqlExecutor implements SqlExecutor {
   async execute(sql: string, params: SqlParam[] | undefined, opts: { database: string; transactionId?: string }): Promise<Row[]> {
     this.record({ kind: "execute", sql, params, database: opts.database, transactionId: opts.transactionId });
     const rows = this.respond(sql, params);
-    // 引数の値を記録しない設定の確かめ（role-password.ts）は、答えを差し込まなければ 0 で pgAudit が無いと返す
+    // 引数の値を記録しない設定の確かめ（role-password.ts）は、答えを差し込まなければ 0 で計画を書かず pgAudit が無いと返す
     if (rows.length === 0 && sql.includes("current_setting('log_parameter_max_length')")) {
-      return [{ normal: "0", on_error: "0", audit_log: null, audit_parameter: null }];
+      return [{ normal: "0", on_error: "0", print_plan: "off", explain_min_duration: null, audit_log: null, audit_parameter: null }];
     }
     return rows;
   }
