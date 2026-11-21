@@ -85,6 +85,13 @@ function commitAll(root: string, message: string): string {
   return git(root, "rev-parse", "HEAD");
 }
 
+/** 木を作って git の倉庫にし、全部を 1 つ目のコミットにする。木の根とそのコミットを返す */
+function makeRepo(files: Record<string, string>, message: string): { root: string; head: string } {
+  const root = makeTree(files);
+  initRepo(root);
+  return { root, head: commitAll(root, message) };
+}
+
 /**
  * `leak-check` のジョブが組むのと同じ重ねた設定（`.gitleaks.toml` を `[extend] path` で読み、規則 `nd-real-value` を足す）を
  * 一時のディレクトリに書く
@@ -325,9 +332,7 @@ describe("既定の規則（tools/checks/gitleaks-default.toml）", () => {
   }, TIMEOUT);
 
   it("根に nd-factory の規則だけの .gitleaks.toml がある木でも、git の探しで架空の token が既定の規則で当たる", () => {
-    const root = makeTree({ ".gitleaks.toml": readFileSync(ND_CONFIG, "utf8"), "docs/token.md": `token ${fakeToken()}\n` });
-    initRepo(root);
-    commitAll(root, "token");
+    const { root } = makeRepo({ ".gitleaks.toml": readFileSync(ND_CONFIG, "utf8"), "docs/token.md": `token ${fakeToken()}\n` }, "token");
     const result = scan(root, ["git", DEFAULT_CONFIG]);
     expect(result.status).toBe(1);
     expect(rulesByFile(result.findings)).toEqual({ "docs/token.md": ["github-pat"] });
@@ -345,9 +350,7 @@ describe("既定の規則（tools/checks/gitleaks-default.toml）", () => {
 
 describe("履歴の探し", () => {
   it("途中のコミットで足して後で消した値が、分岐点からの git の探しで当たる", () => {
-    const root = makeTree({ "docs/a.md": "はじめ\n" });
-    initRepo(root);
-    const base = commitAll(root, "base");
+    const { root, head: base } = makeRepo({ "docs/a.md": "はじめ\n" }, "base");
     write(root, "docs/a.md", `はじめ\nアカウント ${fakeAccount()}\n`);
     const added = commitAll(root, "add");
     write(root, "docs/a.md", "はじめ\n");
@@ -372,9 +375,7 @@ describe("履歴の探し", () => {
   }, TIMEOUT);
 
   it("マージのコミットの競合の解消でだけ足して後で消した値が、マージのコミットの当たりとして報告される", () => {
-    const root = makeTree({ "docs/a.md": "はじめ\n" });
-    initRepo(root);
-    const base = commitAll(root, "base");
+    const { root, head: base } = makeRepo({ "docs/a.md": "はじめ\n" }, "base");
     git(root, "checkout", "-q", "-b", "side");
     write(root, "docs/a.md", "枝の側\n");
     commitAll(root, "side");
@@ -404,9 +405,7 @@ describe("履歴の探し", () => {
   }, TIMEOUT);
 
   it("git で読めない範囲を渡すと、当たり無しで通さずに失敗する", () => {
-    const root = makeTree({ "docs/a.md": `アカウント ${fakeAccount()}\n` });
-    initRepo(root);
-    commitAll(root, "base");
+    const { root } = makeRepo({ "docs/a.md": `アカウント ${fakeAccount()}\n` }, "base");
     const result = scan(root, ["git", ND_CONFIG, "--range", `${"0".repeat(40)}..HEAD`]);
     expect(result.status).not.toBe(0);
     expect(result.output).toContain("範囲");
@@ -438,9 +437,7 @@ describe("gitleaks の生の出力", () => {
   for (const mode of ["dir", "git"] as const) {
     it(`${mode} の探しで、--paths を渡さなければ gitleaks の標準出力と標準エラーに載ったファイルの名前を出さない`, () => {
       const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
-      const root = makeTree({ "a.md": "中身\n" });
-      initRepo(root);
-      commitAll(root, "first");
+      const { root } = makeRepo({ "a.md": "中身\n" }, "first");
       const env = { ...process.env, PATH: fakeGitleaksPath(`docs/${realWord}.md`) };
       const hidden = scan(root, [mode, ND_CONFIG], { paths: false, env });
       expect(hidden.status).toBe(0);
@@ -464,9 +461,7 @@ describe("読めずに飛ばした対象", () => {
   for (const mode of ["dir", "git"] as const) {
     it(`${mode} の探しで、gitleaks が警告を出して 0 で終えても、当たり無しとして通さず、ファイルの名前を出さない`, () => {
       const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
-      const root = makeTree({ "a.md": "中身\n" });
-      initRepo(root);
-      commitAll(root, "first");
+      const { root } = makeRepo({ "a.md": "中身\n" }, "first");
       const env = { ...process.env, PATH: fakeGitleaksPath("中身", skipLine(`docs/${realWord}.md`)) };
       const hidden = scan(root, [mode, ND_CONFIG], { paths: false, env });
       expect(hidden.status).toBe(1);
@@ -480,9 +475,7 @@ describe("読めずに飛ばした対象", () => {
 
   it("警告の後にパイプの容量を超える出力が続いても、当たり無しとして通さない", () => {
     const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
-    const root = makeTree({ "a.md": "中身\n" });
-    initRepo(root);
-    commitAll(root, "first");
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
     // 1 行が約 50 バイトで 1 万行（約 500KB）。パイプの容量（Linux の既定は 64KiB）を超える
     const env = { ...process.env, PATH: fakeGitleaksPath("中身", skipLine(`docs/${realWord}.md`), 10000) };
     const result = scan(root, ["dir", ND_CONFIG], { paths: false, env });
@@ -519,9 +512,7 @@ describe("除外の拒み", () => {
   }, TIMEOUT);
 
   it("git の探しで、値の行に gitleaks:allow だけを付けた値が対象の規則の当たりとして報告される", () => {
-    const root = makeTree({ "docs/allow.md": allowLine() });
-    initRepo(root);
-    commitAll(root, "allow");
+    const { root } = makeRepo({ "docs/allow.md": allowLine() }, "allow");
     const result = scan(root, ["git", ND_CONFIG]);
     expect(result.status).toBe(1);
     expect(rulesByFile(result.findings)).toEqual({ "docs/allow.md": ["nd-aws-account-id"] });
@@ -536,9 +527,7 @@ describe("除外の拒み", () => {
   }, TIMEOUT);
 
   it("git の探しで、根に追跡している .gitleaksignore を置くと、名前を示して探さずに失敗する", () => {
-    const root = makeTree({ "docs/a.md": `アカウント ${fakeAccount()}\n`, ".gitleaksignore": "docs/a.md:nd-aws-account-id:1\n" });
-    initRepo(root);
-    commitAll(root, "ignore");
+    const { root } = makeRepo({ "docs/a.md": `アカウント ${fakeAccount()}\n`, ".gitleaksignore": "docs/a.md:nd-aws-account-id:1\n" }, "ignore");
     const result = scan(root, ["git", ND_CONFIG]);
     expect(result.status).not.toBe(0);
     expect(result.output).toContain(".gitleaksignore");
