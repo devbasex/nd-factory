@@ -1,4 +1,4 @@
-# #13 の詳細設計: ネットワーク・進行表の DB・ECS のクラスタ・費用の見張り・DB の用意のタスク・設置のコマンドの足し
+# #13 の詳細設計: ネットワーク・進行表の DB・ECS のクラスタ・費用の見張り・DB の用意の関数・設置のコマンドの足し
 
 設計文書 [issue-13-design.md](./issue-13-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 2 つ以上あるため別のファイルにした。値の理由は設計文書の決定にあり、ここでは繰り返さない。ソースのコメントや型で読める情報は写さない。
 
@@ -9,10 +9,9 @@
 ```text
 packages/contracts/
 ├── src/settings.ts
-├── src/db-prep-api.ts          *
+├── src/db-prep.ts              *
 ├── test/settings.test.ts
-├── test/db-prep-api.test.ts    *
-├── data/exit-codes.json
+├── test/db-prep.test.ts        *
 └── schema/settings.schema.json （生成物）
 infra/
 ├── settings.example.json       （生成物）
@@ -21,51 +20,49 @@ infra/
 ├── lib/network.ts              *
 ├── lib/progress-db.ts          *
 ├── lib/tasks.ts                *
+├── lib/db-prep-function.ts     *
 ├── lib/cost-watch.ts           *
-├── lib/pipeline-stack.ts
 ├── setup/nd-setup.ts
 ├── setup/aws-reader.ts
 ├── setup/missing-settings.ts   *
-├── lib/images.ts               *
-├── bin/app.ts
-├── setup/images.ts             *
-├── setup/images-cli.ts         *
-└── test/（support.ts・app-stack・stack-rules*・pipeline-stack・naming・nd-setup・missing-settings*・images*）
-apps/db-prep/                   *
-├── package.json・tsconfig.json・Dockerfile
-├── certs/rds-global-bundle.pem
-├── src/main.ts・exchange.ts・provision.ts・rotate.ts
-└── test/exchange.test.ts・provision.test.ts・rotate.test.ts
-docs/operations/settings.md・setup.md・pipeline-approval.md
+└── test/（support.ts・app-stack・stack-rules*・db-prep-function*・naming・nd-setup・missing-settings*）
+apps/api/
+├── package.json
+├── src/entries/db-prep.ts      *
+├── src/db-prep/                *
+│   └── handler.ts・sql-executor.ts・pending-secret.ts・provision.ts・rotate.ts
+└── test/db-prep/               *
+    └── pg-executor.ts・sql-executor.test.ts・pending-secret.test.ts・handler.test.ts・provision.test.ts・rotate.test.ts
+docs/operations/settings.md
 .github/workflows/ci.yml
+package-lock.json
 ```
 
-依存の向き: `packages/contracts` ← `infra`・`apps/db-prep` の一方向で、`infra` と `apps/db-prep` は互いを import しない。`infra/lib/images.ts` と `infra/setup/images.ts` は `apps/db-prep/Dockerfile` をビルドの入力のパスとして指すだけで、コードを import しない（[詳細設計の依存の表](../docs/design/detail.md#クラスと関数の構造)の `infra` から `apps/*` への import の禁止に合う）。
+依存の向き: `packages/contracts` ← `infra`・`apps/api` の一方向で、`infra` と `apps/api` は互いを import しない。`infra/lib/db-prep-function.ts` は `apps/api/src/entries/db-prep.ts` を `NodejsFunction` の起点のパスとして指すだけで、コードを import しない（今の API の関数と同じ形。[全体の詳細設計の依存の表](../docs/design/detail.md#クラスと関数の構造) の `infra` から `apps/*` への import の禁止に合う）。置き場は [全体の詳細設計の受け持つ子の課題](../docs/design/detail.md#受け持つ子の課題) の「`apps/api/src/entries/` の DB の用意の関数」に合わせる。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `packages/contracts/src/settings.ts` | 変更 | 設定のファイルの形に 5 つのキーを足し、既定を解く | zod | モジュール | `settingsSchema`（変更）・`infraValues`（新設） |
-| `packages/contracts/src/db-prep-api.ts` | 新設 | DB の用意のタスクの 2 つの HTTP の経路の要求と応答の形 | zod | モジュール | 4 つの zod の定義・`PROGRESS_DB_IDENT_SHAPE`・`DB_PREP_FAILURE_REASONS` |
-| `infra/lib/naming.ts` | 変更 | 足す資源の名前 | — | モジュール | `appResourceNames`（変更） |
+| `packages/contracts/src/db-prep.ts` | 新設 | DB の用意の関数の呼び出しの値と終わりの結果の形 | zod | モジュール | `dbPrepInvocation`・`dbPrepOutcome`・`PROGRESS_DB_IDENT_SHAPE`・`DB_PREP_FAILURE_REASONS` |
+| `infra/lib/naming.ts` | 変更 | 足す資源の名前（DB の用意の関数 `<prefix>-<environment>-db-prep` を含む） | — | モジュール | `appResourceNames`（変更） |
 | `infra/lib/network.ts` | 新設 | VPC・サブネット・エンドポイント・SG | aws-cdk-lib | `Network` | `constructor`・`subnetMask` |
-| `infra/lib/progress-db.ts` | 新設 | Aurora のクラスタと管理の役割の秘密の器 | aws-cdk-lib・`Network` | `ProgressDb` | `constructor` |
-| `infra/lib/tasks.ts` | 新設 | ECS のクラスタ・実行の役割・DB の用意のタスクの定義 | aws-cdk-lib・`Network` | `TaskPlatform` | `constructor`・`RUNNER_TASK_SIZE`・`DB_PREP_TASK_SIZE` |
+| `infra/lib/progress-db.ts` | 新設 | Aurora のクラスタ（Data API を有効）と管理の役割の秘密の器 | aws-cdk-lib・`Network` | `ProgressDb` | `constructor` |
+| `infra/lib/tasks.ts` | 新設 | ECS のクラスタ・実行の役割・文を持たないタスクの役割・ログの群 | aws-cdk-lib・`Network` | `TaskPlatform` | `constructor`・`RUNNER_TASK_SIZE`・`RUN_TASK_PROPAGATE_TAGS` |
+| `infra/lib/db-prep-function.ts` | 新設 | DB の用意の関数の Lambda と、その役割の権限 | aws-cdk-lib・`ProgressDb` | `DbPrepFunction` | `constructor`・`DB_PREP_ENTRY` |
 | `infra/lib/cost-watch.ts` | 新設 | 運用の知らせのトピックと月の予算 | aws-cdk-lib | `CostWatch` | `constructor` |
-| `infra/lib/app-stack.ts` | 変更 | 4 つの部品を組み、AZ を `Fn::GetAZs` から返し、利用者の表に PITR を付ける | 上の 4 つ | `AppStack` | `availabilityZones`（新設の getter）・`constructor`（変更） |
-| `infra/lib/pipeline-stack.ts` | 変更 | 準備のアクションを特権にしてイメージを作らせ、自前の ECR への push を許す。反映のアクションは変えない | — | `PipelineStack` | `constructor`・`prepareBuildSpec`（変更） |
+| `infra/lib/app-stack.ts` | 変更 | 5 つの部品を組み、AZ を `Fn::GetAZs` から返し、利用者の表に PITR を付ける | 上の 5 つ | `AppStack` | `availabilityZones`（新設の getter）・`constructor`（変更） |
 | `infra/setup/missing-settings.ts` | 新設 | 足りない設定の一覧を集めて出す | `aws-reader` | モジュール | `MISSING_CHECKS`・`collectMissingSettings`・`printMissingSettings` |
-| `infra/lib/images.ts` | 新設 | イメージごとの自前の ECR とライフサイクルの規則、合成の入力のダイジェストの読み方 | aws-cdk-lib | `ImageRepository` | `constructor`・`IMAGE_SPECS`・`KEEP_IMAGES`・`imageRepositoryName`・`readImageDigests` |
-| `infra/bin/app.ts` | 変更 | 合成の入力のダイジェストを読んで `AppStack` へ渡す | `images.ts` | モジュール | 最上位の処理（変更） |
-| `infra/setup/images.ts` | 新設 | イメージを作って push し、一覧を書く | `images.ts`・AWS SDK（ECR） | モジュール | `buildAndPushImages` |
-| `infra/setup/images-cli.ts` | 新設 | パイプラインの準備のアクションから `buildAndPushImages` を打つ入口 | `setup/images.ts` | モジュール | `main` |
-| `packages/contracts/data/exit-codes.json` | 変更 | 6 `BUILD` の意味にイメージの作成と push を足し、0・5・6 の「AWS へ書いたか」を自前の ECR への push に合わせる（`setup.md` の表は生成） | — | — | — |
 | `infra/setup/aws-reader.ts` | 変更 | コスト配分タグ・組織・AZ を読む | AWS SDK（Cost Explorer・Organizations・EC2） | モジュール | `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount`（新設） |
-| `infra/setup/nd-setup.ts` | 変更 | `diff` の合成の前にイメージを push する。`diff` の最後に一覧を出す | 上の 2 つ | モジュール | `runDiff`・`synthesize`・`defaultDeps`（変更） |
+| `infra/setup/nd-setup.ts` | 変更 | `diff` の最後に足りない設定の一覧を出す | 上の 2 つ | モジュール | `runDiff`・`defaultDeps`（変更） |
 | `infra/test/support.ts` | 変更 | スタックの決まりの検査 | — | モジュール | `stackRuleViolations`（新設）・`hourlyCostResources`（変更） |
-| `apps/db-prep/src/main.ts` | 新設 | タスクの入口。引き換え → 用意か差し替え → 終わりの報告 | 下の 3 つ・contracts・`pino` | モジュール | `main` |
-| `apps/db-prep/src/exchange.ts` | 新設 | タスクの ID を読み、API と話す | contracts・`p-retry` | モジュール | `readTaskArn`・`exchange`・`complete` |
-| `apps/db-prep/src/provision.ts` | 新設 | 管理の接続・I10 の守り・用意の手順の 1〜6 | `pg`・`p-retry` | モジュール | `connectAdmin`・`claimBinding`・`checkIsolationGuard`・`provisionProject` |
-| `apps/db-prep/src/rotate.ts` | 新設 | 差し替えと古い接続の切り | `pg` | モジュール | `rotateRole`・`terminateRoleConnections` |
+| `apps/api/package.json` | 変更 | DB の用意の関数の依存を足す（`@aws-sdk/client-rds-data`・`@aws-sdk/client-secrets-manager`・`p-retry`・`pino`・`pg`） | — | — | — |
+| `apps/api/src/entries/db-prep.ts` | 新設 | DB の用意の関数の起点。本番の依存を組んで `handler` を出す | 下の 3 つ・AWS SDK | モジュール | `handler` |
+| `apps/api/src/db-prep/handler.ts` | 新設 | 呼び出しを照らし、用意の ID を読み直し、用意か差し替えを打って結果を終わりの記録の口へ渡す | contracts・`provision`・`rotate`・`pino` | モジュール | `createDbPrepHandler`・`PrepCompletionPort`（型）・`createPrepLogger` |
+| `apps/api/src/db-prep/sql-executor.ts` | 新設 | SQL を打つ口と、その Data API の実装 | `@aws-sdk/client-rds-data`・`p-retry` | モジュール | `SqlExecutor`（型）・`createDataApiExecutor`・`RESUME_WAIT_ERRORS`・`DataApiUnavailableError` |
+| `apps/api/src/db-prep/pending-secret.ts` | 新設 | プロジェクトの秘密の器の保留の版からパスワードを読む | `@aws-sdk/client-secrets-manager` | モジュール | `readPendingPassword` |
+| `apps/api/src/db-prep/provision.ts` | 新設 | I10 の守り・用意の手順の 1〜6 | `SqlExecutor`・`pg`（`escapeIdentifier`・`escapeLiteral`） | モジュール | `claimBinding`・`checkIsolationGuard`・`provisionProject` |
+| `apps/api/src/db-prep/rotate.ts` | 新設 | 差し替えと古い接続の切り | `SqlExecutor`・`pg`（`escapeIdentifier`・`escapeLiteral`） | モジュール | `rotateRole`・`terminateRoleConnections` |
+| `apps/api/test/db-prep/pg-executor.ts` | 新設 | テストで使う `SqlExecutor` の `pg` の実装 | `pg` | モジュール | `createPgExecutor` |
 | `.github/workflows/ci.yml` | 変更 | `check` のジョブに PostgreSQL 16 のサービスコンテナと接続の値を足す | — | — | — |
 
 ## 形の正本
@@ -78,23 +75,23 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | --- | --- | --- | --- | --- |
 | `settingsSchema` | `packages/contracts/src/settings.ts` | 変更 | — | `network`・`progress_db`・`budget`（額と `scope`）・`ops` の任意のキーを足す（形は設計文書の「設定のファイル」の表） |
 | `infraValues` | 同上 | 新設 | `(s: Settings) => InfraValues` | キーが無ければ既定を入れた値を返す |
-| 4 つの zod の定義 | `packages/contracts/src/db-prep-api.ts` | 新設 | `dbPrepExchangeRequest`・`dbPrepExchangeResponse`・`dbPrepCompletionRequest`・`dbPrepCompletionResponse` | 設計文書の「DB の用意のタスクの HTTP の経路」の表の形。どれも要素 1 個の配列。2 つの応答の要素は要素の結果の判別共用体（`ok: true` なら `item` に表の項目、`ok: false` なら `status`・`reason`） |
+| 2 つの zod の定義 | `packages/contracts/src/db-prep.ts` | 新設 | `dbPrepInvocation`・`dbPrepOutcome` | 設計文書の「DB の用意の関数の呼び出しと終わり」の表の形 |
 
 - `infraValues`
   - 事後条件: `vpcCidr`・`maxAcu`・`budgetUsd`・`budgetScope`・`opsEmails` がどれも値を持つ。既定は `INFRA_DEFAULTS`（`10.80.0.0/16`・2・30・`tags`・空の配列）
-- `dbPrepExchangeResponse`・`dbPrepCompletionResponse`
-  - 要素は `{ ok: true; item }` か `{ ok: false; status: number; reason: string }`。HTTP 401 の problem の本文はこの形に含めず、呼ぶ側が HTTP の状態で先に分ける
-- `dbPrepExchangeResponse` の `item`
-  - `kind` が `rotate` のときだけ `project.rotation_seq` を必須にし、`create` で持てば誤りにする。データベースと役割の名前は `PROGRESS_DB_IDENT_SHAPE`（`^[a-z][a-z0-9_]{7,62}$`）に合う。`project.id` はプロジェクトの ID（データの文書のプロジェクトの集約の ID と同じ形）で、`create` と `rotate` のどちらも必須
-- `dbPrepCompletionRequest`
-  - `result` ごとに要る項目を判別共用体で縛る（`rotation_superseded` は `recorded_seq`、`failed` は `reason`、`kind` が `rotate` なら `rotation_seq`）
+- `dbPrepInvocation`
+  - 項目は `prep_id`・`project_id`・`kind`・`rotation_seq` だけで、ほかの項目を持てば誤りにする（パスワードや管理の値を載せない）。`kind` が `rotate` のときだけ `rotation_seq`（1 以上の整数）を必須にし、`create` で持てば誤りにする。`project_id` はプロジェクトの ID（データの文書のプロジェクトの集約の ID と同じ形）
+- `dbPrepOutcome`
+  - `result` ごとに要る項目を判別共用体で縛る（`rotation_superseded` は `recorded_seq`、`failed` は `reason`）
+- `PROGRESS_DB_IDENT_SHAPE`
+  - データベースと役割の名前の形（`^[a-z][a-z0-9_]{7,62}$`）。関数が口から読んだ名前を照らす
 
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `INFRA_DEFAULTS` | 定数 | `packages/contracts/src/settings.ts` | 上の 5 つの既定 |
-| `DB_PREP_FAILURE_REASONS` | 定数 | `packages/contracts/src/db-prep-api.ts` | `admin_connect_failed`・`guard_conflict`・`connections_remain`・`sql_failed` |
+| `DB_PREP_FAILURE_REASONS` | 定数 | `packages/contracts/src/db-prep.ts` | `data_api_unavailable`・`guard_conflict`・`connections_remain`・`sql_failed` |
 
 ### 単体テストの観点
 
@@ -102,8 +99,8 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | --- | --- | --- | --- |
 | `settingsSchema` | 5 つのキーを持つ・持たない設定のファイル | CIDR の接頭辞 16 と 20 は通り 15 と 21 は落ちる。ACU の 1・16 は通り 0.5・16.5・1.25 は落ちる。予算の 1 は通り 0 は落ちる。範囲は `tags`・`account` が通り `tag` は落ちる | 未知のキー・メールでない宛先 |
 | `infraValues` | キーの無い設定で既定 | — | — |
-| `dbPrepCompletionRequest` | 3 つの `result` | — | `rotation_superseded` で `recorded_seq` が無い・`create` で `rotation_seq` がある |
-| `dbPrepExchangeResponse`・`dbPrepCompletionResponse` | `ok: true` の `item` を読む。`ok: false`・`status: 409`（`state_mismatch`）と `status: 422`（`idempotency_key_reused`）の要素を読む | — | `item` の無い `ok: true`・`status` の無い `ok: false`・包みの無い素の項目を誤りにする |
+| `dbPrepInvocation` | `create` と `rotate` | — | `create` で `rotation_seq` がある・`rotate` で無い・ほかの項目（`password` など）を持つ |
+| `dbPrepOutcome` | 3 つの `result` | — | `rotation_superseded` で `recorded_seq` が無い・`failed` で `reason` が無い・一覧に無い理由 |
 
 ## ネットワーク
 
@@ -137,33 +134,32 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `ProgressDb` の `constructor` | `infra/lib/progress-db.ts` | 新設 | `(scope, id, props: { network: Network; maxAcu: number; names: AppResourceNames })` | Aurora PostgreSQL 16.13・出口の無いサブネット・`ClusterInstance.serverlessV2` の書き手 1 台・最小 0・最大 `maxAcu`・自動の一時停止 300 秒・削除の保護・`RemovalPolicy.RETAIN`・管理の役割 `nd_admin` の生成した秘密の器 `<prefix>/<environment>/progress-db-admin`・保存の暗号化・クラスタのパラメータの群（`rds.force_ssl: 1`。Aurora PostgreSQL 16 は既定が 0 で、TLS でない接続を受けてしまう。LIB18） |
+| `ProgressDb` の `constructor` | `infra/lib/progress-db.ts` | 新設 | `(scope, id, props: { network: Network; maxAcu: number; names: AppResourceNames })` | Aurora PostgreSQL 16.13・出口の無いサブネット・`ClusterInstance.serverlessV2` の書き手 1 台・最小 0・最大 `maxAcu`・自動の一時停止 300 秒・削除の保護・`RemovalPolicy.RETAIN`・管理の役割 `nd_admin` の生成した秘密の器 `<prefix>/<environment>/progress-db-admin`・保存の暗号化・Data API を有効（`enableDataApi: true`）・クラスタのパラメータの群（`rds.force_ssl: 1`。Aurora PostgreSQL 16 は既定が 0 で、TLS でない接続を受けてしまう。LIB18） |
 
-- 接続する側の TLS: DB の用意のタスクは、管理の接続（`connectAdmin`）とプロジェクトのデータベースへの接続（`provisionProject` の `connectTo`）のどちらも `pg` の `ssl: { ca: <RDS の CA の束>, rejectUnauthorized: true }` で開く。名前の検証は Node.js の TLS の既定（`servername` は `host`）で行い、`checkServerIdentity` を差し替えない。そのため `admin.host` はクラスタの端点の DNS の名前で渡す（IP では名前が合わず開けない）。CA の束は RDS の全リージョンの束（`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`）を `apps/db-prep/certs/rds-global-bundle.pem` としてリポジトリに置き（公開の証明書で秘密でない）、`Dockerfile` がイメージへ写す。束の入れ替えは Pull Request で行う。CI の PostgreSQL のサービスコンテナは TLS を持たないため、DB のテストは `connectAdmin` を通らずに作った `pg.Client` を渡す
+- 接続する側の TLS は #6 のランナーが持つ。DB の用意の関数は Data API の HTTPS の端点で打ち、Aurora へ接続しない。`ProgressDb` はクラスタと管理の役割の秘密の器を公開の値に持ち、`DbPrepFunction` へ渡す
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `ProgressDb` | 合成の出力に最小 0・最大 2・一時停止 300 秒・書き手 1 台・クラスタのパラメータの群の `rds.force_ssl` が `1` | `maxAcu` 16 | パラメータの群を外す・`rds.force_ssl` を `0` にすると落ちる |
+| `ProgressDb` | 合成の出力に最小 0・最大 2・一時停止 300 秒・書き手 1 台・クラスタのパラメータの群の `rds.force_ssl` が `1`・`EnableHttpEndpoint` が真 | `maxAcu` 16 | パラメータの群を外す・`rds.force_ssl` を `0` にする・Data API を外すと落ちる |
 
 ## ECS のクラスタ
 
-満たす決定: 決定 5・11、受け入れ条件 2・3・4
+満たす決定: 決定 5、受け入れ条件 2・3・4
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `TaskPlatform` の `constructor` | `infra/lib/tasks.ts` | 新設 | `(scope, id, props: { network: Network; names: AppResourceNames; images: ImageDigests; repositories: Record<ImageKey, IRepository> })` | ECS のクラスタ（Container Insights なし）・タスクの実行の役割（ECR の取得とログの書き込みだけ）・DB の用意のタスクの定義（族 `<prefix>-<environment>-db-prep`・`DB_PREP_TASK_SIZE`・x86_64・非 root・イメージは DB の用意の自前の ECR からダイジェストで引く。下の「イメージ」）・タスクの役割（文なし）・ログの群（30 日） |
-| `RUNNER_TASK_SIZE`・`DB_PREP_TASK_SIZE` | 同上 | 新設 | `{ cpu: 1024, memoryMiB: 2048 }`・`{ cpu: 256, memoryMiB: 512 }` | 既定の大きさ。ランナーの値は #6 がタスクの定義で使う |
-| `TaskPlatform` の公開の値 | 同上 | 新設 | `cluster`・`executionRole`・`publicSubnets`・`taskSecurityGroup`・`dbPrepTaskDefinition` | #6 が API の関数へ `RunTask` の値として渡す |
+| `TaskPlatform` の `constructor` | `infra/lib/tasks.ts` | 新設 | `(scope, id, props: { network: Network; names: AppResourceNames })` | ECS のクラスタ（Container Insights なし）・タスクの実行の役割（ECR の取得とログの書き込みだけ）・タスクの役割（文なし）・ログの群（30 日） |
+| `RUNNER_TASK_SIZE` | 同上 | 新設 | `{ cpu: 1024, memoryMiB: 2048 }` | ランナーの既定の大きさ。#6 がタスクの定義で使う |
+| `TaskPlatform` の公開の値 | 同上 | 新設 | `cluster`・`executionRole`・`taskRole`・`logGroup`・`publicSubnets`・`taskSecurityGroup` | #6 がランナーのタスクの定義と、API の関数の `RunTask` の値に使う |
 | `RUN_TASK_PROPAGATE_TAGS` | 同上 | 新設 | 定数 `"TASK_DEFINITION"` | #6 が `RunTask` の `propagateTags` に必ず渡す値。`RunTask` は既定でタスクの定義のタグを実行するタスクへ写さないため、渡さなければ Fargate の実行の費用がタグ `app-prefix`・`app-env` を持たず、既定の `budget.scope: tags` の予算に数えられない（LIB19） |
 
-- タスクの定義はスタックのタグ（`app-prefix`・`app-env`）を持つ。#6 は `RunTask` に `propagateTags: RUN_TASK_PROPAGATE_TAGS` を渡し、API の関数の役割に `ecs:TagResource`（`ecs:CreateAction` が `RunTask` の条件つき）を許す。#6 の API の関数のテストは、`RunTask` の入力に `propagateTags: "TASK_DEFINITION"` があることを照らす
+- #6 が作るタスクの定義はスタックのタグ（`app-prefix`・`app-env`）を持つ。#6 は `RunTask` に `propagateTags: RUN_TASK_PROPAGATE_TAGS` を渡し、API の関数の役割に `ecs:TagResource`（`ecs:CreateAction` が `RunTask` の条件つき）を許す。#6 の API の関数のテストは、`RunTask` の入力に `propagateTags: "TASK_DEFINITION"` があることを照らす
 
 - 事後条件: `AWS::ECS::Service`・`AWS::ECS::TaskSet` を作らない。タスクの役割に `Policies` も `ManagedPolicyArns` も無い
-- DB の用意のタスクの定義は、`props.images` に DB の用意（キー `db-prep`）のダイジェストがあるときだけ作り、イメージを `ContainerImage.fromEcrRepository(<リポジトリ>, "sha256:…")` でダイジェストで引く。無いとき（初めての設置・CI の合成）は作らない。ほかのキー（#6 の `runner`）の有無に依らない
 
 ## 費用の見張り
 
@@ -175,7 +171,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | --- | --- | --- | --- | --- |
 | `CostWatch` の `constructor` | `infra/lib/cost-watch.ts` | 新設 | `(scope, id, props: { budgetUsd: number; budgetScope: "tags" \| "account"; emails: string[]; tags: { prefix: string; env: string }; names: AppResourceNames })` | SNS のトピック `<prefix>-<environment>-ops`（予算のサービスに発行を許す方針つき）・宛先ごとのメールの購読（空なら作らない）・予算 `<prefix>-<environment>-budget`（月・費用・USD。`budgetScope` が `tags` ならタグ `user:app-prefix$<prefix>` と `user:app-env$<environment>` で絞り、`account` なら絞らない）・実績 80%・100%・見込み 100% の 3 つの知らせをトピックへ |
 
-- トピックの方針は `sns.TopicPolicy` の別の資源で作り、`budgets.amazonaws.com` に `SNS:Publish` を許す（条件は `aws:SourceAccount` がこのアカウント、`aws:SourceArn` が `arn:aws:budgets::<アカウント>:*`）。予算はトピックの ARN を参照するだけでは方針への依存を CloudFormation に伝えず、方針より先に作られうる。AWS Budgets は発行を許されていないトピックを無効と扱うため（LIB20）、`CfnBudget` に `budget.node.addDependency(topicPolicy)` を付け、初回の反映でも方針の後に予算を作る。トピックは KMS で暗号化しない（暗号化すると予算のサービスに鍵の許しが別に要る。LIB20）
+- トピックの方針は `sns.TopicPolicy` の別の資源で作り、`budgets.amazonaws.com` に `SNS:Publish` を許す（条件は `aws:SourceAccount` がこのアカウント、`aws:SourceArn` がこのアカウントの予算の ARN。`Stack.formatArn` でサービス `budgets`・リージョンなし・資源 `*` を組む）。予算はトピックの ARN を参照するだけでは方針への依存を CloudFormation に伝えず、方針より先に作られうる。AWS Budgets は発行を許されていないトピックを無効と扱うため（LIB20）、`CfnBudget` に `budget.node.addDependency(topicPolicy)` を付け、初回の反映でも方針の後に予算を作る。トピックは KMS で暗号化しない（暗号化すると予算のサービスに鍵の許しが別に要る。LIB20）
 
 ### 単体テストの観点
 
@@ -202,7 +198,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `task_ingress` | タスクの SG の `SecurityGroupIngress`、またはタスクの SG を指す `AWS::EC2::SecurityGroupIngress` |
 | `lambda_in_vpc` | `VpcConfig` を持つ `AWS::Lambda::Function` |
 | `ecs_service` | `AWS::ECS::Service`・`AWS::ECS::TaskSet` |
-| `task_role_statement` | タスクの定義の `TaskRoleArn` が指す役割の `Policies`・`ManagedPolicyArns`、またはその役割へ付く `AWS::IAM::Policy` |
+| `task_role_statement` | `TaskPlatform` のタスクの役割と、タスクの定義の `TaskRoleArn` が指す役割の `Policies`・`ManagedPolicyArns`、またはその役割へ付く `AWS::IAM::Policy` |
 | `aurora_min` | `ServerlessV2ScalingConfiguration.MinCapacity` が 0 でない `AWS::RDS::DBCluster` |
 | `deletable` | `DeletionPolicy` が `Retain` でない表・バケット・クラスタ（画面の配信のバケットは残す設定で同じに照らす） |
 | `pitr` | `PointInTimeRecoverySpecification` が有効でない表 |
@@ -214,46 +210,25 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `stackRuleViolations` | 今の `AppStack` で 0 件 | — | 決まりごとに違反を 1 つ足した合成の出力で、その決まりの 1 件だけを返す（8 通り） |
 | `hourlyCostResources` | 許しの条件を満たす Aurora を返さない | — | 最小 0.5・一時停止なし・読み手 1 台で返す |
 
-## イメージ
+## DB の用意の関数の資源
 
-満たす決定: 決定 1・2、受け入れ条件 9
+満たす決定: 決定 9・15、受け入れ条件 3・4
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `IMAGE_SPECS` | `infra/lib/images.ts` | 新設 | `readonly { key: ImageKey; dockerfile: string; context: string }[]` | 作るイメージの並び（今は `db-prep` だけ）。#6 は `runner` の行を足す |
-| `KEEP_IMAGES` | 同上 | 新設 | 定数 `30` | リポジトリごとに残す版の数（設計文書の決定 2） |
-| `imageRepositoryName` | 同上 | 新設 | `(s: Settings, key: ImageKey) => string` | リポジトリの名前 `<prefix>-<environment>-<key>` を返す。`ImageRepository` と `buildAndPushImages` がこれで名前を作る |
-| `ImageRepository` の `constructor` | 同上 | 新設 | `(scope, id, props: { name: string })` | ECR のリポジトリ（名前は `imageRepositoryName` の値・タグは書き換え不可・push の時の検査・`RemovalPolicy.RETAIN`）と、規則 1 つ（`tagStatus: any`・`imageCountMoreThan: KEEP_IMAGES`） |
-| `readImageDigests` | 同上 | 新設 | `(scope: Construct) => ImageDigests` | CDK の context `nd:images` が指す一覧のファイル（`nd-setup-images.json`。形は `{ "<key>": { "repository": "<名前>", "digest": "sha256:…" } }`）を `node.tryGetContext` で読み、キーごとの組を返す。context が未指定（`undefined`）なら空。値は絶対のパスの文字列に限り、空の文字列・文字列でない値・相対のパス・読めないファイルは投げる（`cdk synth` を打つ作業のディレクトリと一覧を書いた基準が違いうるため、相対のパスを解かない）。形が違えば投げる |
-| `buildAndPushImages` | `infra/setup/images.ts` | 新設 | `(target: Target, s: Settings, out: string, deps: ImageDeps) => Promise<ImagesResult>` | `IMAGE_SPECS` のキーごとにリポジトリがあるかを読み、あるキーごとに `docker build --platform linux/amd64` → `build-<UTC の時刻>` のタグで push → ダイジェストを読み、得たキーだけを組で `<out>/nd-setup-images.json` に書く。結果は `{ digests: ImageDigests; noRepository: ImageKey[] }`。リポジトリのあるキーが 1 つも無ければ一覧を書かない |
-| `main` | `infra/setup/images-cli.ts` | 新設 | `(argv: string[], deps: ImageDeps) => Promise<number>` | `push --settings <file> --out <dir>` を打つ。パイプラインの CodeBuild の資格情報（既定の解き方）で動く |
-| `synthesize` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 選んだスタックに `app` が含まれるときだけ、画面のビルドの後、合成の前に `buildAndPushImages` を打ち、一覧のファイルのパスを `path.resolve` で絶対にしてから `cdk synth -c nd:images=<絶対のパス>` で合成へ渡す。一覧は合成の結果の置き場にあるため要約値に入る。`app` を含まない（`--stack pipeline` だけ）ときは push せず、一覧も書かない |
+| `DbPrepFunction` の `constructor` | `infra/lib/db-prep-function.ts` | 新設 | `(scope, id, props: { db: ProgressDb; names: AppResourceNames; secretPrefix: string })` | `NodejsFunction`（起点 `DB_PREP_ENTRY`・名前 `<prefix>-<environment>-db-prep`・Node 24・ARM64・VPC の外・時間切れ 5 分・非同期の呼び出しの `retryAttempts: 0` と `maxEventAge` 60 秒・ログの群）。役割は、クラスタへの `rds-data:ExecuteStatement`・`BeginTransaction`・`CommitTransaction`・`RollbackTransaction` と、管理の役割の秘密の器と `<prefix>/<environment>/progress-db/*` への `secretsmanager:GetSecretValue` だけ。クラスタと管理の秘密の器の ARN と秘密の器の頭は環境変数で渡す（合成の出力では参照） |
+| `DB_PREP_ENTRY` | 同上 | 新設 | 定数（`apps/api/src/entries/db-prep.ts` のパス） | 起点のパス。コードは import しない |
+| `DbPrepFunction` の公開の値 | 同上 | 新設 | `fn` | #6 が API の関数と見回りの関数に呼ぶ権限（`lambda:InvokeFunction`）を許す |
 
-- `SetupDeps` と `ImageDeps` に同じ型の `docker: (args: string[], opts?: { stdin?: string }) => Promise<{ code: number; stdout: string }>` と `ecr`（`DescribeRepositories`・`GetAuthorizationToken`・`DescribeImages` の包み）を置く（テストは本物の Docker と AWS を呼ばない）。`ImageDeps` は `SetupDeps` から `docker`・`ecr` を取り出した部分の型にし、2 つで形を分けない。本物の `docker` は `opts.stdin` があれば子のプロセスの標準入力へ書いて閉じ、無ければ標準入力を開かない。`opts.stdin` の値はログ・出力・例外の文に入れない（失敗の出力は `docker` の終了コードと標準エラーだけ）
-- push の前の `docker login` は `docker(["login", "--username", "AWS", "--password-stdin", <レジストリ>], { stdin: <トークンを復号したパスワード> })` で打ち、パスワードを `args` に入れない
-- `AppStack` の props に `images: ImageDigests` を足し、`bin/app.ts` が `readImageDigests(app)` で渡す。`AppStack` はキーごとにタスクの定義を作るかを決める（新しいリポジトリ（#6 の `runner`）を足す初回の反映でも、`db-prep` のタスクの定義は残る）。組の `repository` が `imageRepositoryName` の値と違えば合成を誤りにする。CI の合成は context `nd:images` を持たず、タスクの定義を作らない版になる。スタックのテストは作り物の組（`digest` は `sha256:` と 0 を 64 桁）を渡して、タスクの定義を持つ版を照らす
-- ビルドはビット単位で再現しない前提に置く（設計文書の決定 2）。中身を変えない `diff` や準備でも、毎回ダイジェストの違う版が push され、30 の数に入る
-- `deploy` と反映のアクションは、引くイメージの在りかを確かめない（設計文書の決定 2）
-
-### 異常系の処理
-
-| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
-| --- | --- | --- | --- | --- | --- | --- |
-| `buildAndPushImages` | Docker が無い・作れない | 端末に Docker が無い・`docker login` の失敗・Dockerfile の誤り | `docker` の終了コード | 合成せずに止める | 「Docker が要る」か docker の出力、`EXIT.BUILD` | 何も合成していない。2 つ目以降のキーで止まったときは、先に処理したキーの push の済んだ版が残る。再実行できる |
-| `buildAndPushImages` | push できない・読めない | ECR の許しが無い・ネットワーク | `docker push` の終了コード・SDK の例外 | 合成せずに止める | docker の出力か例外の名前と文、`EXIT.BUILD` | push の済んだ版が残ることがある（どのタスクの定義からも引かれない）。原因を直して再実行できる |
+- 事後条件: 関数は `VpcConfig` を持たない（スタックの決まりの検査の `lambda_in_vpc` はそのまま当たる）。関数を呼べる主体はこの課題では足さない（#6）
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `imageRepositoryName` | `prefix` `nd`・`environment` `prod`・キー `db-prep` で `nd-prod-db-prep` | — | — |
-| `ImageRepository` | 合成の出力のリポジトリの名前が `imageRepositoryName` の値で、タグ書き換え不可のリポジトリと、`imageCountMoreThan` が 30 の規則 1 つがある | — | 規則が日数になる・数が変わると落ちる |
-| `AppStack`（ダイジェストあり） | DB の用意のタスクの定義のイメージが `<リポジトリ>@sha256:…` | ダイジェストなしでタスクの定義を作らない。一覧が `db-prep` だけでも DB の用意のタスクの定義を作る | ダイジェストを変えると要約値が変わる（合成の結果の要約値の比べ）。組の `repository` が違うと合成が投げる |
-| `readImageDigests` | 絶対のパスの一覧の組をキーごとに返す | context `nd:images` が未指定なら空 | `-c nd:images=` の空の文字列・相対のパス（`./cdk.out/nd-setup-images.json`）・無いファイルで投げる。`digest` か `repository` の無い組・`sha256:` で始まらないダイジェストで投げる |
-| `buildAndPushImages` | リポジトリがあれば作って push し、一覧を書く | リポジトリが 1 つも無ければ何もしない。`db-prep` のリポジトリだけがあると `db-prep` だけを push し、`noRepository` が `runner` になる | Docker の失敗・push の失敗で投げ、一覧を書かない。login の値が作り物の `docker` の `args` に無く `opts.stdin` にだけあり、login が失敗したときも出力と例外の文に出ない |
-| `synthesize` | `--stack app` と既定で `buildAndPushImages` を呼び、相対の `--out` でも合成へ渡す `nd:images` が絶対のパス | `--stack pipeline` だけで呼ばず、置き場に一覧が無い | — |
+| `DbPrepFunction` | 合成の出力の関数が `VpcConfig` を持たず、`Timeout` 300・`Architectures` が `arm64`。`AWS::Lambda::EventInvokeConfig` の `MaximumRetryAttempts` 0・`MaximumEventAgeInSeconds` 60。役割の文が上の操作と資源だけ | — | 再試行を 1 以上にする・最大の年齢を外す・`rds-data:*` か `secretsmanager:*` にする・資源を `*` に広げると落ちる |
 
 ## 設置のコマンド
 
@@ -263,7 +238,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `MISSING_CHECKS` | `infra/setup/missing-settings.ts` | 新設 | `readonly MissingCheck[]`（`MissingCheck = (ctx: MissingContext) => Promise<MissingItem[]>`） | 5 種類の照らし。ほかの子は配列へ足すだけ |
+| `MISSING_CHECKS` | `infra/setup/missing-settings.ts` | 新設 | `readonly MissingCheck[]`（`MissingCheck = (ctx: MissingContext) => Promise<MissingItem[]>`） | 4 種類の照らし。ほかの子は配列へ足すだけ |
 | `collectMissingSettings` | 同上 | 新設 | `(ctx: MissingContext, checks: readonly MissingCheck[]) => Promise<MissingItem[]>` | 照らしを順に打ち、結果を並べる。1 つの照らしの失敗は「確かめられない」の 1 行にする |
 | `printMissingSettings` | 同上 | 新設 | `(items: MissingItem[], out: (line: string) => void) => void` | 「足りない設定:」の見出しと 1 件 1 行。0 件なら「足りない設定: 無し」 |
 | `readCostAllocationTags` | `infra/setup/aws-reader.ts` | 新設 | `(target: Target, keys: string[]) => Promise<Record<string, "Active" \| "Inactive" \| "Missing">>` | `ListCostAllocationTags` でタグの状態を読む |
@@ -272,7 +247,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `runDiff` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 確認の値を出した後に `collectMissingSettings` と `printMissingSettings` を打つ。終了コードは変えない |
 
 - `SetupDeps` に `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount` を足す（テストは本物の AWS を呼ばない）
-- `MISSING_CHECKS` の 5 種類: Google のクライアントの ID が無い・`budget.scope` が `tags` でタグ `app-prefix`・`app-env` が `Active` でない（下のタグの行と、読めないときの行。`account` なら照らさない）・`ops.notify_emails` が空・`buildAndPushImages` の `noRepository` が空でない（キーごとに 1 行。「<キー> の ECR がまだ無いため、そのイメージのタスクの定義を持たない版を合成した。この差分を反映した後に、新しい置き場でもう一度 `diff` を打ち、出た確認の値で `deploy` を打つ」。順は下の「初めての設置の手順」）・`readGetAzsCount` が 2 未満（「`Fn::GetAZs` が返す AZ が <数> つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --availability-zone <AZ>`）か、既定のサブネットをすべて消す」。読めなければ「確かめられない（`ec2:DescribeSubnets`・`ec2:DescribeAvailabilityZones` を許した profile で読む）」）
+- `MISSING_CHECKS` の 4 種類: Google のクライアントの ID が無い・`budget.scope` が `tags` でタグ `app-prefix`・`app-env` が `Active` でない（下のタグの行と、読めないときの行。`account` なら照らさない）・`ops.notify_emails` が空・`readGetAzsCount` が 2 未満（「`Fn::GetAZs` が返す AZ が <数> つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --availability-zone <AZ>`）か、既定のサブネットをすべて消す」。読めなければ「確かめられない（`ec2:DescribeSubnets`・`ec2:DescribeAvailabilityZones` を許した profile で読む）」）
 - 読めないときの行の文（設計文書の決定 12）: 「コスト配分タグ `app-prefix`・`app-env` が有効かを確かめられない。有効でなければ予算は 0 を数え続け、予算の知らせは鳴らない。次の操作: <操作>」。読めない原因は SDK の例外だけでは権限の不足と組織の制限を分けられないため、`readOrganizationManager` で分ける。<操作> は、`member: false` なら「`ce:ListCostAllocationTags` を許した profile で `diff` を打ち直す」、`member: true` なら「組織の管理のアカウント <ID> にタグの有効化を確かめて頼む（メンバーのアカウントでは権限を足しても有効にできない）。頼めなければ設定のファイルの `budget.scope` を `account` にする」、`unknown` なら両方を「組織に入っていなければ …。組織のメンバーなら …」の 2 つに分けて示す（管理のアカウントの ID は「組織の管理のアカウント」とだけ示す）
 - タグの行の文（設計文書の決定 6）: 「コスト配分タグ <有効でないタグ> が有効でない。有効になるまで予算は 0 を数え続け、予算の知らせは鳴らない。有効にする先: <先>。有効にできなければ設定のファイルの `budget.scope` を `account` にする（アカウントの全体を数える）」。<先> は `readOrganizationManager` が `member: false` なら「このアカウント（請求の画面のコスト配分タグ）」、`member: true` なら「組織の管理のアカウント <ID>（メンバーのアカウントでは有効にできない）」、`unknown` なら「組織に入っていなければこのアカウント、組織のメンバーなら組織の管理のアカウント」
 
@@ -286,91 +261,54 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `collectMissingSettings` | 5 種類が当たる入力でそれぞれ 1 行。タグの行の <先> が `member: false`・`member: true`・`unknown` で 3 通りに変わる。タグを読めないときの行の <操作> も同じ 3 通りに変わり、`member: true` と `unknown` で管理のアカウントへの依頼と `budget.scope` の `account` が出る。`budget.scope` が `account` ならタグの行が出ない | 0 件で「無し」。AZ の数 2 で行が出ず 1 で出る | 照らしが投げると「確かめられない」の 1 行 |
+| `collectMissingSettings` | 4 種類が当たる入力でそれぞれ 1 行。タグの行の <先> が `member: false`・`member: true`・`unknown` で 3 通りに変わる。タグを読めないときの行の <操作> も同じ 3 通りに変わり、`member: true` と `unknown` で管理のアカウントへの依頼と `budget.scope` の `account` が出る。`budget.scope` が `account` ならタグの行が出ない | 0 件で「無し」。AZ の数 2 で行が出ず 1 で出る | 照らしが投げると「確かめられない」の 1 行 |
 | `readGetAzsCount` | 既定のサブネットが 3 つの AZ にあれば 3 | 既定のサブネットが 1 つの AZ にだけあれば、使える AZ が 3 つでも 1。既定のサブネットが無ければ使える AZ の数 | — |
 | `runDiff` | 出力の最後に一覧の欄 | — | 足りない設定があっても終了コード 0 |
 
-### 終了コード
+## DB の用意の関数
 
-正本は `packages/contracts/data/exit-codes.json` で、`setup.md` の表はそこから作る。終了コードは足さない。直す行は次のとおりである。
-
-| 終了コード | 名前 | 意味 | AWS へ書いたか |
-| --- | --- | --- | --- |
-| 0 | `OK`（直す） | `diff` は差分を示して止まった。`deploy` は反映した | `diff` は `app` を選び ECR があるときだけ、自前の ECR へ push した。`deploy` は CloudFormation へ反映した |
-| 5 | `BOOTSTRAP`（直す） | bootstrap が無いか版が足りない（求める版と今の版を示す） | `diff` で `app` を選び ECR があるときは、bootstrap の版の段がイメージの push の後にあるため、push の済んだ版が自前の ECR に残ることがある（どのタスクの定義からも引かれない）。ほかは書いていない |
-| 6 | `BUILD`（直す） | 画面のビルド・イメージの作成と push・合成・差分の作成が失敗した | `diff` でイメージの作成と push の段か、その後の段で止まれば、push の済んだ版が自前の ECR に残ることがある（どのタスクの定義からも引かれない）。ほかは書いていない |
-
-`diff` で `app` を選ぶときの段の並びは、引数（2）・設定のファイル（3）・profile（4）・画面のビルド（6）・イメージの作成と push（6）・合成（6）・bootstrap の版（5）・差分の作成（6）になる。bootstrap の求める版は合成の結果から読むため、bootstrap の版の段は合成の後に残し、push の前へ移さない。そのため、ECR が既にある設置先では push が成功した後に 5 で止まることがある。`setup.md` の「diff」の節の並びをこの順に直し、「どの段で止まっても AWS へは書かない」を「イメージの作成と push の段か、その後の段（合成・bootstrap の版・差分の作成）で止まったときは、push の済んだ版が自前の ECR に残ることがある。ほかの段では AWS へ書かない」に直す。「終了コード」の節の地の文「0 と 8 のほかは、AWS へ何も書いていない」を、「0・5・6・8 のほかは、AWS へ何も書いていない。0 の `diff` と `diff` の 5・6 は自前の ECR へ push していることがあるが、反映しなければどのタスクの定義からも引かれず、push の新しい 30 版を超えると規則で消える」に直す。運用の手順には、5 で止まったら bootstrap を求める版へ上げてから同じ設定で `diff` を打ち直すこと（前の push の版は残ったまま数に入り、打ち直しで新しい版がもう 1 つ push される）を足す。
-
-### 初めての設置の手順
-
-ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回目の反映が DB の用意のタスクの定義を足す。`setup.md` の「使い方の場面」の「自分で設置する人」の段 2・3（`diff` と `deploy`）を、次の 4 つの段に置き換えてこのまま写す。どの段も同じ profile と設定のファイルで打つ。
-
-1. `npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> --out <置き場 1>` を打つ。足りない設定の一覧に「db-prep の ECR がまだ無いため、そのイメージのタスクの定義を持たない版を合成した」の行があり、差分が自前の ECR のリポジトリを足し、DB の用意のタスクの定義が無いことを読む。ネットワーク・表・Aurora など、ほかの資源の差分も読み、足す・変える・消す資源のそれぞれに納得する。確認の値（確認の値 1）を控える
-2. 段 1 の差分に納得したときだけ、`npm run nd-setup -- deploy --profile <profile> --assembly <置き場 1> --confirm <確認の値 1>` を打ち、0 で終わることを読む
-3. 新しい置き場で `npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> --out <置き場 2>` を打つ。DB の用意のイメージを push した行とダイジェストがあり、差分が DB の用意のタスクの定義（イメージは `<リポジトリ>@sha256:…` で、ダイジェストが push の行と同じ）を足し、ほかの資源の消しが無いことを読む。確認の値（確認の値 2）を控える
-4. 段 3 の差分に納得したときだけ（段 1 の承認は段 3 の差分を含まない）、`npm run nd-setup -- deploy --profile <profile> --assembly <置き場 2> --confirm <確認の値 2>` を打ち、0 で終わることを読む
-
-## 反映のパイプライン
-
-満たす決定: 決定 2・11
+満たす決定: 決定 8・9・15、受け入れ条件 1・I10
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `PipelineStack` の `constructor` | `infra/lib/pipeline-stack.ts` | 変更 | 変えない | 準備のアクションの CodeBuild を `privileged: true` にし、その役割に `ecr:GetAuthorizationToken`（資源を絞れない）と、`<prefix>-<environment>-` の頭の自前のリポジトリへの `DescribeRepositories`・`DescribeImages`・`BatchCheckLayerAvailability`・`InitiateLayerUpload`・`UploadLayerPart`・`CompleteLayerUpload`・`PutImage`・`BatchGetImage` を許す。反映のアクションは変えない（引き受ける bootstrap の役割は今の `deploy`・`file-publishing` のまま） |
-| `prepareBuildSpec` | 同上 | 変更 | 変えない | 画面のビルドの後、`infra/setup/images-cli.ts` があれば `node infra/setup/images-cli.ts push --settings <設定> --out .nd-images` を打つ。リポジトリのまだ無いキーごとに「<キー> の ECR がまだ無いため、そのイメージのタスクの定義を持たない版を合成した。この反映の後に準備を再び走らせる（決定 11）」を記録へ出す。一覧があれば `-c nd:images="$CODEBUILD_SRC_DIR/.nd-images/nd-setup-images.json"`（絶対のパス）を付けて合成し、一覧を `cdk.out/nd-setup-images.json` へ写す（要約値に入る） |
+| `handler` | `apps/api/src/entries/db-prep.ts` | 新設 | `(event: unknown) => Promise<void>` | 本番の依存（`createDataApiExecutor`・`readPendingPassword`・`createPrepLogger`・終わりの記録の口）を実行環境ごとに 1 回組み、`createDbPrepHandler` の結果を呼ぶ。口の本番の実装は #6 がこのファイルで渡す。この課題の版は、呼ばれたら投げる口を渡す（関数を呼ぶ側も #6 が作り、それまで誰も呼ばない） |
+| `createDbPrepHandler` | `apps/api/src/db-prep/handler.ts` | 新設 | `(deps: PrepDeps) => (event: unknown) => Promise<void>` | 呼び出しを `dbPrepInvocation` で照らす → 口の `isCurrent(prep_id)` で用意の ID を読み直し、違えば何もせずに終える → 口の `readTarget(project_id)` でデータベースと役割と秘密の器の名前を読み、`readPassword` で保留の版のパスワードを読む → `kind` で用意か差し替え → 結果を口の `record` へ渡す。`PrepDeps` は `{ sql: SqlExecutor; completion: PrepCompletionPort; readPassword: (secret: string) => Promise<string>; logger; now: () => number }` |
+| `PrepCompletionPort` | 同上 | 新設（型） | `{ isCurrent(prepId: string): Promise<boolean>; readTarget(projectId: string): Promise<{ database: string; role: string; secret: string }>; record(inv: DbPrepInvocation, outcome: DbPrepOutcome): Promise<"recorded" \| "mismatch"> }` | 終わりの記録の口。実装は #6（プロジェクトのモジュールの操作。`record` は用意の ID と差し替えの番号が今の値と合うときだけ書く条件つきの書き込み） |
+| `SqlExecutor` | `apps/api/src/db-prep/sql-executor.ts` | 新設（型） | `{ execute(sql: string, params: SqlParam[] \| undefined, opts: { database: string; transactionId?: string }): Promise<Row[]>; begin(opts: { database: string }): Promise<string>; commit(transactionId: string): Promise<void>; rollback(transactionId: string): Promise<void> }` | 用意と差し替えの SQL を打つ口。`transactionId` の無い `execute` は自動の確定で打つ（`CREATE DATABASE` はこれで打つ）。`database` で `postgres` かプロジェクトのデータベースを選ぶ |
+| `createDataApiExecutor` | 同上 | 新設 | `(opts: { client: RDSDataClient; resourceArn: string; secretArn: string; retry: { attempts: number; delayMs: number; deadlineMs: number; now: () => number } }) => SqlExecutor` | `ExecuteStatement`（`database`・`transactionId`・`formatRecordsAs: "JSON"`）・`BeginTransaction`・`CommitTransaction`・`RollbackTransaction` を打つ。`transactionId` の無い `execute` と `begin` だけ、`RESUME_WAIT_ERRORS`（`DatabaseResumingException`）の例外を `p-retry` で繰り返す（下の箇条）。尽きたら `DataApiUnavailableError` を投げる |
+| `readPendingPassword` | `apps/api/src/db-prep/pending-secret.ts` | 新設 | `(client: SecretsManagerClient, secret: string) => Promise<string>` | 秘密の器の保留の版（`VersionStage: AWSPENDING`）の URL を読み、パスワードを返す |
+| `createPgExecutor` | `apps/api/test/db-prep/pg-executor.ts` | 新設 | `(connect: (database: string) => Promise<pg.Client>) => SqlExecutor` | テスト用。データベースごとに接続を開き、`begin` は専用の接続に `BEGIN` を打ってその接続を `transactionId` に結ぶ |
+| `claimBinding` | `apps/api/src/db-prep/provision.ts` | 新設 | `(sql: SqlExecutor, project: ProjectIdent) => Promise<"bound" \| "retry" \| "conflict">` | 1 つのトランザクション（`begin`〜`commit`）で `pg_advisory_xact_lock(hashtext('nd-prep:bindings'))` を取り、`nd_prep.bindings`（`project_id` 主キー・`database_name` 一意・`role_name` 一意・`bound_at`）を `project_id`・`database_name`・`role_name` のどれかで引く。下の処理の手順の表で分ける。`bound` のときだけ行を足す。データベースと役割を作る前に打つ |
+| `checkIsolationGuard` | 同上 | 新設 | `(sql: SqlExecutor, project: ProjectIdent) => Promise<"ok" \| "conflict">` | データベースか役割が、渡されたもの以外へ `CONNECT` で結ばれていれば `conflict`（`claimBinding` の後に打つ二重の守り） |
+| `provisionProject` | 同上 | 新設 | `(sql: SqlExecutor, project: ProjectIdent & { password: string }) => Promise<void>` | [用意の手順](../docs/design/data.md#用意の手順) の 1〜6。2 の `CREATE DATABASE` は `transactionId` なしで打ち、4 は `database` にプロジェクトのデータベースを渡して打つ。何度打っても同じ結果になる |
+| `rotateRole` | `apps/api/src/db-prep/rotate.ts` | 新設 | `(sql: SqlExecutor, project: ProjectIdent & { password: string; seq: number }) => Promise<RotateResult>` | 1 つのトランザクションで `pg_advisory_xact_lock(hashtext('nd-rotate:' \|\| role))` を取り、`nd_prep.rotation_seq` の記した番号と n を比べ、小さいときだけパスワード・番号・書いた時刻を書き、境の時刻 `old_conn_cutoff` を空にする。結果は `applied`・`superseded_equal`・`superseded_greater` と記した番号 |
+| `terminateRoleConnections` | 同上 | 新設 | `(sql: SqlExecutor, role: string, seq: number, opts: { deadlineMs: number; pollMs: number; now: () => number }) => Promise<{ kind: "done"; remaining: number } \| { kind: "superseded_greater"; recorded: number }>` | `rotateRole` のトランザクションが確定した後に、別のトランザクションで同じ排他の鎖を取る。記した番号が n より大きければ何も切らずに `superseded_greater`。番号 n の行の `old_conn_cutoff` が空なら `clock_timestamp()` を記す。切りと読み直しは、切り始めの時刻から `deadlineMs`（既定 15,000）の 1 つの期限を共にする（`now` は既定 `performance.now`）。1. 切る: `pg_stat_activity` のうち、その役割で `backend_start` が `old_conn_cutoff` より前の接続へ、1 つの SQL で `pg_terminate_backend(pid, 0)` を送る（`timeout` 0 はシグナルを送るだけで待たない。0 より大きい待ちは呼び出しごとに掛かり、接続ごとに呼ぶと期限を食い尽くすため使わない。設計文書の LIB22）。2. 読み直す: 同じ条件の残りの数を読む。トランザクションの中の `pg_stat_activity` は、その中で最初に読んだ時点の写しを返し続ける（設計文書の LIB21）ため、毎回の読みの直前に `SELECT pg_stat_clear_snapshot()` を打って写しを捨てる。1 の接続の一覧を読む前にも打つ。3. 残りが 0 なら返す。0 でなく期限の内なら、`min(pollMs, 期限までの残り)`（`pollMs` の既定 500）待って 2 へ戻る。期限を過ぎていれば、その読みの数を返す。期限を過ぎた後でも、2 の読みを最低 1 回打ってから返す（1 で期限を過ぎていても、読まずに数を決めない）。返した数が 1 以上なら `createDbPrepHandler` が `connections_remain` にする |
 
-### 移行の間の動き
-
-| `Source` | 準備のアクション | 反映のアクション |
-| --- | --- | --- |
-| 前の版（`images-cli.ts` が無い） | push を飛ばし、今のとおり合成する | 今のとおり反映する |
-| この課題の版で ECR がまだ無い（マージの後の最初の実行） | ECR の無いことを記録へ出し、一覧を書かない | 今のとおり反映する（ECR を作る）。その後に準備を再び走らせる（決定 11） |
-| この課題の版で ECR がある | push し、一覧を置き場へ入れる | 今のとおり反映する |
-
-### 単体テストの観点
-
-| 関数 | 正常 | 境界値 | 異常 |
-| --- | --- | --- | --- |
-| `PipelineStack`・`prepareBuildSpec` | 合成の出力の準備の役割が上の操作だけを持ち、準備の CodeBuild が特権。準備の手順の `-c nd:images=` が `$CODEBUILD_SRC_DIR` から始まる | 準備の手順が `images-cli.ts` の有無で分かれる | 反映の役割に ECR の権限が増えると落ちる |
-
-`docs/operations/setup.md` の前提の表に Docker（`diff` を打つ端末）と、profile に要る ECR の許し（`ecr:DescribeRepositories`・`ecr:DescribeImages`・`ecr:GetAuthorizationToken` と push の 5 つの操作。足りなければ `diff` が 6 で止まる）を足す。手順には「パイプラインで初めてイメージを引く版は、パイプラインのスタックを先に反映する」と、上の「初めての設置の手順」を足す。あわせて、先の反映の前に保存するもの・戻しを始める条件・前の版へ戻す 4 つの段・マージの後に準備を再び走らせる段（設計文書の決定 11）を、運用する環境の節に手順として写す。
-
-## DB の用意のタスク
-
-満たす決定: 決定 8・9、受け入れ条件 1・I10
-
-### 関数の仕様
-
-| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
-| --- | --- | --- | --- | --- |
-| `main` | `apps/db-prep/src/main.ts` | 新設 | `(env: NodeJS.ProcessEnv, deps: PrepDeps) => Promise<number>` | 引き換え → `kind` で用意か差し替え → 終わりの報告。終了コードは報告できたら 0 |
-| `readTaskArn` | `apps/db-prep/src/exchange.ts` | 新設 | `(metadataUri: string, fetchFn: typeof fetch) => Promise<string>` | `${ECS_CONTAINER_METADATA_URI_V4}/task` の `TaskARN` を読む |
-| `exchange` | 同上 | 新設 | `(apiUrl: string, token: string, taskArn: string, fetchFn) => Promise<ExchangeResult>` | `/v1/db_prep/exchanges/create` を 1 回だけ呼び、応答を形の正本で照らす。HTTP 401 なら `unauthorized`、HTTP 200 で要素が `ok: false` なら `rejected`（`status` と `reason`）、`ok: true` なら `item` を返す |
-| `complete` | 同上 | 新設 | `(apiUrl: string, completionToken: string, body: DbPrepCompletion, fetchFn) => Promise<void>` | `/v1/db_prep/completions/create` を呼ぶ。届いたか分からない失敗だけを `p-retry` で繰り返す。どの試行も同じ token と同じ本文を送る。1 回目が確定して応答だけ失われた場合、API は期限の内の同じ本文の送り直しに 1 回目と同じ `accepted` を返す（設計文書の「DB の用意のタスクの HTTP の経路」の同じ報告の送り直し）。渡す値は `{ retries: 3, factor: 2, minTimeout: 1000, maxTimeout: 4000 }` で、初回と 3 回の繰り返しの計 4 回まで試す。各試行は `AbortSignal.timeout(10000)` で打ち切る。繰り返すのは、`fetch` のネットワークの失敗・試行の打ち切り・HTTP 5xx・HTTP 429 だけ。HTTP 401 とほかの 4xx・HTTP 200 の要素の `ok: false`（409 `state_mismatch`・422 `idempotency_key_reused` など）・応答の形の誤りは、試行の中で `AbortError` に包んで投げ、繰り返さずに止める（`shouldRetry` は使わず、試行の中で分ける） |
-| `connectAdmin` | `apps/db-prep/src/provision.ts` | 新設 | `(admin: AdminConnection, opts: { attempts: number; delayMs: number; connectTimeoutMs: number; deadlineMs: number; now: () => number }) => Promise<pg.Client>` | Aurora の再開を待って管理の接続を開く。繰り返しは `p-retry`。`p-retry` の既定は指数の待ちで、`retries` は初回を除いた回数のため、`{ retries: attempts - 1, factor: 1, minTimeout: delayMs, maxTimeout: delayMs, randomize: false, maxRetryTime: deadlineMs }`（既定で `attempts` 12・`retries: 11`・`minTimeout`・`maxTimeout` 5,000）を渡す。全体の期限は最初の試行の開始から `deadlineMs`（既定 60,000）で、`now`（既定 `performance.now`。`p-retry` が `maxRetryTime` を測るのと同じ時計）で測る。`p-retry` の `maxRetryTime` は待ちを残り時間に切り詰めるだけで、待った直後に期限を照らさずに次の試行を呼ぶ（設計文書の LIB8）。そのため、試行の関数の始めで期限を照らし、残りが 0 以下なら接続を開かずに `AbortError`（期限の尽き）を投げる。試行ごとに `pg.Client` の `connectionTimeoutMillis` を `connectTimeoutMs`（既定 5,000）と残り時間の小さい方にし、保留のままの試行を打ち切る（`pg` は既定で接続を待ち続ける）。試せる回数は、期限と回数のどちらが先に尽きるかで決まる。接続がすぐ失敗する場合は回数が先に尽き、0・5・…・55 秒に始めた 12 回で終わる。接続が保留のまま返らない場合は 1 回が約 10 秒（打ち切りの 5 秒と待ちの 5 秒）で、0・10・…・50 秒に始めた 6 回の後、60 秒に期限が尽きて 7 回目を始めない。どちらでも、最初の試行から `admin_connect_failed` の報告を始めるまでは 60 秒に `pg` の後始末の分を足した時間を超えない |
-| `claimBinding` | 同上 | 新設 | `(client: pg.Client, project: ProjectIdent) => Promise<"bound" \| "retry" \| "conflict">` | 1 つのトランザクションで `pg_advisory_xact_lock(hashtext('nd-prep:bindings'))` を取り、`nd_prep.bindings`（`project_id` 主キー・`database_name` 一意・`role_name` 一意・`bound_at`）を `project_id`・`database_name`・`role_name` のどれかで引く。下の処理の手順の表で分ける。`bound` のときだけ行を足す。データベースと役割を作る前に打つ |
-| `checkIsolationGuard` | 同上 | 新設 | `(client: pg.Client, project: ProjectIdent) => Promise<"ok" \| "conflict">` | データベースか役割が、渡されたもの以外へ `CONNECT` で結ばれていれば `conflict`（`claimBinding` の後に打つ二重の守り） |
-| `provisionProject` | 同上 | 新設 | `(client: pg.Client, connectTo: (database: string) => Promise<pg.Client>, project: ProjectIdent & { password: string }) => Promise<void>` | [用意の手順](../docs/design/data.md#用意の手順) の 1〜6。何度打っても同じ結果になる |
-| `rotateRole` | `apps/db-prep/src/rotate.ts` | 新設 | `(client: pg.Client, project: ProjectIdent & { password: string; seq: number }) => Promise<RotateResult>` | 1 つのトランザクションで `pg_advisory_xact_lock(hashtext('nd-rotate:' \|\| role))` を取り、`nd_prep.rotation_seq` の記した番号と n を比べ、小さいときだけパスワード・番号・書いた時刻を書き、境の時刻 `old_conn_cutoff` を空にする。結果は `applied`・`superseded_equal`・`superseded_greater` と記した番号 |
-| `terminateRoleConnections` | 同上 | 新設 | `(client: pg.Client, role: string, seq: number, opts: { deadlineMs: number; pollMs: number; now: () => number }) => Promise<{ kind: "done"; remaining: number } \| { kind: "superseded_greater"; recorded: number }>` | `rotateRole` のトランザクションが確定した後に、別のトランザクションで同じ排他の鎖を取る。記した番号が n より大きければ何も切らずに `superseded_greater`。番号 n の行の `old_conn_cutoff` が空なら `clock_timestamp()` を記す。切りと読み直しは、切り始めの時刻から `deadlineMs`（既定 15,000）の 1 つの期限を共にする（`now` は既定 `performance.now`）。1. 切る: `pg_stat_activity` のうち、その役割で `backend_start` が `old_conn_cutoff` より前の接続へ、1 つの SQL で `pg_terminate_backend(pid, 0)` を送る（`timeout` 0 はシグナルを送るだけで待たない。0 より大きい待ちは呼び出しごとに掛かり、接続ごとに呼ぶと期限を食い尽くすため使わない。設計文書の LIB22）。2. 読み直す: 同じ条件の残りの数を読む。トランザクションの中の `pg_stat_activity` は、その中で最初に読んだ時点の写しを返し続ける（設計文書の LIB21）ため、毎回の読みの直前に `SELECT pg_stat_clear_snapshot()` を打って写しを捨てる。1 の接続の一覧を読む前にも打つ。3. 残りが 0 なら返す。0 でなく期限の内なら、`min(pollMs, 期限までの残り)`（`pollMs` の既定 500）待って 2 へ戻る。期限を過ぎていれば、その読みの数を返す。期限を過ぎた後でも、2 の読みを最低 1 回打ってから返す（1 で期限を過ぎていても、読まずに数を決めない）。返した数が 1 以上なら `main` が `connections_remain` にする |
-
-- `main`
-  - 事前条件: 環境の上書きで `ND_DB_PREP_API_URL` と `ND_DB_PREP_EXCHANGE_TOKEN` が渡っている
-  - 副作用: PostgreSQL への DDL と API への 2 回の要求。秘密の器・ファイル・AWS の API には触れない
-- 識別子は `pg` の `escapeIdentifier`、パスワードは `escapeLiteral` で組む（`CREATE ROLE … PASSWORD` は引数の束縛を受けないため）
+- `createDbPrepHandler`
+  - 事前条件: 環境変数でクラスタの ARN・管理の役割の秘密の器の ARN・秘密の器の頭が渡っている（`handler` が読む）
+  - 副作用: Data API への SQL・秘密の器の保留の版の読み取り・終わりの記録の口の呼び出し。ほかの AWS の API とファイルには触れない
+- `createDataApiExecutor` の繰り返し
+  - `p-retry` に `{ retries: attempts - 1, factor: 1, minTimeout: delayMs, maxTimeout: delayMs, randomize: false, maxRetryTime: deadlineMs }`（既定で `attempts` 12・`retries: 11`・`delayMs` 5,000・`deadlineMs` 60,000）を渡す。期限は呼び出しごとの最初の試行の開始から測り、`now`（既定 `performance.now`。`p-retry` が `maxRetryTime` を測るのと同じ時計）で測る
+  - `p-retry` の `maxRetryTime` は待ちを残り時間に切り詰めるだけで、待った直後に期限を照らさずに次の試行を呼ぶ（設計文書の LIB8）。そのため、試行の関数の始めで期限を照らし、残りが 0 以下なら打たずに `AbortError` を投げる
+  - `RESUME_WAIT_ERRORS` に無い例外は試行の中で `AbortError` に包み、繰り返さない（`shouldRetry` は使わない）。トランザクションの中の文（`transactionId` を持つ `execute`）と `commit`・`rollback` は繰り返さずに投げ、呼ぶ側が `rollback` して失敗にする。`begin` が通った時点で書き手は起きている
+- 識別子は `pg` の `escapeIdentifier`、パスワードは `escapeLiteral` で組む（`CREATE ROLE … PASSWORD` は引数の束縛を受けないため）。名前と番号を照らす値は `SqlExecutor` の引数で渡す
+- `PROGRESS_DB_IDENT_SHAPE` に合わない名前を口が返したら、SQL を打たずに投げる
 
 ### 処理の手順
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `main` | 引き換えが HTTP 401（token の署名・宛先・期限の切れ・使い終え）、または HTTP 200 の要素が `ok: false`（409 `state_mismatch`。用意の状態の不一致） | 終わりを知らせずに終了コード 1（API が見回りで扱う）。ログに HTTP の状態か要素の `status` と `reason` だけを出す |
-| `main` | 終わりの報告が HTTP 401、または HTTP 200 の要素が `ok: false`（409 `state_mismatch`・422 `idempotency_key_reused` など） | 繰り返さずに終了コード 1。ログに `status` と `reason` だけを出す。送り直しが token の期限の後で 401 になった場合も同じで、1 回目が確定していれば用意の状態はそのまま |
-| `main` | `create` で `claimBinding` か `checkIsolationGuard` が `conflict` | 何も書かずに `failed`・`guard_conflict` |
-| `main` | `rotate` で `superseded_greater`（`rotateRole` か `terminateRoleConnections` のどちらか） | 接続を切らずに `rotation_superseded`（記した番号） |
-| `main` | `rotate` で `applied` か `superseded_equal` | `terminateRoleConnections` の古い接続の残りが 0 なら `applied` か `rotation_superseded`、1 以上なら `failed`・`connections_remain`。境の時刻より後に始まった接続は数えない |
+| `createDbPrepHandler` | 呼び出しが `dbPrepInvocation` に合わない | 口を呼ばずに終える。ログに形の誤りだけを出す |
+| `createDbPrepHandler` | `isCurrent` が偽 | SQL を打たず、`record` も呼ばずに終える（全体の設計の決定 96） |
+| `createDbPrepHandler` | `isCurrent`・`readTarget`・`readPassword`・`record` のどれかが投げる | 終わりを記さずに投げる（関数の誤り。自動の再試行は 0 回で、見回りが期限の後に扱う） |
+| `createDbPrepHandler` | `record` が `mismatch` | 書かれずに終える。ログに出す |
+| `createDbPrepHandler` | Data API の再開の待ちが尽きた（`DataApiUnavailableError`） | `failed`・`data_api_unavailable` |
+| `createDbPrepHandler` | `create` で `claimBinding` か `checkIsolationGuard` が `conflict` | 何も書かずに `failed`・`guard_conflict` |
+| `createDbPrepHandler` | `create` か `rotate` で、ほかの SQL の失敗 | `failed`・`sql_failed` |
+| `createDbPrepHandler` | `rotate` で `superseded_greater`（`rotateRole` か `terminateRoleConnections` のどちらか） | 接続を切らずに `rotation_superseded`（記した番号） |
+| `createDbPrepHandler` | `rotate` で `applied` か `superseded_equal` | `terminateRoleConnections` の古い接続の残りが 0 なら `applied` か `rotation_superseded`、1 以上なら `failed`・`connections_remain`。境の時刻より後に始まった接続は数えない。`failed` で保留を下ろさないことは口の実装（#6）が I17・I22 のとおりに守る |
 | `claimBinding` | 3 つのどれにも当たる行が無く、データベースも役割も無い | `bound`（行を足す） |
 | `claimBinding` | 3 つのどれにも当たる行が無いが、データベースか役割が既にある | `conflict`（結び付きの無い資源） |
 | `claimBinding` | 当たる行が 1 つで、3 つの値がすべて同じ | `retry`（途中で止まった作成の打ち直し） |
@@ -383,65 +321,64 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `readTaskArn` | 読めない | 端点が無い（ECS の外） | `fetch` の失敗 | 止める | ログに理由、終了コード 1 | 何も書いていない。見回りが時間切れで扱う |
-| `connectAdmin` | 開けない | Aurora の再開の遅れ・ネットワーク | 再試行の尽き | `failed`・`admin_connect_failed` を報告 | 終了コード 0 | 見回りが起こし直す |
-| `provisionProject` | SQL の失敗 | 権限・名前の衝突 | `pg` の例外 | `failed`・`sql_failed` を報告 | ログに SQLSTATE だけ（値は出さない） | 手順は何度打っても同じ結果。起こし直しで続く |
-| `complete` | 届かない | ネットワーク・API の 5xx | 再試行の尽き | 止める | 終了コード 1 | 1 回目が確定していれば、同じ本文の送り直しは API が同じ `accepted` を返す（同じ報告の送り直し）。どの試行も確定していなければ、見回りが時間切れで扱う |
+| `createDataApiExecutor` | 再開の待ちが尽きた | Aurora の再開の遅れ | 期限か回数の尽き | `DataApiUnavailableError` を投げ、`failed`・`data_api_unavailable` を口へ渡す | ログに理由のコード | 作るなら `無い` へ戻り次の開始で、差し替えなら見回りの呼び直しで続く |
+| `provisionProject` | SQL の失敗 | 権限・名前の衝突 | SDK の例外（`pg` の実装では `pg` の例外） | `failed`・`sql_failed` を口へ渡す | ログに例外の名前と、取れるときの SQLSTATE だけ（値は出さない） | 手順は何度打っても同じ結果。次の開始か呼び直しで続く |
+| `readPendingPassword` | 読めない・形が違う | 保留の版が無い・権限・URL の形 | SDK の例外・形の照らし | 終わりを記さずに投げる | ログに例外の名前 | 何も書いていない。見回りが期限の後に扱う |
+| `PrepCompletionPort` の `record` | 投げる | プロジェクトの表へ書けない | 例外 | 終わりを記さずに投げる | ログに例外の名前 | 見回りが期限の後に扱う（作るなら `無い` へ戻り、次の開始で同じ名前で打ち直す。手順は何度打っても同じ結果） |
 
 ### 並行と排他
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 同じ役割の 2 つの差し替えのタスク | 役割のパスワードと `nd_prep.rotation_seq` | `pg_advisory_xact_lock`（STD83） | 番号の比べで古い方は書かない（I17） |
-| 同じ番号 n の起こし直しのタスクと、遅れていた前のタスク（順序が逆になる） | 役割の接続 | 切るのは境の時刻 `old_conn_cutoff` より前に始まった接続だけ。境の時刻は、パスワードを書いたトランザクションの確定の後に、最初に切りの段へ来たタスクが排他の鎖の下で記し、後から来たタスクは記された値を使う | 終わりを知らせるのは切りの段の後だけで、API は終わりの知らせを受けてから保留を下ろす（I20）。そのため新しいパスワードの接続はどれも境の時刻より後に始まり、遅れたタスクの切りに当たらない。境の時刻より前に始まった接続は、確定の前に古いパスワードで認証したものだけである |
-| 同じプロジェクトの作成の打ち直し | データベースと役割 | API の用意の ID（I18）と、手順が何度打っても同じ結果 | 起こし直しで続く（`claimBinding` は `retry`） |
+| 同じ役割の 2 つの差し替えの呼び出し | 役割のパスワードと `nd_prep.rotation_seq` | `pg_advisory_xact_lock`（STD83） | 番号の比べで古い方は書かない（I17） |
+| 同じ番号 n の呼び直しと、時間切れの守りが外れて遅れた前の呼び出し（順序が逆になる） | 役割の接続 | 切るのは境の時刻 `old_conn_cutoff` より前に始まった接続だけ。境の時刻は、パスワードを書いたトランザクションの確定の後に、最初に切りの段へ来た呼び出しが排他の鎖の下で記し、後から来た呼び出しは記された値を使う | 終わりを記すのは切りの段の後だけで、API は終わりの記録を受けてから保留を下ろす（I20）。そのため新しいパスワードの接続はどれも境の時刻より後に始まり、遅れた呼び出しの切りに当たらない。境の時刻より前に始まった接続は、確定の前に古いパスワードで認証したものだけである |
+| 同じプロジェクトの作成の打ち直し | データベースと役割 | API の用意の ID（I18）と、関数が SQL の前に用意の ID を読み直すこと。手順は何度打っても同じ結果 | 次の開始で続く（`claimBinding` は `retry`） |
 | 2 つのプロジェクトの作成 | `nd_prep.bindings` | `pg_advisory_xact_lock(hashtext('nd-prep:bindings'))` と表の一意の制約 | 後に来た方が同じ名前を渡せば `conflict` |
 
 ### ログと記録の出力
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `main` | 用意の ID・種類・結果・理由のコード・所要時間・失敗のときの例外の名前と SQLSTATE（`err.code`）・API の要素の `status` と `reason` | `pino` の 1 行の JSON を標準出力へ（ログの群へ） | パスワード・管理の接続の値・token・データベースと役割の名前 |
+| `createDbPrepHandler` | 用意の ID・種類・結果・理由のコード・所要時間・口の結果（`recorded`・`mismatch`）・失敗のときの例外の名前と、取れるときの SQLSTATE（`pg` の実装の `err.code`。Data API の実装は持たない） | `pino` の 1 行の JSON を標準出力へ（関数のログの群へ） | パスワード・URL・秘密の器の値・データベースと役割の名前・SQL の文 |
 
 値を出さない決まりは 2 つで、`redact` は 2 つ目の守りとする。
 
-1. 出す項目を決まった形で組む。ログの呼び出しは `logger.info({ prep_id, kind, result, reason, duration_ms, err_name, sqlstate, api_status, api_reason }, "<固定の文>")` の形だけにし、メッセージの文字列は定数にして値を埋め込まない。例外は `err` のまま渡さず、`err.name` と `err.code` だけを取り出す（`pg` と `fetch` の例外の `message` と `stack` には、接続の値・データベースや役割の名前・URL が入りうるが、`redact` はキーのパスでしか伏せず文字列の中は伏せられないため）。応答の本文・要求の本文・`admin`・`project` の物をそのまま渡さない
-2. `redact: { paths, remove: true }` の `paths` に次を並べる: `password`・`*.password`・`admin`・`*.admin`・`project`・`*.project`・`token`・`completion_token`・`*.completion_token`・`exchange_token`・`database`・`*.database`・`role`・`*.role`・`host`・`*.host`・`user`・`*.user`・`err`・`*.err`・`message`・`stack`・`*.message`・`*.stack`・`req`・`res`
+1. 出す項目を決まった形で組む。ログの呼び出しは `logger.info({ prep_id, kind, result, reason, duration_ms, record_result, err_name, sqlstate }, "<固定の文>")` の形だけにし、メッセージの文字列は定数にして値を埋め込まない。例外は `err` のまま渡さず、`err.name` と `err.code` だけを取り出す（SDK と `pg` の例外の `message` と `stack` には、SQL の文・データベースや役割の名前が入りうるが、`redact` はキーのパスでしか伏せず文字列の中は伏せられないため）。呼び出し・口の返す名前・秘密の器の値をそのまま渡さない
+2. `redact: { paths, remove: true }` の `paths` に次を並べる: `password`・`*.password`・`url`・`*.url`・`secret`・`*.secret`・`SecretString`・`*.SecretString`・`database`・`*.database`・`role`・`*.role`・`sql`・`*.sql`・`err`・`*.err`・`message`・`stack`・`*.message`・`*.stack`
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `complete`・`connectAdmin` の再試行 | `p-retry`（設計文書の LIB8）・横断の部品の `callHttp`（[詳細設計の横断の部品](../docs/design/detail.md)） | 設計文書の決定 14・`ls packages/` | `p-retry` を使う。`packages/core` は #2 が作り、まだ無い。そろえ方は #56 |
-| `main` のログ | `pino`（設計文書の LIB10）・横断の部品の `createLogger` | 設計文書の決定 14 | `pino` を使い、出す項目を決まった形で組み、`redact` を 2 つ目の守りにする（上の「ログと記録の出力」）。そろえ方は #56 |
+| `createDataApiExecutor` の再試行 | `p-retry`（設計文書の LIB8）・横断の部品の `withRetry`（[全体の設計の決定 91](../docs/design/platform.md#決定の記録)・[詳細設計の横断の部品](../docs/design/detail.md)） | 設計文書の決定 14・`ls packages/` | `p-retry` を使う。`packages/core` は #2 が作り、まだ無い（`ls packages/` は `contracts` だけ）。そろえ方は #56 |
+| `createDbPrepHandler` のログ | `pino`（設計文書の LIB10）・横断の部品の `createLogger` | 設計文書の決定 14 | `pino` を使い、出す項目を決まった形で組み、`redact` を 2 つ目の守りにする（上の「ログと記録の出力」）。そろえ方は #56 |
 | 識別子の組み立て | `pg` の `escapeIdentifier` | LIB3 | 使う |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `provisionProject`（PostgreSQL のサービスコンテナ） | 2 つのプロジェクトを作り、A の役割で A へ接続できる | 同じ値で 2 回打っても同じ結果 | A の役割で B・`postgres`・`template1` へ接続できると落ちる。A の役割で `pg_database` と `pg_roles` から B の名前が読めると落ちる |
-| `claimBinding`（PostgreSQL のサービスコンテナ） | 新しい名前で `bound` | A の作成をデータベースと役割を作った後・最後の `GRANT` の前で止め、A の打ち直しが `retry` で用意を終える | 途中で止まった A に対し、B が A のデータベースの名前と B の役割・B のデータベースと A の役割・A の 2 つの名前を渡すとどれも `conflict`。行の無い既存のデータベースで `conflict`。2 つを同時に打って片方だけが `bound` |
+| `provisionProject`（`createPgExecutor`・PostgreSQL のサービスコンテナ） | 2 つのプロジェクトを作り、A の役割で A へ接続できる | 同じ値で 2 回打っても同じ結果 | A の役割で B・`postgres`・`template1` へ接続できると落ちる。A の役割で `pg_database` と `pg_roles` から B の名前が読めると落ちる |
+| `claimBinding`（`createPgExecutor`・PostgreSQL のサービスコンテナ） | 新しい名前で `bound` | A の作成をデータベースと役割を作った後・最後の `GRANT` の前で止め、A の打ち直しが `retry` で用意を終える | 途中で止まった A に対し、B が A のデータベースの名前と B の役割・B のデータベースと A の役割・A の 2 つの名前を渡すとどれも `conflict`。行の無い既存のデータベースで `conflict`。2 つを同時に打って片方だけが `bound` |
 | `checkIsolationGuard` | 新しい名前で `ok` | 作り直し（片方だけある）で `ok`。A の作成を `CREATE DATABASE … ALLOW_CONNECTIONS false` の直後・`REVOKE` の前で止め、同じ結び付きの打ち直しが `ok` になり、`provisionProject` が用意を終えて A の役割だけが `CONNECT` を持つ | B のデータベースに A の役割を渡す・A の役割に B のデータベースを渡すと `conflict`。`ALLOW_CONNECTIONS true` で `PUBLIC` が `CONNECT` を持つ既存のデータベースで `conflict` |
 | `rotateRole` | 記した番号 < n で書く | 記した番号 = n で書かない | 記した番号 > n で何も変えない。2 つを同時に打って番号の大きい方だけが残る |
-| `terminateRoleConnections`（PostgreSQL のサービスコンテナ） | 書く前に開いた役割の接続を 3 本の実際の PostgreSQL 16 で切り、同じトランザクションの中の読み直しで残り 0 を返す（`pg_stat_clear_snapshot()` を外すと、最初の写しの 3 を読み続けて落ちる） | 境の時刻が記されていれば記し直さない。作り物の `pg` で次を照らす（時計は差し替える）: 残りの読みの直前ごとに `pg_stat_clear_snapshot()` を打つ。切りの SQL が `pg_terminate_backend(pid, 0)` の 1 回で、接続の数（1 本・10 本）で呼ぶ回数が変わらない。1 回目の読み直しが 1・2 回目が 0 なら 0 を返す。読みが 1 のまま期限の 15 秒を過ぎれば、最後の読みの 1 を返し、期限の後に次の読みを打たない。切りの SQL が戻るまでに時計を期限の後へ進めても、残りを 1 回読んでから返し、その数が 0 なら 0（`main` は `applied`）、1 以上ならその数（`main` は `connections_remain`）。待ちは毎回 `pollMs` と期限までの残りの小さい方 | 順序の逆転: タスク T1 が番号 n を書いて切りの前で止まり、起こし直しの T2（同じ n）が `superseded_equal`・切り・終わりまで進み、その後に新しいパスワードで接続 C を開き、T1 を再開すると C が切られずに残る（C が切られると落ちる）。T1 が `rotateRole` の前で止まり、T2 が終わって C を開いた後に T1 を最初から打っても C が残る。記した番号が n+1 に上がった後の T1（n）は何も切らずに `superseded_greater` |
-| `connectAdmin` | 3 回目の試行で開ければ返す。既定の `opts` で `p-retry` に渡す値が `retries: 11`・`factor: 1`・`minTimeout: 5000`・`maxTimeout: 5000`・`randomize: false`・`maxRetryTime: 60000`。作り物の `pg.Client` が受けた設定の `ssl` が CA の束と `rejectUnauthorized: true` を持ち、`checkServerIdentity` を差し替えない | 即時の失敗の最大回数: 作り物の接続がすぐ失敗すると 12 回試し、13 回目を打たない（最後の試行の始めは 55 秒）。保留の期限: 作り物の接続が応答を返さず保留のままだと、試行ごとに 5 秒で打ち切って次へ進み、0・10・20・30・40・50 秒に始めた 6 回で止まり、7 回目を始めずに 60 秒で投げる。試行の始めの期限の照らし: `p-retry` の切り詰めた待ちが期限ちょうどで明けたときに、試行の関数が接続を開かずに投げる（作り物の接続の呼ばれた回数が増えない）。期限の 3 秒前に始める試行の `connectionTimeoutMillis` が 3,000（時計は差し替える） | 期限か回数の尽きで投げ、`main` が `admin_connect_failed` を報告する |
-| `exchange`・`complete` | 形の正本に合う `ok: true` の要素 | HTTP 200 の `ok: false`・`status: 409` を、HTTP 401 と別の結果として返す。`complete` の 1 回目が打ち切りで、2 回目に作り物の API が同じ本文へ `accepted` を返せば成功（4 回の試行の本文と token がすべて同じ） | 形の違う応答を誤りにする・HTTP 401 と HTTP 200 の `status: 409` の要素のどちらでも再試行しない。`complete` は、ネットワークの失敗・打ち切り・503・429 では 4 回まで試し（4 回目が成功すれば成功）、400・401・403・409・422 の要素・形の誤りでは 1 回で止める。5 回目を打たない |
-| `main` | 処理の手順の表の 6 行 | — | ログの出力（作り物の書き先に集めた全行）に、作り物のパスワード・管理の接続の `host` と `user` と `password`・引き換えの token・終わりの報告の token・データベースと役割の名前のどれかが部分の文字列として現れると落ちる。作り物の `pg` と `fetch` が、それらの値を `message` に含む例外を投げる場合（管理の接続の失敗・SQL の失敗・終わりの報告の失敗）でも同じに照らす |
+| `terminateRoleConnections`（`createPgExecutor`・PostgreSQL のサービスコンテナ） | 書く前に開いた役割の接続を 3 本の実際の PostgreSQL 16 で切り、同じトランザクションの中の読み直しで残り 0 を返す（`pg_stat_clear_snapshot()` を外すと、最初の写しの 3 を読み続けて落ちる） | 境の時刻が記されていれば記し直さない。作り物の `SqlExecutor` で次を照らす（時計は差し替える）: 残りの読みの直前ごとに `pg_stat_clear_snapshot()` を打つ。切りの SQL が `pg_terminate_backend(pid, 0)` の 1 回で、接続の数（1 本・10 本）で呼ぶ回数が変わらない。1 回目の読み直しが 1・2 回目が 0 なら 0 を返す。読みが 1 のまま期限の 15 秒を過ぎれば、最後の読みの 1 を返し、期限の後に次の読みを打たない。切りの SQL が戻るまでに時計を期限の後へ進めても、残りを 1 回読んでから返し、その数が 0 なら 0（`createDbPrepHandler` は `applied`）、1 以上ならその数（`createDbPrepHandler` は `connections_remain`）。待ちは毎回 `pollMs` と期限までの残りの小さい方 | 順序の逆転: 呼び出し T1 が番号 n を書いて切りの前で止まり、呼び直しの T2（同じ n）が `superseded_equal`・切り・終わりまで進み、その後に新しいパスワードで接続 C を開き、T1 を再開すると C が切られずに残る（C が切られると落ちる）。T1 が `rotateRole` の前で止まり、T2 が終わって C を開いた後に T1 を最初から打っても C が残る。記した番号が n+1 に上がった後の T1（n）は何も切らずに `superseded_greater` |
+| `createDataApiExecutor`（SDK のクライアントを差し替える） | `execute` が `database` と `transactionId` を `ExecuteStatement` へそのまま渡し、`transactionId` の無い `execute` は持たない。`begin` の返す ID を `commit`・`rollback` へ渡す。2 回目の試行で `DatabaseResumingException` が止めば返す。既定の値で `p-retry` に渡す値が `retries: 11`・`factor: 1`・`minTimeout: 5000`・`maxTimeout: 5000`・`randomize: false`・`maxRetryTime: 60000` | `DatabaseResumingException` が続くと 12 回試し、13 回目を打たない（最後の試行の始めは 55 秒）。`p-retry` の切り詰めた待ちが期限ちょうどで明けたとき、試行の関数が打たずに投げる（作り物のクライアントの呼ばれた回数が増えない。時計は差し替える）。`transactionId` を持つ `execute` は `DatabaseResumingException` でも繰り返さない | `RESUME_WAIT_ERRORS` に無い例外（`BadRequestException` など）は 1 回で投げる。尽きたら `DataApiUnavailableError` を投げ、`createDbPrepHandler` が `data_api_unavailable` を渡す |
+| `readPendingPassword` | 保留の版の URL からパスワードを返し、`VersionStage` に `AWSPENDING` を渡す | — | 保留の版が無い・URL にパスワードが無いと投げる。例外の文にパスワードと URL が現れない |
+| `createDbPrepHandler` | 処理の手順の表の各行（作り物の口と `SqlExecutor`）。`isCurrent` が偽なら、`SqlExecutor`・`readTarget`・`readPassword`・`record` のどれも呼ばれない | — | ログの出力（作り物の書き先に集めた全行）に、作り物のパスワード・URL・データベースと役割の名前のどれかが部分の文字列として現れると落ちる。作り物の `SqlExecutor` と `readPassword` が、それらの値を `message` に含む例外を投げる場合（再開の待ちの尽き・SQL の失敗・秘密の器の失敗）でも同じに照らす |
 | ロガーの設定 | — | — | `paths` の各キーに値を入れた物を渡すと、出力にそのキーが無い |
 
 CI の `check` のジョブに `postgres:16`（要約値で固定）のサービスコンテナを置き、接続の値を `ND_TEST_PG_URL` で渡す。値が無いとき、`CI` が真なら DB のテストは落ち、手元では飛ばす（このリポジトリはテストを CI に寄せる）。
 
 ## 実測と戻しの予行の手順
 
-満たす決定: 決定 1・2・10・13、受け入れ条件 6・7・9
+満たす決定: 決定 10・13、受け入れ条件 6・7
 
-リリース承認ゲートの承認の後に行う。M1〜M3 は読むだけで、反映のパイプラインで反映した運用する環境で行う。M4・M5 は `app` のスタックを変えるため運用する環境では打たない（運用する環境の `app` は反映のパイプラインだけで反映する。AGENTS.md の「反映の経路」）。同じコミットを、運用する環境と別の `environment` の値（例 `rehearsal`）の設定のファイルで設置のコマンドから立てた、自分で設置する環境（以下、予行の環境）で行い、終えたら予行の環境を残すか消すかを運用する人が決める。結果を #13 のリリース後テストのコメントと、全体の設計の費用の見込み・未確認のまま残ることへ返す。値はリポジトリと課題に書かず、比と時間と回数だけを書く。接続する項目は #44 が受ける。
+リリース承認ゲートの承認の後に行う。M1・M2 は読むだけで、反映のパイプラインで反映した運用する環境で行う。M4・M5 は `app` のスタックを変えるため運用する環境では打たない（運用する環境の `app` は反映のパイプラインだけで反映する。AGENTS.md の「反映の経路」）。同じコミットを、運用する環境と別の `environment` の値（例 `rehearsal`）の設定のファイルで設置のコマンドから立てた、自分で設置する環境（以下、予行の環境）で行い、終えたら予行の環境を残すか消すかを運用する人が決める。結果を #13 のリリース後テストのコメントと、全体の設計の費用の見込み・未確認のまま残ることへ返す。値はリポジトリと課題に書かず、比と時間と回数だけを書く。接続する項目は #44 が受ける。
 
 | # | 項目 | 手順 | 合格の目安 |
 | --- | --- | --- | --- |
 | M1 | 接続の無い間の一時停止 | 反映の後 3 日、CloudWatch の `ServerlessDatabaseCapacity` を 5 分の粒度で読み、0 でない時間の合計と起きた回数を数える | 0 でない時間が保守の起き上がり（1 回 20 分程度）だけ |
 | M2 | 単価 | EventBridge Scheduler・DynamoDB の PITR とストリームの単価の頁を、設置したリージョンで読む | 見込みの額への効きを全体の設計の見込みに書く |
-| M3 | ECR のライフサイクルの規則 | 運用する環境の反映の後と、予行の環境の戻しの予行（M4）の後に、それぞれの DB の用意のリポジトリでライフサイクルの規則の試し（`StartLifecyclePolicyPreview` と `GetLifecyclePolicyPreview`。読むだけで消さない）を打ち、版の数と消える予定を読む。あわせて版ごとの大きさ（`DescribeImages` の `imageSizeInBytes`）を読み、保管の見込みへ返す | 版が 30 以下なら消える予定が 0 件で、30 を超えた分の push の古い版だけが消える予定に入る |
 | M4 | 戻しの予行 | 予行の環境で、決定 10 の手順。戻す前に、Aurora のクラスタの識別子とリソースの ID（`DescribeDBClusters` の `DbClusterResourceId`）・利用者の表の項目の数と作り物の目印の項目 1 件を控える。保存した前の合成の結果を設置のコマンドの `deploy` で反映し、同じ値を読み直し、確認の値の照らしを読む | クラスタの識別子とリソースの ID が前後で同じ・利用者の表の項目の数と目印の項目が残る・確認の値の違う `deploy` が止まる。プロジェクトのデータベースの残りは確かめない（#44 が受ける） |
 | M5 | 予算と運用の知らせ | 予行の環境で、予算を 1 ドルにした設定で `diff`・`deploy` し、知らせのメールが届くことを読んだ後に戻す | 宛先に届く |
