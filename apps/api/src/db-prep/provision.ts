@@ -1,7 +1,7 @@
 import { PROGRESS_DB_IDENT_SHAPE } from "@nd-factory/contracts/db-prep";
 import { escapeIdentifier } from "pg";
 import { prepareRolePassword } from "./role-password.ts";
-import { ADMIN_DATABASE, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
+import { ADMIN_DATABASE, inTransaction, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
 
 // プロジェクトと、そのデータベースと役割の名前。名前は API（#6）が無作為に作り、関数は口から読む
 export type ProjectIdent = { projectId: string; database: string; role: string };
@@ -53,25 +53,6 @@ function assertIdent(project: ProjectIdent): void {
   if (project.projectId.length === 0) throw new Error("プロジェクトの ID が空");
   if (!PROGRESS_DB_IDENT_SHAPE.test(project.database)) throw new Error("データベースの名前が形に合わない");
   if (!PROGRESS_DB_IDENT_SHAPE.test(project.role)) throw new Error("役割の名前が形に合わない");
-}
-
-// 1 つのトランザクションで打つ。途中で投げたら巻き戻して元の失敗を投げ、確定が投げたらそのまま投げる
-async function inTransaction<T>(
-  sql: SqlExecutor,
-  database: string,
-  fn: (opts: { database: string; transactionId: string }) => Promise<T>,
-): Promise<T> {
-  const tx = await sql.begin({ database });
-  let out: T;
-  try {
-    out = await fn({ database, transactionId: tx });
-  } catch (e) {
-    // 巻き戻しの失敗は元の失敗より後の出来事で、呼ぶ側は元の失敗で扱う。Data API のトランザクションは無通信で巻き戻る
-    await sql.rollback(tx).catch(() => undefined);
-    throw e;
-  }
-  await sql.commit(tx);
-  return out;
 }
 
 async function readFlag(

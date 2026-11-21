@@ -1,4 +1,4 @@
-import { ADMIN_DATABASE, type SqlExecutor } from "./sql-executor.ts";
+import { ADMIN_DATABASE, inTransaction, type SqlExecutor } from "./sql-executor.ts";
 
 // 受け取りの行を残す日数。待ち行列の最大の年齢（60 秒）より十分長い
 export const PREP_RUN_RETENTION_DAYS = 7;
@@ -34,10 +34,8 @@ async function tablePresent(sql: SqlExecutor, stmt: string, opts: { database: st
 // 同じ用意の ID の重複の配信のうち、1 つだけに SQL と終わりの記録を許す
 export async function claimPrepRun(sql: SqlExecutor, prepId: string): Promise<"first" | "duplicate"> {
   if (prepId.length === 0) throw new Error("用意の ID が空");
-  const tx = await sql.begin({ database: ADMIN_DATABASE });
-  const opts = { database: ADMIN_DATABASE, transactionId: tx };
-  let inserted: boolean;
-  try {
+  // 確定が投げたら、記せたかが分からないまま投げる（呼ぶ側は終わりを記さない）
+  const inserted = await inTransaction(sql, ADMIN_DATABASE, async (opts) => {
     if (!(await tablePresent(sql, TABLE_PRESENT, opts))) {
       // 鎖は確定か巻き戻しまで持つ。表の無い間の受け取りどうしだけが直列になる
       await sql.execute(SCHEMA_LOCK, undefined, opts);
@@ -49,13 +47,7 @@ export async function claimPrepRun(sql: SqlExecutor, prepId: string): Promise<"f
     }
     await sql.execute(DELETE_OLD, [{ name: "retention_days", value: PREP_RUN_RETENTION_DAYS }], opts);
     const rows = await sql.execute(INSERT_RUN, [{ name: "prep_id", value: prepId }], opts);
-    inserted = rows.length === 1;
-  } catch (e) {
-    // 巻き戻しの失敗は元の失敗より後の出来事で、呼ぶ側は元の失敗で扱う。Data API のトランザクションは無通信で巻き戻る
-    await sql.rollback(tx).catch(() => undefined);
-    throw e;
-  }
-  // 確定が投げたら、記せたかが分からないまま投げる（呼ぶ側は終わりを記さない）
-  await sql.commit(tx);
+    return rows.length === 1;
+  });
   return inserted ? "first" : "duplicate";
 }

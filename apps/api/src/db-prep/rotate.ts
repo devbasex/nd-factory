@@ -2,7 +2,7 @@ import { PROGRESS_DB_IDENT_SHAPE } from "@nd-factory/contracts/db-prep";
 import { CREATE_SCHEMA, REVOKE_SCHEMA, SCHEMA_LOCK, SCHEMA_PRESENT, tablePresent, tablePresentFresh } from "./nd-prep-schema.ts";
 import type { ProjectIdent } from "./provision.ts";
 import { passwordCommandsRestriction, prepareRolePassword } from "./role-password.ts";
-import { ADMIN_DATABASE, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
+import { ADMIN_DATABASE, inTransaction, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
 
 // 差し替えの結果。recorded は確定の後に記された番号（applied なら渡した番号）
 export type RotateResult = { kind: "applied" | "superseded_equal" | "superseded_greater"; recorded: number };
@@ -122,21 +122,6 @@ async function authTimeoutMs(sql: SqlExecutor, opts: TxOpts): Promise<number> {
   return s * 1000;
 }
 
-// 1 つのトランザクションで打つ。途中で投げたら巻き戻して元の失敗を投げ、確定が投げたらそのまま投げる
-async function inTransaction<T>(sql: SqlExecutor, fn: (opts: TxOpts) => Promise<T>): Promise<T> {
-  const tx = await sql.begin({ database: ADMIN_DATABASE });
-  let out: T;
-  try {
-    out = await fn({ database: ADMIN_DATABASE, transactionId: tx });
-  } catch (e) {
-    // 巻き戻しの失敗は元の失敗より後の出来事で、呼ぶ側は元の失敗で扱う。Data API のトランザクションは無通信で巻き戻る
-    await sql.rollback(tx).catch(() => undefined);
-    throw e;
-  }
-  await sql.commit(tx);
-  return out;
-}
-
 async function present(sql: SqlExecutor, stmt: string, opts: TxOpts): Promise<boolean> {
   const [row] = await sql.execute(stmt, undefined, opts);
   return row?.present === true;
@@ -175,7 +160,7 @@ export async function rotateRole(sql: SqlExecutor, project: ProjectIdent & { pas
   // 文を打つ前に作る。印字できない文字のパスワードはここで投げ、何も打たない
   const writePassword = prepareRolePassword(project.role, project.password, "alter");
   const roleParam = [{ name: "role_name", value: project.role }];
-  return inTransaction(sql, async (opts) => {
+  return inTransaction(sql, ADMIN_DATABASE, async (opts) => {
     // 鎖は確定か巻き戻しまで持つ
     await sql.execute(ROTATE_LOCK, roleParam, opts);
     // 番号を読む前に照らす。記した番号 = n の呼び直し（パスワードを書かずに切りと移しへ進む道）も、照らしが通らなければ止める
@@ -213,7 +198,7 @@ export async function terminateRoleConnections(
   const now = options.now ?? (() => performance.now());
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const roleParam = [{ name: "role_name", value: role }];
-  return inTransaction(sql, async (opts): Promise<TerminateResult> => {
+  return inTransaction(sql, ADMIN_DATABASE, async (opts): Promise<TerminateResult> => {
     await sql.execute(ROTATE_LOCK, roleParam, opts);
     const got = await readSeq(sql, roleParam, opts);
     // 行が無いか n より小さいのは、rotateRole が番号 n を確定していない呼び出し

@@ -27,6 +27,25 @@ export type SqlExecutor = {
   rollback(transactionId: string): Promise<void>;
 };
 
+// 1 つのトランザクションで打つ。途中で投げたら巻き戻して元の失敗を投げ、確定が投げたらそのまま投げる
+export async function inTransaction<T>(
+  sql: SqlExecutor,
+  database: string,
+  fn: (opts: { database: string; transactionId: string }) => Promise<T>,
+): Promise<T> {
+  const tx = await sql.begin({ database });
+  let out: T;
+  try {
+    out = await fn({ database, transactionId: tx });
+  } catch (e) {
+    // 巻き戻しの失敗は元の失敗より後の出来事で、呼ぶ側は元の失敗で扱う。Data API のトランザクションは無通信で巻き戻る
+    await sql.rollback(tx).catch(() => undefined);
+    throw e;
+  }
+  await sql.commit(tx);
+  return out;
+}
+
 // 管理の役割が持つデータベース。nd_prep のスキーマはここに置く
 export const ADMIN_DATABASE = "postgres";
 
