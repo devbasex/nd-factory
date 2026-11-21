@@ -386,8 +386,7 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | 起動 | 差分の判定に使うコミット | 契約の照合に使う作業の木 |
 | --- | --- | --- |
 | `pull_request` | `github.event.pull_request.base.sha` と `github.event.pull_request.head.sha` の分岐点と、`head.sha` | `actions/checkout` の既定の取得（マージした結果のコミット `refs/pull/<番号>/merge`）。マージされる姿で照らす |
-| `push`（main） | 判定しない | push したコミット |
-| `schedule`・`workflow_dispatch` | 判定しない | 既定の枝の先端（`schedule` の取得） |
+| `schedule` | 判定しない | 既定の枝の先端（`schedule` の取得） |
   - 副作用: 作業のディレクトリ（一時のディレクトリ）への取得、要約のファイルへの追記（ワークフローは `GITHUB_STEP_SUMMARY` を渡す）
 - 固定の点のコミットは `ndf-pin.json` から読む。キーの名前は参照の検査の書き方に倣って定数に置き、キーを読む行に大小の比べの記号と矢印の関数を置かない（参照の検査の版の比べに当たるため）
 
@@ -441,7 +440,7 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | ファイル | 変える中身 |
 | --- | --- |
 | `.github/workflows/ci.yml` | ジョブ `synth` の「作り物の値で合成する」の後に、`npm run route-check -- --cdk-out infra/cdk.out`（API Gateway の合成の結果の経路の照らし）の手順を足す。ジョブ `leak-check` を足す。取得は履歴をすべて取り（`fetch-depth: 0`。分岐点からのコミットを探すため）、Node の用意と `npm ci` の後に、`GITLEAKS_VERSION` の版の配布の資産 `gitleaks_<版>_linux_x64.tar.gz` だけを取り、その `sha256sum` を環境変数 `GITLEAKS_SHA256` に固定した値と直接比べ（`echo "$GITLEAKS_SHA256  <資産>" \| sha256sum -c -`）、一致したときだけ展開して `PATH` へ置く。配布のチェックサムのファイルは取らない（同じ配布元から取った値と比べても、配布元を信じることにしかならず、固定にならないため）。続けて `npm run test:integration`（実物の gitleaks を起こす結合のテスト）を打ち、最後に `npm run leak-check` を打つ（Pull Request では `-- --base <分岐点>`）。gitleaks の版と要約値はこのジョブの環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の 1 か所にだけ書く。環境変数 `LEAK_CHECK_TERMS`（秘密）と `LEAK_CHECK_REQUIRE_TERMS`（`ref-check` と同じ式で変数 `LEAK_CHECK_REQUIRE_TERMS` から作る）を渡す |
-| `.github/workflows/ndf-contract.yml`（新設） | `on` は `pull_request`・`push`（main）・`schedule`（毎日 1 回）・`workflow_dispatch`。`permissions: contents: read`。ジョブ `ndf-contract` は Pull Request のとき、既定の取得（マージした結果のコミット）に加えて `base.sha` と `head.sha` を分岐点が求まる深さまで取り（`fetch-depth: 0`）、`npm run ndf-contract -- --base <base.sha> --head <head.sha> --summary "$GITHUB_STEP_SUMMARY"` を打つ。ほかの起動では `--base` と `--head` を渡さない。動作の版はコミットの SHA で固定する（`ci.yml` と同じ） |
+| `.github/workflows/ndf-contract.yml`（新設） | `on` は `pull_request` と `schedule`（毎日 1 回）だけ（全体の設計の「いつ」。`push` と `workflow_dispatch` は置かない。設計文書の決定 6）。`permissions: contents: read`。ジョブ `ndf-contract` は Pull Request のとき、既定の取得（マージした結果のコミット）に加えて `base.sha` と `head.sha` を分岐点が求まる深さまで取り（`fetch-depth: 0`）、`npm run ndf-contract -- --base <base.sha> --head <head.sha> --summary "$GITHUB_STEP_SUMMARY"` を打つ。`schedule` では `--base` と `--head` を渡さない。動作の版はコミットの SHA で固定する（`ci.yml` と同じ） |
 | `.ndf/project.json` | `ci.required_checks` に `leak-check`・`ndf-contract` を足す。`ci.workflows` に `ndf-contract.yml` の行を足す |
 | `package.json` | スクリプト `leak-check`・`ndf-contract`・`route-check`・`test:integration`（`vitest run -c vitest.integration.config.ts`） |
 | `vitest.config.ts` | `tools` の組に `exclude: ["tools/test/**/*.integration.test.ts"]` を足す。`npm run check` の `npm run test` は gitleaks を起こさないテストだけを走らせる |

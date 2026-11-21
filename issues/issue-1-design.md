@@ -52,7 +52,7 @@ flowchart TB
         synth["synth"]
         e2e["e2e"]
     end
-    subgraph nc["ndf-contract.yml（新設。pull_request・push・毎日・手動）"]
+    subgraph nc["ndf-contract.yml（新設。pull_request・毎日）"]
         ndfc["ndf-contract"]
     end
     check --> lint["ESLint の置き場ごとの規則<br/>境界・依存の向き・I8・画面の HTTP の経路・React と TSX"]
@@ -69,7 +69,7 @@ flowchart TB
 - 構文で見つかる破れ（横断の部品の外での直の利用・依存の向きに反する import・料金プランの値の判定の外での import と名前の比べ・画面の HTTP の経路の直書き・API の振り分けと API Gateway の定義への HTTP の経路の手書き・画面の外での React の import と TSX のファイル）は、`eslint.config.js` が `tools/checks/` の規則の組を置き場ごとに読み込み、今の `check` が落とす
 - 形の往復と I14 の対応は、形の正本と生成物を読む単体テスト（`tools/test/`）が落とす。実際に使う HTTP の経路は、`synth` が合成した API Gateway の経路と、`apps/api` の振り分けのテストで操作の表と照らす。I15（日時は時刻帯つきの UTC で、金額は `amount_minor` と `currency` の組で受ける）と I12（利用者向けの操作の要求と応答は配列で、1 件も配列の 1 要素として扱う）の形もここで照らす（どちらも [API と MCP の文書](../docs/design/api.md) の不変条件）
 - 漏れの検査は新しいジョブ `leak-check` が、gitleaks の既定の規則と、秘密の形のデータと CI の秘密の実際の値から組んだ規則で、`docs/` を含む追跡しているファイルと、Pull Request の途中のコミットを探す
-- NDF の契約の照合は新しいワークフローのジョブ `ndf-contract` が、固定の点を変えた Pull Request・main への push・毎日 1 回・手動で照らし、ほかの Pull Request では照らさずに通る
+- NDF の契約の照合は新しいワークフローのジョブ `ndf-contract` が、全体の設計の「いつ」のとおり固定の点を変えた Pull Request と毎日 1 回で照らし、ほかの Pull Request では照らさずに通る
 - 必須のチェックは 6 つ（`check`・`synth`・`e2e`・`ref-check`・`leak-check`・`ndf-contract`）になり、CI の定義のテストがすべてのワークフローを読んで宣言との食い違いと資格情報の語を落とす
 
 ## 構成要素
@@ -204,11 +204,12 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 ### 決定 6: 全体の設計の「いつ」を変えずに必須のチェックへ載せるため、NDF の契約の照合を別のワークフローの常に起動するジョブにし、固定の点を変えない Pull Request では照らさずに通す
 
 - **質問**: F23 は「毎日 1 回と `ndf-pin.json` を変える Pull Request」で走り（実行の文書）、同時に必須のチェックに載る（プラットフォームの文書）。パスの絞り込みで起動を絞ると、起動しなかった Pull Request で必須のチェックが待ちのまま残る
-- **選んだ案**: 新しいワークフロー `.github/workflows/ndf-contract.yml` に 1 つのジョブ `ndf-contract` を置き、`pull_request`・main への `push`・`schedule`（毎日 1 回）・`workflow_dispatch` で起動する。Pull Request では、ジョブの中で Pull Request の分岐点（基点の枝の先端と head の共通の祖先。GitHub の Pull Request の差分と同じ点）と head のコミットの `ndf-pin.json` を比べ、同じなら照らさずに成功で終える（出力に `skip: pin-unchanged` の行を出す。出力の行は詳細設計の「NDF の契約の照合」）。基点の枝の先端と比べないのは、分岐の後に main だけで固定の点が変わった場合を Pull Request 自身の変更と取り違えないためである。変えた Pull Request では、マージした結果のコミット（`pull_request` の既定の取得）で照らす。マージされる姿の固定の点と形の正本で照らすためである。push・毎日・手動では、そのコミットで固定の点と既定の枝の先端の両方を照らす
+- **選んだ案**: 新しいワークフロー `.github/workflows/ndf-contract.yml` に 1 つのジョブ `ndf-contract` を置き、`pull_request` と `schedule`（毎日 1 回）だけで起動する。Pull Request では、ジョブの中で Pull Request の分岐点（基点の枝の先端と head の共通の祖先。GitHub の Pull Request の差分と同じ点）と head のコミットの `ndf-pin.json` を比べ、同じなら照らさずに成功で終える（出力に `skip: pin-unchanged` の行を出す。出力の行は詳細設計の「NDF の契約の照合」）。基点の枝の先端と比べないのは、分岐の後に main だけで固定の点が変わった場合を Pull Request 自身の変更と取り違えないためである。変えた Pull Request では、マージした結果のコミット（`pull_request` の既定の取得）で照らす。マージされる姿の固定の点と形の正本で照らすためである。毎日の実行では、既定の枝の先端のコミットで固定の点と ai-plugins の既定の枝の先端の両方を照らす。main への `push` と `workflow_dispatch` では起動しない（実行の文書と要求の「いつ」に無い起動を足すと、全体の設計の「いつ」を詳細設計で広げることになる。失敗した毎日の実行は GitHub の「Re-run jobs」で打ち直せる）
 - 採らなかった案: `on.pull_request.paths` で起動を絞る（起動しなかった Pull Request で必須のチェックが待ちのまま残り、マージできない。STD1）
 - 採らなかった案: すべての Pull Request で照らす（全体の設計の「いつ」を広げることになり、詳細設計で決め直さない決まりに当たる。照らす相手のコード（#2・#6）の変更は毎日の実行で知る）
 - 採らなかった案: `ci.yml` に `schedule` を足す（毎日、ほかのすべてのジョブも走る）
-- **代償**: 照らす相手（形の正本の NDF の契約の使い方）を変えて固定の点を変えない Pull Request は、その Pull Request では照らされず、マージした後の push か次の毎日の実行で落ちる。公開のリポジトリで 60 日活動が無いと、毎日の起動が止まる（STD2）
+- 採らなかった案: main への `push` と `workflow_dispatch` でも照らす（固定の点を変えない Pull Request の後の食い違いを早く知れるが、実行の文書の「いつ」と #1 の要求の「毎日 1 回と `ndf-pin.json` を変える Pull Request」に無い起動を足すことになり、採るなら全体の設計と要求を先に直す。毎日の実行で知る遅れは 1 日以内で、反映の前に照らす目的（実行の文書の決定 79）に足りる）
+- **代償**: 照らす相手（形の正本の NDF の契約の使い方）を変えて固定の点を変えない Pull Request は、その Pull Request では照らされず、マージした後の次の毎日の実行で落ちる。公開のリポジトリで 60 日活動が無いと、毎日の起動が止まる（STD2）
 - 根拠: Value 8・Vision（MVV バージョン 2）
 
 ### 決定 7: 契約の見本でランナーと同じ判定を照らすため、検査は形の正本の判定とデータを呼び、自前の判定を持たない
@@ -273,9 +274,9 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 | --- | --- | --- |
 | 別名で受ける・変数に入れてから呼ぶ（決定 1） | 構文の印の無い呼び出し（`const f = Date.now; f()` など）は ESLint の規則に当たらない | レビュー |
 | 印を避ける書き方（決定 2） | 再帰で繰り返す・応答を作る部品を別に作る・文字列を連結して経路や理由のコードを組む | レビュー。正当な例外は控えに理由を書いて足す |
-| 固定の点を変えない Pull Request での NDF の契約の使い方の変更（決定 6） | 形の正本の NDF の契約の使い方だけを変えた Pull Request は、その Pull Request では照らされない | マージの後の push の実行か次の毎日の実行で落ちる |
+| 固定の点を変えない Pull Request での NDF の契約の使い方の変更（決定 6） | 形の正本の NDF の契約の使い方だけを変えた Pull Request は、その Pull Request では照らされない | マージの後の次の毎日の実行で落ちる |
 | 漏れの検査の外しの中の置き換え（上の「漏れの検査の外しの粒度」） | 外したファイルの当たりを、同じ件数の別の実際の値へ置き換える。外したパスと規則の組に、途中のコミットで値を足して消す | 秘密の一覧との照合とレビュー |
-| 照らす相手（#2・#29）がそろうまで「相手が無い」で通る検査 | 形の往復・I14（#2 の操作の表と生成物）・I8 の料金プランの値と名前（#29）・F23 の 1〜6（#2 の NDF の契約の使い方）は、相手が無い間はリポジトリへの適用を飛ばして通る。作り物の入力で落ちることはテストで示すが、実物は照らされない | #2・#29 の実装の Pull Request で相手が入った時点から照らされる。形の往復・I14・I8 は、相手を足す Pull Request の CI で検査がその相手を読むことを確かめる。F23 だけは、相手を足す #2 の Pull Request が固定の点（`ndf-pin.json`）を変えるかどうかで初めて照らす時点が変わる（決定 6）。変える場合は、その Pull Request の `ndf-contract` の実行がマージした結果のコミットで照らすので、その CI の出力で確かめる。変えない場合は、その Pull Request の出力は `skip: pin-unchanged` で照らさず、初めて照らすのはマージした後の main への push の `ndf-contract` の実行である。どちらも、出力に `checked: fixed <固定の点のコミット> 1-6` の行があり、`skip:` の行（`pin-unchanged`・`no-contract-use`）が無いことで、固定の点に対して照らすこと 1〜6 が実行されたと確かめる（出力の行は詳細設計の「NDF の契約の照合」） |
+| 照らす相手（#2・#29）がそろうまで「相手が無い」で通る検査 | 形の往復・I14（#2 の操作の表と生成物）・I8 の料金プランの値と名前（#29）・F23 の 1〜6（#2 の NDF の契約の使い方）は、相手が無い間はリポジトリへの適用を飛ばして通る。作り物の入力で落ちることはテストで示すが、実物は照らされない | #2・#29 の実装の Pull Request で相手が入った時点から照らされる。形の往復・I14・I8 は、相手を足す Pull Request の CI で検査がその相手を読むことを確かめる。F23 だけは、相手を足す #2 の Pull Request が固定の点（`ndf-pin.json`）を変えるかどうかで初めて照らす時点が変わる（決定 6）。変える場合は、その Pull Request の `ndf-contract` の実行がマージした結果のコミットで照らすので、その CI の出力で確かめる。変えない場合は、その Pull Request の出力は `skip: pin-unchanged` で照らさず、初めて照らすのはマージした後の次の毎日の `ndf-contract` の実行である（その実行の出力で確かめる）。どちらも、出力に `checked: fixed <固定の点のコミット> 1-6` の行があり、`skip:` の行（`pin-unchanged`・`no-contract-use`）が無いことで、固定の点に対して照らすこと 1〜6 が実行されたと確かめる（出力の行は詳細設計の「NDF の契約の照合」） |
 | I14 の画面の控え（決定 5） | 控えに載せた操作は、画面が無くても `screen-missing` にならない | 画面を作る課題が自分の行を消す |
 
 ### このリポジトリだけの事情
@@ -360,7 +361,7 @@ C1 と C7 は、NDF の共通原則が「AI が自分で進めずに必ず人の
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
 | STD1 | GitHub Actions の必須のステータスチェック | パスや枝の絞り込みでワークフローが起動しないと、必須のチェックは待ちのまま残りマージを止める。ジョブの `if` で飛ばしたジョブは成功と報告される | 決定 6（パスで絞らず、ジョブの中で照らすかを決める） | https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks（2026-11-21） |
-| STD2 | GitHub Actions の `schedule` と `workflow_dispatch` | `schedule` は既定の枝の最新のコミットで走り、公開のリポジトリで 60 日活動が無いと止まる。`workflow_dispatch` で手で起こせる | 決定 6・影響と危険 | https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows（2026-11-21） |
+| STD2 | GitHub Actions の `schedule` と `workflow_dispatch` | `schedule` は既定の枝の最新のコミットで走り、公開のリポジトリで 60 日活動が無いと止まる。`workflow_dispatch` で手で起こせる | 決定 6・影響と危険（`schedule` を使い、`workflow_dispatch` は「いつ」に無いので使わない） | https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows（2026-11-21） |
 | STD3 | JSON Schema draft 2020-12 と zod v4 の `z.toJSONSchema` | zod v4 の書き出しの既定の版は draft 2020-12。ajv はこの版に別のクラスを使う | 決定 8 | https://zod.dev/json-schema・https://ajv.js.org/json-schema.html（2026-11-21） |
 | STD4 | AWS の ARN | 形は `arn:partition:service:region:account-id:resource`。パーティションは `aws`・`aws-cn`・`aws-us-gov`。資源によりリージョンとアカウントを省く。ARN そのものは秘密でないと明記 | 決定 3（ARN の形と、秘密でなくても実際の値として探す理由） | https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html（2026-11-21） |
 | STD5 | GitHub Actions の `permissions` と秘密の伏せ字 | `permissions` で 1 つでも指定すると、ほかは `none` になる。`::add-mask::` で値をログで伏せる | 足すワークフローは `contents: read` だけにする。検査は値を出さないので伏せ字に頼らない | https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions・https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions（2026-11-21） |
