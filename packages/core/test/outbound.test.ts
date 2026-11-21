@@ -1,4 +1,6 @@
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { DescribeTableCommand, DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { RETRY_POLICIES } from "@nd-factory/contracts/data";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClock } from "../src/clock.ts";
@@ -8,13 +10,13 @@ import { leakedSecrets, SECRET_SAMPLES } from "./fixtures/secrets.ts";
 
 // HTTP は fetch の差し替えと偽のタイマーで確かめる。AWS は呼ばない
 
-type Call = { at: number; method: string; url: string; headers: Headers; body: string };
+type Call = { at: number; method: string; url: string; headers: Headers; body: string; redirect: Request["redirect"] };
 
 // 決まった応答を順に返す偽の fetch。呼ばれた時刻（偽の時計）と要求を控える
 function fakeFetch(answers: (() => Response | Promise<Response>)[] | (() => Response | Promise<Response>)) {
   const calls: Call[] = [];
   const fetch = async (input: Request): Promise<Response> => {
-    calls.push({ at: Date.now(), method: input.method, url: input.url, headers: input.headers, body: await input.clone().text() });
+    calls.push({ at: Date.now(), method: input.method, url: input.url, headers: input.headers, body: await input.clone().text(), redirect: input.redirect });
     const answer = Array.isArray(answers) ? answers[Math.min(calls.length, answers.length) - 1] : answers;
     if (answer === undefined) throw new Error("応答が無い");
     return answer();
@@ -189,6 +191,44 @@ describe("callHttp", () => {
     expect(result).toMatchObject({ status: 0, class: "retryable" });
   });
 
+  it("使い切った 408 は時間切れとして retryable で返し、断られた扱いにしない", async () => {
+    const { calls, fetch } = fakeFetch(json(408, {}));
+    const { log, records } = logs();
+    const result = await settle(callHttp(get(), "http-github", { log, clock: createClock(), fetch }));
+    expect(calls).toHaveLength(4);
+    expect(result).toMatchObject({ status: 408, class: "retryable" });
+    expect(records().at(-1)).toMatchObject({ level: "error", status: 408, class: "retryable" });
+  });
+
+  it.each([
+    ["冪等な要求", get()],
+    ["冪等でない要求", post()],
+  ])("2xx の頭書きの後に本文が止まると、%sも方針の期限で状態 0 の retryable を返す", async (_why, req) => {
+    let count = 0;
+    const fetch = () => {
+      count += 1;
+      // 頭書きと最初の一片だけを返し、本文を閉じない
+      const body = new ReadableStream<Uint8Array>({ start: (c) => c.enqueue(new TextEncoder().encode('{"a":')) });
+      return Promise.resolve(new Response(body, { status: 200, headers: { "content-type": "application/json" } }));
+    };
+    const { log, records } = logs();
+    const started = Date.now();
+    const result = await settle(callHttp(req, "http-github", { log, clock: createClock(), fetch }));
+    expect(result).toEqual({ status: 0, headers: {}, body: null, class: "retryable" });
+    expect(Date.now() - started).toBeLessThanOrEqual(RETRY_POLICIES["http-github"].total_timeout_ms);
+    expect(count).toBe(1);
+    expect(records().at(-1)).toMatchObject({ level: "error", status: 0, class: "retryable" });
+  });
+
+  it("転送に自動で従わず、307 は Location を付けた結果で返す（http: の転送先へ本文を送り直さない）", async () => {
+    const { calls, fetch } = fakeFetch(() => new Response(null, { status: 307, headers: { location: "http://api.example.com/v1/issues" } }));
+    const result = await settle(callHttp(post(), "http-github", { log: logs().log, clock: createClock(), fetch }));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.redirect).toBe("manual");
+    expect(result).toMatchObject({ status: 307, headers: { location: "http://api.example.com/v1/issues" } });
+    expect(result.class).not.toBe("ok");
+  });
+
   it("http: の URL は送る前に止まる", async () => {
     const { calls, fetch } = fakeFetch(json(200, {}));
     await expect(callHttp(get("http://api.example.com/v1/repos"), "http-github", { log: logs().log, clock: createClock(), fetch })).rejects.toBeInstanceOf(InsecureUrlError);
@@ -238,8 +278,39 @@ describe("awsClient", () => {
   });
 
   it("構築子へ渡す設定は方針のデータの値", () => {
-    expect(awsClientConfigOf("dynamodb")).toEqual({ retryMode: "standard", maxAttempts: 3, requestHandler: { requestTimeout: 2_000 } });
-    expect(awsClientConfigOf("aws-control")).toEqual({ retryMode: "standard", maxAttempts: 3, requestHandler: { requestTimeout: 5_000 } });
+    expect(awsClientConfigOf("dynamodb")).toEqual({ retryMode: "standard", maxAttempts: 3, requestHandler: { requestTimeout: 2_000, throwOnRequestTimeout: true } });
+    expect(awsClientConfigOf("aws-control")).toEqual({ retryMode: "standard", maxAttempts: 3, requestHandler: { requestTimeout: 5_000, throwOnRequestTimeout: true } });
+  });
+
+  describe("応答しない相手", () => {
+    let server: Server;
+    beforeEach(async () => {
+      // 要求を受けても応答しない
+      server = createServer(() => undefined);
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    });
+    afterEach(async () => {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    });
+
+    it("要求の期限を過ぎると、警告だけで待ち続けず TimeoutError で切る", async () => {
+      const { port } = server.address() as AddressInfo;
+      const config = awsClientConfigOf("dynamodb");
+      // 繰り返しを 1 回にし、期限 1 回分だけで確かめる
+      const client = new DynamoDBClient({
+        region: "us-west-2",
+        ...config,
+        maxAttempts: 1,
+        endpoint: `http://127.0.0.1:${port}`,
+        credentials: { accessKeyId: "AKIDTEST", secretAccessKey: "test" },
+      });
+      const started = Date.now();
+      const error = await client.send(new DescribeTableCommand({ TableName: "t" })).catch((e: unknown) => e);
+      client.destroy();
+      expect(error).toMatchObject({ name: "TimeoutError" });
+      expect(Date.now() - started).toBeLessThan(config.requestHandler.requestTimeout + 1_500);
+    }, 10_000);
   });
 
   it("同じ構築子と方針の 2 回目は同じインスタンスで、構築子を 1 回だけ呼ぶ", () => {

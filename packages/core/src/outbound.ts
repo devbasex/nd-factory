@@ -98,6 +98,8 @@ export function kyOptionsOf(req: OutboundRequest, policy: HttpRetryPolicy): Opti
     },
     timeout: policy.timeout_ms,
     totalTimeout: policy.total_timeout_ms,
+    // 転送に自動で従わない。https: の相手が http: へ 307・308 を返すと、本文が平文の接続へ送り直され得る。3xx は Location を付けた結果で返す
+    redirect: "manual",
     // throwHttpErrors は既定の真のまま（偽にすると ky は 2xx でない応答を成功と見て繰り返さない）
   };
 }
@@ -111,8 +113,7 @@ function pickHeaders(headers: Headers): Record<string, string> {
   return out;
 }
 
-async function readBody(response: Response): Promise<unknown> {
-  const text = await response.text();
+function parseBody(response: Response, text: string): unknown {
   if (text === "") return null;
   if (!(response.headers.get("content-type") ?? "").includes("json")) return text;
   try {
@@ -155,8 +156,11 @@ export async function callHttp(req: OutboundRequest, policyName: HttpPolicyName,
   };
   let result: OutboundResult;
   try {
-    const response = await ky(req.url, options);
-    result = { status: response.status, headers: pickHeaders(response.headers), body: await readBody(response), class: "ok" };
+    const pending = ky(req.url, options);
+    const response = await pending;
+    // 本文は ky の読み口から読み、timeout と totalTimeout の残りを本文の読み取りにも掛ける（頭書きの後に本文が止まる相手で待ち続けない）
+    const text = await pending.text();
+    result = { status: response.status, headers: pickHeaders(response.headers), body: parseBody(response, text), class: "ok" };
   } catch (error) {
     result = failureResult(error);
   }
@@ -179,12 +183,13 @@ function failureResult(error: unknown): OutboundResult {
 export type AwsClientConfig = {
   retryMode: "standard";
   maxAttempts: number;
-  requestHandler: { requestTimeout: number };
+  // throwOnRequestTimeout が無いと、Smithy の Node の HTTP の扱い手は期限を過ぎても警告を出すだけで要求を切らない
+  requestHandler: { requestTimeout: number; throwOnRequestTimeout: true };
 };
 
 export function awsClientConfigOf(policyName: AwsPolicyName): AwsClientConfig {
   const policy = awsPolicyOf(policyName);
-  return { retryMode: policy.retry_mode, maxAttempts: policy.max_attempts, requestHandler: { requestTimeout: policy.request_timeout_ms } };
+  return { retryMode: policy.retry_mode, maxAttempts: policy.max_attempts, requestHandler: { requestTimeout: policy.request_timeout_ms, throwOnRequestTimeout: true } };
 }
 
 // 実行環境ごとの控え。aws-control は ECS・Secrets Manager・STS の 3 つのクライアントが共有するため、構築子と方針の名前の組で引く

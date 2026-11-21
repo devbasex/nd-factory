@@ -20,6 +20,7 @@ const answer = (status: number) => () => Promise.resolve(new Response("{}", { st
 
 describe("classifyFailure", () => {
   it.each([
+    [408, "retryable"],
     [429, "retryable"],
     [500, "retryable"],
     [502, "retryable"],
@@ -30,7 +31,6 @@ describe("classifyFailure", () => {
     [400, "rejected"],
     [401, "rejected"],
     [403, "rejected"],
-    [408, "rejected"],
     [422, "rejected"],
     [501, "rejected"],
     [505, "unknown"],

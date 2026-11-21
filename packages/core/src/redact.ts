@@ -52,7 +52,13 @@ function copy(value: unknown, ancestors: Set<object>): unknown {
     if (value instanceof Map) return [...value].map(([key, item]) => [copy(key, ancestors), isSecretKeyValue(key) ? REDACTED : copy(item, ancestors)]);
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-      out[freeKey(out, isSecretText(key) ? REDACTED : key)] = isSecretKey(key) ? REDACTED : copy(item, ancestors);
+      // 代入でなく defineProperty で書く。"__proto__" の鍵（JSON.parse の結果など）を代入すると、項目にならずプロトタイプの差し替えになり黙って落ちる
+      Object.defineProperty(out, freeKey(out, isSecretText(key) ? REDACTED : key), {
+        value: isSecretKey(key) ? REDACTED : copy(item, ancestors),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
     return out;
   } finally {

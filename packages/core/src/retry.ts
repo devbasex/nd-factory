@@ -5,7 +5,8 @@ import { isHTTPError } from "ky";
 
 export type FailureClass = "retryable" | "conflict" | "not_found" | "rejected" | "unknown";
 
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+// 408 は callHttp が繰り返す状態（RETRY_STATUS_CODES）と揃える。使い切った 408 は相手が断ったのでなく時間切れ
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
 // ky の時間切れとネットワークの誤り・AbortSignal.timeout の時間切れ・AWS SDK の呼びすぎ
 const RETRYABLE_NAMES = new Set(["TimeoutError", "NetworkError", "ThrottlingException", "ProvisionedThroughputExceededException", "TransactionConflict"]);
