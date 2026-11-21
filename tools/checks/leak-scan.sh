@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gitleaks の 1 回の探し（#1 の決定 3。中身は issues/issue-1-design-detail.md の「gitleaks の設定と leak-check のジョブ」）。
+# gitleaks の 1 回の探し（#1 の決定 3。中身は docs/design-process/issue-1/design-detail.md の「gitleaks の設定と leak-check のジョブ」）。
 # gitleaks のすべての実行はこのスクリプトを通す（leak-check のジョブと tools/test/leak-scan.integration.test.ts）。
 # gitleaks の除外（値の行の gitleaks:allow・.gitleaksignore・前の報告）を効かなくし、当たりを規則・ファイル・行・コミットだけで出す。
 # 当たった行の残り・コミットの本文・作者は出さない（同じ行の別の秘密や、伏せた値の前後が記録に残るため）。

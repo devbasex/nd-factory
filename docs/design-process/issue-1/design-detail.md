@@ -1,6 +1,6 @@
 # #1 の詳細設計: このリポジトリの CI の検査を、ツールの設定のファイルと 2 つの自前の照らしへ下ろす
 
-設計文書 [issue-1-design.md](./issue-1-design.md) の「解き方の全体像」の表を、ファイルと設定の中身へ下ろした文書である。決定の理由は設計文書にある。対象は nd-factory 自体の開発（A）の CI で、利用者のプロジェクトの検査ではない。
+設計文書 [design.md](design.md) の「解き方の全体像」の表を、ファイルと設定の中身へ下ろした文書である。決定の理由は設計文書にある。対象は nd-factory 自体の開発（A）の CI で、利用者のプロジェクトの検査ではない。
 
 ## 地図
 
@@ -360,6 +360,6 @@ MCP の道具の入力の形（承認済みの `createMcpHandler` と #2 の生�
 | `.ndf/project.json` | `ci.required_checks` に `leak-check`・`workflow-audit`・`ndf-contract` を足す。`ci.workflows` に `ndf-contract.yml` の行を足す |
 | `package.json` | スクリプト `deps-check`・`knip`・`ndf-contract`・`test:integration`。開発の依存 `dependency-cruiser`・`knip` |
 | `vitest.config.ts` | 結合のテスト（`*.integration.test.ts`）を `tools` の単体のテストから外し、`test:integration` でだけ打つ |
-| `tools/package.json` | 依存 `@nd-factory/contracts`・`ajv`・`ajv-formats`・`yaml` |
+| `tools/package.json` | 依存 `@nd-factory/contracts`・`ajv`・`ajv-formats`・`yaml`・`zod`・`zod-schema-faker`・`@faker-js/faker` |
 | `tools/tsconfig.json` | `checks/src` を含める |
 | `AGENTS.md` | 「秘密とインフラの値を置かない」に、実際の値の正規表現は CI の秘密 `LEAK_CHECK_PATTERN` から受ける行を足す |

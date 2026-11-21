@@ -4,7 +4,7 @@
 
 ## 今の姿
 
-何が起きたか・目的・受け入れ条件は要求仕様（[issue-1-requirements.md](./issue-1-requirements.md)、正は #1 の本文）にある。この文書は「どう解くか」と「なぜその解き方か」だけを書く。
+何が起きたか・目的・受け入れ条件は要求仕様（[requirements.md](requirements.md)、正は #1 の本文）にある。この文書は「どう解くか」と「なぜその解き方か」だけを書く。
 
 ```mermaid
 flowchart LR
@@ -17,7 +17,7 @@ flowchart LR
     decl[".ndf/project.json<br/>必須のチェック 4 つ"] -.照らす.- cidef
 ```
 
-全体の設計は、検査で落とす決まりを [プラットフォームの検査](../docs/design/platform.md#検査)・[API と MCP の照らす検査（I14）](../docs/design/api.md#照らす検査i14)・[実行の契約の照合の定期の検査](../docs/design/execution.md#契約の照合の定期の検査) に決めている。今の CI が落とせるのは、そのうち参照の検査（旧いリポジトリの名前・NDF の固定の値の置き方・NDF の版の比べ）と、CI の定義のテスト（`ci.yml` のジョブと必須のチェックの宣言の一致・AWS の資格情報の語）だけである。
+全体の設計は、検査で落とす決まりを [プラットフォームの検査](../../design/platform.md#検査)・[API と MCP の照らす検査（I14）](../../design/api.md#照らす検査i14)・[実行の契約の照合の定期の検査](../../design/execution.md#契約の照合の定期の検査) に決めている。今の CI が落とせるのは、そのうち参照の検査（旧いリポジトリの名前・NDF の固定の値の置き方・NDF の版の比べ）と、CI の定義のテスト（`ci.yml` のジョブと必須のチェックの宣言の一致・AWS の資格情報の語）だけである。
 
 骨組みのコードは、足す検査に今も当たる。`apps/api/src/users-handler.ts`・`apps/api/src/user-store.ts` が AWS SDK を直に使い、引数なしの `new Date()` と `console.log` を使う。`apps/web/src/main.ts` が `fetch` を、`apps/web/src/users-client.ts` と `infra/lib/app-stack.ts` が `/v1/users` を直に書く。#2 が横断の部品（`packages/core`）へ移し、#4 が `PUT /v1/users` を置き換える。
 
@@ -25,7 +25,7 @@ flowchart LR
 
 - CI は AWS の資格情報を持たない（Value 8）。足すジョブも `permissions: contents: read` だけで動く
 - 実際の値と照合の語はリポジトリと CI の記録に置かない。リポジトリは公開されている（Value 7）
-- 検査の置き場の `tools` が import してよいのは `packages/contracts` だけで、ほかの置き場は文字として読む（[詳細設計の依存の表](../docs/design/detail.md#クラスと関数の構造)）
+- 検査の置き場の `tools` が import してよいのは `packages/contracts` だけで、ほかの置き場は文字として読む（[詳細設計の依存の表](../../design/detail.md#クラスと関数の構造)）
 - 照らす相手（操作の表・生成物・横断の部品・料金プランの値・NDF の契約の使い方）は #2・#29 が作り、まだ無い。相手が無い検査は、相手が無いことで落とさずに通り、わざと違反を入れた入力で落ちることをテストで示す（要求の前提 2）
 - 作り方と部品は既存の広く使われるものを選び（Value 15）、長く保ちやすい方を選ぶ（Value 17）。nd-factory に固有の仕組みと語を検査に持ち込まない
 - 落とすものの集合を変えるときは、全体の設計を同じ設計 PR の中で直す（要求の前提 1）
@@ -237,7 +237,7 @@ flowchart TB
 | 受け入れ条件 14・決定 9 | 除外の注釈を残したまま違反を直すと ESLint が使われない注釈の誤りを出す | `reportUnusedDisableDirectives` を外すと落ちる |
 | 受け入れ条件 11 | 詳細設計が、全体の設計の置き場・依存の向き・落とすものを引いて書かれ、変えたものは全体の設計を同じ PR で直している（cross-review が読む） | 全体の設計と食い違う書き方が残ると cross-review が落とす |
 
-詳細設計は [issue-1-design-detail.md](./issue-1-design-detail.md) にある（新設する関数が 2 つ以上あるため）。
+詳細設計は [design-detail.md](design-detail.md) にある（新設する関数が 2 つ以上あるため）。
 
 ## 設計の結果
 

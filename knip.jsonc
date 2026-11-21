@@ -1,4 +1,4 @@
-// 使っていないファイル・書き出し・依存を落とす（#1 の決定 4・8）。中身は issues/issue-1-design-detail.md の「knip の設定」にある。
+// 使っていないファイル・書き出し・依存を落とす（#1 の決定 4・8）。中身は docs/design-process/issue-1/design-detail.md の「knip の設定」にある。
 // 入口は、ワークスペースごとに knip の標準の手掛かり（package.json のスクリプトと exports・ツールの設定のファイル）が
 // 拾わないものだけを書く。拾うものを重ねて書くと、設定の手掛かりが誤りになる
 {

@@ -1,4 +1,4 @@
-// 置き場の間の依存の向き（#1 の決定 2）。規則の表は issues/issue-1-design-detail.md の「dependency-cruiser の設定」にある。
+// 置き場の間の依存の向き（#1 の決定 2）。規則の表は docs/design-process/issue-1/design-detail.md の「dependency-cruiser の設定」にある。
 // 依存は解決した先のファイルの置き場で照らす。workspaces の名前（`@nd-factory/*`）も相対のパスも、型だけの import も同じに数える
 
 /** このリポジトリの置き場のファイル（`node_modules` の外） */

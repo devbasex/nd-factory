@@ -3,7 +3,7 @@
  *
  * NDF のリポジトリから、`ndf-pin.json` の固定の点と既定の枝の先端の 2 つのコミットの契約のファイルを取り、
  * 形の正本の NDF の契約の使い方（#2 の書き出し。呼び出しの判定・区間の報告の読み取り・使い方のデータ）と照らす。
- * 照らすことの表は issues/issue-1-design-detail.md の「NDF の契約の照合」にある。
+ * 照らすことの表は docs/design-process/issue-1/design-detail.md の「NDF の契約の照合」にある。
  *
  *     node tools/checks/src/ndf-contract-check.ts [--root <作業の木>] [--summary <要約のファイル>]
  *

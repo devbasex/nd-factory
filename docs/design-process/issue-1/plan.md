@@ -2,8 +2,8 @@
 
 ## 関連リンク
 
-- 要求仕様: [issue-1-requirements.md](./issue-1-requirements.md)（正は #1 の本文）。受け入れ条件は番号で指す
-- 設計書: [issue-1-design.md](./issue-1-design.md)・詳細設計書 [issue-1-design-detail.md](./issue-1-design-detail.md)
+- 要求仕様: [requirements.md](requirements.md)（正は #1 の本文）。受け入れ条件は番号で指す
+- 設計書: [design.md](design.md)・詳細設計書 [design-detail.md](design-detail.md)
 - モード: `standard`（CI の必須のチェックを足し、全体の設計を引いて詳細設計を書いた。設計 PR #49 で承認済み）
 
 ## 承認で足したこと
@@ -51,7 +51,7 @@
 
 ### Task 5: gitleaks の `leak-check` のジョブ
 
-- **対象ファイル:** `.gitleaks.toml`・`tools/checks/leak-scan.sh`・`tools/checks/gitleaks-default.toml`・`.github/workflows/ci.yml`（`leak-check`）・`tools/test/leak-scan.integration.test.ts`・`.ndf/project.json`（必須のチェック）・`AGENTS.md`（`LEAK_CHECK_PATTERN` の行）・`issues/issue-1-design.md`・`issues/issue-1-design-detail.md`（承認で足したこと 1）
+- **対象ファイル:** `.gitleaks.toml`・`tools/checks/leak-scan.sh`・`tools/checks/gitleaks-default.toml`・`.github/workflows/ci.yml`（`leak-check`）・`tools/test/leak-scan.integration.test.ts`・`.ndf/project.json`（必須のチェック）・`AGENTS.md`（`LEAK_CHECK_PATTERN` の行）・`docs/design-process/issue-1/design.md`・`docs/design-process/issue-1/design-detail.md`（承認で足したこと 1）
 - **変更内容:** 詳細設計書の「gitleaks の設定と `leak-check` のジョブ」。gitleaks のすべての実行を `tools/checks/leak-scan.sh` で打ち、`--ignore-gitleaks-allow` と `--gitleaks-ignore-path <空の一時のディレクトリ>` を渡し、`--baseline-path` を渡さない。設定は毎回明示し（既定の規則は `[extend] useDefault = true` の `tools/checks/gitleaks-default.toml`）、履歴は `--log-opts="-m <範囲>"` でマージのコミットの差分を含めて探し、`.gitleaks.toml` の許可は規則ごとの `[[rules.allowlists]]` に書く。gitleaks は探す木の根の `.gitleaksignore` を引数によらず読むので、スクリプトはそれが在れば探さずに失敗する。スクリプトを足すのは、ジョブと結合のテストが同じ引数と照らしで打つため
 - **満たす受け入れ条件:** 1・2・3
 - **進め方:** 許可の値に合わず検出の規則に合う値を置いた一時の木で当たり、報告に値が出ないことと、作り物の値の許可が `.gitleaks.toml` と重ねた設定の両方で効くことと、根に `.gitleaks.toml` が在っても既定の規則の設定で架空の token が当たることと、マージのコミットでだけ足して後で消した値が履歴の探しで当たることと、`dir` と `git` のそれぞれで、値の行の `gitleaks:allow` だけを付けた値が対象の規則の当たりとして報告されるケースと、根に `.gitleaksignore` を置くと探さずに失敗するケースを別に確かめる結合のテスト → スクリプトと設定とジョブ。その値は実行のときに生成した架空の値に限る（乱数の 12 桁・架空の ARN と端点・形だけ合わせた token）。実在のアカウント・資源・端点の値と有効な token は使わず、リポジトリにも置かない
@@ -65,7 +65,7 @@
 
 ### Task 7: 形の正本の往復のテストと、合成した API Gateway の経路の照らし
 
-- **対象ファイル:** `tools/test/contracts-round-trip.test.ts`・`tools/package.json`（`ajv`・`ajv-formats`・`zod`・要素の見本を作る `zod-schema-faker`・`@faker-js/faker`）・`issues/issue-1-design.md`・`issues/issue-1-design-detail.md`（承認で足したこと 2）
+- **対象ファイル:** `tools/test/contracts-round-trip.test.ts`・`tools/package.json`（`ajv`・`ajv-formats`・`zod`・要素の見本を作る `zod-schema-faker`・`@faker-js/faker`）・`docs/design-process/issue-1/design.md`・`docs/design-process/issue-1/design-detail.md`（承認で足したこと 2）
 - **変更内容:** 詳細設計書の「形の正本の往復のテスト」の照らすこと 1〜7 に、照らすこと 8（合成した経路と経路の登録の比べ）を足し、「合成の打ち方」のとおりに合成する。照らすこと 8 と合成の打ち方は承認の後に詳細設計書へ書き足した（このタスクで設計文書の該当する節を変えるときも、ここと揃える）。要点は次のとおり
   - 比べる範囲: 合成したテンプレートの `AWS::ApiGatewayV2::Route` の経路（方法と経路）から除外の旧経路を引いた集まりが、経路の登録（#2 の `generated/routes.json`）から除外の受け口の経路を引いた集まり（反映済みの経路）に、除外していない操作でない受け口の経路（`POST /mcp`・`GET /mcp`・`DELETE /mcp`・`POST /v1/github/webhooks`。登録に無い）を足した集まりと等しい。操作でない受け口の経路は登録に無いことも照らす（登録にあれば当たり）。操作でない受け口（`mcp`・`github`）も #4 が反映するまで受け口ごとに除外の表へ置き、行を消すとその経路がすべて合成にあることを照らす
   - 期限付きの除外: テストの中の表に、行ごとに外すもの（旧経路 `PUT /v1/users`、受け口 `user`・`runner`・`machine`・`db_prep` の 1 つ、または操作でない受け口 `mcp`・`github` の 1 つ）と、外すのを終える課題の番号（`db_prep` は #13、ほかは #4）を置く。除外が要らなくなった行で落ちる（旧経路が合成に無い・受け口の経路が合成に 1 本でもある・登録にある受け口が登録に無い）。操作でない受け口 `mcp`・`github` の行は、もとから登録に無いので登録の有無で判定せず、その受け口の経路が合成に 1 本でもあることだけで落ちる。#2 は `api-fn` と `ApiRoutes` をスタックへ入れないため、登録が入った時点の合成の経路は旧経路の 1 本だけで、#2 の登録にある 4 つの受け口がすべて除外に入る。`db_prep` の 2 本（`/v1/db_prep/exchanges/create`・`/v1/db_prep/completions/create`）は #13 が DB の用意を Lambda へ移して操作の表から消すので、その Pull Request で `db_prep` の行が落ち、その行を消す

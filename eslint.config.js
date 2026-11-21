@@ -1,7 +1,7 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
-// 置き場ごとの塊の中身は issues/issue-1-design-detail.md の「ESLint の設定」の表にある（#1 の決定 1・9）
+// 置き場ごとの塊の中身は docs/design-process/issue-1/design-detail.md の「ESLint の設定」の表にある（#1 の決定 1・9）
 
 /**
  * #29 が料金プランの名前の書き出しを置いたら真にする。偽の間は書き出しが読めなければ名前の選び方を作らず、

@@ -1,4 +1,4 @@
-# nd-factory の漏れの規則と作り物の値の許可（#1 の決定 3。中身は issues/issue-1-design-detail.md の「gitleaks の設定」）。
+# nd-factory の漏れの規則と作り物の値の許可（#1 の決定 3。中身は docs/design-process/issue-1/design-detail.md の「gitleaks の設定」）。
 # [extend] を持たない: 既定の規則と既定の全体の許可（package-lock.json などのパス）を読まない。既定の規則は
 # tools/checks/gitleaks-default.toml で別に探す。すべての実行は tools/checks/leak-scan.sh を通す。
 # 許可は規則ごとの [[rules.allowlists]] に書く。最上位の [[allowlists]] の targetRules は、CI が秘密の規則を重ねる設定から

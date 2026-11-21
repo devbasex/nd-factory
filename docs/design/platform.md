@@ -445,7 +445,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 ## 言語と書き方の決まり
 
-子の課題が詳細設計で引く、言語と画面の組み方と TypeScript の書き方の細則の正本である（決定 140）。縛るのは共通の `tsconfig.base.json`（各置き場の `tsconfig.json` が `extends` で引く）・`apps/web/tsconfig.json`・`eslint.config.js`・`.dependency-cruiser.cjs`・`apps/web/package.json`・`apps/web/vite.config.ts` である。画面の組み方の行（React と TSX）を除き、値は今のリポジトリの設定と同じである。React と TSX の規約は #12 で入れ、その PR が `apps/web/package.json` の依存（LIB87・LIB90）、`apps/web/tsconfig.json` の `jsx` と `include` の `.tsx`、`apps/web/vite.config.ts` の React のプラグインを整える。画面の外から React を import すると落とす規則（dependency-cruiser の `react-only-in-web`。型だけの import を含む）と、`apps/web` の外の `*.tsx` を落とす規則（ESLint）は、#1 が CI の検査として先に入れる（[#1 の設計](../../issues/issue-1-design.md)）。それまでの画面は今の骨組み（素の TypeScript）のままである。`AGENTS.md` は手順（`npm run generate`・`npm run check`）だけを持ち、細則はこの節を指す。
+子の課題が詳細設計で引く、言語と画面の組み方と TypeScript の書き方の細則の正本である（決定 140）。縛るのは共通の `tsconfig.base.json`（各置き場の `tsconfig.json` が `extends` で引く）・`apps/web/tsconfig.json`・`eslint.config.js`・`.dependency-cruiser.cjs`・`apps/web/package.json`・`apps/web/vite.config.ts` である。画面の組み方の行（React と TSX）を除き、値は今のリポジトリの設定と同じである。React と TSX の規約は #12 で入れ、その PR が `apps/web/package.json` の依存（LIB87・LIB90）、`apps/web/tsconfig.json` の `jsx` と `include` の `.tsx`、`apps/web/vite.config.ts` の React のプラグインを整える。画面の外から React を import すると落とす規則（dependency-cruiser の `react-only-in-web`。型だけの import を含む）と、`apps/web` の外の `*.tsx` を落とす規則（ESLint）は、#1 が CI の検査として先に入れる（[#1 の設計](../design-process/issue-1/design.md)）。それまでの画面は今の骨組み（素の TypeScript）のままである。`AGENTS.md` は手順（`npm run generate`・`npm run check`）だけを持ち、細則はこの節を指す。
 
 | 項目 | 決まり | 縛るもの |
 | --- | --- | --- |

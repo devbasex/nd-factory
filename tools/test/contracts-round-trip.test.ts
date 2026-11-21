@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fake, seed, setFaker } from "zod-schema-faker/v4";
 
-// 形の正本の往復のテスト（#1 の決定 8。中身は issues/issue-1-design-detail.md の「形の正本の往復のテスト」）。
+// 形の正本の往復のテスト（#1 の決定 8。中身は docs/design-process/issue-1/design-detail.md の「形の正本の往復のテスト」）。
 // 照らしの関数はどれも作り物の入力を渡せる純粋な関数にし、壊れが無ければ空の配列、あれば 1 件 1 文字列の当たりを返す。
 // リポジトリの入力に打つテストと、1 か所を壊した作り物の入力で落ちることを確かめるテストを分ける
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
