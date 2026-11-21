@@ -44,7 +44,6 @@ describe("appResourceNames", () => {
       imageRepositories: "acme-test-*",
       progressDb: "acme-test-progress-db",
       progressDbAdminSecret: "acme/test/progress-db-admin",
-      dbPrepFunction: "acme-test-db-prep",
       opsTopic: "acme-test-ops",
       budget: "acme-test-budget",
     });

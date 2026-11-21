@@ -70,7 +70,6 @@ export function appResourceNames(s: Naming) {
     imageRepositories: `${s.prefix}-${s.environment}-*`,
     progressDb: resourceName(s, "progress-db"),
     progressDbAdminSecret: secretName(s, "progress-db-admin"),
-    dbPrepFunction: resourceName(s, "db-prep"),
     opsTopic: resourceName(s, "ops"),
     budget: resourceName(s, "budget"),
   };
