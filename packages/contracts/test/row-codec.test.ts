@@ -197,6 +197,67 @@ describe("readRow と writeRow（受け入れ条件 9 の読み手）", () => {
     expect(writeRow(dropping(1), one)["meta"]).toEqual({ labels: new Set(["a"]) });
   });
 
+  it("readRow は upgrade に写しを渡し、upgrade が集合から要素をその場で消しても、読んだ行（raw）は変わらず rowUpdateOf が値の損失を拒む", () => {
+    const meta = z.looseObject({}).optional();
+    const s1 = v1.extend({ meta });
+    const s2 = v2.extend({ meta });
+    type S1 = z.infer<typeof s1>;
+    type S2 = z.infer<typeof s2>;
+    const pruning = (writeVersion: number) =>
+      rowCodec({
+        latest: { version: 2, schema: s2 },
+        previous: {
+          version: 1,
+          schema: s1,
+          upgrade: (r: S1): S2 => {
+            const labels = r.meta?.["labels"];
+            if (labels instanceof Set) labels.delete("legacy");
+            return { ...upgrade(r), ...(r.meta === undefined ? {} : { meta: r.meta }) };
+          },
+          downgrade: (r: S2): S1 => ({ ...downgrade(r), ...(r.meta === undefined ? {} : { meta: r.meta }) }),
+        },
+        writeVersion,
+        keyOf,
+      });
+    for (const writeVersion of [1, 2]) {
+      const raw = { ...rowV1, meta: { labels: new Set(["a", "legacy"]) } };
+      const read = readRow(pruning(writeVersion), raw);
+      if (!read.ok) throw new Error("読めない");
+      expect(raw.meta.labels).toEqual(new Set(["a", "legacy"]));
+      expect(() => rowUpdateOf(pruning(writeVersion), raw, read.row)).toThrow(/値が失われる/);
+    }
+  });
+
+  it("ArrayBuffer 本体のバイナリも中身のバイトまで比べ、下げるとバイト列が変わる行を書かずに投げる", () => {
+    const meta = z.looseObject({}).optional();
+    const b1 = v1.extend({ meta });
+    const b2 = v2.extend({ meta });
+    type B1 = z.infer<typeof b1>;
+    type B2 = z.infer<typeof b2>;
+    const rewriting = (writeVersion: number) =>
+      rowCodec({
+        latest: { version: 2, schema: b2 },
+        previous: {
+          version: 1,
+          schema: b1,
+          upgrade: (r: B1): B2 => ({ ...upgrade(r), ...(r.meta === undefined ? {} : { meta: r.meta }) }),
+          downgrade: (r: B2): B1 => {
+            const blob = r.meta?.["blob"];
+            const changed = blob instanceof ArrayBuffer ? new Uint8Array(blob.byteLength).buffer : blob;
+            return { ...downgrade(r), ...(r.meta === undefined ? {} : { meta: { ...r.meta, blob: changed } }) };
+          },
+        },
+        writeVersion,
+        keyOf,
+      });
+    const nonZero = { ...asV2, meta: { blob: new Uint8Array([1, 2, 3]).buffer } };
+    expect(() => writeRow(rewriting(1), nonZero)).toThrow(/値が失われる/);
+    expect(() => writeRow(rewriting(2), nonZero)).toThrow(/値が失われる/);
+    const zeros = { ...asV2, meta: { blob: new Uint8Array(3).buffer } };
+    expect(() => writeRow(rewriting(1), zeros)).not.toThrow();
+    expect(() => writeRow(rewriting(2), zeros)).not.toThrow();
+  });
+
   it("upgrade が投げた前の版の行は、投げずに shape_invalid を返す", () => {
     const throwing = rowCodec({
       latest: { version: 2, schema: v2 },

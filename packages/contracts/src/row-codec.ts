@@ -96,6 +96,12 @@ function issuePaths(error: z.ZodError): string {
   return error.issues.map((i) => i.path.join(".")).join(", ");
 }
 
+function bytesOf(v: object): Uint8Array | null {
+  if (ArrayBuffer.isView(v)) return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  if (v instanceof ArrayBuffer || (typeof SharedArrayBuffer !== "undefined" && v instanceof SharedArrayBuffer)) return new Uint8Array(v);
+  return null;
+}
+
 // 値が undefined の列は無い列と同じに見る（writeRow は undefined の列を書かない）。
 // DynamoDB の集合（文字列・数・バイナリの集合）は Set で表すため、Set は要素まで比べる（Object.entries は Set の中身を並べない）
 function sameValue(a: unknown, b: unknown): boolean {
@@ -110,10 +116,11 @@ function sameValue(a: unknown, b: unknown): boolean {
     if (!(a instanceof Map) || !(b instanceof Map) || a.size !== b.size) return false;
     return [...a].every(([k, v]) => b.has(k) && sameValue(v, b.get(k)));
   }
-  if (ArrayBuffer.isView(a) || ArrayBuffer.isView(b)) {
-    if (!ArrayBuffer.isView(a) || !ArrayBuffer.isView(b) || a.byteLength !== b.byteLength) return false;
-    const ba = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
-    const bb = new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
+  // バイナリ（型付きの配列・DataView と ArrayBuffer 本体。DynamoDB SDK はどちらもバイナリとして書く）は中身のバイトまで比べる
+  const ba = bytesOf(a);
+  const bb = bytesOf(b);
+  if (ba !== null || bb !== null) {
+    if (ba === null || bb === null || ba.byteLength !== bb.byteLength) return false;
     return ba.every((v, i) => v === bb[i]);
   }
   if (Array.isArray(a) || Array.isArray(b)) {
@@ -185,7 +192,8 @@ export function readRow<L>(codec: RowCodec<L>, raw: unknown): ReadRowResult<L> {
   if (!old.success) return { ok: false, reason: "shape_invalid" };
   let upgradedRow: L;
   try {
-    upgradedRow = previous.upgrade(old.data);
+    // 写しを渡す。z.looseObject の下の Set などは raw と同じ物を指すため、upgrade がその場で変えると、呼び出し元が rowUpdateOf に渡す raw まで変わる
+    upgradedRow = previous.upgrade(copyOf(old.data));
   } catch {
     return { ok: false, reason: "shape_invalid" };
   }
