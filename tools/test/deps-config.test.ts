@@ -168,9 +168,14 @@ afterAll(() => {
   rmSync(tree, { recursive: true, force: true });
 });
 
+/** 根 `baseDir` の下の、設定が指す tsconfig（既定は tsconfig.base.json）を読む */
+function tsConfigOf(baseDir: string, opts: Options): ReturnType<typeof extractTSConfig> {
+  return extractTSConfig(join(baseDir, opts.tsConfig?.fileName ?? "tsconfig.base.json"));
+}
+
 /** 一時の木を照らし、違反を `from` のファイルごとの規則の名前の並びで返す */
 async function cruiseTree(opts: Options): Promise<Map<string, string[]>> {
-  const tsConfig = extractTSConfig(join(tree, opts.tsConfig?.fileName ?? "tsconfig.base.json"));
+  const tsConfig = tsConfigOf(tree, opts);
   const { output } = await cruise(CRUISE_DIRS, { ...opts, baseDir: tree, validate: true }, {}, { tsConfig });
   const result = output as ICruiseResult;
   const byFile = new Map<string, string[]>();
