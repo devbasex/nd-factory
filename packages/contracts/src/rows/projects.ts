@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rowCodec } from "../row-codec.ts";
 import { idOf } from "../ids.ts";
 import { githubRepo, utcDateTime } from "../values.ts";
 import { expireAt, identifier, overwriteRow, type RowKey, seqKey, versionlessRow } from "./common.ts";
@@ -75,3 +76,9 @@ export const githubTokenKey = (row: GithubTokenRow): RowKey => ({
   pk: `PROJECT#${row.project_id}`,
   sk: `GHTOKEN#${row.expires_at}#${row.lane_id}#${seqKey(row.generation)}`,
 });
+
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
+export const projectCodec = rowCodec({ latest: { version: 1, schema: projectRow }, writeVersion: 1, keyOf: projectKey });
+export const assignmentCodec = rowCodec({ latest: { version: 1, schema: assignmentRow }, writeVersion: 1, keyOf: assignmentKey });
+export const repositoryCodec = rowCodec({ latest: { version: 1, schema: repositoryRow }, writeVersion: 1, keyOf: repositoryKey });
+export const githubTokenCodec = rowCodec({ latest: { version: 1, schema: githubTokenRow }, writeVersion: 1, keyOf: githubTokenKey });

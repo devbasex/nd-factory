@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rowCodec } from "../row-codec.ts";
 import { utcDateTime } from "../values.ts";
 import { expireAt, type RowKey, versionlessRow } from "./common.ts";
 
@@ -20,3 +21,6 @@ export const idempotencyRow = versionlessRow(1, {
 });
 export type IdempotencyRow = z.infer<typeof idempotencyRow>;
 export const idempotencyKey = (row: IdempotencyRow): RowKey => ({ pk: `${row.principal_key}#${row.operation}#${row.key}`, sk: null });
+
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
+export const idempotencyCodec = rowCodec({ latest: { version: 1, schema: idempotencyRow }, writeVersion: 1, keyOf: idempotencyKey });

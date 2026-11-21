@@ -8,7 +8,7 @@ import { segmentResult, sprintState } from "../src/rows/sprints.ts";
 import { seatRole } from "../src/rows/teams.ts";
 import { usageKind } from "../src/rows/usage.ts";
 import { idp } from "../src/rows/users.ts";
-import { defineTables, TABLE_PURPOSES, TABLES, type TableSpec, TableSpecError } from "../src/tables.ts";
+import { defineTables, type RowSpec, TABLE_PURPOSES, TABLES, type TableSpec, TableSpecError } from "../src/tables.ts";
 import { AT, id, LANE, PRJ, ROW_CASES, USR } from "./fixtures/rows.ts";
 
 // 19 の行と、全体の設計が列を決めた 6 つの行（IdP の主体の一意の行・プロジェクト・割り当て・レーン・承認の依頼・操作の記録）
@@ -225,6 +225,8 @@ describe("TABLES", () => {
   });
 
   const base = Object.values(TABLES);
+  const cost = TABLES.usage.rows[0] as RowSpec;
+  const idem = TABLES.idempotency.rows[0] as RowSpec;
 
   it("同じ索引の名前の重なりで投げる", () => {
     const dup = base.map((t) => (t.purpose === "usage" ? { ...t, indexes: [{ name: "waiting", partitionKey: "project_id", sortKey: "occurred_at", projection: [] }] } : t));
@@ -233,12 +235,12 @@ describe("TABLES", () => {
 
   it("名前の末尾・行の種類の名前の重なり・表の欠けで投げる", () => {
     expect(() => defineTables(base.map((t) => (t.purpose === "usage" ? { ...t, suffix: "db-audit" } : t)))).toThrow(TableSpecError);
-    expect(() => defineTables(base.map((t) => (t.purpose === "usage" ? { ...t, rows: [{ name: "audit", skPattern: /^COST#/, writes: "append" as const }] } : t)))).toThrow(TableSpecError);
+    expect(() => defineTables(base.map((t) => (t.purpose === "usage" ? { ...t, rows: [{ ...cost, name: "audit" }] } : t)))).toThrow(TableSpecError);
     expect(() => defineTables(base.filter((t) => t.purpose !== "usage"))).toThrow(TableSpecError);
   });
 
   it("並びの鍵の有無と行の種類の skPattern が合わないと投げる", () => {
-    expect(() => defineTables(base.map((t) => (t.purpose === "idempotency" ? { ...t, rows: [{ name: "idempotency", skPattern: /.*/, writes: "settle_once" as const }] } : t)))).toThrow(TableSpecError);
-    expect(() => defineTables(base.map((t) => (t.purpose === "usage" ? { ...t, rows: [{ name: "cost_record", skPattern: null, writes: "append" as const }] } : t)))).toThrow(TableSpecError);
+    expect(() => defineTables(base.map((t) => (t.purpose === "idempotency" ? { ...t, rows: [{ ...idem, skPattern: /.*/ }] } : t)))).toThrow(TableSpecError);
+    expect(() => defineTables(base.map((t) => (t.purpose === "usage" ? { ...t, rows: [{ ...cost, skPattern: null }] } : t)))).toThrow(TableSpecError);
   });
 });
