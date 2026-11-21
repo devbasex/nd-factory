@@ -430,6 +430,14 @@
       {
         "code": "state_mismatch",
         "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
       }
     ],
     "invitations.delete": [
@@ -1526,6 +1534,14 @@
       {
         "code": "role_insufficient",
         "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
       }
     ],
     "runner.answer_deliveries.create": [
