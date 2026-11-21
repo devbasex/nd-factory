@@ -146,6 +146,7 @@ export class AppStack extends Stack {
       },
     });
     api.addRoutes({
+      // eslint-disable-next-line no-restricted-syntax -- #2 が横断の部品へ移す
       path: "/v1/users",
       methods: [HttpMethod.PUT],
       integration: new HttpLambdaIntegration("UsersIntegration", fn),

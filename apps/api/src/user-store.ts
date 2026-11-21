@@ -1,4 +1,6 @@
+// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- #2 が横断の部品へ移す
 import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
+// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- #2 が横断の部品へ移す
 import { type DynamoDBDocumentClient, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import type { UserRow } from "@nd-factory/contracts/users-api";
 
@@ -35,6 +37,7 @@ export async function ensureUser(client: DynamoDBDocumentClient, table: string, 
       new PutCommand({
         TableName: table,
         Item: { ...key, schema_version: SCHEMA_VERSION, created_at: createdAt },
+        // eslint-disable-next-line no-restricted-syntax -- #2 が横断の部品へ移す
         ConditionExpression: "attribute_not_exists(pk)",
       }),
     );
