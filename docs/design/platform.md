@@ -393,7 +393,7 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 | lint・型検査・生成物の差・単体テスト | `npm run check`（CI の `check`） | 形の正本から作り直していない生成物（`generate:check`）・型の誤り |
 | 作り物の値での合成 | CI の `synth` | 資格情報が要る合成（lookup） |
 | 画面の e2e | CI の `e2e` | 画面の振る舞いの壊れ |
-| 参照の検査 | `tools/ref-check`（CI の `ref-check` が秘密を受けずに固定の値と版の比べを、`leak-real-value` が既定の枝の `ref-check` で照合の語を照らす。#1 の決定 3） | 照合の語（CI の秘密 `REF_CHECK_TERMS`）の当たり・NDF の固定の値が `ndf-pin.json` の 1 か所でない・NDF の版を読む式と大小の比べが同じ行にある |
+| 参照の検査 | `tools/ref-check`（CI の `ref-check`） | 照合の語（CI の秘密 `REF_CHECK_TERMS`）の当たり・NDF の固定の値が `ndf-pin.json` の 1 か所でない・NDF の版を読む式と大小の比べが同じ行にある |
 | CI の定義のテスト | `tools/test/ci-definition.test.ts` | ジョブの集合と NDF の宣言の必須のチェックの食い違い・AWS の資格情報の語 |
 | スタックのテスト | `infra/test/` | 接頭辞の無い名前・タグの欠け・時間で費用が掛かる資源・合成の出力の秘密の値 |
 
