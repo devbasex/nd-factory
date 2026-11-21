@@ -52,50 +52,77 @@ function quietly(write: () => void): void {
 const RESERVED = new Set(["time", "level", "msg", "request_id", "fn", "endpoint"]);
 const RESERVED_PREFIX = "field.";
 
+// 伏せた項目の 1 つ。id は上書きを決める元の鍵の識別子、key は伏せた鍵、value は伏せた値
+type Entry = readonly [id: string, key: string, value: unknown];
+
+// 元の鍵から秘密の原文を残さずに同一性を判定する識別子を作る（cyrb53 を 2 つの種で回し、約 106 ビットにする）。
+// 画面でも動くよう node:crypto を使わない。伏せない鍵は名前そのものを識別子にする（頭の "k:" と "h:" で 2 つを分ける）
+function hash53(text: string, seed: number): string {
+  let h1 = 0xdeadbeef ^ seed;
+  let h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+function keyId(original: string, safeKey: string): string {
+  return safeKey === original ? `k:${original}` : `h:${hash53(original, 1)}.${hash53(original, 2)}`;
+}
+
+// 項目を伏せた組の並びにする。鍵の名前で伏せる値（token など）も伏せるよう、鍵と値の組で redact に通す。
+// 秘密の形の鍵は "[redacted]" になり、元の鍵は識別子でだけ残す（長く生きる child に原文を持たせない）
+function entries(fields: LogFields): Entry[] {
+  return Object.entries(fields).map(([key, value]) => {
+    const [safeKey, safe] = Object.entries(loggable({ [key]: value }))[0] ?? [key, undefined];
+    return [keyId(key, safeKey), safeKey, safe] as const;
+  });
+}
+
+function put(out: LogFields, key: string, value: unknown): void {
+  Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
+function freeKey(out: LogFields, base: string): string {
+  let target = base;
+  for (let n = 2; Object.hasOwn(out, target); n += 1) target = `${base}#${n}`;
+  return target;
+}
+
 // child の文脈（先）と呼び出しの項目（後）を 1 つの物へ組む。pino の child の束ねは使わない
 // （Node の pino は束ねと項目の同じ鍵を 2 度書き、JSON を読むと先の値が消えるため）。
-// 必須でない名前は後の値が先の値に勝つ。必須の名前は "field." を頭に付けて残し、避け先が埋まっていれば
+// 上書きは元の鍵の識別子で決め（伏せた鍵では、別の鍵が同じ "[redacted]" に重なる）、必須でない名前は後の値が先の値に勝つ。
+// 残った伏せた鍵の重なりには "[redacted]#2" のように番号を付ける。必須の名前は "field." を頭に付けて残し、避け先が埋まっていれば
 // "field.time#2" のように番号を付ける（黙って落とさない）。避け先は呼び手の鍵を先に置いてから決める
-function reserved(layers: readonly LogFields[]): LogFields {
-  const out: LogFields = {};
+function reserved(layers: readonly (readonly Entry[])[]): LogFields {
+  const kept = new Map<string, readonly [string, unknown]>();
   const moved: [string, unknown][] = [];
   for (const layer of layers) {
-    for (const [key, value] of Object.entries(layer)) {
+    for (const [id, key, value] of layer) {
       if (RESERVED.has(key)) moved.push([key, value]);
-      else out[key] = value;
+      else kept.set(id, [key, value]);
     }
   }
-  for (const [key, value] of moved) {
-    const base = `${RESERVED_PREFIX}${key}`;
-    let target = base;
-    for (let n = 2; target in out; n += 1) target = `${base}#${n}`;
-    out[target] = value;
-  }
-  return out;
-}
-
-// child の項目の写し。値は伏せるが鍵は元の名前のまま持つ。上書きは元の鍵で決め（伏せた鍵では、同じ鍵が別の名前になり、
-// 別の鍵が同じ "[redacted]" に重なる）、残った鍵を伏せて重なりに番号を付けるのは行を書く時の formatters.log が 1 度だけ行う
-function snapshot(fields: LogFields): LogFields {
   const out: LogFields = {};
-  for (const [key, value] of Object.entries(fields)) {
-    // 鍵の名前で伏せる値（token など）も伏せるよう、鍵と値の組で redact に通し、値だけを取る
-    const [safe] = Object.values(loggable({ [key]: value }));
-    Object.defineProperty(out, key, { value: safe, enumerable: true, writable: true, configurable: true });
-  }
+  for (const [key, value] of kept.values()) put(out, freeKey(out, key), value);
+  for (const [key, value] of moved) put(out, freeKey(out, `${RESERVED_PREFIX}${key}`), value);
   return out;
 }
 
-function wrap(base: PinoLogger, bound: readonly LogFields[]): Logger {
-  const line = (fields: LogFields | undefined): LogFields => reserved([...bound, fields ?? {}]);
+function wrap(base: PinoLogger, bound: readonly (readonly Entry[])[]): Logger {
+  const line = (fields: LogFields | undefined): LogFields => reserved([...bound, entries(fields ?? {})]);
   return {
     info: (msg, fields) => quietly(() => base.info(line(fields), msg)),
     warn: (msg, fields) => quietly(() => base.warn(line(fields), msg)),
     error: (msg, fields) => quietly(() => base.error(line(fields), msg)),
-    // 子の項目はこの時に値を伏せた写しを取って持つ。扱えない（読むと投げる getter など）ときは、親のロガーのまま続ける
+    // 子の項目はこの時に鍵と値を伏せた写しを取って持つ。扱えない（読むと投げる getter など）ときは、親のロガーのまま続ける
     child: (fields) => {
       try {
-        return wrap(base, [...bound, snapshot(fields)]);
+        return wrap(base, [...bound, entries(fields)]);
       } catch {
         return wrap(base, bound);
       }
