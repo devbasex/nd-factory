@@ -350,6 +350,21 @@ describe("自分へ戻る形の $ref", () => {
     expect(JSON.stringify(doc)).not.toContain('"$ref":"#"');
   });
 
+  // zod-openapi は再帰を components.schemas の __schemaN へ切り出すため、値は $defs と一致しない。一致の照らしは再帰しない形に限り、ここでは参照が解けて合否が Zod と同じことを照らす
+  it("openapi.json の components.schemas は参照が解け、要素と結果を深い層まで Zod と同じ合否で照らす", () => {
+    const schemas = buildOpenApi([op]).components?.schemas ?? {};
+    expect(JSON.stringify(schemas)).toContain('"$ref":"#/components/schemas/');
+    const ajv = new Ajv2020({ strict: false, validateFormats: false });
+    ajv.addSchema({ components: { schemas } }, "oa");
+    const item = ajv.getSchema("oa#/components/schemas/fixture_trees.create.item");
+    const result = ajv.getSchema("oa#/components/schemas/fixture_trees.create.result");
+    expect(item?.(good)).toBe(true);
+    expect(item?.(bad)).toBe(false);
+    expect(result?.({ ok: true, item: { root: good, again: good } })).toBe(true);
+    expect(result?.({ ok: true, item: { root: good, again: bad } })).toBe(false);
+    expect((node as z.ZodType).safeParse(bad).success).toBe(false);
+  });
+
   it("MCP の道具の outputSchema は単独の文書として参照が解ける", () => {
     const [tool] = buildMcpTools([op], doc);
     const validate = new Ajv2020({ strict: true, validateFormats: false }).compile(tool!.outputSchema);
@@ -362,6 +377,7 @@ describe("buildOpenApi", () => {
   const doc = buildOpenApi(ALL);
   const defs = buildOperationSchemas(ALL).$defs;
 
+  // 操作の表の形は再帰しない。再帰する形は zod-openapi が components.schemas の __schemaN へ切り出し一致しないため、「自分へ戻る形の $ref」で参照の解けと合否を照らす
   it("OpenAPI 3.1.1 で、components.schemas の各値が operations.schema.json の同じ名前の $defs と一致する（zod-openapi と z.toJSONSchema の差を拾う）", () => {
     expect(doc.openapi).toBe("3.1.1");
     const schemas = doc.components?.schemas ?? {};
