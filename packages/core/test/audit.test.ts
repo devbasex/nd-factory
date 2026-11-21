@@ -17,12 +17,12 @@ const PROJECT = "prj_01890a5d-ac96-774b-bcce-b302099a8058";
 const TEAM = "team_01890a5d-ac96-774b-bcce-b302099a8059";
 const AUDIT = "aud_01890a5d-ac96-774b-bcce-b302099a805a";
 
-const human: Principal = { kind: "human", userId: USER, cognitoSub: "cognito-sub-1", sessionId: "session-1", bindingEpoch: 0 };
+const human: Principal = { kind: "human", userId: USER, cognitoSub: "cognito-sub-1", sessionId: "session-1", boundAuthTime: "2026-11-20T00:00:00.000Z", authTime: 1_795_000_000 };
 
 // まだ利用者へ結んでいない人（sessions.create の初回）
 const newcomer: Principal = {
   kind: "newcomer",
-  login: { cognitoSub: "cognito-sub-new", username: "google_cognito-sub-new", sessionId: "session-new", idp: "google", subject: "g-subject-new", authTime: 0, bindingEpoch: 0, rowVersion: null },
+  login: { cognitoSub: "cognito-sub-new", username: "google_cognito-sub-new", sessionId: "session-new", idp: "google", subject: "g-subject-new", authTime: 0 },
 };
 const newcomerEntry = (over: Partial<AuditEntry> = {}): AuditEntry =>
   entry({ actor: { principal: newcomer, mcpClientName: null }, operation: "sessions.create", targetIds: {}, projectId: null, ...over });
@@ -145,7 +145,7 @@ describe("auditItem", () => {
 
   it("まだ結んでいない人が利用者を作った要素と要約の行は、作った利用者の人の主体で本人の区切りへ置く", () => {
     const actor = actorOfCreatedUser({ principal: newcomer, mcpClientName: null }, USER);
-    expect(actor.principal).toEqual({ kind: "human", userId: USER, cognitoSub: "cognito-sub-new", sessionId: "session-new", bindingEpoch: 0 });
+    expect(actor.principal).toEqual({ kind: "human", userId: USER, cognitoSub: "cognito-sub-new", sessionId: "session-new", boundAuthTime: "1970-01-01T00:00:00.000Z", authTime: 0 });
     for (const itemIndex of [0, null]) {
       const item = auditItem(newcomerEntry({ actor, itemIndex }), sessionsCreate, clock).item;
       expect(item).toMatchObject({ pk: `USER#${USER}`, actor: { kind: "human", user_id: USER } });

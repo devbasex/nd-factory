@@ -145,7 +145,8 @@ export function dbPrepClaimsOf(claims: SignedClaims): DbPrepTokenClaims | null {
 // 期限（exp。必須）と nbf は、ほかの token と同じく authenticate の注入した時計（nowMs）だけで照らす。aws-jwt-verify は exp・nbf を
 // 実時刻（Date.now）で照らし、時計を受けないため、その照らしは graceSeconds を無限にして止める（ほかの照らしには graceSeconds が効かない）。
 // 公開鍵の控えは組み込みの SimpleJwksCache と SimplePenaltyBox を既定のまま使い、取り手 SimpleFetcher には方針 http-idp-keys の
-// responseTimeout だけを渡す（決定 17。全体の設計の決定 48）。控えは実行環境ごとに 1 つで、起点が 1 回だけ作る
+// responseTimeout だけを渡す（決定 17。全体の設計の決定 48）。控えは実行環境ごとに 1 つで、起点が 1 回だけ作る。
+// expiredGraceMs は exp を過ぎた token を受ける長さ（exp から数える）。authenticate が sessions.delete にだけ渡し、ほかは 0（exp を過ぎれば断つ）
 export type CognitoConfig = { readonly userPoolId: string; readonly clientId: string };
 
 // sub は Cognito の利用者の ID、username は Cognito の利用者の名前（IdP の主体を引く AdminGetUser に渡す）、
@@ -154,7 +155,7 @@ export type CognitoConfig = { readonly userPoolId: string; readonly clientId: st
 // アプリのクライアントの token の取り消しを有効にした利用者プールが載せる。ログインをつなぐ流れを始めたセッションに結ぶのに使う
 export type CognitoClaims = { readonly sub: string; readonly username: string; readonly authTime: number; readonly originJti: string };
 
-export type CognitoCheck = (token: string, nowMs: number) => Promise<CheckResult<CognitoClaims>>;
+export type CognitoCheck = (token: string, nowMs: number, expiredGraceMs: number) => Promise<CheckResult<CognitoClaims>>;
 
 export type CognitoCheckOptions = {
   // テストだけが差し替える（本番は SimpleFetcher のまま）
@@ -201,7 +202,7 @@ export function createCognitoCheck(config: CognitoConfig, options: CognitoCheckO
     { userPoolId: config.userPoolId, tokenUse: "access", clientId: config.clientId, graceSeconds: Number.POSITIVE_INFINITY },
     { jwksCache: new SimpleJwksCache({ fetcher }) },
   );
-  return async (token, nowMs) => {
+  return async (token, nowMs, expiredGraceMs) => {
     const iss = issuerOf(token);
     if (typeof iss !== "string") return unauthorized("shape");
     if (!issuers.includes(iss)) return unauthorized("endpoint");
@@ -212,7 +213,7 @@ export function createCognitoCheck(config: CognitoConfig, options: CognitoCheckO
       // aws-jwt-verify は exp が無ければ期限を照らさないため、有限の数の exp を必須にする
       const exp: unknown = payload.exp;
       if (typeof exp !== "number" || !Number.isFinite(exp)) return unauthorized("shape");
-      if (exp * 1000 <= nowMs) return unauthorized("expired");
+      if (exp * 1000 + expiredGraceMs <= nowMs) return unauthorized("expired");
       const nbf: unknown = payload.nbf;
       if (nbf !== undefined && (typeof nbf !== "number" || !Number.isFinite(nbf))) return unauthorized("shape");
       if (typeof nbf === "number" && nbf * 1000 > nowMs) return unauthorized("expired");

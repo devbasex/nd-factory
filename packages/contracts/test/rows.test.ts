@@ -50,13 +50,6 @@ function keyOf(name: string, row: unknown): RowKey {
   return (c.keyOf as (r: unknown) => RowKey)(row);
 }
 
-// 行の形の列（状態ごとに形を分けた行は、どれかの状態の形が持つ列）
-function hasColumn(name: string, column: string): boolean {
-  const schema = ROW_CASES[name]?.schema;
-  const objects = schema instanceof z.ZodUnion ? (schema.options as z.ZodObject[]) : [schema as z.ZodObject];
-  return objects.some((o) => column in o.shape);
-}
-
 function tableOfRow(name: string): TableSpec {
   const spec = Object.values(TABLES).find((t) => t.rows.some((r) => r.name === name));
   if (spec === undefined) throw new Error(`行の種類の表が無い: ${name}`);
@@ -157,33 +150,14 @@ describe("行の形（受け入れ条件 8）", () => {
     expect(usage?.schema.safeParse({ ...usage.sample, used_amount_minor: 1.5 }).success).toBe(false);
   });
 
-  it("Cognito の主体の対応の行は状態に要る列を必須にし、状態に当たらない列を断つ", () => {
+  it("Cognito の主体の対応の行は状態を持たず、結んだ利用者と結んだ時のサインインの時刻を必須にする", () => {
     const c = ROW_CASES["cognito_subject"];
     if (c === undefined) throw new Error("cognito_subject が無い");
     const validate = ajv.compile(z.toJSONSchema(c.schema));
-    const { revoked_before: _r, ...base } = c.sample;
-    const bound = { ...base, state: "bound", user_id: USR, bound_auth_time: AT };
-    const signingOut = { ...base, state: "signing_out", signout_lease_id: "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b", signout_lease_until: AT, signout_unsettled_until: AT };
-    const accepted = [bound, signingOut, { ...base, state: "signing_out" }, { ...base, state: "signing_out", signout_unsettled_until: AT }, c.sample];
-    const rejected = [
-      without(bound, "user_id"),
-      without(bound, "bound_auth_time"),
-      { ...bound, revoked_before: AT },
-      { ...bound, signout_lease_id: "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b" },
-      { ...signingOut, user_id: USR },
-      { ...signingOut, bound_auth_time: AT },
-      { ...signingOut, revoked_before: AT },
-      without(signingOut, "signout_lease_id"),
-      without(signingOut, "signout_lease_until"),
-      { ...base, state: "unlinked" },
-      { ...c.sample, user_id: USR },
-      { ...c.sample, signout_lease_until: AT },
-      { ...c.sample, signout_unsettled_until: AT },
-    ];
-    for (const row of accepted) {
-      expect(c.schema.safeParse(row).success).toBe(true);
-      expect(validate(row)).toBe(true);
-    }
+    expect(c.schema.safeParse(c.sample).success).toBe(true);
+    expect(validate(c.sample)).toBe(true);
+    const rejected = ["cognito_sub", "cognito_username", "idp", "subject", "user_id", "bound_auth_time", "version"].map((column) => without(c.sample, column));
+    rejected.push({ ...c.sample, bound_auth_time: "2026-11-21T12:04:05+09:00" }, { ...c.sample, idp: "okta" });
     for (const row of rejected) {
       expect(c.schema.safeParse(row).success).toBe(false);
       expect(validate(row)).toBe(false);
@@ -257,12 +231,12 @@ describe("TABLES", () => {
   });
 
   it("db-teams で user_id の列を持つのは席の行だけ", () => {
-    const holders = TABLES.teams.rows.filter((r) => hasColumn(r.name, "user_id")).map((r) => r.name);
+    const holders = TABLES.teams.rows.filter((r) => "user_id" in (ROW_CASES[r.name]?.schema as z.ZodObject).shape).map((r) => r.name);
     expect(holders).toEqual(["seat"]);
   });
 
   it("TTL の列を持つ表の、TTL の列を持つ行が詳細設計と一致する", () => {
-    const holders = Object.values(TABLES).flatMap((t) => t.rows.filter((r) => hasColumn(r.name, "expire_at")).map((r) => r.name));
+    const holders = Object.values(TABLES).flatMap((t) => t.rows.filter((r) => "expire_at" in (ROW_CASES[r.name]?.schema as z.ZodObject).shape).map((r) => r.name));
     expect(holders.sort()).toEqual(["audit", "github_token", "idempotency"]);
   });
 

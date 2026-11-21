@@ -42,7 +42,7 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
     schema: cognitoSubjectRow,
     keyOf: cognitoSubjectKey,
     overwrite: true,
-    sample: { schema_version: 1, version: 1, cognito_sub: UUID, cognito_username: "github_42", idp: "github", subject: "42", state: "unlinked", binding_epoch: 1, revoked_before: AT },
+    sample: { schema_version: 1, version: 1, cognito_sub: UUID, cognito_username: "github_42", idp: "github", subject: "42", user_id: USR, bound_auth_time: AT },
   },
   delegation: {
     schema: delegationRow,

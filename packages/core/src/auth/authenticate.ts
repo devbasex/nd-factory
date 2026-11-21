@@ -28,13 +28,11 @@ export { createCognitoCheck, DB_PREP_AUDIENCE, RUNNER_AUDIENCE, type CognitoChec
 // 認可の判定（authorize）と操作の記録（audit）が主体を読む
 
 // 検証した Cognito の主体と、それに当たる IdP の主体。IdP の主体は要求の本文から採らず、検証した token の username で
-// 利用者プールを引いてサーバーの側で得る（AuthReaders.cognitoIdentity）。authTime は IdP でサインインした時刻（エポックの秒）。
-// username は検証した token の username（Cognito の利用者の名前）で、結ぶハンドラーが対応の行の cognito_username に書く
-// （外した後の AdminUserGlobalSignOut の対象）。sessionId は検証した token の origin_jti で、利用者を作った要素の記録を
-// 作った利用者の人の主体で書くときに使う（audit の actorOfCreatedUser）。
-// bindingEpoch と rowVersion は読んだ Cognito の主体の対応の行のもの（行が無ければ 0 と null）。結ぶハンドラーは、
-// rowVersion が null なら対応の行を無いときだけ書き（putIfAbsent）、そうでなければその版と「state が unlinked で revoked_before が
-// token の auth_time より前」を条件に書き換える（認証の読みの後に外し直された・失効が済んでいない行へ結ばない）
+// 利用者プールを引いてサーバーの側で得る（AuthReaders.cognitoIdentity）。authTime は IdP でサインインした時刻（token の auth_time、エポックの秒）で、
+// 結ぶハンドラーが対応の行の bound_auth_time に書く。username は検証した token の username（Cognito の利用者の名前）で、
+// 結ぶハンドラーが対応の行の cognito_username に書く（ログインを外すときの Cognito の呼び出しの対象）。
+// sessionId は検証した token の origin_jti で、利用者を作った要素の記録を作った利用者の人の主体で書くときに使う（audit の actorOfCreatedUser）。
+// 結ぶハンドラーは対応の行を無いときだけ書く（認証の読みの後に別の要求が結んだ行へ重ねて結ばない）
 export type CognitoLogin = {
   readonly cognitoSub: string;
   readonly username: string;
@@ -42,16 +40,22 @@ export type CognitoLogin = {
   readonly idp: "google" | "github";
   readonly subject: string;
   readonly authTime: number;
-  readonly bindingEpoch: number;
-  readonly rowVersion: number | null;
 };
 
 export type Principal =
-  // cognitoSub と bindingEpoch は sessions.create の冪等の鍵を結ぶ前後で同じにし、外した後に変えるために持つ（idempotencyPrincipalKey）。
-  // sessionId は検証した token の origin_jti（そのサインインのセッションの識別子）。cognitoSub・sessionId・bindingEpoch は、
-  // ログインをつなぐ流れ（#4）が、同じセッション・同じ世代の対応の行から続けていることを照らすのに使う
-  | { readonly kind: "human"; readonly userId: Id<"usr">; readonly cognitoSub: string; readonly sessionId: string; readonly bindingEpoch: number }
-  // Cognito の token は正しいが、まだ利用者へ結んでいない主体（初めてのサインイン）。sessions.create だけに渡し、そのハンドラーが
+  // sessionId は検証した token の origin_jti（そのサインインのセッションの識別子）、boundAuthTime は対応の行の bound_auth_time
+  // （結んだ時のサインインの時刻。UTC の ISO 8601）、authTime は要求の token の auth_time（エポックの秒。既にある利用者がサインインし直した
+  // token では boundAuthTime より後）。dispatch は人の書き込みの要求元の照らしに cognitoSub・sessionId・boundAuthTime を使い、
+  // 冪等の鍵の主体の部分（idempotencyPrincipalKey）は sessions.create で authTime、logins.create で sessionId と boundAuthTime を使う
+  | {
+      readonly kind: "human";
+      readonly userId: Id<"usr">;
+      readonly cognitoSub: string;
+      readonly sessionId: string;
+      readonly boundAuthTime: string;
+      readonly authTime: number;
+    }
+  // Cognito の token は正しいが、まだ利用者へ結んでいない主体（初めてのサインインとログインの付け替え）。sessions.create だけに渡し、そのハンドラーが
   // login の値（検証した主体とサーバーの側で得た IdP の主体）で利用者・ログインの組・IdP の主体の一意の行・Cognito の主体の対応の行を作る
   | { readonly kind: "newcomer"; readonly login: CognitoLogin }
   | {
@@ -67,7 +71,12 @@ export type Principal =
   | { readonly kind: "db_prep"; readonly projectId: Id<"prj">; readonly prepId: string }
   | { readonly kind: "patrol" };
 
-export type AuthResult = { readonly ok: true; readonly principal: Principal } | { readonly ok: false; readonly reason: "unauthorized" | "unavailable" };
+// sessionRevokedAt は、operation が sessions.delete で要求のセッションの取り消しの行があったときだけその revoked_at、ほかは null。
+// session_ended は、署名・claim・期限を通した人の token のセッションが既に断たれているときだけ（取り消しの行がある（sessions.delete を除く）・
+// 対応の行が無い（sessions.create を除く）・auth_time が対応の行の bound_auth_time より前。docs/design/api.md の「誤りの形」の 401 の本文）
+export type AuthResult =
+  | { readonly ok: true; readonly principal: Principal; readonly sessionRevokedAt: string | null }
+  | { readonly ok: false; readonly reason: "unauthorized" | "session_ended" | "unavailable" };
 
 // 受け口（受けた HTTP の経路の頭で決まる）。見回りは HTTP の経路を持たず、認証を通らない
 export type AuthEndpoint = "user" | "mcp" | "runner" | "machine" | "github" | "db_prep";
@@ -117,21 +126,20 @@ export type DbPrepRecord = { readonly prepId: string; readonly inProgress: boole
 // 条件に外れたら、authenticate の外れと同じ 401 unauthorized を返し、値を返さない
 
 // 行の読み手（ポート）。どれも表の本体を強い整合で読む。中身は行の持ち主の子が書く（core から apps へ依存しない）
-// Cognito の主体の対応の行の読んだ値（docs/design/data.md の「Cognito の主体の対応の行」）。時刻は UTC の ISO 8601。
-// - bound: 結んでいる。boundAuthTime（結んだときに使った token の auth_time）より前にサインインした token を断つ
-// - signing_out: 外して、その Cognito の利用者の AdminUserGlobalSignOut の済むのを待つ間。どの token も通さず、結び直させない
-// - unlinked: 外して失効を済ませた。revokedBefore（失効を済ませた時刻）以前にサインインした token では結び直させない
-// epoch は外した回数（binding_epoch）、version は行の版
-export type CognitoBinding =
-  | { readonly state: "bound"; readonly userId: Id<"usr">; readonly boundAuthTime: string; readonly epoch: number; readonly version: number }
-  | { readonly state: "signing_out"; readonly epoch: number; readonly version: number }
-  | { readonly state: "unlinked"; readonly revokedBefore: string; readonly epoch: number; readonly version: number };
+// Cognito の主体の対応の行の読んだ値（docs/design/data.md の「Cognito の主体の対応の行」）。行は状態を持たず、行があることが結んでいることである。
+// boundAuthTime は結んだときに使った token の auth_time（UTC の ISO 8601）で、これより前にサインインした token を断つ
+export type CognitoBinding = { readonly userId: Id<"usr">; readonly boundAuthTime: string };
+
+// セッションの取り消しの行の読んだ値（docs/design/data.md の「セッションの取り消しの行」）。revokedAt は UTC の ISO 8601
+export type SessionRevocation = { readonly revokedAt: string };
 
 export type AuthReaders = {
   // Cognito の access token の sub から利用者を引く。読むのは db-users の Cognito の主体の対応の行
   // （COGNITO#<sub> / COGNITO。docs/design/data.md の「Cognito の主体の対応の行」）で、LOGIN#<IdP>#<主体> の行は読まない
   // （sub は Cognito の利用者の ID で、IdP の主体ではない）。行が無ければ null（一度も結んでいない）
   userOfSubject(cognitoSub: string): Promise<CognitoBinding | null>;
+  // セッションの取り消しの行（COGNITO#<sub> / REVOKED#<origin_jti>）を読む。無ければ null。TTL の削除は遅れるため、行があれば expire_at によらず返す
+  sessionRevocation(cognitoSub: string, sessionId: string): Promise<SessionRevocation | null>;
   // 検証した token の username で利用者プールの利用者を読み（AdminGetUser）、属性 sub と identities（IdP の名前と IdP の利用者の ID）を返す。
   // IdP の名前は設定で google か github に当てる。利用者が無い・identities が 1 件でない・当たる IdP が無ければ null
   cognitoIdentity(username: string): Promise<{ readonly cognitoSub: string; readonly idp: "google" | "github"; readonly subject: string } | null>;
@@ -158,6 +166,15 @@ export type AuthDeps = {
 // 利用者へ結んでいない人の主体を受ける唯一の経路（初めてのサインインで利用者を作る）
 export const SESSIONS_CREATE = "sessions.create";
 
+// 取り消しの行があっても断たず、期限を過ぎた access token も猶予の内なら受ける唯一の経路（サインアウト）
+export const SESSIONS_DELETE = "sessions.delete";
+
+// 冪等の鍵の主体の部分を要求のセッションで区切る経路（ログインをつなぐ）
+const LOGINS_CREATE = "logins.create";
+
+// sessions.delete だけが、exp を過ぎた Cognito の access token を受ける長さ（exp から数える）。refresh token の寿命（30 日）と同じ
+export const SESSION_DELETE_EXPIRED_GRACE_MS = 2_592_000_000;
+
 // ログインを結ぶ（sessions.create の初回と logins.create）token は、この時間の内に IdP でサインインしたものだけを受ける。
 // 結ぶ要求をその場のサインインの流れに限り、前に漏れた token や外す前のセッションの token で結べないようにする
 export const LOGIN_BIND_FRESH_MS = 300_000;
@@ -167,72 +184,84 @@ const RUNNER_EXCHANGE = "runner.exchanges.create";
 const DB_PREP_EXCHANGE = "db_prep.exchanges.create";
 const DB_PREP_COMPLETION = "db_prep.completions.create";
 
-type Outcome = CheckResult<Principal>;
+// session_ended の内訳（ログにだけ出す）: 取り消しの行がある・結んだ時より前のサインイン・対応の行が無い
+type SessionEndedFault = "revoked" | "before_bound" | "unbound";
 
-const ok = (principal: Principal): Outcome => ({ ok: true, value: principal });
+type Decided = { readonly principal: Principal; readonly sessionRevokedAt: string | null };
+
+type Outcome = CheckResult<Decided> | { readonly ok: false; readonly reason: "session_ended"; readonly fault: SessionEndedFault };
+
+const ok = (principal: Principal, sessionRevokedAt: string | null = null): Outcome => ({ ok: true, value: { principal, sessionRevokedAt } });
+
+const sessionEnded = (fault: SessionEndedFault): Outcome => ({ ok: false, reason: "session_ended", fault });
 
 function isExpired(iso: string, nowMs: number): boolean {
   const at = Date.parse(iso);
   return !Number.isFinite(at) || at <= nowMs;
 }
 
-// 結ぶための照らし: 新しいサインインであること、対応の行が結び直せる状態であること（失効の済むのを待つ間でなく、外したなら
-// 失効を済ませた後のサインイン）、IdP の主体のサーバーの側での取得（検証した username で利用者プールを引き、sub が token と同じこと）。
-// 結んでいる行はここへ来ない（呼び手が先に分ける）
-async function loginOf(claims: CognitoClaims, binding: CognitoBinding | null, deps: AuthDeps): Promise<CheckResult<CognitoLogin>> {
-  const authMs = claims.authTime * 1000;
-  if (authMs < deps.clock.epochMs() - LOGIN_BIND_FRESH_MS) return unauthorized("expired");
-  if (binding !== null && binding.state !== "unlinked") return unauthorized("revoked");
-  if (binding !== null) {
-    const revokedBefore = Date.parse(binding.revokedBefore);
-    if (!Number.isFinite(revokedBefore) || authMs <= revokedBefore) return unauthorized("revoked");
-  }
+// 結ぶための照らし: 新しいサインインであることと、IdP の主体のサーバーの側での取得（検証した username で利用者プールを引き、
+// 利用者があり sub が token と同じこと）。外れは unauthorized（利用者が無いか別の sub が返るのは、外したログインの古い token に当たる）
+async function loginOf(claims: CognitoClaims, deps: AuthDeps): Promise<CheckResult<CognitoLogin>> {
+  if (claims.authTime * 1000 < deps.clock.epochMs() - LOGIN_BIND_FRESH_MS) return unauthorized("expired");
   const identity = await deps.readers.cognitoIdentity(claims.username);
   if (identity === null || identity.cognitoSub !== claims.sub) return unauthorized("unknown_principal");
-  return {
-    ok: true,
-    value: { cognitoSub: claims.sub, username: claims.username, sessionId: claims.originJti, idp: identity.idp, subject: identity.subject, authTime: claims.authTime, bindingEpoch: binding?.epoch ?? 0, rowVersion: binding?.version ?? null },
-  };
+  return { ok: true, value: { cognitoSub: claims.sub, username: claims.username, sessionId: claims.originJti, idp: identity.idp, subject: identity.subject, authTime: claims.authTime } };
 }
 
 async function human(token: string, operation: string, deps: AuthDeps): Promise<Outcome> {
   if (deps.cognito === null) return unauthorized("endpoint");
-  const checked = await deps.cognito(token, deps.clock.epochMs());
+  // sessions.delete だけは exp から猶予の内の期限切れも通す（期限切れの token しか持たない端末が取り消しの行を確定できるように）
+  const graceMs = operation === SESSIONS_DELETE ? SESSION_DELETE_EXPIRED_GRACE_MS : 0;
+  const checked = await deps.cognito(token, deps.clock.epochMs(), graceMs);
   if (!checked.ok) return checked;
-  const cognitoSub = checked.value.sub;
-  const binding = await deps.readers.userOfSubject(cognitoSub);
-  if (binding !== null && binding.state === "bound") {
-    // 結んだときの token より前にサインインした token は、外して結び直す前のセッションのものとして断つ
+  const claims = checked.value;
+  // 対応の行と取り消しの行を強い整合で並べて読む
+  const [binding, revocation] = await Promise.all([deps.readers.userOfSubject(claims.sub), deps.readers.sessionRevocation(claims.sub, claims.originJti)]);
+  // サインアウトしたセッションは断つ。sessions.delete だけは断たず、取り消し済みとその revoked_at を返す（ハンドラーが行を書かずに成功で返す）
+  if (revocation !== null && operation !== SESSIONS_DELETE) return sessionEnded("revoked");
+  const sessionRevokedAt = operation === SESSIONS_DELETE ? (revocation?.revokedAt ?? null) : null;
+  if (binding !== null) {
+    // 結んだときの token より前にサインインした token は、結ぶ前のサインインのセッションのものとして断つ（refresh token で取り直しても auth_time は変わらない）
     const bound = Date.parse(binding.boundAuthTime);
-    if (!Number.isFinite(bound) || checked.value.authTime * 1000 < bound) return unauthorized("unknown_principal");
-    return ok({ kind: "human", userId: binding.userId, cognitoSub, sessionId: checked.value.originJti, bindingEpoch: binding.epoch });
+    if (!Number.isFinite(bound) || claims.authTime * 1000 < bound) return sessionEnded("before_bound");
+    return ok({ kind: "human", userId: binding.userId, cognitoSub: claims.sub, sessionId: claims.originJti, boundAuthTime: binding.boundAuthTime, authTime: claims.authTime }, sessionRevokedAt);
   }
-  // 結んでいない主体（一度も結んでいないか、外した主体）は sessions.create へだけ渡す（ほかの操作は利用者を持たないため断る）
-  if (operation !== SESSIONS_CREATE) return unauthorized("unknown_principal");
-  const login = await loginOf(checked.value, binding, deps);
+  // 結んでいない主体は sessions.create へだけ渡す。ほかの操作は、外したログインのセッションの token として断つ（取り直しても通らない）
+  if (operation !== SESSIONS_CREATE) return sessionEnded("unbound");
+  const login = await loginOf(claims, deps);
   return login.ok ? ok({ kind: "newcomer", login: login.value }) : login;
 }
 
-// 冪等の鍵の主体の部分（docs/design/api.md の「冪等の鍵」）。人と委任は主体の利用者。
-// sessions.create だけは、対応の行を作る前（newcomer）と後（human）で同じ鍵になるよう、検証した Cognito の sub と
-// 対応の行の binding_epoch（外した回数）で区切る。外すと epoch が上がるため、外す前の結果を外した後（別の利用者へ結び直した後も）に返さない
+// 冪等の鍵の主体の部分（docs/design/detail.md の idempotencyPrincipalKey。docs/design/api.md の「冪等の鍵」）。
+// 主体の種類ごとに頭を変え、種類の違う主体の鍵が重ならないようにする（利用者の ID は usr_ の頭を持つ）
 export function idempotencyPrincipalKey(principal: Principal, operation: string): string {
+  // sessions.create だけは、対応の行を作る前（newcomer）と後（human）で同じ鍵になるよう、検証した Cognito の sub と要求の token の auth_time の組で区切る。
+  // human の boundAuthTime はサインインし直した要求では token の auth_time と違うため使わない。外した後にサインインし直すと auth_time が変わるため、
+  // 外す前の結果を外した後の要求へ返さない
+  if (operation === SESSIONS_CREATE) {
+    if (principal.kind === "newcomer") return `COGNITO#${principal.login.cognitoSub}#${principal.login.authTime}`;
+    if (principal.kind === "human") return `COGNITO#${principal.cognitoSub}#${principal.authTime}`;
+  }
   switch (principal.kind) {
     case "human":
-      return operation === SESSIONS_CREATE ? `COGNITO#${principal.cognitoSub}#${principal.bindingEpoch}` : principal.userId;
+      // logins.create だけは要求のセッションと結んだ時のサインインの時刻で区切り、同じ利用者の別のセッションの再送へ保存した結果を返さない
+      return operation === LOGINS_CREATE ? `${principal.userId}#LINK#${principal.cognitoSub}#${principal.sessionId}#${principal.boundAuthTime}` : principal.userId;
     case "newcomer":
-      return `COGNITO#${principal.login.cognitoSub}#${principal.login.bindingEpoch}`;
+      // 認可が sessions.create の外を先に拒むため、ここへ届くのは実装の誤り
+      throw new Error(`まだ結んでいない人の冪等の鍵は sessions.create だけ: ${operation}`);
     case "delegation":
       return principal.userId;
     case "runner":
-      return principal.laneId;
+      return `LANE#${principal.laneId}#${principal.generation}`;
     case "machine":
-      return principal.machineId;
+      return `MACHINE#${principal.teamId}#${principal.machineId}`;
     case "db_prep":
-      return `${principal.projectId}#${principal.prepId}`;
+      return `DBPREP#${principal.projectId}#${principal.prepId}`;
     case "github":
+      return "GITHUB";
     case "patrol":
-      return principal.kind;
+      return "PATROL";
   }
 }
 
@@ -357,12 +386,16 @@ export async function authenticate(req: InboundRequest, deps: AuthDeps): Promise
   // token・要約値・秘密の部分・JWT の項目は出さない。unauthorized の内訳はログにだけ出す
   // 受け口はログの文脈の必須の endpoint が持つ（項目に重ねて書くと field.endpoint に避けられる）
   if (outcome.ok) {
-    deps.log?.info("主体を決めた", { principal: outcome.value.kind, result: "ok" });
-    return { ok: true, principal: outcome.value };
+    deps.log?.info("主体を決めた", { principal: outcome.value.principal.kind, result: "ok" });
+    return { ok: true, principal: outcome.value.principal, sessionRevokedAt: outcome.value.sessionRevokedAt };
   }
   if (outcome.reason === "unavailable") {
     deps.log?.warn("認証の依存先に届かない", { result: "unavailable", error: outcome.cause });
     return { ok: false, reason: "unavailable" };
+  }
+  if (outcome.reason === "session_ended") {
+    deps.log?.info("セッションが断たれている", { principal: "human", result: "session_ended", fault: outcome.fault });
+    return { ok: false, reason: "session_ended" };
   }
   const fault: TokenFault = outcome.fault;
   deps.log?.info("主体を決められない", { result: "unauthorized", fault });

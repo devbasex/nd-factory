@@ -58,7 +58,8 @@ export function actorOfCreatedUser(actor: AuditActor, userId: Id<"usr">): AuditA
   if (p === null || p.kind !== "newcomer") return actor;
   return {
     ...actor,
-    principal: { kind: "human", userId, cognitoSub: p.login.cognitoSub, sessionId: p.login.sessionId, bindingEpoch: p.login.bindingEpoch },
+    // 作った対応の行は要求の token の auth_time を bound_auth_time に持つため、結んだ時のサインインの時刻と要求のサインインの時刻は同じ
+    principal: { kind: "human", userId, cognitoSub: p.login.cognitoSub, sessionId: p.login.sessionId, boundAuthTime: new Date(p.login.authTime * 1000).toISOString(), authTime: p.login.authTime },
   };
 }
 

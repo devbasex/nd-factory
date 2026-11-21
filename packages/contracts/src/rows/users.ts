@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { idOf } from "../ids.ts";
 import { languageTag, timeZone, utcDateTime } from "../values.ts";
-import { overwriteRow, type RowKey, sha256Hex, uuid, versionlessRow } from "./common.ts";
+import { overwriteRow, type RowKey, sha256Hex, versionlessRow } from "./common.ts";
 
 // db-users の行（利用者・ログインの組・IdP の主体の一意の行・Cognito の主体の対応の行・委任）
 
@@ -38,73 +38,20 @@ export const loginSubjectRow = versionlessRow(1, {
 export type LoginSubjectRow = z.infer<typeof loginSubjectRow>;
 export const loginSubjectKey = (row: LoginSubjectRow): RowKey => ({ pk: `LOGIN#${row.idp}#${row.subject}`, sk: "LOGIN" });
 
-// Cognito の主体の対応の行（COGNITO#<Cognito の sub> / COGNITO）。上書き（外しても消さず、失効の境を残す）。
+// Cognito の主体の対応の行（COGNITO#<Cognito の sub> / COGNITO。docs/design/data.md の「Cognito の主体の対応の行」）。
 // Cognito の access token は IdP の主体でなく Cognito の利用者の sub を持つため、認証（userOfSubject）はこの行を強い整合で読んで利用者を引く。
 // Cognito は IdP のアカウントごとに別の利用者（別の sub）を作るため、ログインの組と 1 対 1 に当たる。
-// state は bound（結んでいる。user_id と bound_auth_time を持つ）・signing_out（外して、その Cognito の利用者の
-// AdminUserGlobalSignOut の済むのを待つ間。結び直せない）・unlinked（外して失効を済ませた。revoked_before を持つ）。
-// bound_auth_time は結んだときに使った token の auth_time。認証はこれより前にサインインした token を断つ。
-// revoked_before は失効を済ませた時刻。これ以前にサインインした token では結び直せない（外す前のセッションと、失効の済む前のセッション）。
-// binding_epoch は外した回数。sessions.create の冪等の鍵に入れ、外す前の結果を外した後に返さない。
-// cognito_username は結ぶのに使った token の username で、外した後の AdminUserGlobalSignOut に渡す。
-// signout_lease_id と signout_lease_until は signing_out の間だけ持つ、失効の呼び出しの借り。「行う予定」の行（外したときの binding_epoch に固定）の
-// 実行が AdminUserGlobalSignOut を呼ぶ前に、同じ世代の signing_out で借りが無いか期限を過ぎたときだけ取り、借りの持ち主だけが unlinked へ進める。
-// signout_unsettled_until は、応答を失った呼び出し（打ち切り・期限切れ・失敗。Cognito に届いた実行は取り消せない）の結果の分からない期間の終わり。
-// この時刻より前は借りを取らず、この時刻より後に始めた呼び出しの成功だけで unlinked へ進める（後から処理される前の失効が、結び直したセッションへ届かない）
-// 状態ごとに持つ列を形で決める（bound は user_id と bound_auth_time、unlinked は revoked_before が必須。失効の借りと
-// 結果の分からない期間の列は signing_out の間だけで、借りの 2 列は両方を持つか両方を持たない）。状態に当たらない列を持つ行は断つ（読み手が状態の値を組めない行を書かせない）
-export const COGNITO_SUBJECT_STATES = ["bound", "signing_out", "unlinked"] as const;
-const cognitoSubjectCommon = {
+// 行は状態を持たず、行があることがその sub を利用者へ結んでいることである。結ぶときに無いときだけ書き、外すときに消す（書き換えない）。
+// cognito_username は結ぶのに使った token の username（外すときの Cognito の呼び出しに渡す）、
+// bound_auth_time は結ぶのに使った token の auth_time（認証はこれより前にサインインした token を断つ）
+export const cognitoSubjectRow = overwriteRow(1, {
   cognito_sub: z.string().min(1),
   cognito_username: z.string().min(1),
   idp,
   subject: z.string().min(1),
-  binding_epoch: z.int().min(0),
-};
-// その状態では持たない列
-const absent = z.never().optional();
-const signingOutCommon = {
-  ...cognitoSubjectCommon,
-  state: z.literal("signing_out"),
-  user_id: absent,
-  bound_auth_time: absent,
-  revoked_before: absent,
-  signout_unsettled_until: utcDateTime.optional(),
-};
-// signing_out は借りの有無で 2 つの形に分けるため、state だけで選べる判別の和でなく和にする
-export const cognitoSubjectRow = z.union([
-  overwriteRow(1, {
-    ...cognitoSubjectCommon,
-    state: z.literal("bound"),
-    user_id: idOf("usr"),
-    bound_auth_time: utcDateTime,
-    revoked_before: absent,
-    signout_lease_id: absent,
-    signout_lease_until: absent,
-    signout_unsettled_until: absent,
-  }),
-  // 失効の借りは ID と期限の両方を持つか、どちらも持たない（ID だけでは期限切れを判定できず、期限だけでは持ち主を照合できない）
-  overwriteRow(1, {
-    ...signingOutCommon,
-    signout_lease_id: uuid,
-    signout_lease_until: utcDateTime,
-  }),
-  overwriteRow(1, {
-    ...signingOutCommon,
-    signout_lease_id: absent,
-    signout_lease_until: absent,
-  }),
-  overwriteRow(1, {
-    ...cognitoSubjectCommon,
-    state: z.literal("unlinked"),
-    user_id: absent,
-    bound_auth_time: absent,
-    revoked_before: utcDateTime,
-    signout_lease_id: absent,
-    signout_lease_until: absent,
-    signout_unsettled_until: absent,
-  }),
-]);
+  user_id: idOf("usr"),
+  bound_auth_time: utcDateTime,
+});
 export type CognitoSubjectRow = z.infer<typeof cognitoSubjectRow>;
 export const cognitoSubjectKey = (row: CognitoSubjectRow): RowKey => ({ pk: `COGNITO#${row.cognito_sub}`, sk: "COGNITO" });
 
