@@ -20,6 +20,8 @@ type Command = GetSecretValueCommand | DescribeSecretCommand | UpdateSecretVersi
 // Secrets Manager のクライアントの代わり。送られた命令を残し、答えを差し込める
 class FakeSecrets {
   calls: Command[] = [];
+  // 送られた命令ごとの打ち切りの信号
+  signals: Array<AbortSignal | undefined> = [];
   handle: (cmd: Command) => unknown = () => ({});
 
   asClient(): SecretsManagerClient {
@@ -27,7 +29,10 @@ class FakeSecrets {
       region: "us-west-2",
       credentials: { accessKeyId: "AKIDEXAMPLE", secretAccessKey: "secret" },
     });
-    client.send = ((cmd: Command) => this.send(cmd)) as unknown as SecretsManagerClient["send"];
+    client.send = ((cmd: Command, opts?: { abortSignal?: AbortSignal }) => {
+      this.signals.push(opts?.abortSignal);
+      return this.send(cmd);
+    }) as unknown as SecretsManagerClient["send"];
     return client;
   }
 
@@ -182,6 +187,72 @@ describe("promoteVersion", () => {
     expect(fake.updates()).toHaveLength(1);
     expect(describes).toBe(4);
     expect(waits).toEqual([250, 500]);
+  });
+
+  it("期限は最初の読みの前に決め、どの送信も期限までの残りで打ち切る", async () => {
+    const fake = stagesFake({ [OLD_VERSION]: ["AWSCURRENT"], [VERSION]: ["AWSPENDING"] });
+    let t = 1_000;
+    const inner = fake.handle;
+    // 送るたびに 3 秒かかる
+    fake.handle = (cmd) => {
+      t += 3_000;
+      return inner(cmd);
+    };
+    const lefts: number[] = [];
+    await promoteVersion(fake.asClient(), SECRET, VERSION, {
+      now: () => t,
+      sleep: async (ms) => void (t += ms),
+      abortAfter: (ms) => {
+        lefts.push(ms);
+        return new AbortController().signal;
+      },
+    });
+    expect(lefts).toEqual([20_000, 17_000, 14_000]);
+    expect(fake.signals.every((x) => x instanceof AbortSignal)).toBe(true);
+  });
+
+  it("最初の読みが期限を越えて遅れたら、移しを送らずに投げる（鎖が外れた後に古い版へ戻さない）", async () => {
+    const fake = stagesFake({ [OLD_VERSION]: ["AWSCURRENT"], [VERSION]: ["AWSPENDING"] });
+    let t = 0;
+    const inner = fake.handle;
+    fake.handle = (cmd) => {
+      if (cmd instanceof DescribeSecretCommand) t += 25_000;
+      return inner(cmd);
+    };
+    const e = await caught(promoteVersion(fake.asClient(), SECRET, VERSION, { now: () => t, sleep: async () => undefined }));
+    expect(e.name).toBe("PromoteDeadlineError");
+    expect(fake.updates()).toHaveLength(0);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it("移しの後の読み直しの途中で期限を過ぎたら、次の読みを送らずに投げる", async () => {
+    const fake = stagesFake({ [OLD_VERSION]: ["AWSCURRENT"], [VERSION]: ["AWSPENDING"] }, { moves: false });
+    let t = 0;
+    const inner = fake.handle;
+    fake.handle = (cmd) => {
+      if (cmd instanceof UpdateSecretVersionStageCommand) t += 19_900;
+      return inner(cmd);
+    };
+    // 読み直しは 1 回送り、待ちで期限に届いた後は送らない
+    await expect(promoteVersion(fake.asClient(), SECRET, VERSION, { now: () => t, sleep: async (ms) => void (t += ms) })).rejects.toThrow();
+    expect(fake.updates()).toHaveLength(1);
+    expect(fake.calls.filter((c) => c instanceof DescribeSecretCommand)).toHaveLength(2);
+  });
+
+  it("送った要求が期限で打ち切られたら（SDK が AbortError で落とす）、そのまま投げる", async () => {
+    const fake = stagesFake({ [OLD_VERSION]: ["AWSCURRENT"], [VERSION]: ["AWSPENDING"] });
+    const inner = fake.handle;
+    fake.handle = (cmd) => {
+      if (cmd instanceof UpdateSecretVersionStageCommand) {
+        const e = new Error("Request aborted");
+        e.name = "AbortError";
+        throw e;
+      }
+      return inner(cmd);
+    };
+    const e = await caught(promoteVersion(fake.asClient(), SECRET, VERSION));
+    expect(e.name).toBe("AbortError");
+    expect(fake.calls.filter((c) => c instanceof DescribeSecretCommand)).toHaveLength(1);
   });
 
   it("移しが投げれば、そのまま投げる", async () => {
