@@ -88,7 +88,7 @@ infra/
 | `packages/contracts/src/ids.ts` | 新設 | ID の頭の集まりと ID の形 | values | ids | `ID_KINDS`・`IdKind`・`idOf` |
 | `packages/contracts/src/tokens.ts` | 新設 | 委任と登録の token の形 | ids | tokens | `delegationToken`・`machineToken` |
 | `packages/contracts/src/reasons.ts` | 新設 | 理由のコードの共通の集まりと型 | zod | reasons | `REQUEST_REASONS`・`ITEM_REASONS`・`ReasonDef` |
-| `packages/contracts/src/operation.ts` | 新設 | 操作の定義の型と組み立て | values・reasons | operation | `defineOperation`・`pendingShape`・`isPending`・`okItem`・`okList`・`itemFailure`・`itemReasonsOf`・`resultSchemaOf`・`OperationDef`・`ItemOf`・`ResultOf`・`ItemFailureSchema`・`ReasonsOf` |
+| `packages/contracts/src/operation.ts` | 新設 | 操作の定義の型と組み立て | values・reasons | operation | `defineOperation`・`pendingShape`・`isPending`・`okItem`・`okList`・`itemFailure`・`itemReasonsOf`・`resultSchemaOf`・`OperationDef`・`ItemOf`・`ResultOf`・`ResultShapeOf`・`ItemFailureSchema`・`ReasonsOf` |
 | `packages/contracts/src/operations/*.ts` | 新設 | 操作の表の全行 | operation・ids・values | operations | `OPERATIONS`・`operationByName`・`operationByRoute` |
 | `packages/contracts/src/rows/*.ts` | 新設 | 表の行の形 | values・ids | rows | 行ごとの `<行>Row` の zod と `ROW_CODECS` |
 | `packages/contracts/src/tables.ts` | 新設 | 10 の表の仕様 | rows | tables | `TABLES`・`TableSpec` |
@@ -162,7 +162,7 @@ infra/
 | `isPending` | `operation.ts` | 新設 | `(shape: ZodType \| PendingShape) => shape is PendingShape` | 形の未定かを返す |
 | `okItem`・`okList` | `operation.ts` | 新設 | `<R extends ZodType>(item: R) => z.ZodObject<{ ok: z.ZodLiteral<true>; item: R }>`・`<R extends ZodType>(item: R) => z.ZodObject<{ ok: z.ZodLiteral<true>; items: z.ZodArray<R>; next_cursor: z.ZodNullable<z.ZodString> }>` | 成功の要素の結果の封筒（`{ok: true, item}`・`{ok: true, items, next_cursor}`） |
 | `itemFailure` | `operation.ts` | 新設 | `<const RS extends readonly [ReasonDef, ...ReasonDef[]]>(reasons: RS) => ItemFailureSchema<RS>` | 失敗の要素の結果（`{ok: false, status, reason, fields?}`）。渡した `ReasonDef` ごとに `status` と `reason` を `z.literal` で縛ったオブジェクトを 1 つ作り、`reason` を判別の鍵にした和にする |
-| `resultSchemaOf` | `operation.ts` | 新設 | `<Op extends OperationDef>(op: Op) => z.ZodDiscriminatedUnion<[Op["result"], ItemFailureSchema<ReasonsOf<Op>>], "ok">` | その操作の要素の結果の zod。`z.discriminatedUnion("ok", [op.result, itemFailure(itemReasonsOf(op))])`。`ResultOf<Op>` はこの戻り値の `z.infer`。`op.result` が `PendingShape` なら投げる（形の未定の操作は呼び手が `isPending` で先に外す） |
+| `resultSchemaOf` | `operation.ts` | 新設 | `<Op extends OperationDef>(op: Op) => z.ZodDiscriminatedUnion<[ResultShapeOf<Op>, ItemFailureSchema<ReasonsOf<Op>>], "ok">` | その操作の要素の結果の zod。`z.discriminatedUnion("ok", [op.result, itemFailure(itemReasonsOf(op))])`。`ResultOf<Op>` はこの戻り値の `z.infer` で、成功の側は `z.infer<ResultShapeOf<Op>>`（`PendingShape` を和の選択肢に含まない）。`op.result` が `PendingShape` なら投げる（形の未定の操作は呼び手が `isPending` で先に外す）。戻り値の型は宣言の上で `PendingShape` を外した `ResultShapeOf<Op>` にし、関数の中で `isPending` で外した後の `op.result` をその型として渡す |
 | `itemReasonsOf` | `operation.ts` | 新設 | `<Op extends OperationDef>(op: Op) => ReasonsOf<Op>` | その操作で起きうる要素の理由。`ITEM_REASONS` のうち `when` が操作に当たるもの（`write` は `access` が `write`、`idempotency` は `idempotencyKey`、`all_or_nothing` は `allOrNothing`、`human_only_per_item` は `humanOnly` が `per_item`）に、`op.reasons` を続けた配列。結果の形の `itemFailure`・`generated/reasons.json`・失敗のダミーはどれもこの戻り値から作る |
 | `operationByName` | `operations/index.ts` | 新設 | `(name: string) => OperationDef \| undefined` | 名前で引く |
 | `operationByRoute` | `operations/index.ts` | 新設 | `(path: string) => OperationDef \| undefined` | `/v1/...` の経路で引く（`readHttpCall` が使う） |
@@ -209,6 +209,7 @@ infra/
 | `IDEMPOTENCY_TTL_SECONDS` | 定数 | `operation.ts` | 86400 |
 | `PendingShape` | 型 | `operation.ts` | `{ kind: "pending"; owner: string; schema: z.ZodNever }` |
 | `ItemFailureSchema<RS>` | 型 | `operation.ts` | `z.ZodDiscriminatedUnion<{ [K in keyof RS]: z.ZodObject<{ ok: z.ZodLiteral<false>; status: z.ZodLiteral<RS[K]["status"]>; reason: z.ZodLiteral<RS[K]["code"]>; fields: z.ZodOptional<z.ZodArray<z.ZodString>> }> }, "reason">`。`ZodObject` 1 つでは理由ごとの `status` と `reason` の組を縛れないため、理由ごとのオブジェクトの和を型に出す |
+| `ResultShapeOf<Op>` | 型 | `operation.ts` | `Exclude<Op["result"], PendingShape>`。`OperationDef` の `result` は zod か `PendingShape` を許すため、`resultSchemaOf` の和の成功の選択肢はこの型で zod だけに絞る。形の未定の操作では `never` になり、その操作の `ResultOf` は失敗の側だけになる（`resultSchemaOf` は投げるため値は作られない） |
 | `ReasonsOf<Op>` | 型 | `operation.ts` | `readonly [ReasonDef, ...ReasonDef[]]`。`ITEM_REASONS` の `item_invalid`・`not_found`・`role_insufficient` は `when` が `always` でどの操作にも入るため、空にならない。型の上では要素を `ReasonDef` に広げるため、`ResultOf<Op>` の失敗の側は `{ ok: false; status: ReasonDef["status"]; reason: string; fields?: string[] }` になる。理由ごとの `status` と `reason` の組は、`itemFailure` が実行の時に作る zod の和が縛る |
 | 結果の和の組み方 | 決まり | `operation.ts` | 成功と失敗を合わせる外側の和は `ok` を判別の鍵にし、失敗の側には `itemFailure` の和（`reason` が判別の鍵）をそのまま 1 つの要素として入れる（zod 4 の `discriminatedUnion` は、要素の和の各分岐が外側の鍵を `z.literal` で持てば入れ子にできる）。失敗の分岐はどれも `ok: false` を持つが、外側の和から見ると失敗の側は 1 つの要素のため、鍵の値は重ならない。理由ごとの分岐を外側の和へ平らに並べない（`ok: false` が重なって組めない） |
 | 全部か無かの上限 | 操作の定義の値 | `projects.ts` | `projects.create` は 20（要素 1 つでプロジェクト・主リポジトリ・割り当ての 3 件と記録の行・冪等の済みの行の 5 件 → 100 ÷ 5）、`repositories.add` は 25（リポジトリの行・プロジェクトの行の照らし・記録の行・冪等の済みの行の 4 件） |
@@ -232,7 +233,7 @@ infra/
 | `defineOperation` | 経路が名前から作られる。受け口 `runner` は `/v1/runner/…` | `allOrNothing.maxItems` が 1 | 読む操作に冪等の鍵・人だけの操作に読み出しの道具が無い・名前の形の違いで投げる |
 | `OPERATIONS` | 66 + 9 行。利用者向けの操作の名前と経路と機能と人だけかが [操作の一覧](../docs/design/api.md#操作の一覧) と一致する（表の文字を読まずに、テストに一覧の写しを持つ） | — | 名前か経路の重なりで投げる |
 | `pendingShape` | `isPending` が真。どの値も zod の検証を通らない | — | — |
-| `itemFailure`・`resultSchemaOf` | `ok: false` の理由を 3 つ持つ操作で、成功の結果と各理由の失敗をどちらも通す（失敗の分岐が `ok: false` を共有しても組める） | 理由が 1 つ（`itemFailure` の和の分岐が 1 つ） | 理由と `status` の組み替え（`not_found` と 409）・`ReasonDef` に無い `reason`・`ok: true` に `reason` を持つ値を拒む。`op.result` が `PendingShape` で投げる |
+| `itemFailure`・`resultSchemaOf` | `ok: false` の理由を 3 つ持つ操作で、成功の結果と各理由の失敗をどちらも通す（失敗の分岐が `ok: false` を共有しても組める） | 理由が 1 つ（`itemFailure` の和の分岐が 1 つ） | 理由と `status` の組み替え（`not_found` と 409）・`ReasonDef` に無い `reason`・`ok: true` に `reason` を持つ値を拒む。`op.result` が `PendingShape` で投げる。型のテスト（`expectTypeOf`）で、`ResultOf` の `ok: true` の側が `okItem` に渡した要素の型と一致し、`PendingShape` が和に入らない |
 
 ## 形の正本: データと NDF の契約
 
