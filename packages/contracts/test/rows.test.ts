@@ -53,7 +53,7 @@ function keyOf(name: string, row: unknown): RowKey {
 // 行の形の列（状態ごとに形を分けた行は、どれかの状態の形が持つ列）
 function hasColumn(name: string, column: string): boolean {
   const schema = ROW_CASES[name]?.schema;
-  const objects = schema instanceof z.ZodDiscriminatedUnion ? (schema.options as z.ZodObject[]) : [schema as z.ZodObject];
+  const objects = schema instanceof z.ZodUnion ? (schema.options as z.ZodObject[]) : [schema as z.ZodObject];
   return objects.some((o) => column in o.shape);
 }
 
@@ -164,7 +164,7 @@ describe("行の形（受け入れ条件 8）", () => {
     const { revoked_before: _r, ...base } = c.sample;
     const bound = { ...base, state: "bound", user_id: USR, bound_auth_time: AT };
     const signingOut = { ...base, state: "signing_out", signout_lease_id: "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b", signout_lease_until: AT, signout_unsettled_until: AT };
-    const accepted = [bound, signingOut, { ...base, state: "signing_out" }, c.sample];
+    const accepted = [bound, signingOut, { ...base, state: "signing_out" }, { ...base, state: "signing_out", signout_unsettled_until: AT }, c.sample];
     const rejected = [
       without(bound, "user_id"),
       without(bound, "bound_auth_time"),
@@ -173,6 +173,8 @@ describe("行の形（受け入れ条件 8）", () => {
       { ...signingOut, user_id: USR },
       { ...signingOut, bound_auth_time: AT },
       { ...signingOut, revoked_before: AT },
+      without(signingOut, "signout_lease_id"),
+      without(signingOut, "signout_lease_until"),
       { ...base, state: "unlinked" },
       { ...c.sample, user_id: USR },
       { ...c.sample, signout_lease_until: AT },

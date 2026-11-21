@@ -52,7 +52,7 @@ export const loginSubjectKey = (row: LoginSubjectRow): RowKey => ({ pk: `LOGIN#$
 // signout_unsettled_until は、応答を失った呼び出し（打ち切り・期限切れ・失敗。Cognito に届いた実行は取り消せない）の結果の分からない期間の終わり。
 // この時刻より前は借りを取らず、この時刻より後に始めた呼び出しの成功だけで unlinked へ進める（後から処理される前の失効が、結び直したセッションへ届かない）
 // 状態ごとに持つ列を形で決める（bound は user_id と bound_auth_time、unlinked は revoked_before が必須。失効の借りと
-// 結果の分からない期間の列は signing_out の間だけ）。状態に当たらない列を持つ行は断つ（読み手が状態の値を組めない行を書かせない）
+// 結果の分からない期間の列は signing_out の間だけで、借りの 2 列は両方を持つか両方を持たない）。状態に当たらない列を持つ行は断つ（読み手が状態の値を組めない行を書かせない）
 export const COGNITO_SUBJECT_STATES = ["bound", "signing_out", "unlinked"] as const;
 const cognitoSubjectCommon = {
   cognito_sub: z.string().min(1),
@@ -63,7 +63,16 @@ const cognitoSubjectCommon = {
 };
 // その状態では持たない列
 const absent = z.never().optional();
-export const cognitoSubjectRow = z.discriminatedUnion("state", [
+const signingOutCommon = {
+  ...cognitoSubjectCommon,
+  state: z.literal("signing_out"),
+  user_id: absent,
+  bound_auth_time: absent,
+  revoked_before: absent,
+  signout_unsettled_until: utcDateTime.optional(),
+};
+// signing_out は借りの有無で 2 つの形に分けるため、state だけで選べる判別の和でなく和にする
+export const cognitoSubjectRow = z.union([
   overwriteRow(1, {
     ...cognitoSubjectCommon,
     state: z.literal("bound"),
@@ -74,15 +83,16 @@ export const cognitoSubjectRow = z.discriminatedUnion("state", [
     signout_lease_until: absent,
     signout_unsettled_until: absent,
   }),
+  // 失効の借りは ID と期限の両方を持つか、どちらも持たない（ID だけでは期限切れを判定できず、期限だけでは持ち主を照合できない）
   overwriteRow(1, {
-    ...cognitoSubjectCommon,
-    state: z.literal("signing_out"),
-    user_id: absent,
-    bound_auth_time: absent,
-    revoked_before: absent,
-    signout_lease_id: uuid.optional(),
-    signout_lease_until: utcDateTime.optional(),
-    signout_unsettled_until: utcDateTime.optional(),
+    ...signingOutCommon,
+    signout_lease_id: uuid,
+    signout_lease_until: utcDateTime,
+  }),
+  overwriteRow(1, {
+    ...signingOutCommon,
+    signout_lease_id: absent,
+    signout_lease_until: absent,
   }),
   overwriteRow(1, {
     ...cognitoSubjectCommon,
