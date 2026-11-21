@@ -196,15 +196,17 @@ export function edgeOf(opts: Bounds | undefined, side: Side, fallback: () => num
   const step = opts?.multipleOf;
   if (!step || isMultipleOf(end, step)) return end;
   const towardLower = end === hi;
-  const at = (k: number) => multipleAt(k, step);
+  const inRange = (v: number) => (lo === undefined || v >= lo) && (hi === undefined || v <= hi);
   const k = towardLower ? Math.floor(end / step) : Math.ceil(end / step);
-  // 誤差で k が 1 つずれても拾えるよう、端に近い側から前後 1 つを照らす
+  // 誤差で k が 1 つずれても拾えるよう、端に近い側から前後 1 つを照らす。各 k では 10 進で組んだ値を先に、浮動小数の積を次に照らす
+  // （非正規化数の step は最短の 10 進表記が元の値とずれ、10 進で組むと倍数に応じて差が広がるため、積の方が範囲に収まることがある）
   const near = towardLower ? [k + 1, k, k - 1] : [k - 1, k, k + 1];
   for (const c of near) {
-    const v = at(c);
-    if ((towardLower ? v <= end : v >= end) && isMultipleOf(v, step)) return v;
+    for (const v of [multipleAt(c, step), c * step]) {
+      if ((towardLower ? v <= end : v >= end) && inRange(v) && isMultipleOf(v, step)) return v;
+    }
   }
-  return at(k);
+  return multipleAt(k, step);
 }
 
 // 形の中の文字列の上限・下限の長さのうち最大のもの。境目の見本の文字列の元をこの長さにし、どの上限も満たせるようにする
@@ -455,7 +457,7 @@ export function checkExamples(ops: readonly OperationDef[]): ExampleProblem[] {
     const schema = resultSchemaOf(op);
     const examples = examplesOf(op);
     const extra = extraListKeysOf(op);
-    // 項目の名前は診断に載せない（キーもメールや ID でありうり、見本の照らしでは伏せる値を CI のログに残さない）
+    // 項目の名前は診断に載せない（キーもメールや ID でありえ、見本の照らしでは伏せる値を CI のログに残さない）
     if (extra.length > 0 && !(op.examples && "empty" in op.examples)) {
       problems.push({ operation: op.name, scene: "empty", index: 0, problem: `一覧の封筒が ok・items・next_cursor のほかに必須の項目を持つため、examples.empty を書く` });
     }

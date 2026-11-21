@@ -224,6 +224,15 @@ describe("edgeOf", () => {
     expect(z.number().multipleOf(opts.multipleOf).safeParse(v).success).toBe(true);
   });
 
+  it.each(["upper", "lower"] as const)("非正規化数の倍数の %s の端も範囲と倍数を守る", (side) => {
+    const step = 1.5e-323;
+    const opts = { min: 99 * step, max: 100 * step + Number.MIN_VALUE, multipleOf: step };
+    const v = edgeOf(opts, side, never);
+    expect(v).toBeGreaterThanOrEqual(opts.min);
+    expect(v).toBeLessThanOrEqual(opts.max);
+    expect(z.number().multipleOf(step).safeParse(v).success).toBe(true);
+  });
+
   it("小数の倍数の数の形は、上の端と下の端が上限・下限そのもの", () => {
     const op = defineOperation({ ...FIXTURE_CREATE, name: "fixture_ratios.create", result: okItem(z.strictObject({ r: z.number().min(0.1).max(0.3).multipleOf(0.1) })), examples: null, owner: "#2" });
     const [upper, lower] = fakeExamples(op).edge as Array<{ item: { r: number } }>;
