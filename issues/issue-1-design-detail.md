@@ -308,7 +308,7 @@ MCP の道具の入力の形（承認済みの `createMcpHandler` と #2 の生�
 | --- | --- | --- | --- |
 | 1 | 見本 26 件を呼び出しの判定へ通し、`valid` と同じ判定になる | `C/domains/entrypoint-cases.json`・`C/domains/entrypoints.json` | 呼び出しの判定 |
 | 2 | `version.json` の `history` の最後の行（版と sha256）が受ける組にある | `C/version.json` | 受ける組 |
-| 3 | 使う口と実行の場（ホステッド・手元のマシン）の組ごとに、使い方のその組の渡す環境変数の名前が、その口の `env` 列にあり、`env.json` の行にある。その行の `set_by` が `service` であるか、使い方の `set_by` の許容（名前と、その名前の契約の `set_by` の値の組）が同じ値を載せる | `C/domains/env.json`・`C/domains/entrypoints.json` | 口と実行の場の組ごとの渡す環境変数の名前・`set_by` の許容（`envSetBy`） |
+| 3 | 使う口と実行の場（ホステッド・手元のマシン）の組ごとに、使い方のその組の渡す環境変数の名前が、その口の `env` 列にあり、`env.json` の行にある。使い方の `set_by` の許容（名前と、その名前の契約の `set_by` の値の組）に載せた名前は、その行の `set_by` が載せた値と一致する（`service` でも、載せた値と違えば食い違い）。載せない名前だけ、その行の `set_by` が `service` である | `C/domains/env.json`・`C/domains/entrypoints.json` | 口と実行の場の組ごとの渡す環境変数の名前・`set_by` の許容（`envSetBy`） |
 | 4 | `reader: service` の読むファイルの `fields` が、翻訳が読む項目を含む。読むファイルの行が契約にある | `C/domains/ndf-files.json` | 読むファイルと項目 |
 | 5 | 区間の報告の `shape.values`・`shape.items`・`shape.required`・`shape.material` が、ランナーが読む値と項目を含み（`shape.required` は値ごとに、ランナーが無条件に要るとする項目が `always` にあり、条件つきで要るとする項目が、同じ条件（`when` の行の `need` のほかの鍵。`item`・`prefix`・`equals` など）の行の `need` か `always` にある）、同じファイルの `cases` の見本を区間の報告の読み取りへ通して `result` と `errors` の有無が同じ判定になる | `C/hooks/unattended-report.json` | 区間の報告から読む値と項目・区間の報告の読み取り |
 | 6 | 使う口がすべて契約の口の表にある | `C/domains/entrypoints.json` | 使う口 |
