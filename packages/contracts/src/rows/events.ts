@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rowCodec } from "../row-codec.ts";
 import { idOf } from "../ids.ts";
 import { utcDateTime } from "../values.ts";
 import { identifier, type RowKey, seqKey, versionlessRow } from "./common.ts";
@@ -19,3 +20,6 @@ export const progressEventRow = versionlessRow(1, {
 });
 export type ProgressEventRow = z.infer<typeof progressEventRow>;
 export const progressEventKey = (row: ProgressEventRow): RowKey => ({ pk: `PROJECT#${row.project_id}#LANE#${row.lane_id}`, sk: `SEQ#${seqKey(row.seq)}` });
+
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
+export const progressEventCodec = rowCodec({ latest: { version: 1, schema: progressEventRow }, writeVersion: 1, keyOf: progressEventKey });

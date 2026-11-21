@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rowCodec } from "../row-codec.ts";
 import { idOf } from "../ids.ts";
 import { utcDateTime } from "../values.ts";
 import { expireAt, identifier, reasonCode, type RowKey, versionlessRow } from "./common.ts";
@@ -55,3 +56,6 @@ export const auditKey = (row: AuditRow): RowKey => ({
   pk: auditPartition(row),
   sk: row.item_index === undefined ? `${row.at}#${row.audit_id}` : `${row.at}#${row.audit_id}#${String(row.item_index).padStart(3, "0")}`,
 });
+
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
+export const auditCodec = rowCodec({ latest: { version: 1, schema: auditRow }, writeVersion: 1, keyOf: auditKey });
