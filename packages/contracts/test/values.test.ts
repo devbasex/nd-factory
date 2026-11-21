@@ -1,3 +1,4 @@
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ID_KINDS, idOf } from "../src/ids.ts";
@@ -16,7 +17,7 @@ import {
   utcDateTime,
 } from "../src/values.ts";
 
-// 生成した JSON Schema の pattern を、Ajv と同じく u の旗で正規表現にして照らす（Ajv そのものの往復は生成の単位のテストが持つ）
+// 生成した JSON Schema の pattern を、Ajv と同じく u の旗で正規表現にして照らす（日時は下の ajvValidator でスキーマ全体を照らす）
 function schemaPattern(schema: z.ZodType): RegExp {
   const json = z.toJSONSchema(schema) as { pattern?: string };
   if (json.pattern === undefined) throw new Error("JSON Schema に pattern が無い");
@@ -27,14 +28,21 @@ function passes(schema: z.ZodType, value: unknown): boolean {
   return schema.safeParse(value).success;
 }
 
+// 生成した JSON Schema の全体を Ajv（生成の単位の往復と同じ設定）で検証する
+const ajv = new Ajv2020({ strict: true, validateFormats: false });
+function ajvValidator(schema: z.ZodType): (value: unknown) => boolean {
+  const validate = ajv.compile(z.toJSONSchema(schema));
+  return (value) => validate(value);
+}
+
 const UUID_V7 = "01935b4e-7c2a-7d10-8f3e-2b6f0c9a1d42";
 
 describe("utcDateTime", () => {
-  const pattern = schemaPattern(utcDateTime);
+  const byAjv = ajvValidator(utcDateTime);
 
   function both(value: string): boolean {
     const byZod = passes(utcDateTime, value);
-    expect(pattern.test(value)).toBe(byZod);
+    expect(byAjv(value)).toBe(byZod);
     return byZod;
   }
 
@@ -84,7 +92,7 @@ describe("utcDateTime", () => {
           const at = new Date(Date.UTC(y, m - 1, d));
           const real = at.getUTCMonth() === m - 1 && at.getUTCDate() === d;
           const text = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}T12:00:00Z`;
-          if (passes(utcDateTime, text) !== real || pattern.test(text) !== real) mismatches.push(text);
+          if (passes(utcDateTime, text) !== real || byAjv(text) !== real) mismatches.push(text);
         }
       }
     }
