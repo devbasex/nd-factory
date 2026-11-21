@@ -188,6 +188,8 @@ export type TestDatabase = {
   executor(): PgExecutor;
   // 後始末で消す役割（役割はデータベースの外に残るため）
   dropRoleLater(role: string): void;
+  // 後始末で消すデータベース（用意の手順が作るもの）。役割より先に消す（役割の持つスキーマと権限が中にあるため）
+  dropDatabaseLater(database: string): void;
 };
 
 function urlFor(database: string, credentials?: Credentials): string {
@@ -221,6 +223,7 @@ export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>):
   const clients: Client[] = [];
   const executors: PgExecutor[] = [];
   const roles: string[] = [];
+  const databases: string[] = [];
   try {
     await admin.query(`CREATE DATABASE ${escapeIdentifier(name)}`);
     const connect = async (database: string = name, credentials?: Credentials): Promise<Client> => {
@@ -239,6 +242,9 @@ export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>):
       dropRoleLater(role) {
         roles.push(role);
       },
+      dropDatabaseLater(database) {
+        databases.push(database);
+      },
     };
     return await fn(db);
   } finally {
@@ -246,6 +252,7 @@ export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>):
     await Promise.allSettled(clients.map((c) => c.end()));
     try {
       await admin.query(`DROP DATABASE IF EXISTS ${escapeIdentifier(name)} WITH (FORCE)`);
+      for (const database of databases) await admin.query(`DROP DATABASE IF EXISTS ${escapeIdentifier(database)} WITH (FORCE)`);
       for (const role of roles) await admin.query(`DROP ROLE IF EXISTS ${escapeIdentifier(role)}`);
     } finally {
       await admin.end();
