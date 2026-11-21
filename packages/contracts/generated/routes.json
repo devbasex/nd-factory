@@ -25,6 +25,12 @@
   },
   {
     "method": "POST",
+    "path": "/v1/login_links/create",
+    "operation": "login_links.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
     "path": "/v1/logins/create",
     "operation": "logins.create",
     "endpoint": "user"
