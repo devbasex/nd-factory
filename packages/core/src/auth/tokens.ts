@@ -172,10 +172,27 @@ function causeOf(error: unknown): string {
   return error instanceof Error ? error.constructor.name : "unknown";
 }
 
+// 利用者のプールの発行元（地域の形と全体の形。aws-jwt-verify が両方を受ける）。
+// aws-jwt-verify は設定に無い発行元の token を設定の誤り（ParameterValidationError）として投げるため、渡す前に照らして 401 にする
+function issuersOf(userPoolId: string): readonly string[] {
+  const region = userPoolId.split("_")[0] ?? "";
+  return [`https://cognito-idp.${region}.amazonaws.com/${userPoolId}`, `https://issuer-cognito-idp.${region}.amazonaws.com/${userPoolId}`];
+}
+
+function issuerOf(token: string): unknown {
+  if (!isJwtShape(token)) return undefined;
+  const payload = decodeSegment(token.split(".")[1] ?? "");
+  return isRecord(payload) ? payload["iss"] : undefined;
+}
+
 export function createCognitoCheck(config: CognitoConfig, options: CognitoCheckOptions = {}): CognitoCheck {
+  const issuers = issuersOf(config.userPoolId);
   const fetcher = options.fetcher ?? new SimpleFetcher({ defaultRequestOptions: { responseTimeout: IDP_KEYS_POLICY.response_timeout_ms } });
   const verifier = CognitoJwtVerifier.create({ userPoolId: config.userPoolId, tokenUse: "access", clientId: config.clientId }, { jwksCache: new SimpleJwksCache({ fetcher }) });
   return async (token, nowMs) => {
+    const iss = issuerOf(token);
+    if (typeof iss !== "string") return unauthorized("shape");
+    if (!issuers.includes(iss)) return unauthorized("endpoint");
     try {
       const payload = await verifier.verify(token);
       const sub = payload.sub;

@@ -215,6 +215,14 @@ describe("authenticate: 人（Cognito の access token）", () => {
     await expect(authenticate(req("user", cognitoToken({ exp: NOW_SEC + 1 })), later)).resolves.toEqual(UNAUTHORIZED);
   });
 
+  it("全体の形の発行元も通り、設定に無い発行元は鍵を取らずに unauthorized", async () => {
+    const fetcher = fakeFetcher();
+    const { deps } = setup({}, { fetcher });
+    await expect(authenticate(req("user", cognitoToken({ iss: "https://cognito-idp.us-west-2.amazonaws.com/us-west-2_OTHER" })), deps)).resolves.toEqual(UNAUTHORIZED);
+    expect(fetcher.calls).toHaveLength(0);
+    await expect(authenticate(req("user", cognitoToken({ iss: `https://issuer-cognito-idp.us-west-2.amazonaws.com/${POOL}` })), deps)).resolves.toMatchObject({ ok: true });
+  });
+
   it("公開鍵を取れないときは unavailable で、unauthorized にしない", async () => {
     const { deps, lines } = setup({}, { fetcher: fakeFetcher("fail") });
     await expect(authenticate(req("user", cognitoToken()), deps)).resolves.toEqual(UNAVAILABLE);
