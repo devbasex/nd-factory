@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ICruiseOptions, type ICruiseResult, cruise } from "dependency-cruiser";
 import extractDepcruiseOptions from "dependency-cruiser/config-utl/extract-depcruise-options";
@@ -230,4 +230,45 @@ describe("受け入れ条件 1・4・7: .dependency-cruiser.cjs の依存の向�
     },
     CRUISE_TIMEOUT,
   );
+});
+
+/** 料金プランの値の規則が禁じる先の正規表現 */
+function planValuePattern(opts: Options): RegExp {
+  const rule = forbiddenOf(opts).find((r) => r.name === "plan-values-only-in-usage-limit");
+  const to = rule !== undefined && "to" in rule ? rule.to : undefined;
+  const path = to !== undefined && "path" in to ? to.path : undefined;
+  if (typeof path !== "string") throw new Error("plan-values-only-in-usage-limit の to.path が 1 つの正規表現でない");
+  return new RegExp(path);
+}
+
+/** 置き場の下のファイル（node_modules の外）を、リポジトリの根からのパスで返す */
+function listFiles(dir: string): string[] {
+  return readdirSync(join(ROOT, dir), { withFileTypes: true, recursive: true })
+    .filter((e) => e.isFile())
+    .map((e) => relative(ROOT, join(e.parentPath, e.name)))
+    .filter((f) => !f.split("/").includes("node_modules"));
+}
+
+/** 料金プランの値のファイルらしいもの（名前に plan を含むファイルと exports の ./plans の行き先）のうち、規則の外のもの */
+function planFilesOutsideRule(files: string[], exportsField: Record<string, unknown>, pattern: RegExp): string[] {
+  const candidates = files.filter((f) => /plan/i.test(posix.basename(f)));
+  const target = exportsField["./plans"];
+  if (typeof target === "string") candidates.push(posix.join("packages/contracts", target));
+  return [...new Set(candidates)].filter((f) => !pattern.test(f));
+}
+
+describe("受け入れ条件 4: 料金プランの値の規則がリポジトリの実際の配置を照らす（#29 への引き継ぎ）", () => {
+  it("規則の外の名前（作り物）は見つかる", () => {
+    const pattern = planValuePattern(options);
+    expect(planFilesOutsideRule(["packages/contracts/data/pricing-plans.json", "packages/contracts/data/plans.json"], { "./plans": "./src/plan-values.ts" }, pattern)).toEqual([
+      "packages/contracts/data/pricing-plans.json",
+      "packages/contracts/src/plan-values.ts",
+    ]);
+  });
+
+  it("packages/contracts の料金プランの値のファイルは、すべて規則の対象に入る", () => {
+    const manifest = JSON.parse(readFileSync(join(ROOT, "packages/contracts/package.json"), "utf8")) as { exports?: Record<string, unknown> };
+    const files = listFiles("packages/contracts").filter((f) => /^packages\/contracts\/(data|src)\//.test(f));
+    expect(planFilesOutsideRule(files, manifest.exports ?? {}, planValuePattern(options))).toEqual([]);
+  });
 });

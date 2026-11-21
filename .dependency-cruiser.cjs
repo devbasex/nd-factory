@@ -8,8 +8,10 @@ const REPO_FILE = "^(packages|apps|infra|tools)/";
 const REACT_PACKAGES = "(react|react-dom|@vitejs/plugin-react|@types/react|@types/react-dom)";
 
 /**
- * 料金プランの値のデータと、それを読む書き出しのファイル（#29 が置く）。名前は `eslint.config.js` の
- * `PLAN_EXPORT`（`@nd-factory/contracts/plans`）と、事実と方針のデータの置き場 `packages/contracts/data/` に合わせる
+ * 料金プランの値のデータと、それを読む書き出しのファイル（#29 が置く。#1 の設計の「#29 へ渡す欠け」）。名前は
+ * `eslint.config.js` の `PLAN_EXPORT`（`@nd-factory/contracts/plans`）と、事実と方針のデータの置き場
+ * `packages/contracts/data/` に合わせる。`packages/contracts` の名前に `plan` を含むファイルがここに合わないと
+ * `tools/test/deps-config.test.ts` が落ちる
  */
 const PLAN_VALUE_FILES = "^packages/contracts/(data/plans\\.json|src/plans\\.ts)$";
 
