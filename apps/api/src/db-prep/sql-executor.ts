@@ -46,6 +46,18 @@ export async function inTransaction<T>(
   return out;
 }
 
+// 文が返す最初の行の、真偽の列を 1 つ読む。行が無いか、列が true でなければ false
+export async function readFlag(
+  sql: SqlExecutor,
+  stmt: string,
+  column: string,
+  params: SqlParam[] | undefined,
+  opts: { database: string; transactionId?: string },
+): Promise<boolean> {
+  const [row] = await sql.execute(stmt, params, opts);
+  return row?.[column] === true;
+}
+
 // 管理の役割が持つデータベース。nd_prep のスキーマはここに置く
 export const ADMIN_DATABASE = "postgres";
 

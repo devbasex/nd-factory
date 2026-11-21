@@ -1,7 +1,7 @@
 import { PROGRESS_DB_IDENT_SHAPE } from "@nd-factory/contracts/db-prep";
 import { escapeIdentifier } from "pg";
 import { prepareRolePassword } from "./role-password.ts";
-import { ADMIN_DATABASE, inTransaction, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
+import { ADMIN_DATABASE, inTransaction, readFlag, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
 
 // プロジェクトと、そのデータベースと役割の名前。名前は API（#6）が無作為に作り、関数は口から読む
 export type ProjectIdent = { projectId: string; database: string; role: string };
@@ -53,17 +53,6 @@ function assertIdent(project: ProjectIdent): void {
   if (project.projectId.length === 0) throw new Error("プロジェクトの ID が空");
   if (!PROGRESS_DB_IDENT_SHAPE.test(project.database)) throw new Error("データベースの名前が形に合わない");
   if (!PROGRESS_DB_IDENT_SHAPE.test(project.role)) throw new Error("役割の名前が形に合わない");
-}
-
-async function readFlag(
-  sql: SqlExecutor,
-  stmt: string,
-  column: string,
-  params: SqlParam[] | undefined,
-  opts: { database: string; transactionId?: string },
-): Promise<boolean> {
-  const [row] = await sql.execute(stmt, params, opts);
-  return row?.[column] === true;
 }
 
 // --- 結び付き（claimBinding） ---

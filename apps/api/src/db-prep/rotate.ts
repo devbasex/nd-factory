@@ -2,7 +2,7 @@ import { PROGRESS_DB_IDENT_SHAPE } from "@nd-factory/contracts/db-prep";
 import { CREATE_SCHEMA, REVOKE_SCHEMA, SCHEMA_LOCK, SCHEMA_PRESENT, tablePresent, tablePresentFresh } from "./nd-prep-schema.ts";
 import type { ProjectIdent } from "./provision.ts";
 import { passwordCommandsRestriction, prepareRolePassword } from "./role-password.ts";
-import { ADMIN_DATABASE, inTransaction, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
+import { ADMIN_DATABASE, inTransaction, readFlag, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
 
 // 差し替えの結果。recorded は確定の後に記された番号（applied なら渡した番号）
 export type RotateResult = { kind: "applied" | "superseded_equal" | "superseded_greater"; recorded: number };
@@ -122,16 +122,11 @@ async function authTimeoutMs(sql: SqlExecutor, opts: TxOpts): Promise<number> {
   return s * 1000;
 }
 
-async function present(sql: SqlExecutor, stmt: string, opts: TxOpts): Promise<boolean> {
-  const [row] = await sql.execute(stmt, undefined, opts);
-  return row?.present === true;
-}
-
 async function ensureTable(sql: SqlExecutor, opts: TxOpts): Promise<void> {
-  if (await present(sql, TABLE_PRESENT, opts)) return;
+  if (await readFlag(sql, TABLE_PRESENT, "present", undefined, opts)) return;
   await sql.execute(SCHEMA_LOCK, undefined, opts);
-  if (await present(sql, TABLE_PRESENT_FRESH, opts)) return;
-  if (!(await present(sql, SCHEMA_PRESENT, opts))) {
+  if (await readFlag(sql, TABLE_PRESENT_FRESH, "present", undefined, opts)) return;
+  if (!(await readFlag(sql, SCHEMA_PRESENT, "present", undefined, opts))) {
     await sql.execute(CREATE_SCHEMA, undefined, opts);
     await sql.execute(REVOKE_SCHEMA, undefined, opts);
   }
