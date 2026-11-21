@@ -299,6 +299,7 @@ MCP の道具の入力の形（承認済みの `createMcpHandler` と #2 の生�
   - 事後条件: どの起動でも、作業の木の `ndf-pin.json` の固定の点と、既定の枝の先端の両方を照らす（設計文書の決定 6）。固定の点の食い違いで終了コード 1、先端の食い違いは要約に並べて 0
   - 出力の行（標準出力と要約の両方）: `checked: fixed <固定の点のコミット> 1-6`・`checked: tip <先端のコミット> 1-6`・`skip: no-contract-use <固定の点のコミット>`（使い方の書き出しが無く、1〜6 を照らさなかった）。先端を取れなければ `checked: tip` を出さず、要約に先端を照らさなかったと出す
   - 副作用: 一時のディレクトリへの取得、要約のファイルへの追記（ワークフローは `GITHUB_STEP_SUMMARY` を渡す）
+- 固定の点（`ndf-pin.json`）と NDF の契約の使い方の書き出しは、どちらも `--root` の作業の木から解決する。書き出しは作業の木の `package.json` を起点に、先にパッケージ本体（`@nd-factory/contracts`）を Node と同じ探し方で引き、本体が作業の木の外なら終了コード 2。作業の木でパッケージを引けないときも 2 にし、書き出しが無い（`skip: no-contract-use`）として通さない。書き出しが無いとするのは、そのパッケージ自身の `exports` が書き出しを持たない（自己参照の解決が `ERR_PACKAGE_PATH_NOT_EXPORTED`）ときだけで、書き出しの読み込みの中（依存のモジュール）から出た例外は 2。解決した書き出しが作業の木の外でも 2
 - 固定の点のコミットは `ndf-pin.json` から読む。キーの名前は参照の検査の書き方に倣って定数に置き、キーを読む行に大小の比べの記号と矢印の関数を置かない（参照の検査の版の比べに当たるため）
 
 照らすこと（実行の文書の (1)〜(5) と、使う口の有無）:
@@ -307,12 +308,13 @@ MCP の道具の入力の形（承認済みの `createMcpHandler` と #2 の生�
 | --- | --- | --- | --- |
 | 1 | 見本 26 件を呼び出しの判定へ通し、`valid` と同じ判定になる | `C/domains/entrypoint-cases.json`・`C/domains/entrypoints.json` | 呼び出しの判定 |
 | 2 | `version.json` の `history` の最後の行（版と sha256）が受ける組にある | `C/version.json` | 受ける組 |
-| 3 | 使う口と実行の場（ホステッド・手元のマシン）の組ごとに、`set_by: service` の名前とその口の `env` 列の名前が、使い方のその組の渡す環境変数の名前を含む | `C/domains/env.json`・`C/domains/entrypoints.json` | 口と実行の場の組ごとの渡す環境変数の名前 |
+| 3 | 使う口と実行の場（ホステッド・手元のマシン）の組ごとに、使い方のその組の渡す環境変数の名前が、その口の `env` 列にあり、`env.json` の行にある。使い方の `set_by` の許容（名前と、その名前の契約の `set_by` の値の組）に載せた名前は、その行の `set_by` が載せた値と一致する（`service` でも、載せた値と違えば食い違い）。載せない名前だけ、その行の `set_by` が `service` である | `C/domains/env.json`・`C/domains/entrypoints.json` | 口と実行の場の組ごとの渡す環境変数の名前・`set_by` の許容（`envSetBy`） |
 | 4 | `reader: service` の読むファイルの `fields` が、翻訳が読む項目を含む。読むファイルの行が契約にある | `C/domains/ndf-files.json` | 読むファイルと項目 |
-| 5 | 区間の報告の `shape.values`・`shape.items`・`shape.required`・`shape.material` が、ランナーが読む値と項目を含み、同じファイルの `cases` の見本を区間の報告の読み取りへ通して `result` と `errors` の有無が同じ判定になる | `C/hooks/unattended-report.json` | 区間の報告から読む値と項目・区間の報告の読み取り |
+| 5 | 区間の報告の `shape.values`・`shape.items`・`shape.required`・`shape.material` が、ランナーが読む値と項目を含み（`shape.required` は値ごとに、ランナーが無条件に要るとする項目が `always` にあり、条件つきで要るとする項目が、同じ条件（`when` の行の `need` のほかの鍵。`item`・`prefix`・`equals` など）の行の `need` か `always` にある）、同じファイルの `cases` の見本を区間の報告の読み取りへ通して `result` と `errors` の有無が同じ判定になる | `C/hooks/unattended-report.json` | 区間の報告から読む値と項目・区間の報告の読み取り |
 | 6 | 使う口がすべて契約の口の表にある | `C/domains/entrypoints.json` | 使う口 |
 
-- 先端では、通っても `C/hooks/unattended-report.json` の `shape` を固定の点と比べ、差分を要約に並べる（実行の文書の「通ったときの差分」）
+- 照らすこと 3 の `set_by` の許容: ランナー（サービスの実行ジョブ）が入れる名前は `set_by: service` の行である。`service` でない行の名前をランナーが渡すのは、次の 2 つに限り、使い方の `envSetBy` に名前と契約の `set_by` の値の組で載せる。(a) 利用者に代わって取得して渡す資格情報（固定の点の `GH_TOKEN` は `set_by: user`。実行の設計でランナーが取得して渡す）。(b) 利用者に代わってレーンの作業場所の下を指す状態の保存先の根（固定の点の `NDF_STATE_HOME` は `set_by: user`。実行の設計の「渡す環境変数」でランナーが渡す）。`envSetBy` に載せた名前は、契約の `set_by` がその値と同じかを先に照らし（`user` から `service` へ変わっても食い違い）、載せない名前にだけ `service` を求める。`envSetBy` に無い `service` でない名前（NDF・ランタイム・CI が入れる名前、`service` から `user` へ移った名前）と、`envSetBy` と契約の `set_by` が違う名前は食い違い
+- 先端では、通っても `C/hooks/unattended-report.json` の `shape` を固定の点と比べ、差分を要約に並べる（実行の文書の「通ったときの差分」）。`shape.required` は値ごとに `always` の項目と、`when` の条件（`need` のほかの鍵を含む）と条件ごとの `need` の差分を並べ、条件だけが変わっても差分に出す。足された・消えた値と条件も、片側を空として `always` と条件ごとの `need` の差分を出す
 - 定数 `CONTRACT_USE_REQUIRED` が偽（#2 の前）の間だけ、書き出しが無いときに `skip: no-contract-use` で通す。#2 が書き出しを置く Pull Request で真にし、以後は書き出しが無いと `fail: no-contract-use` で終了コード 1
 - `ask-journal` の行が `fields` を持つようになったら、要約の知らせの行へ出す（失敗にしない。#41 の決定 106 の答えを知るため）
 - ランナー（#6）が実際に組み立てた呼び出しを判定に通すことと、判定が拒む呼び出しで NDF を起こさないことは、`apps/runner` のテストが照らす（#6 へ渡す欠け）
@@ -341,8 +343,9 @@ MCP の道具の入力の形（承認済みの `createMcpHandler` と #2 の生�
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `compareContract` | 作り物の契約と使い方で 0 件 | 使い方が `null` で照らさない。`ask-journal` に `fields` を足した契約で知らせが出て、食い違いにならない | 1〜6 のそれぞれ 1 つを壊した契約で、その番号の食い違いが出る |
-| `mainNdfContractCheck` | 固定の点だけの食い違いで 1、先端だけで 0 と要約の行。どちらも `checked: fixed` が出る | 使い方の書き出しが無いと `skip: no-contract-use` と 0 | 固定の点の取得の失敗で 2 |
+| `compareContract` | 作り物の契約と使い方で 0 件。固定の点の `env.json` と `entrypoints.json` の写しで、実行の設計の「渡す環境変数」どおりのホステッド・手元のマシンの名前を、`GH_TOKEN` と `NDF_STATE_HOME` を `envSetBy` に `user` で載せて照らすと 0 件 | 使い方が `null` で照らさない。`ask-journal` に `fields` を足した契約で知らせが出て、食い違いにならない。条件つきで要る項目が `always` へ移っても 0 件 | 1〜6 のそれぞれ 1 つを壊した契約で、その番号の食い違いが出る。固定の点の写しで `GH_TOKEN` か `NDF_STATE_HOME` を `envSetBy` に載せない・`service` の名前を `user` へ移す・`envSetBy` と違う `set_by` にする（`user` から `service` へ移すを含む）、で 3。`shape.required` の条件（`equals`）だけを変える・無条件の項目を条件つきへ移す、で 5 |
+| `reportShapeDiff` | `shape.required` の条件だけが変わると、消えた条件と足された条件を差分に出す。条件と `need` が一緒に変わると、消えた条件と足された条件のそれぞれの `need` を出す。値が足される・消えると、片側を空としてその値の `always` と条件ごとの `need` を出す | 形が同じなら差分を出さない | — |
+| `mainNdfContractCheck` | 固定の点だけの食い違いで 1、先端だけで 0 と要約の行。どちらも `checked: fixed` が出る | 使い方の書き出しが無いと `skip: no-contract-use` と 0。書き出しは `--root` の作業の木から解決する | 固定の点の取得の失敗で 2。`--root` の作業の木でパッケージを引けないと 2 |
 
 `fetchContract` はテストでネットワークを使わず、テストの中で作った git のリポジトリを NDF のリポジトリの代わりに渡す（URL を引数で差し替える）。
 
