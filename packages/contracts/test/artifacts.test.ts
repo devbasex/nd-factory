@@ -216,6 +216,8 @@ describe("edgeOf", () => {
     [{ min: 0.15, max: 0.35, multipleOf: 0.1 }, "lower", 0.2],
     [{ min: 0, max: 0.7, multipleOf: 0.01 }, "upper", 0.7],
     [{ max: 1.1, multipleOf: 0.2 }, "upper", 1],
+    [{ min: 1.5e-101, max: 3.5e-101, multipleOf: 1e-101 }, "upper", 3e-101],
+    [{ min: 1.5e-101, max: 3.5e-101, multipleOf: 1e-101 }, "lower", 2e-101],
   ] as const)("小数の倍数 %o の %s の端は %d（端そのものが倍数なら端）", (opts, side, expected) => {
     const v = edgeOf(opts, side, never);
     expect(v).toBe(expected);

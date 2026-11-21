@@ -175,15 +175,19 @@ function isMultipleOf(value: number, step: number): boolean {
   return z.number().multipleOf(step).safeParse(value).success;
 }
 
-// 数の小数の桁数（1e-7 のような指数の書き方も数える）。toFixed の上限の 100 で止める
-function decimalsOf(n: number): number {
-  const [mantissa = "", exponent = "0"] = n.toExponential().split("e");
-  return Math.min(100, Math.max(0, (mantissa.split(".")[1] ?? "").length - Number(exponent)));
+// 倍数の k 倍を 10 進で組む。step を「整数の仮数 × 10 の指数」に分け、k × 仮数を整数で掛けてから指数を付けて読む。
+// toFixed は 100 桁までしか書けず 1e-101 の倍数をゼロに丸めるため使わない（指数の書き方なら桁数に上限が無い）
+function multipleAt(k: number, step: number): number {
+  const [mantissa = "0", exponent = "0"] = step.toExponential().split("e");
+  const fraction = mantissa.split(".")[1] ?? "";
+  const digits = BigInt(mantissa.replace(".", ""));
+  if (!Number.isSafeInteger(k)) return k * step;
+  return Number(`${(BigInt(k) * digits).toString()}e${Number(exponent) - fraction.length}`);
 }
 
 // 端の値。上の端は上限（無ければ下限）、下の端は下限（無ければ上限）に寄せる。multipleOf があり端そのものが倍数でなければ、
 // 範囲の内側で端に最も近い倍数へ丸める。小数の倍数は除算と乗算の誤差（0.3 / 0.1 = 2.9999…・3 * 0.1 = 0.3000…04）が出るため、
-// 端そのものを Zod と同じ判定で先に照らし、丸めた値は倍数の小数の桁でそろえてから照らす
+// 端そのものを Zod と同じ判定で先に照らし、丸めた値は倍数を 10 進で組んでから照らす
 export function edgeOf(opts: Bounds | undefined, side: Side, fallback: () => number): number {
   const lo = opts?.min !== undefined && Number.isFinite(opts.min) ? opts.min : undefined;
   const hi = opts?.max !== undefined && Number.isFinite(opts.max) ? opts.max : undefined;
@@ -192,8 +196,7 @@ export function edgeOf(opts: Bounds | undefined, side: Side, fallback: () => num
   const step = opts?.multipleOf;
   if (!step || isMultipleOf(end, step)) return end;
   const towardLower = end === hi;
-  const digits = decimalsOf(step);
-  const at = (k: number) => Number((k * step).toFixed(digits));
+  const at = (k: number) => multipleAt(k, step);
   const k = towardLower ? Math.floor(end / step) : Math.ceil(end / step);
   // 誤差で k が 1 つずれても拾えるよう、端に近い側から前後 1 つを照らす
   const near = towardLower ? [k + 1, k, k - 1] : [k - 1, k, k + 1];
