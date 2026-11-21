@@ -4,7 +4,14 @@ import { describe, expect, it } from "vitest";
 import { type TerminateOptions, rotateRole, terminateRoleConnections } from "../../src/db-prep/rotate.ts";
 import { ADMIN_DATABASE, type Row, type SqlExecutor } from "../../src/db-prep/sql-executor.ts";
 import { FakeSqlExecutor, type SqlCall } from "./fake-sql-executor.ts";
-import { type TestDatabase, describePg, describePgDisposable, withTestDatabase } from "./pg-executor.ts";
+import {
+  PG_AUTH_TIMEOUT_S,
+  type TestDatabase,
+  authTimeoutClusterUrl,
+  describePg,
+  describePgAuthTimeout,
+  withTestDatabase,
+} from "./pg-executor.ts";
 
 // 作り物の値だけを使う
 const PROJECT = { projectId: "prj_acme_a", database: "acme_db_aaaaaaaa", role: "acme_role_aaaaaaaa" };
@@ -320,6 +327,15 @@ describe("terminateRoleConnections（作り物の SqlExecutor）", () => {
     }
   });
 
+  it("鎖を持つ pid の読みは、対象の役割が繋げないデータベースの鎖を持つか待つ pid（認証を終えたほかの接続）を外す", async () => {
+    const fake = fakeDb({ recorded: current });
+    await terminateRoleConnections(fake, PROJECT.role, 3, fakeClock().options());
+    const read = executes(fake).find((c) => c.sql.includes("AS holders"));
+    expect(read?.sql).toContain("classid = 'pg_catalog.pg_database'::regclass");
+    expect(read?.sql).toContain("NOT (d.datallowconn AND has_database_privilege(CAST(:role_name AS text), d.oid, 'CONNECT'))");
+    expect(read?.params).toEqual([{ name: "role_name", value: PROJECT.role }]);
+  });
+
   it("起動の途中の接続が残る間だけ、期限を認証の時間切れ＋余裕まで延ばし、そこでも残ればその数を残りに足して返す", async () => {
     const fake = fakeDb({ recorded: current, remaining: [1], holders: ["101,102"], stillStarting: (given) => given, authTimeoutS: 30 });
     const clock = fakeClock();
@@ -535,6 +551,45 @@ async function gatedOldConnection(db: TestDatabase, r: TestRole): Promise<{ rele
   return { release, connected: settled, client };
 }
 
+// 役割 r が CONNECT を持つ別のデータベースを作り、名前を変える文を確定せずに持ってデータベースの鎖を取ったままにする。
+// connect は r の今のパスワードでそのデータベースへ繋ぎ始め、認証の後にこの鎖を待つ。unlock は巻き戻して鎖を放す
+async function lockedDatabase(
+  db: TestDatabase,
+  r: TestRole,
+): Promise<{ connect(): Promise<Client>; waitForWaiter(): Promise<void>; unlock(): Promise<void> }> {
+  const name = `nd_test_lk_${randomBytes(5).toString("hex")}`;
+  db.dropDatabaseLater(name);
+  const admin = await db.connect();
+  await admin.query(`CREATE DATABASE ${escapeIdentifier(name)} WITH ALLOW_CONNECTIONS false`);
+  await admin.query(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier(name)} FROM PUBLIC`);
+  await admin.query(`GRANT CONNECT ON DATABASE ${escapeIdentifier(name)} TO ${escapeIdentifier(r.role)}`);
+  await admin.query(`ALTER DATABASE ${escapeIdentifier(name)} WITH ALLOW_CONNECTIONS true`);
+  const holder = await db.connect();
+  await holder.query("BEGIN");
+  await holder.query(`ALTER DATABASE ${escapeIdentifier(name)} RENAME TO ${escapeIdentifier(`${name}_x`)}`);
+  let open = true;
+  return {
+    connect: () => db.connect(name, { user: r.role, password: r.password }),
+    async waitForWaiter() {
+      for (let i = 0; i < 100; i += 1) {
+        const res = await admin.query<{ n: number }>(
+          "SELECT count(*)::int AS n FROM pg_locks l JOIN pg_database d ON d.oid = l.objid" +
+            " WHERE l.locktype = 'object' AND l.classid = 'pg_database'::regclass AND NOT l.granted AND d.datname = $1",
+          [name],
+        );
+        if ((res.rows[0]?.n ?? 0) > 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("データベースの鎖を待つ接続が現れなかった");
+    },
+    async unlock() {
+      if (!open) return;
+      open = false;
+      await holder.query("ROLLBACK");
+    },
+  };
+}
+
 // 関数の差し替えの段（パスワードを書く → 古い接続を切る）
 async function rotateAndTerminate(sql: SqlExecutor, r: TestRole, seq: number): Promise<unknown> {
   const rotated = await rotateRole(sql, { ...r, seq });
@@ -675,6 +730,54 @@ describePg("terminateRoleConnections（PostgreSQL）", () => {
     });
   });
 
+  it("ほかのプロジェクトの接続が認証の後に自分のデータベースの鎖を待ち続けても、対象外として残り 0 で終わる", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      const r = await newRole(db);
+      const other = await newRole(db);
+      const otherDb = await lockedDatabase(db, other);
+      try {
+        const old = await connectAs(db, r);
+        await old.query("SELECT 1");
+        // ほかのプロジェクトの役割が認証を終え、自分のデータベースの鎖を待つ（pg_stat_activity に載らず、認証の時間切れも効かない）
+        const waiting = otherDb.connect();
+        await otherDb.waitForWaiter();
+        expect(await rotateRole(sql, { ...r, password: newPassword(), seq: 1 })).toMatchObject({ kind: "applied" });
+        const begin = performance.now();
+        const result = await terminateRoleConnections(sql, r.role, 1, { deadlineMs: 300, pollMs: 50 });
+        expect(result).toEqual({ kind: "done", remaining: 0 });
+        // 認証の時間切れ（既定 60 秒）まで延ばさない
+        expect(performance.now() - begin).toBeLessThan(10_000);
+        expect(await alive(old)).toBe(false);
+        await otherDb.unlock();
+        // ほかの役割の接続は切らない
+        expect(await alive(await waiting)).toBe(true);
+      } finally {
+        await otherDb.unlock();
+      }
+    });
+  });
+
+  it("対象の役割が繋げるデータベースの鎖を認証の後に待つ接続は判別できず、延ばした所でも残れば残りに数える", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      const r = await newRole(db);
+      const locked = await lockedDatabase(db, r);
+      try {
+        // 対象の役割が古いパスワードで認証を終え、データベースの鎖を待つ
+        const waiting = locked.connect();
+        await locked.waitForWaiter();
+        expect(await rotateRole(sql, { ...r, password: newPassword(), seq: 1 })).toMatchObject({ kind: "applied" });
+        const result = await terminateRoleConnections(sql, r.role, 1, { deadlineMs: 300, pollMs: 50, startingWaitCapMs: 300 });
+        expect(result.kind === "done" && result.remaining).toBeGreaterThanOrEqual(1);
+        await locked.unlock();
+        await waiting.catch(() => undefined);
+      } finally {
+        await locked.unlock();
+      }
+    });
+  });
+
   it("境の時刻が記されていれば記し直さない", async () => {
     await withTestDatabase(async (db) => {
       const sql = db.executor();
@@ -740,22 +843,15 @@ describePg("terminateRoleConnections（PostgreSQL）", () => {
   });
 });
 
-// サーバーの認証の時間切れ（クラスタ全体の設定）を縮めるため、使い捨てのクラスタだけで打つ
-describePgDisposable("terminateRoleConnections（PostgreSQL・認証の時間切れ）", () => {
+// サーバーの認証の時間切れを縮めて起こした、この組だけが使うクラスタで打つ（クラスタ全体の設定を変えない）
+describePgAuthTimeout("terminateRoleConnections（PostgreSQL・認証の時間切れ）", () => {
   it("ほかの役割の認証を止めたままでも、サーバーの時間切れの後に対象の役割の差し替えが残り 0 で終わる", async () => {
-    await withTestDatabase(async (db) => {
-      const admin = await db.connect();
-      await admin.query("ALTER SYSTEM SET authentication_timeout = '3s'");
-      await admin.query("SELECT pg_reload_conf()");
-      try {
-        // 設定の読み直しが届いてから接続を始める（認証の時間切れは接続を始めたときの値で決まる）
-        for (let i = 0; i < 50; i += 1) {
-          const c = await db.connect();
-          const v = (await c.query<{ s: string }>("SELECT setting AS s FROM pg_settings WHERE name = 'authentication_timeout'")).rows[0]?.s;
-          await c.end();
-          if (v === "3") break;
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
+    await withTestDatabase(
+      async (db) => {
+        const admin = await db.connect();
+        // クラスタを短い認証の時間切れで起こしたことを確かめる（違えば、この試しは成り立たない）
+        const set = (await admin.query<{ s: string }>("SELECT setting AS s FROM pg_settings WHERE name = 'authentication_timeout'")).rows[0]?.s;
+        expect(set).toBe(String(PG_AUTH_TIMEOUT_S));
         const sql = db.executor();
         const r = await newRole(db);
         const other = await newRole(db);
@@ -773,10 +869,8 @@ describePgDisposable("terminateRoleConnections（PostgreSQL・認証の時間切
         } finally {
           stalled.release();
         }
-      } finally {
-        await admin.query("ALTER SYSTEM RESET authentication_timeout");
-        await admin.query("SELECT pg_reload_conf()");
-      }
-    });
+      },
+      { url: authTimeoutClusterUrl() },
+    );
   });
 });

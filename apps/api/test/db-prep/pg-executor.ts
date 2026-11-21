@@ -161,6 +161,11 @@ const PG_URL = process.env.ND_TEST_PG_URL;
 // これが CI の渡す "1" と完全に一致するときだけ打つ（off・no・打ち間違いでは打たない）。
 // 手元の既存のクラスタを ND_TEST_PG_URL で指しても、その利用者の権限を変えない
 const PG_DISPOSABLE = process.env.ND_TEST_PG_DISPOSABLE_CLUSTER === "1";
+// 認証の時間切れを短くして起こした、そのテストの組だけが使うクラスタの接続の値。クラスタ全体の設定を変えるテストを、
+// ほかのテストが使うクラスタで打たない（ALTER SYSTEM は並んで走るテストの新しい接続にも効き、前の値を戻せない）
+const PG_AUTH_TIMEOUT_URL = process.env.ND_TEST_PG_AUTH_TIMEOUT_URL;
+// そのクラスタを起こすときの認証の時間切れ（秒）。テストはこの値で起きていることを読んで確かめ、変えない
+export const PG_AUTH_TIMEOUT_S = 3;
 
 function truthy(raw: string | undefined): boolean {
   const v = raw?.trim().toLowerCase();
@@ -202,6 +207,27 @@ export function describePgDisposable(name: string, fn: () => void): void {
   }
 }
 
+// 認証の時間切れを短くした専用のクラスタを使う、PostgreSQL を使うテストの組。ND_TEST_PG_AUTH_TIMEOUT_URL が要る。
+// 無ければ CI では落とし、手元では飛ばす。組の中では withTestDatabase に { url: authTimeoutClusterUrl() } を渡す
+export function describePgAuthTimeout(name: string, fn: () => void): void {
+  if (PG_AUTH_TIMEOUT_URL) {
+    describe(name, { timeout: 60_000 }, fn);
+  } else if (isCi()) {
+    describe(name, () => {
+      it("ND_TEST_PG_AUTH_TIMEOUT_URL が要る", () => {
+        throw new Error(`CI では authentication_timeout を ${PG_AUTH_TIMEOUT_S}s で起こした専用のコンテナを指す`);
+      });
+    });
+  } else {
+    describe.skip(name, fn);
+  }
+}
+
+export function authTimeoutClusterUrl(): string {
+  if (!PG_AUTH_TIMEOUT_URL) throw new Error("ND_TEST_PG_AUTH_TIMEOUT_URL が無い");
+  return PG_AUTH_TIMEOUT_URL;
+}
+
 export type Credentials = { user: string; password: string };
 
 export type TestDatabase = {
@@ -224,9 +250,13 @@ export type TestDatabase = {
   dropDatabaseLater(database: string): void;
 };
 
-function urlFor(database: string, credentials?: Credentials): string {
+function baseUrl(): string {
   if (!PG_URL) throw new Error("ND_TEST_PG_URL が無い");
-  const url = new URL(PG_URL);
+  return PG_URL;
+}
+
+function urlFor(base: string, database: string, credentials?: Credentials): string {
+  const url = new URL(base);
   url.pathname = `/${encodeURIComponent(database)}`;
   if (credentials) {
     url.username = encodeURIComponent(credentials.user);
@@ -241,13 +271,12 @@ export function gatedClientConfig(connectionString: string, user: string, passwo
   return { ...parseIntoClientConfig(connectionString), user, password };
 }
 
-function adminDatabaseOfUrl(): string {
-  if (!PG_URL) throw new Error("ND_TEST_PG_URL が無い");
-  return decodeURIComponent(new URL(PG_URL).pathname.replace(/^\//, "")) || "postgres";
+function adminDatabaseOfUrl(base: string): string {
+  return decodeURIComponent(new URL(base).pathname.replace(/^\//, "")) || "postgres";
 }
 
-async function open(database: string, credentials?: Credentials): Promise<Client> {
-  const client = new Client({ connectionString: urlFor(database, credentials) });
+async function open(base: string, database: string, credentials?: Credentials): Promise<Client> {
+  const client = new Client({ connectionString: urlFor(base, database, credentials) });
   // 切られた接続の誤りは打った文の失敗で受ける。出来事のまま放ると処理が落ちる
   client.on("error", () => undefined);
   await client.connect();
@@ -255,10 +284,11 @@ async function open(database: string, credentials?: Credentials): Promise<Client
 }
 
 // テストごとに使い捨てのデータベースを作り、終えたら接続ごと消す。PUBLIC は接続できない（接続の値の役割と、
-// 明示して CONNECT を与えた役割だけが繋げる）
-export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>): Promise<T> {
+// 明示して CONNECT を与えた役割だけが繋げる）。url を渡せば、ND_TEST_PG_URL の代わりにそのクラスタで作る
+export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>, options: { url?: string } = {}): Promise<T> {
+  const base = options.url ?? baseUrl();
   const name = `nd_test_${randomBytes(6).toString("hex")}`;
-  const admin = await open(adminDatabaseOfUrl());
+  const admin = await open(base, adminDatabaseOfUrl(base));
   const clients: Client[] = [];
   const executors: PgExecutor[] = [];
   const roles: string[] = [];
@@ -272,7 +302,7 @@ export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>):
     await admin.query(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier(name)} FROM PUBLIC`);
     await admin.query(`ALTER DATABASE ${escapeIdentifier(name)} WITH ALLOW_CONNECTIONS true`);
     const connect = async (database: string = name, credentials?: Credentials): Promise<Client> => {
-      const c = await open(database, credentials);
+      const c = await open(base, database, credentials);
       clients.push(c);
       return c;
     };
@@ -280,7 +310,7 @@ export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>):
       name,
       connect,
       connectGated(user, password) {
-        const client = new Client(gatedClientConfig(urlFor(name), user, password));
+        const client = new Client(gatedClientConfig(urlFor(base, name), user, password));
         client.on("error", () => undefined);
         clients.push(client);
         return { client, connected: client.connect().then(() => undefined) };
