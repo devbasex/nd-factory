@@ -193,6 +193,10 @@ const ROLE_EXISTS = "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE roln
 const EXISTING_CATALOG_READS =
   "SELECT c.relname::text AS name FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace" +
   " WHERE n.nspname = 'pg_catalog' AND c.relname = ANY (string_to_array(:names, ',')) ORDER BY 1";
+// PUBLIC からデータベースの接続と一時表を外す文（手順の 1 と 3）。名前はここで識別子として括る
+const REVOKE_PUBLIC_DATABASE = (database: string) =>
+  `REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier(database)} FROM PUBLIC`;
+
 // 取り消しの後の読み直し。REVOKE は取り消す権限が無いと警告だけで終わるため、権限の今の状態を読んで照らす。
 // PUBLIC がまだ CONNECT か TEMPORARY を持つデータベースの数と、渡した名前のうち見つかったデータベースの数
 const PUBLIC_DATABASE_GRANTS =
@@ -367,7 +371,7 @@ export async function provisionProject(
 
   // 1. クラスタに初めからあるデータベースへの接続と一時表を PUBLIC から外す（何度打っても同じ結果）
   for (const name of SYSTEM_DATABASES) {
-    await sql.execute(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier(name)} FROM PUBLIC`, undefined, ADMIN);
+    await sql.execute(REVOKE_PUBLIC_DATABASE(name), undefined, ADMIN);
   }
   await assertPublicDatabaseRevoked(sql, SYSTEM_DATABASES, ADMIN);
   // ほかのデータベースで PUBLIC の CONNECT が戻っていれば外す。続けて、postgres・template1 を含むすべてのデータベースで
@@ -382,7 +386,7 @@ export async function provisionProject(
 
   // 3. PUBLIC から外し、外れたことを読み直してから接続を許す。この時点で接続できるのは持ち主の管理の役割だけ
   await inTransaction(sql, ADMIN_DATABASE, async (opts) => {
-    await sql.execute(`REVOKE CONNECT, TEMPORARY ON DATABASE ${db} FROM PUBLIC`, undefined, opts);
+    await sql.execute(REVOKE_PUBLIC_DATABASE(project.database), undefined, opts);
     await assertPublicDatabaseRevoked(sql, [project.database], opts);
     await sql.execute(`ALTER DATABASE ${db} WITH ALLOW_CONNECTIONS true`, undefined, opts);
   });
