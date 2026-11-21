@@ -1,3 +1,4 @@
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -9,12 +10,15 @@ import {
   buildReasons,
   buildRoutes,
   checkExamples,
+  edgeOf,
+  examplesOf,
   fakeExamples,
 } from "../scripts/artifacts.ts";
 import { idOf } from "../src/ids.ts";
-import { defineOperation, itemReasonsOf, okItem, type OperationDef, pendingShape, resultSchemaOf } from "../src/operation.ts";
+import { defineOperation, itemReasonsOf, okItem, okList, type OperationDef, pendingShape, resultSchemaOf } from "../src/operation.ts";
 import { OPERATIONS } from "../src/operations/index.ts";
-import { money } from "../src/values.ts";
+import { settingsSchema } from "../src/settings.ts";
+import { awsAccountId, money } from "../src/values.ts";
 import { FIXTURE_CREATE, FIXTURE_LIST, FIXTURE_OPERATIONS } from "./fixtures/operations.ts";
 
 const ALL: readonly OperationDef[] = [...OPERATIONS, ...FIXTURE_OPERATIONS];
@@ -50,6 +54,21 @@ describe("checkExamples", () => {
     expect(problems[0]).toMatchObject({ operation: "fixture_bills.update", scene: "normal", index: 0 });
     expect(problems[0]?.problem).toContain(needle);
   });
+
+  it.each([
+    ["作り物でないメール", { note: "someone@corp.test" }, ["someone", "corp.test"]],
+    ["12 桁の別の数", { note: "acct 210987654321" }, ["210987654321"]],
+    ["形に合わない値", { note: "a" + "1".repeat(3), budget: { amount_minor: "210987654321", currency: "USD" } }, ["210987654321"]],
+  ])("%s の診断は当たった値を含めない", (_label, value, secrets) => {
+    const problems = checkExamples([withExamples(value)]);
+    expect(problems.length).toBeGreaterThan(0);
+    for (const p of problems) for (const secret of secrets) expect(p.problem).not.toContain(secret);
+  });
+
+  it("空の場面の書いた見本も結果の形で照らす", () => {
+    const op = defineOperation({ ...FIXTURE_LIST, name: "fixture_notes.list", examples: { empty: { ok: true, items: [] } }, owner: "#2" });
+    expect(checkExamples([op])).toEqual([expect.objectContaining({ scene: "empty", index: 0 })]);
+  });
 });
 
 describe("fakeExamples", () => {
@@ -57,7 +76,7 @@ describe("fakeExamples", () => {
     const first = fakeExamples(FIXTURE_CREATE);
     expect(fakeExamples(FIXTURE_CREATE)).toEqual(first);
     expect(first.normal).toHaveLength(3);
-    expect(first.edge).toHaveLength(1);
+    expect(first.edge).toHaveLength(2);
     for (const v of [...first.normal, ...first.edge]) expect(resultSchemaOf(FIXTURE_CREATE).safeParse(v).success).toBe(true);
   });
 
@@ -65,8 +84,93 @@ describe("fakeExamples", () => {
     const edge = fakeExamples(FIXTURE_LIST).edge[0] as { items: Array<{ title: string }> };
     expect(edge.items.length).toBeGreaterThan(0);
     for (const it of edge.items) expect(it.title).toHaveLength(200);
-    const created = fakeExamples(FIXTURE_CREATE).edge[0] as { item: { version: number } };
-    expect(created.item.version).toBe(Number.MAX_SAFE_INTEGER);
+    const [upper, lower] = fakeExamples(FIXTURE_CREATE).edge as Array<{ item: { version: number } }>;
+    expect(upper?.item.version).toBe(Number.MAX_SAFE_INTEGER);
+    expect(lower?.item.version).toBe(1);
+    const [, shortest] = fakeExamples(FIXTURE_LIST).edge as Array<{ items: unknown[] }>;
+    expect(shortest?.items).toEqual([]);
+  });
+
+  it("1024 字を超える上限の文字列も上限の長さにする", () => {
+    const op = defineOperation({ ...FIXTURE_CREATE, name: "fixture_texts.create", result: okItem(z.strictObject({ body: z.string().max(2000), short: z.string().min(3).max(5) })), examples: null, owner: "#2" });
+    const [upper, lower] = fakeExamples(op).edge as Array<{ item: { body: string; short: string } }>;
+    expect(upper?.item.body).toHaveLength(2000);
+    expect(upper?.item.short).toHaveLength(5);
+    expect(lower?.item.body).toHaveLength(0);
+    expect(lower?.item.short).toHaveLength(3);
+    expect(checkExamples([op])).toEqual([]);
+  });
+
+  it("メール・アカウント ID・接頭辞は作り物の値だけを生成し、見本の上書きなしで照らしを通る", () => {
+    const op = defineOperation({
+      ...FIXTURE_CREATE,
+      name: "fixture_accounts.create",
+      result: okItem(
+        z.strictObject({ mail: z.email(), mails: z.array(z.email()).max(3), account_id: awsAccountId, prefix: settingsSchema.shape.prefix, note: z.string().max(10).optional() }),
+      ),
+      examples: null,
+      owner: "#2",
+    });
+    const { normal, edge } = fakeExamples(op);
+    for (const v of [...normal, ...edge] as Array<{ item: { mail: string; mails: string[]; account_id: string; prefix: string } }>) {
+      expect(v.item.mail).toBe("ops@example.com");
+      for (const m of v.item.mails) expect(m).toBe("ops@example.com");
+      expect(v.item.account_id).toBe("123456789012");
+      expect(v.item.prefix).toBe("acme");
+    }
+    expect(checkExamples([op])).toEqual([]);
+  });
+});
+
+describe("edgeOf", () => {
+  const never = () => {
+    throw new Error("fallback を呼ばない");
+  };
+  it.each([
+    [{ min: 5, multipleOf: 3 }, "upper", 6],
+    [{ min: 5, multipleOf: 3 }, "lower", 6],
+    [{ max: 10, multipleOf: 3 }, "upper", 9],
+    [{ max: 10, multipleOf: 3 }, "lower", 9],
+    [{ min: 5, max: 10, multipleOf: 3 }, "upper", 9],
+    [{ min: 5, max: 10, multipleOf: 3 }, "lower", 6],
+    [{ min: -7, max: 7 }, "upper", 7],
+    [{ min: -7, max: 7 }, "lower", -7],
+  ] as const)("%o の %s の端は %d で、範囲と倍数を守る", (opts, side, expected) => {
+    expect(edgeOf(opts, side, never)).toBe(expected);
+  });
+
+  it("端の無いときは fallback", () => {
+    expect(edgeOf(undefined, "upper", () => 42)).toBe(42);
+  });
+
+  it("下限と倍数だけの数の形は、下の端の見本が形を通る", () => {
+    const op = defineOperation({ ...FIXTURE_CREATE, name: "fixture_steps.create", result: okItem(z.strictObject({ n: z.int().min(5).multipleOf(3) })), examples: null, owner: "#2" });
+    const [, lower] = fakeExamples(op).edge as Array<{ item: { n: number } }>;
+    expect(lower?.item.n).toBe(6);
+    expect(checkExamples([op])).toEqual([]);
+  });
+});
+
+describe("要素の追加の項目", () => {
+  const op = (item: z.ZodObject, name: string) =>
+    defineOperation({ ...FIXTURE_CREATE, name, item, result: okItem(z.strictObject({ a: z.string() })), examples: null, owner: "#2" });
+  const loose = op(z.object({ a: z.string() }), "fixture_loose.create");
+  const strict = op(z.strictObject({ a: z.string() }), "fixture_strict.create");
+  const ops = [loose, strict];
+  const ajv = new Ajv2020({ strict: true, validateFormats: false });
+  ajv.addSchema(buildOperationSchemas(ops), "ops");
+  const openapi = buildOpenApi(ops).components?.schemas ?? {};
+
+  it.each([
+    [loose, true],
+    [strict, false],
+  ] as const)("%s は Zod・operations.schema.json・OpenAPI で合否が同じ", (target, accepts) => {
+    const value = { a: "x", extra: 1 };
+    const byJsonSchema = ajv.getSchema(`ops#/$defs/${target.name}.item`);
+    const byOpenApi = new Ajv2020({ strict: false, validateFormats: false }).compile(openapi[`${target.name}.item`] as object);
+    expect((target.item as z.ZodType).safeParse(value).success).toBe(accepts);
+    expect(byJsonSchema?.(value)).toBe(accepts);
+    expect(byOpenApi(value)).toBe(accepts);
   });
 });
 
@@ -134,6 +238,23 @@ describe("buildDummy", () => {
       owner: "#2",
     });
     expect(buildDummy(get)?.empty).toEqual({ ok: false, status: 404, reason: "not_found" });
+  });
+
+  it("封筒が items・next_cursor のほかに必ず持つ項目は、空の一覧にも入り結果の形を通る", () => {
+    const answers = defineOperation({
+      name: "runner.fixture_answers.list",
+      endpoint: "runner",
+      access: "write",
+      item: z.strictObject({ lane_id: z.string() }),
+      result: okList(z.strictObject({ answer_id: z.string() })).extend({ delivered_seqs: z.array(z.int().min(0)) }),
+      owner: "#2",
+    });
+    const doc = buildDummy(answers);
+    expect(doc?.empty).toMatchObject({ ok: true, items: [], next_cursor: null, delivered_seqs: expect.any(Array) });
+    expect(resultSchemaOf(answers).safeParse(doc?.empty).success).toBe(true);
+    expect(checkExamples([answers])).toEqual([]);
+    const written = defineOperation({ ...answers, examples: { empty: { ok: true, items: [], next_cursor: null, delivered_seqs: [3] } }, owner: "#2" });
+    expect(examplesOf(written).empty).toEqual({ ok: true, items: [], next_cursor: null, delivered_seqs: [3] });
   });
 
   it("読む操作の失敗は書く操作の理由を含めない", () => {

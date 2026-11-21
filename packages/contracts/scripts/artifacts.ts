@@ -5,9 +5,10 @@ import { createDocument } from "zod-openapi";
 import { fake, seed, setFaker } from "zod-schema-faker/v4";
 import type { DummyDoc } from "../src/client.ts";
 import { SECRET_SHAPES } from "../src/data.ts";
+import { PREFIX_SHAPE } from "../src/settings.ts";
 import { isPending, itemReasonsOf, MAX_ITEMS, type OperationDef, resultSchemaOf, type Shape } from "../src/operation.ts";
 import { ITEM_REASONS, type ReasonDef, REQUEST_REASONS } from "../src/reasons.ts";
-import { itemsArray } from "../src/values.ts";
+import { AWS_ACCOUNT_ID, itemsArray } from "../src/values.ts";
 
 // 操作の表から生成物を組む（設計の「生成物」の表）。どの関数も値を返すだけで、書くのは generate.ts
 
@@ -25,9 +26,10 @@ export type RouteDoc = { method: "POST"; path: string; operation: string; endpoi
 export type ReasonPair = { code: string; status: number };
 export type ReasonsDoc = { request: ReasonPair[]; item: ReasonPair[]; operations: Record<string, ReasonPair[]> };
 export type PendingDoc = { operation: string; owner: string };
-export type ExampleScene = "normal" | "edge";
+export type ExampleScene = "normal" | "edge" | "empty";
 export type ExampleProblem = { operation: string; scene: ExampleScene; index: number; problem: string };
 export type Examples = { normal: unknown[]; edge: unknown[] };
+export type ExampleSet = Examples & { empty: unknown };
 
 const JSON_SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema";
 const DESTRUCTIVE_VERBS = new Set(["delete", "remove", "cancel", "revoke"]);
@@ -35,7 +37,9 @@ const NORMAL_COUNT = 3;
 // 作り物の値（AGENTS.md）。見本の 12 桁の数とメールの域名はこれだけを許す
 const FAKE_ACCOUNT_ID = "123456789012";
 const FAKE_MAIL_DOMAIN = "example.com";
-// 境目の見本の文字列の元の長さ。形の上限で切り詰める
+const FAKE_MAIL = `ops@${FAKE_MAIL_DOMAIN}`;
+const FAKE_PREFIX = "acme";
+// 境目の見本の文字列の元の長さの下限。形に上限がある文字列は、その上限まで伸ばしてから切り詰める
 const EDGE_TEXT_LENGTH = 1024;
 
 // 要求全体の誤りの本文（RFC 9457 の形。title・detail を持たず、拡張の reason に理由のコードを置く）
@@ -53,8 +57,10 @@ function resultShapeSchema(op: OperationDef): z.ZodType {
   return isPending(op.result) ? op.result.schema : resultSchemaOf(op);
 }
 
-function toSchema(schema: z.ZodType): JsonSchema {
-  const { $schema: _drop, ...rest } = z.toJSONSchema(schema) as JsonSchema;
+// 要素は受け取る値の形（入力のモード）、結果は返す値の形（出力のモード）で出す。zod-openapi も要求を入力、応答を出力で出すため、
+// z.object の要素は追加の項目を受け、strictObject だけが拒む（Zod と同じ合否）
+function toSchema(schema: z.ZodType, io: "input" | "output"): JsonSchema {
+  const { $schema: _drop, ...rest } = z.toJSONSchema(schema, { io }) as JsonSchema;
   return rest;
 }
 
@@ -70,8 +76,8 @@ function pair(r: ReasonDef): ReasonPair {
 export function buildOperationSchemas(ops: readonly OperationDef[]): JsonSchemaDoc {
   const defs: Record<string, JsonSchema> = {};
   for (const op of ops) {
-    defs[`${op.name}.item`] = toSchema(shapeSchema(op.item));
-    defs[`${op.name}.result`] = toSchema(resultShapeSchema(op));
+    defs[`${op.name}.item`] = toSchema(shapeSchema(op.item), "input");
+    defs[`${op.name}.result`] = toSchema(resultShapeSchema(op), "output");
   }
   return { $schema: JSON_SCHEMA_DRAFT, $defs: defs };
 }
@@ -162,71 +168,196 @@ function seedOf(name: string): number {
 }
 
 type Bounds = { min?: number; max?: number; multipleOf?: number };
+type Side = "upper" | "lower";
 
-// 端の値。上限があれば上限、無ければ下限に寄せる
-function edgeOf(opts: Bounds | undefined, fallback: () => number): number {
-  const end = opts?.max ?? opts?.min;
-  if (end === undefined || !Number.isFinite(end)) return fallback();
+// 端の値。上の端は上限（無ければ下限）、下の端は下限（無ければ上限）に寄せ、multipleOf の倍数のうち範囲の内側へ丸める
+export function edgeOf(opts: Bounds | undefined, side: Side, fallback: () => number): number {
+  const lo = opts?.min !== undefined && Number.isFinite(opts.min) ? opts.min : undefined;
+  const hi = opts?.max !== undefined && Number.isFinite(opts.max) ? opts.max : undefined;
+  const end = side === "upper" ? (hi ?? lo) : (lo ?? hi);
+  if (end === undefined) return fallback();
   const step = opts?.multipleOf;
-  return step ? Math.floor(end / step) * step : end;
+  if (!step) return end;
+  const towardLower = end === hi;
+  return (towardLower ? Math.floor(end / step) : Math.ceil(end / step)) * step;
+}
+
+// 形の中の文字列の上限・下限の長さのうち最大のもの。境目の見本の文字列の元をこの長さにし、どの上限も満たせるようにする
+function longestText(schema: z.core.$ZodType, seen = new Set<z.core.$ZodType>()): number {
+  if (seen.has(schema)) return 0;
+  seen.add(schema);
+  let out = 0;
+  const def = schema._zod.def as z.core.$ZodTypeDef & Record<string, unknown>;
+  if (def.type === "string") {
+    for (const c of (def.checks ?? []) as z.core.$ZodCheck[]) {
+      const d = c._zod.def as { check: string; maximum?: number; minimum?: number; length?: number };
+      for (const n of [d.maximum, d.minimum, d.length]) if (typeof n === "number" && Number.isFinite(n)) out = Math.max(out, n);
+    }
+  }
+  for (const child of childrenOf(def)) out = Math.max(out, longestText(child, seen));
+  return out;
+}
+
+function childrenOf(def: z.core.$ZodTypeDef & Record<string, unknown>): z.core.$ZodType[] {
+  const out: z.core.$ZodType[] = [];
+  const add = (v: unknown) => {
+    if (v instanceof z.core.$ZodType) out.push(v);
+    else if (Array.isArray(v)) for (const x of v) add(x);
+  };
+  if (def.type === "object") {
+    for (const v of Object.values(def.shape as Record<string, unknown>)) add(v);
+    add(def.catchall);
+  } else if (def.type === "lazy") add((def.getter as () => unknown)());
+  else for (const key of CHILD_KEYS) add(def[key]);
+  return out;
+}
+
+// 中に形を持つ def のキー（object の shape と lazy の getter は別に読む）
+const CHILD_KEYS = ["element", "innerType", "options", "left", "right", "items", "rest", "keyType", "valueType", "in", "out"] as const;
+
+// 作り物の値だけを返す文字列の形。zod-schema-faker の custom は z.custom の形にしか効かず、メールの形は内部の randexp で作るため、
+// 生成の前に形の木を写し、メール・アカウント ID・接頭辞の文字列をそれぞれの作り物の値の literal へ置き換える
+function fakeValueOf(def: z.core.$ZodTypeDef & Record<string, unknown>): string | null {
+  if (def.type !== "string") return null;
+  const formats = new Set<string>();
+  const patterns = new Set<string>();
+  if (typeof def.format === "string") formats.add(def.format);
+  for (const c of (def.checks ?? []) as z.core.$ZodCheck[]) {
+    const d = c._zod.def as { check: string; format?: string; pattern?: RegExp };
+    if (d.check !== "string_format") continue;
+    if (d.format) formats.add(d.format);
+    if (d.pattern) patterns.add(d.pattern.source);
+  }
+  if (formats.has("email")) return FAKE_MAIL;
+  if (patterns.has(AWS_ACCOUNT_ID.source)) return FAKE_ACCOUNT_ID;
+  if (patterns.has(PREFIX_SHAPE.source)) return FAKE_PREFIX;
+  return null;
+}
+
+export function withFakeValues(schema: z.core.$ZodType, memo = new Map<z.core.$ZodType, z.core.$ZodType>()): z.core.$ZodType {
+  const known = memo.get(schema);
+  if (known) return known;
+  const def = schema._zod.def as z.core.$ZodTypeDef & Record<string, unknown>;
+  const fakeValue = fakeValueOf(def);
+  if (fakeValue !== null) {
+    const literal = z.literal(fakeValue);
+    memo.set(schema, literal);
+    return literal;
+  }
+  memo.set(schema, schema);
+  const map = (v: unknown): unknown =>
+    v instanceof z.core.$ZodType ? withFakeValues(v, memo) : Array.isArray(v) ? v.map(map) : v;
+  const next: Record<string, unknown> = {};
+  let changed = false;
+  const take = (key: string, value: unknown) => {
+    const mapped = map(value);
+    const same = Array.isArray(value) ? value.every((x, i) => x === (mapped as unknown[])[i]) : mapped === value;
+    if (!same) changed = true;
+    next[key] = mapped;
+  };
+  if (def.type === "object") {
+    const shape: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(def.shape as Record<string, unknown>)) {
+      const mapped = map(v);
+      if (mapped !== v) changed = true;
+      shape[k] = mapped;
+    }
+    next.shape = shape;
+    if (def.catchall) take("catchall", def.catchall);
+  } else if (def.type === "lazy") {
+    const inner = (def.getter as () => z.core.$ZodType)();
+    const mapped = withFakeValues(inner, memo);
+    if (mapped !== inner) {
+      changed = true;
+      next.getter = () => mapped;
+    }
+  } else {
+    for (const key of CHILD_KEYS) if (key in def && def[key] !== undefined) take(key, def[key]);
+  }
+  if (!changed) return schema;
+  const copy = (schema as z.ZodType).clone({ ...def, ...next } as z.core.$ZodTypeDef);
+  memo.set(schema, copy);
+  return copy;
 }
 
 // 境目の見本の生成器。zod-schema-faker は組み込みの形の生成器を差し替える口を持たないため、
-// 形の max・min を受け取る faker の関数（数・件数・文の長さ・有無）を端へ寄せたものを渡す
-function edgeFaker(base: Faker): Faker {
+// 形の max・min を受け取る faker の関数（数・件数・文の長さ・有無）を、上の端か下の端へ寄せたものを渡す
+function edgeFaker(base: Faker, side: Side, textLength: number): Faker {
   const number = Object.assign(Object.create(base.number) as Faker["number"], {
-    int: (opts?: Bounds | number) => (typeof opts === "number" ? opts : edgeOf(opts, () => base.number.int())),
-    float: (opts?: Bounds | number) => (typeof opts === "number" ? opts : edgeOf(opts, () => base.number.float())),
+    int: (opts?: Bounds | number) => (typeof opts === "number" ? (side === "upper" ? opts : 0) : edgeOf(opts, side, () => base.number.int())),
+    float: (opts?: Bounds | number) => (typeof opts === "number" ? (side === "upper" ? opts : 0) : edgeOf(opts, side, () => base.number.float())),
   });
   const helpers = Object.assign(Object.create(base.helpers) as Faker["helpers"], {
     multiple: <T>(fn: (v?: unknown, i?: number) => T, opts?: { count?: number | { min: number; max: number } }) => {
       const count = opts?.count;
-      const n = typeof count === "number" ? count : (count?.max ?? 3);
+      const n = typeof count === "number" ? count : side === "upper" ? (count?.max ?? 3) : (count?.min ?? 0);
       return Array.from({ length: n }, (_, i) => fn(undefined, i));
     },
   });
+  // 下の端は空の文から始め、zod-schema-faker が下限の長さまで埋める
   const lorem = Object.assign(Object.create(base.lorem) as Faker["lorem"], {
     sentence: () => {
+      if (side === "lower") return "";
       let text = base.lorem.sentence();
-      while (text.length < EDGE_TEXT_LENGTH) text = `${text} ${base.lorem.sentence()}`;
-      return text.slice(0, EDGE_TEXT_LENGTH);
+      while (text.length < textLength) text = `${text} ${base.lorem.sentence()}`;
+      return text.slice(0, textLength);
     },
   });
-  const datatype = Object.assign(Object.create(base.datatype) as Faker["datatype"], { boolean: () => true });
+  const datatype = Object.assign(Object.create(base.datatype) as Faker["datatype"], { boolean: () => side === "upper" });
   return Object.assign(Object.create(base) as Faker, { number, helpers, lorem, datatype });
 }
 
-// 結果の zod の形から見本を作る。種は操作の名前から決め、同じ版と同じ種で同じ値になる
+// 結果の zod の形から見本を作る。種は操作の名前から決め、同じ版と同じ種で同じ値になる。
+// 境目は上の端（文字列を上限の長さ・配列を上限の件数・数を上限）と下の端（下限）の 2 件
 export function fakeExamples(op: OperationDef): Examples {
   if (isPending(op.result)) return { normal: [], edge: [] };
-  const shape = op.result;
+  const shape = withFakeValues(op.result);
   const s = seedOf(op.name);
-  setFaker(faker);
-  seed(s);
-  const normal = Array.from({ length: NORMAL_COUNT }, () => fake(shape));
-  setFaker(edgeFaker(faker));
+  const textLength = Math.max(EDGE_TEXT_LENGTH, longestText(shape));
   try {
+    setFaker(faker);
     seed(s);
-    return { normal, edge: [fake(shape)] };
+    const normal = Array.from({ length: NORMAL_COUNT }, () => fake(shape));
+    const edge = (["upper", "lower"] as const).map((side) => {
+      setFaker(edgeFaker(faker, side, textLength));
+      seed(s);
+      return fake(shape);
+    });
+    return { normal, edge };
   } finally {
     setFaker(faker);
   }
 }
 
-// 見本。examples を書いた場面はそれを、書かない場面は生成した値を使う
-export function examplesOf(op: OperationDef): Examples {
-  const written = op.examples;
-  if (written?.normal && written.edge) return { normal: written.normal, edge: written.edge };
-  const faked = fakeExamples(op);
-  return { normal: written?.normal ?? faked.normal, edge: written?.edge ?? faked.edge };
+const NOT_FOUND = { ok: false, status: 404, reason: "not_found" } as const;
+
+// 空の場面の結果。list は空の一覧で、封筒が items・next_cursor のほかに必ず持つ項目（runner.answers.list の delivered_seqs など）は
+// 正常の見本の 1 件目から写す。get は 404、それ以外は null（空の場面が無い）。examples.empty を書いた操作はそれを使う
+function emptyOf(op: OperationDef, normal: readonly unknown[]): unknown {
+  if (op.examples && "empty" in op.examples) return op.examples.empty ?? null;
+  if (op.verb === "get") return NOT_FOUND;
+  if (op.verb !== "list") return null;
+  const first = normal[0];
+  const rest = first !== null && typeof first === "object" && !Array.isArray(first) ? first : {};
+  return { ...rest, ok: true, items: [], next_cursor: null };
 }
 
-const NOT_FOUND = { ok: false, status: 404, reason: "not_found" } as const;
+// 見本。examples を書いた場面はそれを、書かない場面は生成した値を使う
+export function examplesOf(op: OperationDef): ExampleSet {
+  const written = op.examples;
+  const picked =
+    written?.normal && written.edge
+      ? { normal: written.normal, edge: written.edge }
+      : (() => {
+          const faked = fakeExamples(op);
+          return { normal: written?.normal ?? faked.normal, edge: written?.edge ?? faked.edge };
+        })();
+  return { ...picked, empty: emptyOf(op, picked.normal) };
+}
 
 export function buildDummy(op: OperationDef): DummyDoc | null {
   if (isPending(op.result)) return null;
-  const { normal, edge } = examplesOf(op);
-  const empty = op.verb === "list" ? { ok: true, items: [], next_cursor: null } : op.verb === "get" ? NOT_FOUND : null;
+  const { normal, edge, empty } = examplesOf(op);
   const failures = itemReasonsOf(op).map((r) => ({ ok: false as const, status: r.status, reason: r.code }));
   return { operation: op.name, normal, empty, edge, failures };
 }
@@ -242,19 +373,26 @@ const SECRET_PATTERNS = SECRET_SHAPES.valuePatterns.map((p) => ({ name: p.name, 
 const TWELVE_DIGITS = /(?<!\d)\d{12}(?!\d)/g;
 const MAIL = /[^\s@]*@([^\s@]*)/g;
 
+// 診断は違反の種類だけを返し、当たった値を含めない（本物のアカウント ID やメールが CI のログに残らないようにする）
 function leafProblems(leaf: string | number): string[] {
   const text = String(leaf);
   const out: string[] = [];
   if (typeof leaf === "string") {
     for (const p of SECRET_PATTERNS) if (p.re.test(text)) out.push(`秘密の形 ${p.name} に当たる値がある`);
     for (const m of text.matchAll(MAIL)) {
-      if ((m[1] ?? "").toLowerCase() !== FAKE_MAIL_DOMAIN) out.push(`メールの域名が ${FAKE_MAIL_DOMAIN} でない: ${m[0]}`);
+      if ((m[1] ?? "").toLowerCase() !== FAKE_MAIL_DOMAIN) out.push(`メールの域名が ${FAKE_MAIL_DOMAIN} でない`);
     }
   }
   for (const m of text.matchAll(TWELVE_DIGITS)) {
-    if (m[0] !== FAKE_ACCOUNT_ID) out.push(`12 桁の数が ${FAKE_ACCOUNT_ID} でない: ${m[0]}`);
+    if (m[0] !== FAKE_ACCOUNT_ID) out.push(`12 桁の数が ${FAKE_ACCOUNT_ID} でない`);
   }
   return out;
+}
+
+// 形に合わない理由は誤りの種類（Zod の issue の code）だけにする。prettifyError は値やレコードの鍵を含みうるため使わない
+function shapeProblem(error: z.ZodError): string {
+  const codes = [...new Set(error.issues.map((i) => i.code))];
+  return `結果の形に合わない（${codes.join("・")}）`;
 }
 
 // 見本を結果の形・秘密の形・作り物の値の決まりで照らす。問題が 1 つでもあれば生成は書かない
@@ -264,11 +402,16 @@ export function checkExamples(ops: readonly OperationDef[]): ExampleProblem[] {
     if (isPending(op.result)) continue;
     const schema = resultSchemaOf(op);
     const examples = examplesOf(op);
-    for (const scene of ["normal", "edge"] as const) {
-      examples[scene].forEach((value, index) => {
+    const scenes: Array<[ExampleScene, unknown[]]> = [
+      ["normal", examples.normal],
+      ["edge", examples.edge],
+      ["empty", examples.empty === null ? [] : [examples.empty]],
+    ];
+    for (const [scene, values] of scenes) {
+      values.forEach((value, index) => {
         const add = (problem: string) => problems.push({ operation: op.name, scene, index, problem });
         const parsed = schema.safeParse(value);
-        if (!parsed.success) add(`結果の形に合わない: ${z.prettifyError(parsed.error)}`);
+        if (!parsed.success) add(shapeProblem(parsed.error));
         for (const leaf of leaves(value)) for (const p of leafProblems(leaf)) add(p);
       });
     }

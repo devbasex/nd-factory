@@ -67,7 +67,8 @@ function compare(ops: readonly OperationDef[]): Comparison {
     const max = op.allOrNothing?.maxItems ?? MAX_ITEMS;
     const items = sampleItems(op as OperationDef & { item: z.ZodType });
     const first = items[0];
-    const itemCases: Case[] = [...items.map((value, i) => ({ label: `見本 ${i}`, value })), ...items.flatMap((v) => brokenCopies(v))];
+    const extra = first !== null && typeof first === "object" ? [{ label: "追加の項目", value: { ...first, extra_key: 1 } }] : [];
+    const itemCases: Case[] = [...items.map((value, i) => ({ label: `見本 ${i}`, value })), ...items.flatMap((v) => brokenCopies(v)), ...extra];
     result.items += check(op.name, op.item, `ops#/$defs/${op.name}.item`, itemCases);
 
     const body = { type: "array", minItems: 1, maxItems: max, items: { $ref: `ops#/$defs/${op.name}.item` } };

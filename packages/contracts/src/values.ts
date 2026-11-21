@@ -31,6 +31,10 @@ export const money = z.strictObject({
   currency: currencyCode,
 });
 
+// AWS のアカウント ID（12 桁の数字）。生成の見本は作り物の 123456789012 へ置き換える（scripts/artifacts.ts）
+export const AWS_ACCOUNT_ID = /^\d{12}$/;
+export const awsAccountId = z.string().regex(AWS_ACCOUNT_ID);
+
 // BCP 47 の言語・文字・地域の部分だけ
 export const languageTag = z.string().regex(/^[a-z]{2,3}(-[A-Z][a-z]{3})?(-([A-Z]{2}|\d{3}))?$/);
 
