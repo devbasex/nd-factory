@@ -7,11 +7,11 @@ import { authenticate, idempotencyPrincipalKey, SESSIONS_DELETE, type Principal 
 import { authorize, type ItemAuthz, type ProjectId } from "../authorize.ts";
 import { AuditAppendOnlyError, cond, TRANSACT_MAX_ITEMS, WriteSpecError, WriteUnavailableError, writeAtomically, type ConflictRule, type TransactItem, type WriteOutcome } from "../conditional-write.ts";
 import type { StoredRow } from "../db.ts";
-import { claimIdempotency, idempotencyKeyOf, settleIdempotency, type IdempotencyClaimInput, type ItemResult } from "../idempotency.ts";
+import { claimIdempotency, idempotencyKeyOf, markIdempotencyStarted, settleIdempotency, type IdempotencyClaimInput, type ItemResult } from "../idempotency.ts";
 import { newId, type Id } from "../ids.ts";
 import type { Logger } from "../log.ts";
 import { bodyFaultOf, canonicalJson, problem } from "./http.ts";
-import type { AllowedAuthz, DispatchDeps, DispatchResult, Handler, HandlerOutput, OperationCall, Problem, WriteConflict } from "./types.ts";
+import type { AllowedAuthz, DispatchDeps, DispatchResult, Handler, HandlerOutput, OperationCall, Problem, Recheck, WriteConflict } from "./types.ts";
 
 export { readHttpCall, writeHttpResponse } from "./http.ts";
 export type * from "./types.ts";
@@ -241,7 +241,9 @@ type Verdict = { readonly kind: "result"; readonly result: ItemResult } | { read
 // 記録の行が外れたら 503 audit_unavailable、済みの行だけが外れたら（借りを失った）409 in_progress。
 // 既にある行から結果を組める return_existing の件が外れ、ほかに外れた書き込みがその件の省ける件（skippable）だけなら、その件の既にある行から結果を組む（existing）。
 // 同じレーンの同じ連番の並行の再送では、先に確定した要求が付随する行（レーンの版など）も進めるため、ハンドラーはその件を省ける件に挙げる。
-// 挙げない件（レーンの世代・終了の状態など再送にも要る条件）が外れたら、既にある行の結果を返さず、その件で結果を決める。
+// 挙げない件が外れたら、既にある行の結果を返さず、その件で結果を決める。版の条件と再送にも要る条件（レーンの世代・終了の状態など）が
+// 同じ行の 1 件にあるときは、その件を省ける件に挙げ、再送にも要る条件を照らし直す条件（recheck）に置く。外れたのが版だけか世代もかは
+// 1 回目の確定では分からないため、既にある行の結果を確定するトランザクションで照らし直す条件だけを照らし、外れたら recheck の onConflict にする。
 // 再送そのものを拒む条件（要求元の照らし・記録の行・冪等の鍵の済みの行）は上で先に当て、既にある行の結果を確定するトランザクションでも、
 // これらと省けない件の条件を照らし直す（replayWrites）
 function verdictOf(req: Request, failed: readonly Owner[], conflicts: readonly (WriteConflict | undefined)[]): Verdict {
@@ -323,9 +325,19 @@ function checkOutput(c: Ctx, output: HandlerOutput | undefined): HandlerOutput &
     const r = record(conflict);
     if (typeof r["existing"] === "function") {
       const skippable: unknown = r["skippable"] ?? [];
-      const valid =
+      const recheck: unknown = r["recheck"] ?? [];
+      const validSkippable =
         Array.isArray(skippable) && skippable.every((n) => Number.isInteger(n) && n >= 0 && n < output.writes.length && n !== index) && output.writes[index]?.onConflict === "return_existing";
-      if (valid) return { existing: r["existing"] as (row: StoredRow | null) => ItemResult, skippable: skippable as number[] };
+      // 照らし直す条件は省ける件ごとに 1 つまで
+      const validRecheck =
+        validSkippable &&
+        Array.isArray(recheck) &&
+        recheck.every((x) => {
+          const rc = record(x);
+          return skippable.includes(rc["index"]) && rc["condition"] !== null && typeof rc["condition"] === "object" && (rc["onConflict"] === "version_mismatch" || rc["onConflict"] === "state_mismatch");
+        }) &&
+        new Set(recheck.map((x) => record(x)["index"])).size === recheck.length;
+      if (validRecheck) return { existing: r["existing"] as (row: StoredRow | null) => ItemResult, skippable: skippable as number[], recheck: recheck as Recheck[] };
       c.req.log.error("ハンドラーの既にある行の結果の組み方が書き込みと合わない", {});
       throw halt(503, "unavailable");
     }
@@ -341,20 +353,27 @@ function checkOutput(c: Ctx, output: HandlerOutput | undefined): HandlerOutput &
 
 // 要求の中で同期に外へ働きかける直前の要求元の照らし。照らしの 2 件だけを打ち、外れたら false（docs/design/data.md の「要求の中で同期に外へ働きかける操作」）
 // 表に届かないときの 503 は控えておき、ハンドラーが例外を握っても dispatch が要求全体の 503 にする
-type RequesterCheck = { failed: boolean; halted: Halt | null };
+// 冪等の鍵を借りた要素は、同じトランザクションで借りの行に働きかけ始めた印を付ける（markIdempotencyStarted）。印の付いた借りは期限の後も
+// 元の中身でだけ取り直せ、外の処理が済んだかもしれない鍵を別の中身で使えない。借りを失って印を付けられなければ（期限の後に取り直された）false で、
+// 要素は 409 in_progress にする
+type RequesterCheck = { failed: boolean; lostLease: boolean; halted: Halt | null };
 
-async function checkRequesterOf(c: Ctx, state: RequesterCheck): Promise<boolean> {
+async function checkRequesterOf(c: Ctx, state: RequesterCheck, claim: IdempotencyClaimInput | null): Promise<boolean> {
   const guards = requesterGuards(c.op, c.principal);
-  if (guards.length === 0) return true;
+  const items = claim === null ? guards : [...guards, markIdempotencyStarted(claim, c.req.deps.clock)];
+  if (items.length === 0) return true;
   let outcome: WriteOutcome;
   try {
-    outcome = await commit(c.req, guards);
+    outcome = await commit(c.req, items);
   } catch (error) {
     if (error instanceof Halt) state.halted = error;
     throw error;
   }
-  if (!outcome.ok) state.failed = true;
-  return outcome.ok;
+  if (outcome.ok) return true;
+  const failed = new Set(outcome.failed.map((f) => f.index));
+  if (guards.some((_, i) => failed.has(i))) state.failed = true;
+  else state.lostLease = true;
+  return false;
 }
 
 // 1 つの要素の、形 → 見えない・人だけの要素・役割（authorize が決めた）→ 冪等の鍵 → ハンドラー
@@ -381,7 +400,7 @@ async function prepare(c: Ctx, index: number, parsed: ParsedItem, authz: ItemAut
     c.taken.push(claim);
   }
 
-  const requester: RequesterCheck = { failed: false, halted: null };
+  const requester: RequesterCheck = { failed: false, lostLease: false, halted: null };
   let output: HandlerOutput | undefined;
   try {
     output = await c.handler(parsed.value, {
@@ -390,7 +409,7 @@ async function prepare(c: Ctx, index: number, parsed: ParsedItem, authz: ItemAut
       clock: req.deps.clock,
       db: req.deps.db,
       sessionRevokedAt: c.sessionRevokedAt,
-      checkRequester: () => checkRequesterOf(c, requester),
+      checkRequester: () => checkRequesterOf(c, requester, claim),
     });
   } catch (error) {
     if (error instanceof Halt) throw error;
@@ -400,6 +419,7 @@ async function prepare(c: Ctx, index: number, parsed: ParsedItem, authz: ItemAut
   if (requester.halted !== null) throw requester.halted;
   // 外へ働きかける前の照らしが外れた要素は、ハンドラーの戻り値によらず何も確定しない
   if (requester.failed) return failure(409, "state_mismatch");
+  if (requester.lostLease) return failure(409, "in_progress");
   const checked = checkOutput(c, output);
   const createdUserId = principal.kind === "newcomer" ? (checked.createdUserId ?? null) : null;
   return { result: checked.result, writes: checked.writes, conflicts: checked.conflicts, claim, authz, item: parsed.value, createdUserId };
@@ -422,12 +442,42 @@ async function existingResult(c: Ctx, h: Handled, writeIndex: number): Promise<I
   return resultOf(c, value);
 }
 
-// 既にある行の結果を確定するときの件。既にある行を返す件とその省ける件は入れず、ほかの件は書かずに同じ行と条件を照らす（check）。
+// 既にある行を返す件の、省ける件ごとの照らし直す条件
+function rechecksOf(h: Handled, writeIndex: number): ReadonlyMap<number, Recheck> {
+  const conflict = h.conflicts[writeIndex];
+  return new Map((conflict !== undefined && "existing" in conflict ? (conflict.recheck ?? []) : []).map((r) => [r.index, r]));
+}
+
+// 既にある行の結果を確定するときの件。既にある行を返す件は入れない。省ける件は、照らし直す条件（recheck）があればその条件だけを書かずに照らし
+// （版の条件は省き、レーンの世代・終了の状態など再送にも要る条件は確定の時に照らす）、無ければ入れない。ほかの件は書かずに同じ行と条件を照らす（check）。
 // 件の番号はハンドラーが並べた番号のまま（外れたときの結果を conflicts から引くため）
 function replayWrites(h: Handled, writeIndex: number): (TransactItem | null)[] {
   const conflict = h.conflicts[writeIndex];
   const skippable = new Set(conflict !== undefined && "existing" in conflict ? (conflict.skippable ?? []) : []);
-  return h.writes.map((write, i) => (i === writeIndex || skippable.has(i) ? null : { table: write.table, op: "check", key: write.key, condition: write.condition, onConflict: write.onConflict }));
+  const rechecks = rechecksOf(h, writeIndex);
+  return h.writes.map((write, i): TransactItem | null => {
+    if (i === writeIndex) return null;
+    const recheck = rechecks.get(i);
+    if (recheck !== undefined) return { table: write.table, op: "check", key: write.key, condition: recheck.condition, onConflict: recheck.onConflict };
+    if (skippable.has(i)) return null;
+    return { table: write.table, op: "check", key: write.key, condition: write.condition, onConflict: write.onConflict };
+  });
+}
+
+// 既にある行の結果を確定するトランザクションが外れたときの結果。要求元の照らし・記録の行・済みの行は verdictOf と同じに先に当て、
+// 残りはハンドラーが並べた件の順の最初の外れた件（照らし直す条件の件はその onConflict、ほかは verdictOf と同じ引き方）
+function replayVerdictOf(req: Request, failed: readonly Owner[], h: Handled, writeIndex: number): ItemResult {
+  if (failed.some((f) => f.guarded)) return failure(409, "state_mismatch");
+  if (failed.some((f) => f.role === "audit")) throw halt(503, "audit_unavailable");
+  const first = failed.filter((f) => f.role === "write").sort((a, b) => a.writeIndex - b.writeIndex)[0];
+  if (first === undefined) return failure(409, "in_progress");
+  const recheck = rechecksOf(h, writeIndex).get(first.writeIndex);
+  if (recheck !== undefined) return failure(409, recheck.onConflict);
+  const conflict = h.conflicts[first.writeIndex];
+  if (conflict !== undefined && "result" in conflict) return conflict.result;
+  if (first.onConflict === "version_mismatch" || first.onConflict === "state_mismatch") return failure(409, first.onConflict);
+  req.log.error("既にある行の結果を確定するときにハンドラーの書き込みの条件が外れた", {});
+  throw halt(503, "unavailable");
 }
 
 // 要素ごとの確定。状態を書かず冪等の鍵も押さえていない要素は、要約の行だけに残す
@@ -452,9 +502,7 @@ async function settleElement(c: Ctx, index: number, h: Handled): Promise<ItemRes
   const again = compose([partOf(req, principal, op, index, replay, result, replayWrites(h, verdict.writeIndex))], guards);
   const second = await commit(req, again.items);
   if (second.ok) return result;
-  const last = verdictOf(req, failedOf(second, again.slots), h.conflicts);
-  if (last.kind === "result") return last.result;
-  throw halt(503, "unavailable");
+  return replayVerdictOf(req, failedOf(second, again.slots), h, verdict.writeIndex);
 }
 
 async function eachItem(c: Ctx, parsed: readonly ParsedItem[], authz: readonly (ItemAuthz | undefined)[]): Promise<ItemResult[]> {
@@ -468,6 +516,7 @@ async function eachItem(c: Ctx, parsed: readonly ParsedItem[], authz: readonly (
 }
 
 // 全部か無かで確定しなかったとき、この要求が借りた冪等の鍵を手放す。持ち主が自分で借りたままの行だけを消す（取り直された行・済みの行は残す）。
+// 外へ働きかけ始めた借り（started_at がある）は、外の処理を元の中身で再開できるよう消さない。
 // 手放せなかった鍵は借りの期限の後に取り直せるため、要求の結果は変えない。
 // 後始末は要約の記録と応答の時間（DISPATCH_SUMMARY_MS）を食わない。残り時間がそれを超える分だけを使い、鍵ごとの手放しを並べて打ち、
 // その時間で終わらなければ待たずに返す（終わらなかった手放しは持ち主の条件つきのため、後で届いても他の要求の行を消さない）
@@ -484,7 +533,7 @@ async function releaseTaken(c: Ctx): Promise<void> {
       table: "idempotency",
       op: "delete",
       key: idempotencyKeyOf(claim),
-      condition: cond.and(cond.eq("state", "leased"), cond.eq("owner_request_id", claim.requestId), cond.eq("fingerprint", claim.fingerprint)),
+      condition: cond.and(cond.eq("state", "leased"), cond.eq("owner_request_id", claim.requestId), cond.eq("fingerprint", claim.fingerprint), cond.notExists("started_at")),
       onConflict: "fail",
     };
     try {

@@ -598,7 +598,9 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     const ok = await dispatch(call("logins.delete", [{ cognito_sub: OTHER_SUB, idempotency_key: IDEM_1 }]), { ...deps, handlers });
     expect(itemsOf(ok)).toEqual([{ ok: true, item: { cognito_sub: OTHER_SUB } }]);
     expect(called).toEqual(["cognito"]);
-    expect(shapeOf(table.transactions.find((t) => t.every((i) => i.op === "check")) ?? [])).toEqual(["users:check", "users:check"]);
+    // 照らしの 2 件と、借りの行に外へ働きかけ始めた印を付ける 1 件を同じトランザクションで打つ
+    expect(shapeOf(table.transactions.find((t) => t.some((i) => i.op === "check")) ?? [])).toEqual(["users:check", "users:check", "idempotency:update"]);
+    expect(table.rows("idempotency")[0]).toMatchObject({ state: "settled", started_at: new Date(NOW).toISOString() });
 
     revoke(table);
     // 照らしの後に外へ働きかけたつもりでも、照らしが外れた要素はハンドラーの戻り値によらず確定しない
@@ -782,6 +784,74 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     expect(table.row("sprints", laneKey)).toMatchObject({ title: "lane", version: 1 });
   });
 
+  it("版と世代を同じ行の 1 件に持つ省ける件は、版だけが進んだ再送を通し、世代が替わった再送を確定の時に拒む", async () => {
+    const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
+    const laneKey = { pk: `PROJECT#${P_A}`, sk: "LANE#1" };
+    const event: Handler = async (item) => {
+      const note = item as { project_id: string; title: string };
+      return {
+        result: { ok: true, item: { title: note.title } },
+        writes: [
+          putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: note.title }, onConflict: "return_existing" }),
+          updateIfVersion({ table: "sprints", key: laneKey, version: 1, set: { title: note.title }, extra: cond.and(cond.eq("generation", 1), cond.eq("status", "open")), onConflict: "version_mismatch" }),
+        ],
+        conflicts: [
+          {
+            existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }),
+            skippable: [1],
+            recheck: [{ index: 1, condition: cond.and(cond.eq("generation", 1), cond.eq("status", "open")), onConflict: "state_mismatch" }],
+          },
+        ],
+      };
+    };
+    const lane = (over: Record<string, unknown>) => ({ ...laneKey, schema_version: 1, version: 2, title: "stored", generation: 1, status: "open", ...over });
+    const run = async (row: Record<string, unknown>) => {
+      const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
+      table.seed("sprints", { ...eventKey, schema_version: 1, version: 1, title: "stored" });
+      table.seed("sprints", row);
+      const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
+      return { table, items: itemsOf(result) };
+    };
+    // 先に確定した同じ再送が版だけを進めた
+    const ok = await run(lane({}));
+    expect(ok.items).toEqual([{ ok: true, item: { title: "stored" } }]);
+    const last = ok.table.transactions.filter((t) => t.some((i) => i.table === "idempotency")).at(-1) ?? [];
+    expect(last.filter((i) => i.table === "sprints").map((i) => [i.op, i.key.sk])).toEqual([["check", "LANE#1"]]);
+    // 認証の後に世代が替わった・レーンが終わった
+    for (const row of [lane({ generation: 2 }), lane({ status: "ended" })]) {
+      const ng = await run(row);
+      expect(ng.items).toEqual([{ ok: false, status: 409, reason: "state_mismatch" }]);
+      expect(ng.table.rows("idempotency")[0]).toMatchObject({ state: "leased" });
+    }
+  });
+
+  it("照らし直す条件が省ける件を指さなければ 503 unavailable", async () => {
+    const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
+    const event: Handler = async () => ({
+      result: { ok: true, item: { title: "x" } },
+      writes: [putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: "x" }, onConflict: "return_existing" })],
+      conflicts: [{ existing: () => ({ ok: true, item: { title: "x" } }), recheck: [{ index: 0, condition: cond.exists("pk"), onConflict: "state_mismatch" }] }],
+    });
+    const { deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
+    await expect(dispatch(call("notes.create", [{ project_id: P_A, title: "x", idempotency_key: IDEM_1 }]), deps)).resolves.toEqual(problem(503, "unavailable"));
+  });
+
+  it("外へ働きかける前に借りを失っていたら、働きかけずに 409 in_progress", async () => {
+    const { table, deps } = setup();
+    const called: string[] = [];
+    const external: Handler = async (item, ctx) => {
+      // 借りの期限の後に別の要求が取り直した
+      const row = table.rows("idempotency")[0];
+      table.seed("idempotency", { ...row, owner_request_id: "req-other" } as never);
+      if (!(await ctx.checkRequester())) return { result: { ok: false, status: 409, reason: "state_mismatch" }, writes: [] };
+      called.push("cognito");
+      return noteHandlers["logins.delete"]!(item, ctx);
+    };
+    const result = await dispatch(call("logins.delete", [{ cognito_sub: OTHER_SUB, idempotency_key: IDEM_1 }]), { ...deps, handlers: { ...noteHandlers, "logins.delete": external } });
+    expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "in_progress" }]);
+    expect(called).toEqual([]);
+  });
+
   it("同じ連番の再送でも、要求元の照らしが外れたら既にある行の結果より先に 409 state_mismatch", async () => {
     const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
     const event: Handler = async (item) => ({
@@ -794,6 +864,28 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     revoke(table);
     const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
     expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "state_mismatch" }]);
+  });
+
+  it("全部か無かで確定しなくても、外へ働きかけ始めた借りは手放さず、期限の後も元の中身でだけ取り直せる", async () => {
+    const external: Handler = async (item, ctx) => {
+      await ctx.checkRequester();
+      return noteHandlers["notes.bulk"]!(item, ctx);
+    };
+    const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.bulk": external } });
+    const items = [
+      { project_id: P_A, title: "one", idempotency_key: IDEM_1 },
+      { project_id: P_A, title: "two", idempotency_key: IDEM_2 },
+    ];
+    table.seed("sprints", { pk: `PROJECT#${P_A}`, sk: "NOTE#two", schema_version: 1, version: 1, title: "two" });
+    const first = await dispatch(call("notes.bulk", items), deps);
+    expect(itemsOf(first)).toEqual([
+      { ok: false, status: 409, reason: "not_applied" },
+      { ok: false, status: 409, reason: "state_mismatch" },
+    ]);
+    expect(table.rows("idempotency").map((r) => [r["state"], typeof r["started_at"]])).toEqual([
+      ["leased", "string"],
+      ["leased", "string"],
+    ]);
   });
 
   it("全部か無かの後始末は要約の記録と応答の時間を食わず、残り時間が足りなければ借りを手放さずに要約を書いて返す", async () => {

@@ -61,15 +61,35 @@ function leasedColumns(claim: IdempotencyClaimInput, clock: Clock) {
   } as const;
 }
 
-// 持ち主を自分へ替える。前の持ち主と期限（読んだ値）を条件にし、同時に取り直す 2 つのうち 1 つだけが勝つ
-function takeOver(claim: IdempotencyClaimInput, row: StoredRow, clock: Clock): TransactItem {
+// 持ち主を自分へ替える。前の持ち主と期限（読んだ値）を条件にし、同時に取り直す 2 つのうち 1 つだけが勝つ。
+// renew は 24 時間を過ぎた行を無い行と同じに取り直し、働きかけ始めた印（started_at）も消す。resume は期限を過ぎた借りを同じ中身で取り直し、
+// 印を残す（読んだ後に前の持ち主が付けた印も消さない）。replace は中身を差し替え、働きかけ始めていないことも条件にする（読んだ後に前の持ち主が印を付けたら外れる）
+function takeOver(claim: IdempotencyClaimInput, row: StoredRow, clock: Clock, mode: "renew" | "replace" | "resume"): TransactItem {
   const columns = leasedColumns(claim, clock);
+  const removed = mode === "resume" ? ["result"] : ["result", "started_at"];
+  const base = cond.and(cond.eq("owner_request_id", row["owner_request_id"]), cond.eq("state", row["state"]), cond.eq("expire_at", row["expire_at"]));
   return {
     table: "idempotency",
     op: "update",
     key: idempotencyKeyOf(claim),
-    update: [...Object.entries(columns).map(([path, value]) => ({ kind: "set" as const, path, value })), { kind: "remove", path: "result" }],
-    condition: cond.and(cond.eq("owner_request_id", row["owner_request_id"]), cond.eq("state", row["state"]), cond.eq("expire_at", row["expire_at"])),
+    update: [...Object.entries(columns).map(([path, value]) => ({ kind: "set" as const, path, value })), ...removed.map((path) => ({ kind: "remove" as const, path }))],
+    condition: mode === "replace" ? cond.and(base, cond.notExists("started_at")) : base,
+    onConflict: "fail",
+  };
+}
+
+// 借りた要求が外へ働きかける直前に、借りの行へ働きかけ始めた印を付ける件（dispatch が要求元の照らしと同じトランザクションで打つ）。
+// 印の付いた借りは、期限を過ぎても同じ中身でだけ取り直せ（外の処理を元の中身で再開する）、全部か無かの後始末でも手放さない
+export function markIdempotencyStarted(claim: IdempotencyClaimInput, clock: Clock): TransactItem {
+  return {
+    table: "idempotency",
+    op: "update",
+    key: idempotencyKeyOf(claim),
+    update: [
+      { kind: "set", path: "started_at", value: clock.iso() },
+      { kind: "set", path: "schema_version", value: IDEMPOTENCY_SCHEMA_VERSION },
+    ],
+    condition: cond.and(cond.eq("state", "leased"), cond.eq("owner_request_id", claim.requestId), cond.eq("fingerprint", claim.fingerprint)),
     onConflict: "fail",
   };
 }
@@ -95,16 +115,18 @@ export async function claimIdempotency(db: Db, claim: IdempotencyClaimInput, clo
   const expired = typeof row["expire_at"] === "number" && row["expire_at"] * 1000 <= clock.epochMs();
   // 24 時間を過ぎて表の期限の消しを待つ行は、無い行と同じに取り直す
   if (expired) {
-    const taken = await writeAtomically(db, [takeOver(claim, row, clock)], log);
+    const taken = await writeAtomically(db, [takeOver(claim, row, clock, "renew")], log);
     return decided(taken.ok ? { kind: "fresh" } : { kind: "in_progress" });
   }
   const sameItem = row["fingerprint"] === claim.fingerprint;
   if (row["state"] === "settled") return decided(sameItem ? { kind: "replay", result: (row["result"] ?? { ok: false }) as ItemResult } : { kind: "reused" });
   if (!isPast(row["lease_until"], clock)) return decided(sameItem ? { kind: "in_progress" } : { kind: "reused" });
-  // 期限を過ぎた借りの行は、中身によらず取り直す。済みの結果を持たず、前の持ち主の済みの行は持ち主の条件で外れるため、もう確定しない
-  // （全部か無かで確定せず、後始末の時間が足りずに手放せなかった鍵を、直した要素で送り直せるようにする）
-
-  const taken = await writeAtomically(db, [takeOver(claim, row, clock)], log);
+  // 期限を過ぎた借りの行。外へ働きかけ始めた借り（started_at がある）は外の処理が済んでいるかもしれないため、元の中身に結び付け、
+  // 同じ中身でだけ取り直して再開する（違う中身は reused）。働きかけ始めていない借りは済みの結果も外の処理も持たず、前の持ち主の済みの行は
+  // 持ち主の条件で外れるため、中身によらず取り直す（全部か無かで確定せず、後始末の時間が足りずに手放せなかった鍵を、直した要素で送り直せるようにする）
+  const started = row["started_at"] !== undefined;
+  if (started && !sameItem) return decided({ kind: "reused" });
+  const taken = await writeAtomically(db, [takeOver(claim, row, clock, sameItem ? "resume" : "replace")], log);
   return decided(taken.ok ? { kind: "fresh" } : { kind: "in_progress" });
 }
 

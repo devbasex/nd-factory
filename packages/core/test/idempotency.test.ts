@@ -2,7 +2,7 @@ import { IDEMPOTENCY_TTL_SECONDS } from "@nd-factory/contracts/operation";
 import { describe, expect, it } from "vitest";
 import { createClock } from "../src/clock.ts";
 import { WriteUnavailableError, writeAtomically } from "../src/conditional-write.ts";
-import { claimIdempotency, IDEMPOTENCY_LEASE_MS, idempotencyKeyOf, settleIdempotency, type IdempotencyClaimInput } from "../src/idempotency.ts";
+import { claimIdempotency, IDEMPOTENCY_LEASE_MS, idempotencyKeyOf, markIdempotencyStarted, settleIdempotency, type IdempotencyClaimInput } from "../src/idempotency.ts";
 import { SECRET_SAMPLES } from "./fixtures/secrets.ts";
 import { fakeTable } from "./fakes/table.ts";
 
@@ -76,6 +76,54 @@ describe("claimIdempotency", () => {
     expect(await claimIdempotency(table.db, fixed, clock)).toEqual({ kind: "fresh" });
     expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ state: "leased", owner_request_id: "req-2", fingerprint: "b".repeat(64) });
     expect((await writeAtomically(table.db, [settleIdempotency(claim(), { ok: true }, NO_ONCE_ONLY, clock)])).ok).toBe(false);
+  });
+
+  it("外へ働きかけ始めた借りは、期限を過ぎても中身が違えば reused で、元の中身との対応を残す", async () => {
+    const table = fakeTable();
+    const { clock, set } = clockAt(T0);
+    await claimIdempotency(table.db, claim(), clock);
+    expect((await writeAtomically(table.db, [markIdempotencyStarted(claim(), clock)])).ok).toBe(true);
+    set(T0 + IDEMPOTENCY_LEASE_MS);
+    expect(await claimIdempotency(table.db, claim({ requestId: "req-2", fingerprint: "b".repeat(64) }), clock)).toEqual({ kind: "reused" });
+    expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ owner_request_id: "req-1", fingerprint: "a".repeat(64), started_at: new Date(T0).toISOString() });
+  });
+
+  it("外へ働きかけ始めた借りは、期限の後に同じ中身なら fresh で取り直し、印を残して再開する", async () => {
+    const table = fakeTable();
+    const { clock, set } = clockAt(T0);
+    await claimIdempotency(table.db, claim(), clock);
+    await writeAtomically(table.db, [markIdempotencyStarted(claim(), clock)]);
+    set(T0 + IDEMPOTENCY_LEASE_MS);
+    expect(await claimIdempotency(table.db, claim({ requestId: "req-2" }), clock)).toEqual({ kind: "fresh" });
+    expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ owner_request_id: "req-2", started_at: new Date(T0).toISOString() });
+    set(T0 + 2 * IDEMPOTENCY_LEASE_MS);
+    expect(await claimIdempotency(table.db, claim({ requestId: "req-3", fingerprint: "b".repeat(64) }), clock)).toEqual({ kind: "reused" });
+  });
+
+  it("中身を差し替える取り直しは、読んだ後に前の持ち主が働きかけ始めた印を付けたら外れる", async () => {
+    const table = fakeTable();
+    const { clock, set } = clockAt(T0);
+    await claimIdempotency(table.db, claim(), clock);
+    set(T0 + IDEMPOTENCY_LEASE_MS);
+    // 取り直しの読みの直後に前の持ち主が印を付ける
+    const get = table.db.get.bind(table.db);
+    const racing = {
+      ...table.db,
+      get: async (...args: Parameters<typeof table.db.get>) => {
+        const row = await get(...args);
+        await writeAtomically(table.db, [markIdempotencyStarted(claim(), clock)]);
+        return row;
+      },
+    };
+    expect(await claimIdempotency(racing, claim({ requestId: "req-2", fingerprint: "b".repeat(64) }), clock)).toEqual({ kind: "in_progress" });
+    expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ owner_request_id: "req-1", fingerprint: "a".repeat(64) });
+  });
+
+  it("印を付けられるのは借りの持ち主だけ", async () => {
+    const table = fakeTable();
+    const { clock } = clockAt(T0);
+    await claimIdempotency(table.db, claim(), clock);
+    expect((await writeAtomically(table.db, [markIdempotencyStarted(claim({ requestId: "req-2" }), clock)])).ok).toBe(false);
   });
 
   it("済みの行で中身が違えば、借りの期限を過ぎても reused", async () => {

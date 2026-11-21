@@ -3,7 +3,7 @@ import type { AuditChannel } from "../audit.ts";
 import type { AuthDeps, AuthEndpoint, Principal } from "../auth/authenticate.ts";
 import type { ItemAuthz, ScopeReader } from "../authorize.ts";
 import type { Clock } from "../clock.ts";
-import type { TransactItem } from "../conditional-write.ts";
+import type { Condition, TransactItem } from "../conditional-write.ts";
 import type { Db, StoredRow } from "../db.ts";
 import type { ItemResult } from "../idempotency.ts";
 import type { Id } from "../ids.ts";
@@ -57,16 +57,25 @@ export type HandlerContext = {
   // 要求の中で同期に外へ働きかける操作（logins.delete の Cognito の呼び出し・notification_targets.test の送信）が、働きかける直前に呼ぶ要求元の照らし
   // （docs/design/data.md の「人の書き込みの要求元の照らし」の「要求の中で同期に外へ働きかける操作」）。照らしの 2 件だけのトランザクションを打ち、
   // 外れたら false を返す。false のときハンドラーは外へ働きかけずに返し、dispatch はハンドラーの戻り値によらず要素を 409 state_mismatch にして何も確定しない。
-  // 照らしの要らない主体と操作では打たずに true。表に届かなければ要求全体の 503 unavailable
+  // 冪等の鍵を借りた要素では、同じトランザクションで借りの行に働きかけ始めた印を付け、期限の後もその鍵を元の中身でだけ取り直せるようにする
+  // （外の処理が済んだかもしれない鍵を別の中身で使わせない。同じ中身で取り直したハンドラーは、外の処理が済んでいても同じ結果になるよう再開する）。
+  // 借りを失って印を付けられなければ false で、dispatch は要素を 409 in_progress にする。
+  // 照らしも印も要らない主体と操作では打たずに true。表に届かなければ要求全体の 503 unavailable
   readonly checkRequester: () => Promise<boolean>;
 };
 
 // 書き込みの件が外れたときの要素の結果。result は操作の契約にある失敗の結果（logins.delete の最後のログイン・logins.create の already_linked など）。
 // existing は onConflict が return_existing の件で、既にある行（強い整合で読んだ行。読んだ時に無ければ null）から今回の結果を組む。
 // skippable は、既にある行の結果を返すときに省ける付随する書き込みの番号（先に確定した同じ再送が進めた行の版など）。省けるのはここに挙げた件だけで、
-// 挙げない件（レーンの世代・終了の状態の条件など、再送にも要る条件）は、外れれば既にある行の結果を返さず、既にある行の結果を確定するトランザクションでも
-// 同じ行と条件を書かずに照らす
-export type WriteConflict = { readonly result: ItemResult } | { readonly existing: (row: StoredRow | null) => ItemResult; readonly skippable?: readonly number[] };
+// 挙げない件は、外れれば既にある行の結果を返さず、既にある行の結果を確定するトランザクションでも同じ行と条件を書かずに照らす。
+// recheck は省ける件のうち、版の条件と再送にも要る条件（レーンの世代・終了の状態など）を同じ行の 1 件に持つ件の、再送にも要る条件だけ。
+// 既にある行の結果を確定するトランザクションでその条件だけを書かずに照らし、外れたら要素を 409（onConflict）にする（版だけが進んだ並行の再送は通し、
+// 認証の後に世代が替わった・レーンが終わった再送は確定の時に拒む）。同じ行の条件を別の件に分けると 1 件にまとめられて版の外れと見分けられないため、ここに置く
+export type Recheck = { readonly index: number; readonly condition: Condition; readonly onConflict: "version_mismatch" | "state_mismatch" };
+
+export type WriteConflict =
+  | { readonly result: ItemResult }
+  | { readonly existing: (row: StoredRow | null) => ItemResult; readonly skippable?: readonly number[]; readonly recheck?: readonly Recheck[] };
 
 // ハンドラーは状態を自分で書かない。要素の結果と組んだ書き込み（putIfAbsent・updateIfVersion・usageAddItem の戻り値）を返す。
 // 要求元の照らし（人の書き込み）は dispatch が足すため、ハンドラーは要求元の行を照らさない。

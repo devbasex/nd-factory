@@ -15,6 +15,8 @@ export const idempotencyRow = versionlessRow(1, {
   state: z.enum(["leased", "settled"]),
   owner_request_id: z.string().min(1),
   lease_until: utcDateTime,
+  // 借りた要求が外へ働きかけ始めた時刻。ある借りは期限の後も同じ中身でだけ取り直せる
+  started_at: utcDateTime.optional(),
   // 要素の結果。済みのときだけ持ち、形は操作ごとの要素の結果
   result: z.looseObject({}).optional(),
   expire_at: expireAt,
