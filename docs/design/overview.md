@@ -19,6 +19,26 @@
 - **プロジェクトごとに違うもの**: AWS のアカウントとリージョンは profile から受ける。ほかの環境の値は、リポジトリの外の設定のファイルから受ける（[docs/operations/settings.md](../operations/settings.md) ）。秘密の値は秘密の器から受ける
 - **当たるモード**: `standard`（NDF の工程の振り分けの区分）。設計と詳細設計を書き、設計承認ゲートで人が承認してから実装へ進む
 
+## nd-factory 自体の開発と、nd-factory が回す開発
+
+この設計には、開発が 2 つ出てくる。節ごとにどちらの話かを決めて読む。
+
+| | A. nd-factory 自体の開発 | B. nd-factory が回す開発 |
+| --- | --- | --- |
+| 対象 | このリポジトリ（devbasex/nd-factory）のコード・インフラの定義・設置のコマンド | 利用者のプロジェクトのリポジトリ |
+| 回す人と道具 | nd-factory の開発者が NDF（devbasex/ai-plugins）を使って回す | 利用者と、利用者が任せた AI のエージェントが、nd-factory の画面・API・MCP から NDF の工程を回す |
+| 品質の確かめ | このリポジトリの CI（[プラットフォームの検査](platform.md#検査)）と、NDF の工程のレビューと完了判定 | NDF の工程と ai-plugins の道具が担う。nd-factory は検査を持たず、結果と承認の材料を見せ、人の承認を NDF へ渡す |
+| 承認と反映 | このリポジトリの Pull Request の承認と、nd-factory 自身の反映（[反映と設置](platform.md#反映と設置)） | 利用者のスプリントの承認ゲート（[実行](execution.md)）。反映するのは利用者のプロジェクト |
+
+nd-factory は B に対して NDF の UI に徹する。工程・検査・契約の中身は NDF が持ち、nd-factory は NDF の契約に載るものだけで工程を起こし、状態を読み、人の答えを渡す（[NDF との契約](execution.md#ndf-との契約)）。B のために nd-factory が持つのは、画面・API・MCP・認可・記録と、NDF の工程を動かす場所（[実行](execution.md)）である。
+
+| 文書・節 | 話の対象 |
+| --- | --- |
+| [screens.md](screens.md)・[api.md](api.md)・[data.md](data.md)・[execution.md](execution.md) | B を回すための nd-factory の製品 |
+| [platform.md](platform.md) のアーキテクチャ・状態の置き場・インフラ・費用・反映と設置 | nd-factory の製品の動く場所と、その設置（設置と反映は A） |
+| [platform.md](platform.md) の検査・横断の部品と定数の置き場・言語と書き方の決まり | A（このリポジトリの開発の決まり） |
+| [docs/design-process/](../design-process/) | A（この設計を作った経緯） |
+
 ## あるべき姿
 
 | # | あるべき姿 |
