@@ -1,0 +1,30 @@
+{
+  "dynamodb": { "kind": "aws", "retry_mode": "standard", "max_attempts": 3, "request_timeout_ms": 2000 },
+  "aws-control": { "kind": "aws", "retry_mode": "standard", "max_attempts": 3, "request_timeout_ms": 5000 },
+  "dynamodb-transaction": { "kind": "transaction", "retries": 2, "min_ms": 50, "max_ms": 1000 },
+  "http-github": {
+    "kind": "http",
+    "limit": 3,
+    "timeout_ms": 10000,
+    "total_timeout_ms": 30000,
+    "backoff_limit_ms": 5000,
+    "max_retry_after_ms": 5000
+  },
+  "http-notify": {
+    "kind": "http",
+    "limit": 3,
+    "timeout_ms": 5000,
+    "total_timeout_ms": 15000,
+    "backoff_limit_ms": 5000,
+    "max_retry_after_ms": 5000
+  },
+  "runner-to-api": {
+    "kind": "http",
+    "limit": 5,
+    "timeout_ms": 10000,
+    "total_timeout_ms": 60000,
+    "backoff_limit_ms": 30000,
+    "max_retry_after_ms": 30000
+  },
+  "http-idp-keys": { "kind": "jwks", "response_timeout_ms": 3000 }
+}

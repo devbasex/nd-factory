@@ -11,7 +11,9 @@
     "./ids": "./src/ids.ts",
     "./tokens": "./src/tokens.ts",
     "./reasons": "./src/reasons.ts",
-    "./operation": "./src/operation.ts"
+    "./operation": "./src/operation.ts",
+    "./ndf": "./src/ndf.ts",
+    "./data": "./src/data.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."
