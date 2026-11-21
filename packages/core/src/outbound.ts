@@ -371,19 +371,23 @@ export function awsClientConfigOf(policyName: AwsPolicyName): AwsClientConfig {
   return { retryMode: policy.retry_mode, maxAttempts: policy.max_attempts, requestHandler: new DeadlineHttpHandler(policy.request_timeout_ms) };
 }
 
-// 実行環境ごとの控え。aws-control は ECS・Secrets Manager・STS の 3 つのクライアントが共有するため、構築子と方針の名前の組で引く
-const clients = new WeakMap<(config: AwsClientConfig) => unknown, Map<AwsPolicyName, unknown>>();
+// AWS SDK のクライアントの class（DynamoDBClient・ECSClient など）。awsClient は方針の設定だけを渡して作る
+export type AwsClientClass<C> = new (config: AwsClientConfig) => C;
 
-// 同じ構築子と方針の名前の 2 回目は同じクライアントを返す。構築子は呼ぶたびに作り直さず、モジュールの最上位に置いて渡す
+// 実行環境ごとの控え。aws-control は ECS・Secrets Manager・STS の 3 つのクライアントが共有するため、クライアントの class と方針の名前の組で引く。
+// class はモジュールの読み込みで 1 つに決まるため、呼び手が呼び出しの場で書いても同じ鍵になる（呼び出しの場で書く関数を鍵にすると、呼ぶたびに作り直す）
+const clients = new WeakMap<AwsClientClass<unknown>, Map<AwsPolicyName, unknown>>();
+
+// 同じ class と方針の名前の 2 回目は同じクライアントを返す。地域・資格情報・端点は渡さず、SDK が実行環境（AWS_REGION・AWS_ENDPOINT_URL_* など）から読む
 // 期限は本文の読み終わりまで掛かるため、流れの本文を返すクライアント（S3 の GetObject など）には使わない（outbound-socket.test.ts が期限で流れを切る挙動を固める）
-export function awsClient<C>(make: (config: AwsClientConfig) => C, policyName: AwsPolicyName): C {
-  let byPolicy = clients.get(make);
+export function awsClient<C>(Client: AwsClientClass<C>, policyName: AwsPolicyName): C {
+  let byPolicy = clients.get(Client);
   if (byPolicy === undefined) {
     byPolicy = new Map();
-    clients.set(make, byPolicy);
+    clients.set(Client, byPolicy);
   }
   if (byPolicy.has(policyName)) return byPolicy.get(policyName) as C;
-  const client = make(awsClientConfigOf(policyName));
+  const client = new Client(awsClientConfigOf(policyName));
   byPolicy.set(policyName, client);
   return client;
 }

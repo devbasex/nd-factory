@@ -316,10 +316,15 @@ describe("callHttp", () => {
 });
 
 describe("awsClient", () => {
-  const makeDynamo = (config: AwsClientConfig) => new DynamoDBClient({ region: "us-west-2", ...config });
+  beforeEach(() => {
+    vi.stubEnv("AWS_REGION", "us-west-2");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
 
   it("方針の retryMode・回数・要求の期限を持つクライアントを作る", async () => {
-    const client = awsClient(makeDynamo, "dynamodb");
+    const client = awsClient(DynamoDBClient, "dynamodb");
     expect(client.config.retryMode).toBe("standard");
     expect(await client.config.maxAttempts()).toBe(3);
     expect(client.config.requestHandler).toBeInstanceOf(DeadlineHttpHandler);
@@ -334,24 +339,45 @@ describe("awsClient", () => {
     }
   });
 
-  it("同じ構築子と方針の 2 回目は同じインスタンスで、構築子を 1 回だけ呼ぶ", () => {
-    const make = vi.fn((config: AwsClientConfig) => ({ config }));
-    const first = awsClient(make, "aws-control");
-    expect(awsClient(make, "aws-control")).toBe(first);
-    expect(make).toHaveBeenCalledTimes(1);
-    expect(awsClient(make, "dynamodb")).not.toBe(first);
+  // 作られた数を数える偽のクライアントの class
+  function countingClass() {
+    const made: AwsClientConfig[] = [];
+    class FakeClient {
+      readonly config: AwsClientConfig;
+      constructor(config: AwsClientConfig) {
+        this.config = config;
+        made.push(config);
+      }
+    }
+    return { FakeClient, made };
+  }
+
+  it("同じ class と方針の 2 回目は同じインスタンスで、1 回だけ作る", () => {
+    const { FakeClient, made } = countingClass();
+    const first = awsClient(FakeClient, "aws-control");
+    expect(awsClient(FakeClient, "aws-control")).toBe(first);
+    expect(made).toHaveLength(1);
+    expect(awsClient(FakeClient, "dynamodb")).not.toBe(first);
   });
 
-  it("同じ方針でも構築子が違えば別のクライアント（aws-control を共有する ECS・STS など）", () => {
-    const makeA = (config: AwsClientConfig) => ({ kind: "a", config });
-    const makeB = (config: AwsClientConfig) => ({ kind: "b", config });
-    expect(awsClient(makeA, "aws-control").kind).toBe("a");
-    expect(awsClient(makeB, "aws-control").kind).toBe("b");
+  it("呼び出しの場で書いても、同じ class なら作り直さない（扱い手のソケットの束を増やさない）", () => {
+    const { FakeClient, made } = countingClass();
+    const get = () => awsClient(FakeClient, "dynamodb");
+    expect(get()).toBe(get());
+    expect(made).toHaveLength(1);
+    expect(awsClient(DynamoDBClient, "dynamodb")).toBe(awsClient(DynamoDBClient, "dynamodb"));
+  });
+
+  it("同じ方針でも class が違えば別のクライアント（aws-control を共有する ECS・STS など）", () => {
+    const a = countingClass();
+    const b = countingClass();
+    expect(awsClient(a.FakeClient, "aws-control")).toBeInstanceOf(a.FakeClient);
+    expect(awsClient(b.FakeClient, "aws-control")).toBeInstanceOf(b.FakeClient);
   });
 
   it("aws でない方針の名前は型で弾く", () => {
     // @ts-expect-error http-github は http の方針
-    const call = () => awsClient(makeDynamo, "http-github");
+    const call = () => awsClient(DynamoDBClient, "http-github");
     expect(typeof call).toBe("function");
   });
 });
