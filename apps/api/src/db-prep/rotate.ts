@@ -171,6 +171,63 @@ export async function rotateRole(sql: SqlExecutor, project: ProjectIdent & { pas
   });
 }
 
+// 起動の途中と見た pid の追跡。最初の読みで決め、以後は載ったか終わったものを外していく（後から起動した接続は新しい検証子を読む）
+type StartingTracker = {
+  // 鎖を持つ pid を読み、追う対象をそのうちに絞って返す。読みに無い pid は、鎖を放した（載ったか終わった）もの。
+  // 載ったものは境の時刻と比べる側で数える
+  readHolders(): Promise<string[]>;
+  // 残りの読みの starting の列（まだ載っていないもの）を追う対象にする。shrank は前の読みより減ったか
+  settle(raw: unknown): { count: number; shrank: boolean };
+};
+
+function trackStarting(sql: SqlExecutor, opts: TxOpts): StartingTracker {
+  let pids: string[] | undefined;
+  // 前の読みの後に残った数。最初の読みの前は無い
+  let before: number | undefined;
+  return {
+    async readHolders() {
+      const [held] = await sql.execute(VXID_HOLDERS, undefined, opts);
+      const holders = pidList(held?.holders, "起動の途中の接続");
+      pids = pids === undefined ? holders : pids.filter((pid) => holders.includes(pid));
+      return pids;
+    },
+    settle(raw) {
+      pids = pidList(raw, "起動の途中の接続");
+      const shrank = before !== undefined && pids.length < before;
+      before = pids.length;
+      return { count: pids.length, shrank };
+    },
+  };
+}
+
+// 切りと読み直しの期限。切り始めの時刻から決め、起動の途中の接続が残る間と、追う対象が減った後の余裕の間だけ延ばす
+type WaitLimits = {
+  // 期限までの残りの時間（ミリ秒）。0 以下なら期限を過ぎた
+  left(shrank: boolean, startingCount: number, readAuthTimeoutMs: () => Promise<number>): Promise<number>;
+};
+
+function waitLimits(now: () => number, deadlineMs: number, startingWaitCapMs: number): WaitLimits {
+  const start = now();
+  const deadline = start + deadlineMs;
+  const hardLimit = start + startingWaitCapMs;
+  // 起動の途中の接続を待つ所。起動の途中の接続が初めて残ったときに、認証の時間切れを読んで決める
+  let startingLimit: number | undefined;
+  // 起動の途中の pid が最後に載ったか終わった後の余裕の終わり（載った古い接続を切って読み直す間）
+  let graceLimit = -Infinity;
+  return {
+    async left(shrank, startingCount, readAuthTimeoutMs) {
+      if (shrank) graceLimit = Math.min(now() + STARTING_GRACE_MS, hardLimit);
+      if (startingCount > 0 && startingLimit === undefined) {
+        startingLimit = Math.min(start + (await readAuthTimeoutMs()) + STARTING_GRACE_MS, hardLimit);
+      }
+      // 追う対象が減った後の余裕は、追う対象が残る間も効かせる（認証の時間切れの近くで一部が古い接続として載ったとき、
+      // ほかがまだ起動の途中でも、載ったものを切って読み直してから決める）。どれも hardLimit で切り詰めてある
+      const limit = Math.max(deadline, startingCount > 0 ? (startingLimit ?? deadline) : -Infinity, graceLimit);
+      return limit - now();
+    },
+  };
+}
+
 // rotateRole の確定の後に、別のトランザクションで同じ鎖を取り、境の時刻より前に始まった役割の接続を切る。
 // 記した番号が n より大きければ何も切らない。境の時刻が空なら記す。切りと読み直しは切り始めから 1 つの期限を共にし、
 // 期限を過ぎても読み直しを 1 回打ってから、その数を返す（1 以上なら呼ぶ側が終わりを記さずに落ちる。I17）。
@@ -202,47 +259,29 @@ export async function terminateRoleConnections(
     if (got.recorded > seq) return { kind: "superseded_greater", recorded: got.recorded };
     if (!got.cutoffRecorded) await sql.execute(RECORD_CUTOFF, [...roleParam, { name: "seq", value: seq }], opts);
 
-    const start = now();
-    const deadline = start + deadlineMs;
-    const hardLimit = start + startingWaitCapMs;
-    // 起動の途中の接続を待つ所。起動の途中の接続が初めて残ったときに、認証の時間切れを読んで決める
-    let startingLimit: number | undefined;
-    // 起動の途中の pid が最後に載ったか終わった後の余裕の終わり（載った古い接続を切って読み直す間）
-    let graceLimit = -Infinity;
+    const limits = waitLimits(now, deadlineMs, startingWaitCapMs);
     // 一覧を読む前にも写しを捨てる
     await sql.execute(CLEAR_SNAPSHOT, undefined, opts);
     await sql.execute(SIGNAL_OLD, roleParam, opts);
-    // 起動の途中と見た pid。最初の読みで決め、以後は載ったか終わったものを外していく（後から起動した接続は新しい検証子を読む）
-    let starting: string[] | undefined;
+    const starting = trackStarting(sql, opts);
     for (;;) {
-      const before = starting?.length;
       // 期限を過ぎていても、読み直しを 1 回打ってから決める
-      const [held] = await sql.execute(VXID_HOLDERS, undefined, opts);
-      const holders = pidList(held?.holders, "起動の途中の接続");
-      // 読みに無い pid は、鎖を放した（載ったか終わった）もの。載ったものは境の時刻と比べる側で数える
-      starting = starting === undefined ? holders : starting.filter((pid) => holders.includes(pid));
+      const pending = await starting.readHolders();
       await sql.execute(CLEAR_SNAPSHOT, undefined, opts);
-      const [row] = await sql.execute(REMAINING_OLD, [...roleParam, { name: "starting", value: starting.join(",") }], opts);
+      const [row] = await sql.execute(REMAINING_OLD, [...roleParam, { name: "starting", value: pending.join(",") }], opts);
       const visible = row?.remaining;
       if (typeof visible !== "number") throw new Error("残りの接続の数を読めなかった");
-      starting = pidList(row?.starting, "起動の途中の接続");
+      const tracked = starting.settle(row?.starting);
       // 対象か判別できない起動の途中の接続は役割が分からない（ほかのプロジェクトの接続でもありうる）ため、0 を返さずに、
       // 載るか終わるまで待つ。認証の途中で止まった接続はサーバーが時間切れで切るため、その所まで期限を
       // 延ばせば、ほかの役割の認証が止まっていても終わる。延ばした所でもまだ残るものだけを、古い検証子を持ちうるものとして
       // 残りに数える。成功は、載った古い接続と追う接続の両方が 0 のときだけ
-      const remaining = visible + starting.length;
+      const remaining = visible + tracked.count;
       if (remaining === 0) {
         if (options.whileLocked !== undefined) await options.whileLocked();
         return { kind: "done", remaining };
       }
-      if (before !== undefined && starting.length < before) graceLimit = Math.min(now() + STARTING_GRACE_MS, hardLimit);
-      if (starting.length > 0 && startingLimit === undefined) {
-        startingLimit = Math.min(start + (await authTimeoutMs(sql, opts)) + STARTING_GRACE_MS, hardLimit);
-      }
-      // 追う対象が減った後の余裕は、追う対象が残る間も効かせる（認証の時間切れの近くで一部が古い接続として載ったとき、
-      // ほかがまだ起動の途中でも、載ったものを切って読み直してから決める）。どれも hardLimit で切り詰めてある
-      const limit = Math.max(deadline, starting.length > 0 ? (startingLimit ?? deadline) : -Infinity, graceLimit);
-      const left = limit - now();
+      const left = await limits.left(tracked.shrank, tracked.count, () => authTimeoutMs(sql, opts));
       if (left <= 0) return { kind: "done", remaining };
       await sleep(Math.min(pollMs, left));
       // 待つ間に起動を終えて載った古い接続にも、シグナルを送る
