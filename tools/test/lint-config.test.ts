@@ -242,6 +242,36 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
         code: `export { randomUUID } from "${source}";\n`,
         ruleId: CRYPTO_RULE,
       },
+      {
+        name: `${source} の名前空間の import の束縛の書き出し`,
+        code: `import * as c from "${source}";\nexport { c };\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の既定の import の束縛の既定の書き出し`,
+        code: `import c from "${source}";\nexport default c;\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import を受けた変数の書き出し`,
+        code: `export const m = await import("${source}");\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import の約束を変数に置いてから await した値の randomUUID の参照`,
+        code: `const loading = import("${source}");\nconst c = await loading;\nexport const id = c.randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import の約束を変数に置いてからの then の randomUUID の参照`,
+        code: `const loading = import("${source}");\nexport const id = loading.then((m) => m.randomUUID());\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import を条件つきで代入した変数からの randomUUID の参照`,
+        code: `declare const other: { randomUUID(): string };\ndeclare const f: boolean;\nlet c = other;\nif (f) c = await import("${source}");\nexport const id = c.randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
     ]),
     { name: "uuid の動的な import", code: 'export const m = await import("uuid");\n', ruleId: "no-restricted-syntax" },
     { name: "node:console の動的な import", code: 'export const m = await import("node:console");\n', ruleId: "no-restricted-syntax" },
@@ -280,6 +310,22 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
   it("大域のオブジェクトからのほかの名前の分割代入は落とさない", async () => {
     for (const path of APP_PATHS) {
       expect(await lint("const { Promise: P } = globalThis;\nexport const p = P;\n", path), path).toEqual([]);
+    }
+  });
+
+  it("モジュールの値を別の値で上書きした後の参照は落とさない（届く書き込みで判定する）", async () => {
+    const code = [
+      "declare const otherProvider: { createHash(a: string): unknown; randomUUID(): string };",
+      'let c: typeof otherProvider = await import("node:crypto");',
+      'export const h = c.createHash("sha256");',
+      "c = otherProvider;",
+      "export const id = c.randomUUID();",
+      'const loading = import("crypto");',
+      'export const h2 = (await loading).createHash("sha256");',
+      "",
+    ].join("\n");
+    for (const path of APP_PATHS) {
+      expect(await lint(code, path), path).toEqual([]);
     }
   });
 

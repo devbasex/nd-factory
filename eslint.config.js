@@ -64,19 +64,56 @@ function keyName(key, computed) {
 /** 型だけの import・export の宣言か指定子 */
 const typeOnly = (node) => node.importKind === "type" || node.exportKind === "type";
 
+/** 書き込みの印のうち、変数の宣言の時点の値（import の束縛・関数の引数） */
+const INITIAL = Symbol("initial");
+/** 読み出し地点に届く書き込みが分からないとき（すべての書き込みが届き得る） */
+const ANY = Symbol("any");
+
 /**
  * `node:crypto`（`crypto`）の `randomUUID`・`randomBytes` を、どの書き方で取り出しても落とす規則。
  * `no-restricted-imports` の `importNames` は名前空間の import を丸ごと落とし、既定の import と動的な import
  * からの取り出しを見ないので、モジュールの値を束縛まで追って、対象の関数を取り出したところだけを落とす。
- * 見るのは名前つきの import・名前空間と既定の import の束縛・動的な import（`await` と `.then` の引数）・
- * 再書き出しで、モジュールの値（とその `.default`）の性質の参照・分割代入・別の名前への代入を追う
+ * 見るのは名前つきの import・名前空間と既定の import の束縛・動的な import（`await` と `.then` の引数。
+ * 約束を変数に置いてからのものを含む）・再書き出しで、モジュールの値（とその `.default`）の性質の参照・
+ * 分割代入・別の名前への代入と、モジュールの値を持つ束縛の書き出しを追う。変数の読み出しは、その地点に
+ * 届き得る書き込み（コードの道筋で判定する）のどれかがモジュールの値のときだけモジュールとして扱う
  */
 const noCryptoIdRule = {
   meta: { type: "problem", schema: [], messages: { banned: CRYPTO_MESSAGE } },
   create(context) {
     const { sourceCode } = context;
-    const report = (node) => context.report({ node, messageId: "banned" });
-    const seen = new Set();
+    const reported = new Set();
+    const report = (node) => {
+      if (reported.has(node)) return;
+      reported.add(node);
+      context.report({ node, messageId: "banned" });
+    };
+
+    // コードの道筋の区間ごとに、識別子の読み出しと代入・宣言の終わりを出てきた順に記録する
+    const segmentEvents = new Map();
+    const segmentCodePath = new Map();
+    const codePathNode = new Map();
+    const positions = new Map();
+    const current = [];
+    const record = (node) => {
+      const at = [];
+      for (const segment of current.at(-1) ?? []) {
+        const events = segmentEvents.get(segment);
+        at.push({ segment, index: events.length });
+        events.push(node);
+      }
+      positions.set(node, at);
+    };
+    const startSegment = (segment) => {
+      current.at(-1).add(segment);
+      segmentEvents.set(segment, []);
+      segmentCodePath.set(segment, codePathStack.at(-1));
+    };
+    const endSegment = (segment) => current.at(-1).delete(segment);
+    const codePathStack = [];
+
+    // import の式と import の宣言の束縛は、すべての節を読んだ後に追う（届く書き込みの判定に道筋が要る）
+    const seeds = [];
 
     function findVariable(node, name) {
       for (let scope = sourceCode.getScope(node); scope !== null; scope = scope.upper) {
@@ -86,33 +123,112 @@ const noCryptoIdRule = {
       return null;
     }
 
-    /** モジュールの値を持つ変数の読み出しを、すべてモジュールの値として追う */
-    function trackVariable(variable) {
-      if (variable === null || seen.has(variable)) return;
-      seen.add(variable);
+    /** 書き込みの参照の評価が終わる地点（代入の式・宣言の終わり。ほかは識別子そのもの） */
+    function writePosition(identifier) {
+      for (let node = identifier; node.parent; node = node.parent) {
+        const parent = node.parent;
+        if (parent.type === "VariableDeclarator") return parent.id === node ? parent : identifier;
+        if (parent.type === "AssignmentExpression") return parent.left === node ? parent : identifier;
+        if (!["ObjectPattern", "ArrayPattern", "Property", "AssignmentPattern", "RestElement"].includes(parent.type)) {
+          return identifier;
+        }
+      }
+      return identifier;
+    }
+
+    const functionOf = (ref) => ref.from.variableScope.block;
+    const reachCache = new Map();
+
+    /** 読み出しの参照に届き得る書き込みの参照（と INITIAL）の集まり。分からなければ ANY を含む */
+    function reachingWrites(variable, readRef) {
+      if (reachCache.has(readRef)) return reachCache.get(readRef);
+      const result = new Set();
+      const writesAt = new Map();
       for (const ref of variable.references) {
-        if (ref.isRead()) checkModuleValue(ref.identifier);
+        if (!ref.isWrite()) continue;
+        // ほかの関数の中の書き込みは、いつ走るか分からないので届き得るものとする
+        if (functionOf(ref) !== functionOf(readRef)) result.add(ref);
+        else writesAt.set(writePosition(ref.identifier), ref);
+      }
+      const home = variable.scope.variableScope.block;
+      const visited = new Set();
+      const scan = (segment, before) => {
+        const events = segmentEvents.get(segment) ?? [];
+        for (let i = before - 1; i >= 0; i--) {
+          const write = writesAt.get(events[i]);
+          if (write !== undefined) return void result.add(write);
+        }
+        if (segment.prevSegments.length === 0) {
+          result.add(codePathNode.get(segmentCodePath.get(segment)) === home ? INITIAL : ANY);
+          return;
+        }
+        for (const prev of segment.prevSegments) {
+          if (visited.has(prev)) continue;
+          visited.add(prev);
+          scan(prev, (segmentEvents.get(prev) ?? []).length);
+        }
+      };
+      const at = positions.get(readRef.identifier) ?? [];
+      if (at.length === 0) result.add(ANY);
+      for (const { segment, index } of at) scan(segment, index);
+      reachCache.set(readRef, result);
+      return result;
+    }
+
+    // 変数ごとの、モジュール（module）か import の約束（promise）の値を持つ書き込み
+    const valueWrites = new Map();
+
+    const isExported = (variable) =>
+      variable.defs.some((def) => def.node.parent?.parent?.type === "ExportNamedDeclaration");
+
+    /** 変数の書き込み `write`（参照か INITIAL）が `kind` の値を持つとき、届く読み出しを追う */
+    function trackWrite(variable, write, kind) {
+      if (variable === null) return;
+      let writes = valueWrites.get(variable);
+      if (writes === undefined) valueWrites.set(variable, (writes = new Map()));
+      const kinds = writes.get(write) ?? new Set();
+      if (kinds.has(kind)) return;
+      kinds.add(kind);
+      writes.set(write, kinds);
+      // モジュールの値を持つ束縛の書き出しは、別のファイルからの取り出しを止められないので落とす
+      if (isExported(variable)) variable.defs.forEach((def) => report(def.name));
+      for (const ref of variable.references) {
+        if (!ref.isRead() || ref.isValueReference === false) continue;
+        // `export { c }` は束縛そのものを書き出すので、届く書き込みによらず落とす
+        if (ref.identifier.parent?.type === "ExportSpecifier") {
+          report(ref.identifier.parent);
+          continue;
+        }
+        const reaching = reachingWrites(variable, ref);
+        if (reaching.has(write) || reaching.has(ANY)) checkValue(ref.identifier, kind);
       }
     }
 
-    /** モジュールの値を受ける束縛の形（識別子・分割代入・既定の値つき） */
-    function checkTarget(target, at) {
-      if (target.type === "AssignmentPattern") return checkTarget(target.left, at);
-      if (target.type === "Identifier") return trackVariable(findVariable(at, target.name));
-      if (target.type === "ObjectPattern") return checkPattern(target, at);
+    /** 値を受ける束縛の形（識別子・分割代入・既定の値つき）。`initial` は関数の引数のとき真 */
+    function checkTarget(target, kind, initial = false) {
+      if (target.type === "AssignmentPattern") return checkTarget(target.left, kind, initial);
+      if (target.type === "Identifier") {
+        const variable = findVariable(target, target.name);
+        if (variable === null) return;
+        const write = initial ? INITIAL : variable.references.find((ref) => ref.identifier === target);
+        return trackWrite(variable, write ?? INITIAL, kind);
+      }
+      if (kind === "module" && target.type === "ObjectPattern") return checkPattern(target, initial);
     }
 
-    function checkPattern(pattern, at) {
+    function checkPattern(pattern, initial) {
       for (const prop of pattern.properties) {
         if (prop.type === "RestElement") {
-          checkTarget(prop.argument, at);
+          checkTarget(prop.argument, "module", initial);
           continue;
         }
         const name = keyName(prop.key, prop.computed);
         if (CRYPTO_ID_FUNCTIONS.has(name)) report(prop);
-        else if (name === "default") checkTarget(prop.value, at);
+        else if (name === "default") checkTarget(prop.value, "module", initial);
       }
     }
+
+    const checkValue = (node, kind) => (kind === "module" ? checkModuleValue(node) : checkImportPromise(node));
 
     /** `node` の評価の値がモジュール（かその `.default`）のとき、その使われ方を見る */
     function checkModuleValue(node) {
@@ -123,6 +239,7 @@ const noCryptoIdRule = {
         case "TSSatisfiesExpression":
         case "TSTypeAssertion":
         case "ChainExpression":
+        case "AwaitExpression":
           return checkModuleValue(parent);
         case "MemberExpression": {
           if (parent.object !== node) return;
@@ -132,49 +249,82 @@ const noCryptoIdRule = {
           return;
         }
         case "VariableDeclarator":
-          if (parent.init === node) checkTarget(parent.id, parent);
+          if (parent.init === node) checkTarget(parent.id, "module");
           return;
         case "AssignmentExpression":
-          if (parent.right === node) checkTarget(parent.left, parent);
+          if (parent.right === node) checkTarget(parent.left, "module");
           return;
+        case "ExportDefaultDeclaration":
+          return report(parent);
       }
     }
 
-    /** 動的な import の約束の値（`await` か `.then` の関数の最初の引数）を見る */
+    /** 動的な import の約束の値（`await` か `.then` の関数の最初の引数・変数への保存）を見る */
     function checkImportPromise(node) {
       const parent = node.parent;
-      if (parent?.type === "AwaitExpression") return checkModuleValue(parent);
-      if (
-        parent?.type === "MemberExpression" &&
-        parent.object === node &&
-        keyName(parent.property, parent.computed) === "then" &&
-        parent.parent?.type === "CallExpression" &&
-        parent.parent.callee === parent
-      ) {
-        const callback = parent.parent.arguments[0];
-        const param = callback?.params?.[0];
-        if (param !== undefined) checkTarget(param, callback.body);
+      switch (parent?.type) {
+        case "TSAsExpression":
+        case "TSNonNullExpression":
+        case "TSSatisfiesExpression":
+        case "TSTypeAssertion":
+          return checkImportPromise(parent);
+        case "AwaitExpression":
+          return checkModuleValue(parent);
+        case "VariableDeclarator":
+          if (parent.init === node) checkTarget(parent.id, "promise");
+          return;
+        case "AssignmentExpression":
+          if (parent.right === node) checkTarget(parent.left, "promise");
+          return;
+        case "ExportDefaultDeclaration":
+          return report(parent);
+        case "MemberExpression":
+          if (
+            parent.object === node &&
+            keyName(parent.property, parent.computed) === "then" &&
+            parent.parent?.type === "CallExpression" &&
+            parent.parent.callee === parent
+          ) {
+            const param = parent.parent.arguments[0]?.params?.[0];
+            if (param !== undefined) checkTarget(param, "module", true);
+          }
       }
     }
 
     const isCryptoSource = (source) => CRYPTO_SOURCE.test(staticString(source) ?? "");
 
     return {
+      onCodePathStart(codePath, node) {
+        codePathStack.push(codePath);
+        codePathNode.set(codePath, node);
+        current.push(new Set());
+      },
+      onCodePathEnd() {
+        codePathStack.pop();
+        current.pop();
+      },
+      onCodePathSegmentStart: startSegment,
+      onCodePathSegmentEnd: endSegment,
+      onUnreachableCodePathSegmentStart: startSegment,
+      onUnreachableCodePathSegmentEnd: endSegment,
+      Identifier: record,
+      "VariableDeclarator:exit": record,
+      "AssignmentExpression:exit": record,
       ImportDeclaration(node) {
         if (!isCryptoSource(node.source) || typeOnly(node)) return;
         for (const spec of node.specifiers) {
           if (spec.type === "ImportSpecifier") {
-            if (!typeOnly(spec) && CRYPTO_ID_FUNCTIONS.has(keyName(spec.imported, false))) report(spec);
-            else if (!typeOnly(spec) && keyName(spec.imported, false) === "default") {
-              sourceCode.getDeclaredVariables(spec).forEach(trackVariable);
-            }
+            if (typeOnly(spec)) continue;
+            const name = keyName(spec.imported, false);
+            if (CRYPTO_ID_FUNCTIONS.has(name)) report(spec);
+            else if (name === "default") seeds.push(() => sourceCode.getDeclaredVariables(spec).forEach((v) => trackWrite(v, INITIAL, "module")));
           } else {
-            sourceCode.getDeclaredVariables(spec).forEach(trackVariable);
+            seeds.push(() => sourceCode.getDeclaredVariables(spec).forEach((v) => trackWrite(v, INITIAL, "module")));
           }
         }
       },
       ImportExpression(node) {
-        if (isCryptoSource(node.source)) checkImportPromise(node);
+        if (isCryptoSource(node.source)) seeds.push(() => checkImportPromise(node));
       },
       ExportNamedDeclaration(node) {
         if (node.source === null || node.source === undefined || !isCryptoSource(node.source) || typeOnly(node)) return;
@@ -185,6 +335,9 @@ const noCryptoIdRule = {
       },
       ExportAllDeclaration(node) {
         if (isCryptoSource(node.source) && !typeOnly(node)) report(node);
+      },
+      "Program:exit"() {
+        for (const seed of seeds) seed();
       },
     };
   },
