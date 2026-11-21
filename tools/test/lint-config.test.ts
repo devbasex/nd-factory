@@ -209,7 +209,7 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
 
 describe("受け入れ条件 1・6: apps/* の node:crypto（crypto）の ID と冪等の鍵の生成（決定 1）", () => {
   // 名前空間・既定の import と動的な import と export *（export * as）は丸ごと、名前つきの import と名前つきの再書き出しは
-  // randomUUID・randomBytes・randomFill・randomFillSync・randomInt・getRandomValues・webcrypto だけを落とす
+  // 名前に random を含む関数・getRandomValues・generatePrime・generatePrimeSync・webcrypto・subtle だけを落とす
   const CRYPTO_PATHS = ["apps/api/src/sample.ts", "apps/web/src/sample.ts"];
   const IMPORTS_RULE = "@typescript-eslint/no-restricted-imports";
   const banned: { name: string; code: string; ruleId: string }[] = [
@@ -249,6 +249,19 @@ describe("受け入れ条件 1・6: apps/* の node:crypto（crypto）の ID と
     const code = 'import { randomUUID, randomBytes } from "node:crypto";\nexport const id = randomUUID() + randomBytes(4).toString("hex");\n';
     for (const path of CRYPTO_PATHS) {
       expect(await ruleHits(code, path, IMPORTS_RULE), path).toBe(2);
+    }
+  });
+
+  it("実行中の Node.js の node:crypto が書き出す乱数の関数と、それを持つ書き出しの名前つきの import をすべて落とす", async () => {
+    // Node.js の版が上がって乱数の関数が増えたら、ここが落ちて importNames への追加を求める
+    const crypto = await import("node:crypto");
+    const names = Object.keys(crypto).filter((name) => /random|webcrypto|subtle|generatePrime/i.test(name));
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      for (const path of CRYPTO_PATHS) {
+        const code = `import { ${name} } from "node:crypto";\nexport const v = ${name};\n`;
+        expect(await ruleHits(code, path, IMPORTS_RULE), `${name} ${path}`).toBe(1);
+      }
     }
   });
 
