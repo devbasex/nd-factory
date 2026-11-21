@@ -122,7 +122,7 @@ flowchart LR
 ### 決定 108: 区間の報告を契約に載るものだけで読むため、決まりの出所を契約の `C/hooks/unattended-report.json` にし、読む項目を契約の項目と照らす
 
 - **質問**: v11.0.12 の契約に区間の報告の決まり（`C/hooks/unattended-report.json`）が入った。全体の設計は「最後の行で読む」を契約の外（`asking.md`）とし、区分・承認ゲート・問い・Pull Request・材料・人に頼むこと・理由・`次のコマンド:` の行を報告から読む。決まりの出所と読む項目をどうそろえるか
-- **選んだ案**: 「区間と結果の行」の決まりの表の出所を `C/hooks/unattended-report.json` にする（最後の `- 結果:` の行は `rule`、値の 3 つは `shape.values`、項目は `shape.items`、値ごとに要る項目は `shape.required`、材料の形は `shape.material`）。`report-unattended` の口は「`C/hooks/unattended-report.json` の形で区間の報告を読む」と書く。報告から読む項目は契約の項目の名前で書き（問いは項目「質問」）、契約に無い 2 つは次のとおり扱う。承認資料の「題」は報告から読まず、問い（項目「質問」）と承認ゲートからランナーが作る。`ndf-ask:human-action` の後の `次のコマンド:` の行は `shape.items` に無く、v11.0.12 の `hooks/guards.json` の `unattended` は次のコマンドを残したまま終える応答に変更を要求するので、続きの区間の起こし方を「未確認のまま残ること」に置き、決定 106 の依頼に含める
+- **選んだ案**: 「区間と結果の行」の決まりの表の出所を `C/hooks/unattended-report.json` にする（最後の `- 結果:` の行は `rule`、値の 3 つは `shape.values`、項目は `shape.items`、値ごとに要る項目は `shape.required`、材料の形は `shape.material`）。`report-unattended` の口は「`C/hooks/unattended-report.json` の形で区間の報告を読む」と書く。報告から読む項目は契約の項目の名前で書き（問いは項目「質問」）、契約に無い 2 つは次のとおり扱う。承認資料の「題」は報告から読まず、ランナーが作る。承認ゲートの項目は区分が `ndf-gate:` で始まるときだけ要る（`shape.required`）ので、題は次の規則で作る。承認ゲートの項目があり値が「無し」でなければ、承認ゲートと問い（項目「質問」）から作る。承認ゲートの項目が無いか値が「無し」なら（区分が `ndf-ask:redline:<番号>` の承認の依頼など）、問い（項目「質問」）だけから作る。`ndf-ask:human-action` の後の `次のコマンド:` の行は、v11.0.12 の守り（`src/ndf/domains/hooks/guards/unattended.py` の `unattended`）が区分 `ndf-ask:human-action` を `次のコマンド:` を残したまま止まってよい例外として通すので、報告に残すことはできる。ただしこの行は `shape.items` に無く、契約は続きの区間を起こすコマンドとしてこの行を保証しない（守りの例外は実装にあり、契約の `hooks/guards.json` には無い）。この保証が無いことを「未確認のまま残ること」に置き、決定 106 の依頼に含める
 - 採らなかった案: 出所を `asking.md` のまま残す（契約に入った決まりを契約の外で読むことになり、F23 が食い違いを拾えない）
 - 採らなかった案: 契約の `source` の注（「Factory のランナーが読むのは結果の行だけで、ほかの項目は人が読む」）に合わせ、ランナーは結果の値だけを読み、承認の依頼の中身を人に読ませる（承認の依頼の区分と承認ゲートを選べず、E10 が成り立たない。項目の名前と要る項目は `shape` に契約として載っているので、読むのは契約の内である）
 - **代償**: 上流の注はランナーが結果の行だけを読む前提で書かれており、項目の名前を上流が手順書の語に合わせて変えると、nd-factory の読み方も変わる（F23 が `shape.items` の差分として知らせる）。`report-unattended` の行の `source` が無い置き場を指すため、#1 の照合の検査は置き場を `source` からでなく `C/hooks/unattended-report.json` として読む
@@ -170,7 +170,7 @@ flowchart LR
 | `docs/design/execution.md` | 「使う口」の「使わない口」: `spec-declarations` を `spec-ndf_settings` にする | 104 |
 | `docs/design/execution.md` | 「使う口」の `report-unattended` の行: 「`C/hooks/unattended-report.json` の形（`rule`・`shape`）で区間の報告を読む」にする | 108 |
 | `docs/design/execution.md` | 「区間と結果の行」: 決まりの表を、最後の行の読み方は `rule`、値の 3 つは `shape.values`、項目と値ごとに要る項目は `shape.items`・`shape.required`、材料の形は `shape.material`（すべて `C/hooks/unattended-report.json`）にし、「契約のファイルには無い」を消す。結果の表の「問い」を「問い（項目「質問」）」にし、`ndf-ask:human-action` の行の `次のコマンド:` は未確認を指す | 108 |
-| `docs/design/execution.md` | 「承認資料」: 「題・区分・承認ゲート・問い」の出所を、区分・承認ゲート・問い（項目「質問」）は区間の報告、題はランナーが問いと承認ゲートから作る、にする | 108 |
+| `docs/design/execution.md` | 「承認資料」: 「題・区分・承認ゲート・問い」の出所を、区分・承認ゲート・問い（項目「質問」）は区間の報告、題はランナーが承認ゲートと問いから作り、承認ゲートの項目が無いか「無し」なら（`ndf-ask:redline:<番号>` など）問いだけから作る、にする | 108 |
 | `docs/design/execution.md` | 「契約の照合の定期の検査」: 読む先を「ai-plugins の既定の枝（`default_branch`）の先端の契約」、落ちたときの「develop の先端」を「既定の枝の先端」にする | 107 |
 | `docs/design/execution.md` | 「ランナーの責務」の照らす・「確定から NDF まで」の図・「問いの答え」の本文: 「表の ID」を「進行表の ID（`machine_id`）」にする。「問いの答え」の未確認の文は決定 106 の依頼を指し、`次のコマンド:` の行の文は未確認（決定 108）を指す | 105・106・108 |
 | `docs/design/execution.md` | 「決定の記録」: 決定 79 の見出しと本文の「develop の先端」を「既定の枝の先端」にし、移した理由を 1 行足す。決定 104〜108 を足す | 104〜108 |
@@ -196,7 +196,7 @@ flowchart LR
 | --- | --- |
 | 上流が `ask-journal` の `fields` を足すか | 依頼の課題への上流の答えで分かる。足されたら、その配布の点へ付け替える Pull Request で「未確認のまま残ること」の行を消す |
 | 契約の `report-unattended` の出所のファイル | v11.0.12 の `entrypoints.json` の `report-unattended` の行は出所を `plugins/ndf/contracts/forms/unattended-report.json` とするが、`forms/` は無く、同じ名前の契約は `C/hooks/unattended-report.json` にある（`hooks/guards.json` の `unattended` もこの置き場を引く）。全体の設計はこの置き場を読む（決定 108）。`source` の直しは決定 106 の依頼に含め、上流の答えで分かる |
-| `ndf-ask:human-action` の後の続きの区間の起こし方 | 全体の設計は人が「済んだ」と答えたら区間の報告の `次のコマンド:` の行で続きを起こすが、その行は `shape.items` に無く、`hooks/guards.json` の `unattended` は次のコマンドを残したまま終える応答に変更を要求する。決定 106 の依頼の答えで分かり、#6 の詳細設計はこの行を前提にしない |
+| `ndf-ask:human-action` の後の続きの区間の起こし方 | 全体の設計は人が「済んだ」と答えたら区間の報告の `次のコマンド:` の行で続きを起こす。v11.0.12 の守り（`guards/unattended.py`）は区分 `ndf-ask:human-action` なら `次のコマンド:` を残したまま止まるのを通すので、行は報告に残せる。未確認なのは、この行が `shape.items` に無く、再開のコマンドとして契約で保証されていないこと（守りの例外も契約の `hooks/guards.json` に無く実装にだけある）である。決定 106 の依頼の答えで分かり、#6 の詳細設計はこの行を前提にしない |
 
 ## 外部の調査
 
