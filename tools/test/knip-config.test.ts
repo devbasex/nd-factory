@@ -14,7 +14,7 @@ const KNIP_BIN = join(ROOT, "node_modules", "knip", "bin", "knip.js");
 // knip の 1 回の実行は数秒かかる
 const KNIP_TIMEOUT = 120_000;
 
-type WorkspaceConfig = { entry?: string[]; ignoreDependencies?: string[] };
+type WorkspaceConfig = { entry?: string[]; ignoreDependencies?: string[]; includeEntryExports?: boolean };
 type KnipConfig = { treatConfigHintsAsErrors?: boolean; tags?: string[]; workspaces: Record<string, WorkspaceConfig> };
 
 /** knip.jsonc を読む（注釈つきの JSON を TypeScript の読み手で解く） */
@@ -33,12 +33,18 @@ const WORKSPACES: { dir: string; manifest: Record<string, unknown> }[] = [
   { dir: "tools", manifest: {} },
 ];
 
+/** 生成した画面の呼び出しの置き場（K2-2） */
+const GENERATED = "apps/web/src/generated/calls.ts";
+const GENERATED_BASE = "export const usedCall = 1;\n/** @screenPending #4 */\nexport const pendingCall = 2;\n";
+
 /** 設定の手掛かりに依らない木の中身。ルートのスクリプトが打つファイルと exports が入口になる */
 const BASE_FILES: Record<string, string> = {
-  // exports の入口から使う書き出し（当たらない）と、生成した画面の呼び出しで画面がまだ無いもの（`@screenPending` で外す）
+  // exports の入口から使う書き出し（当たらない）
   "packages/contracts/src/schema.ts": 'import { used } from "./internal.ts";\nexport const schema = used;\n',
-  "packages/contracts/src/internal.ts": "export const used = 1;\n/** @screenPending #4 */\nexport const pendingCall = 2;\n",
-  "apps/web/src/main.ts": "export const main = 1;\n",
+  "packages/contracts/src/internal.ts": "export const used = 1;\n",
+  // 画面の起点と、生成した画面の呼び出し（K2-2）。画面が呼ぶものと、画面がまだ無いもの（`@screenPending` で外す）
+  "apps/web/src/main.ts": 'import { usedCall } from "./generated/calls.ts";\nconsole.log(usedCall);\n',
+  [GENERATED]: GENERATED_BASE,
   "infra/setup/nd-setup.ts": "export const setup = 1;\n",
   "tools/ref-check/src/ref-check.ts": "export const refCheck = 1;\n",
 };
@@ -105,10 +111,46 @@ const depsOf = (run: KnipRun) => run.issues.flatMap((i) => [...(i.dependencies ?
 describe("受け入れ条件 1・5・12: knip.jsonc の使っていないものの検出（決定 4・8）", () => {
   const config = readConfig();
 
-  it("設定の手掛かりを誤りにし、`@screenPending` を外す", () => {
+  it("設定の手掛かりを誤りにし、`@screenPending` を外し、画面のワークスペースは入口の書き出しも照らす", () => {
     expect(config.treatConfigHintsAsErrors).toBe(true);
     expect(config.tags).toEqual(["-screenPending"]);
+    expect(config.workspaces["apps/web"]?.includeEntryExports).toBe(true);
   });
+
+  const unusedCall = { [GENERATED]: `${GENERATED_BASE}export const unusedCall = 3;\n` };
+  const exposeGenerated = (dir: string, m: Record<string, unknown>) =>
+    dir === "apps/web" ? { ...m, exports: { ...(m.exports as object), "./generated": "./src/generated/calls.ts" } } : m;
+
+  it(
+    "生成した画面の呼び出しで `@screenPending` の無い使われないものは当たる",
+    () => {
+      const run = runKnip(buildTree({ config, files: unusedCall }));
+      expect(run.status).toBe(1);
+      expect(exportsOf(run)).toEqual([`${GENERATED}:unusedCall`]);
+    },
+    KNIP_TIMEOUT,
+  );
+
+  it(
+    "生成した画面の呼び出しを package.json の exports で公開しても、`@screenPending` の無い使われないものは当たる",
+    () => {
+      const run = runKnip(buildTree({ config, manifest: exposeGenerated, files: unusedCall }));
+      expect(run.status).toBe(1);
+      expect(exportsOf(run)).toEqual([`${GENERATED}:unusedCall`]);
+    },
+    KNIP_TIMEOUT,
+  );
+
+  it(
+    "入口の書き出しを照らさない設定では、exports で公開した使われない呼び出しが当たらない（includeEntryExports が要る）",
+    () => {
+      const { includeEntryExports: _ie, ...web } = config.workspaces["apps/web"] ?? {};
+      const without = { ...config, workspaces: { ...config.workspaces, "apps/web": web } };
+      const run = runKnip(buildTree({ config: without, manifest: exposeGenerated, files: unusedCall }));
+      expect(exportsOf(run)).toEqual([]);
+    },
+    KNIP_TIMEOUT,
+  );
 
   it(
     "揃った木では当たりが 0 件で、入口から使う書き出しと `@screenPending` の書き出しは当たらない",

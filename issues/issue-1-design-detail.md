@@ -157,7 +157,7 @@ nd-factory/
 
 満たす決定: 設計の決定 4・8、受け入れ条件 5・12
 
-`knip.jsonc`: `workspaces` に `.`・`packages/*`・`apps/*`・`infra`・`tools` を置き、ワークスペースごとの入口（Lambda の起点・画面の起点・設置のコマンド・検査の CLI・設定のファイル）と `treatConfigHintsAsErrors: true` を書く。`npm run knip`（`knip --no-progress`）を `check` のジョブで打つ。生成した画面の呼び出しのファイルは入口にしない（使われない書き出しを報告させるため。K2-2）。画面がまだ無い操作の書き出しは、生成が付ける JSDoc の `@screenPending` を knip の標準の `tags: ["-screenPending"]` で外す。
+`knip.jsonc`: `workspaces` に `.`・`packages/*`・`apps/*`・`infra`・`tools` を置き、ワークスペースごとの入口（Lambda の起点・画面の起点・設置のコマンド・検査の CLI・設定のファイル）と `treatConfigHintsAsErrors: true` を書く。`npm run knip`（`knip --no-progress`）を `check` のジョブで打つ。生成した画面の呼び出しのファイルは `apps/web/src/generated/` に置き、`knip.jsonc` の `entry` にも `package.json` の `exports` にも載せない（knip は入口のファイルの書き出しを既定で照らさないため。K2-2）。入口にされても落ちるよう、`apps/web` のワークスペースに `includeEntryExports: true` を置く。画面がまだ無い操作の書き出しは、生成が付ける JSDoc の `@screenPending` を knip の標準の `tags: ["-screenPending"]` で外す。
 
 - 今の当たり（使われない開発の依存 `infra/package.json` の `esbuild`、使われない書き出し 4 件）は、検査を足す Pull Request で直す。CDK が実行の時に読む `esbuild` のように直せないものだけを `ignoreDependencies` に置き、`knip.jsonc` の行の注に理由と課題の番号を書く
 
@@ -165,7 +165,7 @@ nd-factory/
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `knip.jsonc`（一時の木にワークスペースの形を組み、設定を写して knip を子のプロセスで打つ） | 揃った木で当たり 0 件 | 入口から使う書き出しは当たらない | 使われない書き出し・使われない依存・どこからも読まれないファイルをそれぞれ 1 つ足すと当たる。使われない `ignoreDependencies` の行で誤りになる |
+| `knip.jsonc`（一時の木にワークスペースの形を組み、設定を写して knip を子のプロセスで打つ） | 揃った木で当たり 0 件 | 入口から使う書き出しは当たらない | 使われない書き出し・使われない依存・どこからも読まれないファイルをそれぞれ 1 つ足すと当たる。`apps/web/src/generated/` の `@screenPending` の無い使われない呼び出しは、`apps/web` の `exports` に載せても当たる（`includeEntryExports` を外した設定では当たらない）。使われない `ignoreDependencies` の行で誤りになる |
 
 ## zizmor の設定と CI の定義のテスト
 

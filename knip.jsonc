@@ -14,8 +14,12 @@
       // Lambda の起点。infra がパスの文字列で渡すので import では辿れない
       "entry": ["src/users-handler.ts"]
     },
-    // 画面の起点（index.html の script）は knip が vite の設定から拾う
-    "apps/web": {},
+    // 画面の起点（index.html の script）は knip が vite の設定から拾う。生成した画面の呼び出しは
+    // apps/web/src/generated/ に置く（K2-2）。入口（package.json の exports など）にされても使われない書き出しを
+    // 落とすよう、入口のファイルの書き出しも照らす
+    "apps/web": {
+      "includeEntryExports": true
+    },
     // 合成の起点（cdk.json の app）と設置のコマンド（ルートのスクリプト nd-setup）は knip が拾う
     "infra": {
       // CDK の NodejsFunction が合成の時に実行ファイルとして読み、import では辿れない（#1）
