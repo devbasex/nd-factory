@@ -12,6 +12,7 @@ import {
   describePgAuthTimeout,
   withTestDatabase,
 } from "./pg-executor.ts";
+import { itKeepsTransactionBoundary } from "./transaction-boundary.ts";
 
 // 作り物の値だけを使う
 const PROJECT = { projectId: "prj_acme_a", database: "acme_db_aaaaaaaa", role: "acme_role_aaaaaaaa" };
@@ -542,6 +543,22 @@ describe("terminateRoleConnections（作り物の SqlExecutor）", () => {
     await expect(terminateRoleConnections(fake, PROJECT.role, 3, fakeClock().options())).rejects.toThrow();
     expect(fake.calls.at(-1)).toEqual({ kind: "rollback", transactionId: "tx-1" });
   });
+});
+
+describe("rotateRole のトランザクションの境（作り物の SqlExecutor）", () => {
+  for (const state of [{}, { tablePresent: false }, { recorded: { recorded: 1, cutoff_recorded: true } }]) {
+    describe(JSON.stringify(state), () => {
+      itKeepsTransactionBoundary((fake) => rotateRole(fake, { ...PROJECT, password: PASSWORD, seq: 2 }), () => fakeDb(state), 1);
+    });
+  }
+});
+
+describe("terminateRoleConnections のトランザクションの境（作り物の SqlExecutor）", () => {
+  for (const state of [{ recorded: { recorded: 3, cutoff_recorded: true } }, { recorded: { recorded: 3, cutoff_recorded: false } }, { recorded: { recorded: 4, cutoff_recorded: true } }]) {
+    describe(JSON.stringify(state), () => {
+      itKeepsTransactionBoundary((fake) => terminateRoleConnections(fake, PROJECT.role, 3, fakeClock().options()), () => fakeDb(state), 1);
+    });
+  }
 });
 
 describe("文の長さ", () => {

@@ -11,6 +11,7 @@ import {
 import { ADMIN_DATABASE, type SqlExecutor, type SqlValue } from "../../src/db-prep/sql-executor.ts";
 import { FakeSqlExecutor, type SqlCall } from "./fake-sql-executor.ts";
 import { type TestDatabase, describePgDisposable, withTestDatabase } from "./pg-executor.ts";
+import { itKeepsTransactionBoundary } from "./transaction-boundary.ts";
 
 // 作り物の値だけを使う
 const PROJECT: ProjectIdent = { projectId: "prj_acme_a", database: "acme_db_aaaaaaaa", role: "acme_role_aaaaaaaa" };
@@ -733,6 +734,23 @@ async function connectGrantees(db: TestDatabase, database: string): Promise<stri
   );
   return res.rows.map((r) => r.name);
 }
+
+describe("claimBinding のトランザクションの境（作り物の SqlExecutor）", () => {
+  for (const state of [{}, { tablePresent: false }]) {
+    describe(state.tablePresent === false ? "表が無い" : "表が有る", () => {
+      itKeepsTransactionBoundary((fake) => claimBinding(fake, PROJECT), () => fakeDb(state), 1);
+    });
+  }
+});
+
+describe("provisionProject のトランザクションの境（作り物の SqlExecutor）", () => {
+  // 3 の PUBLIC の取り消しと接続の許し、6 の役割の作成か書き直し
+  for (const state of [{}, { roleExists: true, databaseExists: true }]) {
+    describe(state.roleExists ? "作り直し" : "初めて", () => {
+      itKeepsTransactionBoundary((fake) => provisionProject(fake, { ...PROJECT, password: PASSWORD }), () => fakeDb(state), 2);
+    });
+  }
+});
 
 describePgDisposable("provisionProject（PostgreSQL）", () => {
   it("2 つのプロジェクトを作り、A の役割で A へ接続でき、B・postgres・template1 へ接続できない", async () => {

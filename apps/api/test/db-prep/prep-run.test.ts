@@ -3,6 +3,7 @@ import { PREP_RUN_RETENTION_DAYS, claimPrepRun } from "../../src/db-prep/prep-ru
 import { ADMIN_DATABASE, type SqlExecutor } from "../../src/db-prep/sql-executor.ts";
 import { FakeSqlExecutor } from "./fake-sql-executor.ts";
 import { describePg, withTestDatabase } from "./pg-executor.ts";
+import { itKeepsTransactionBoundary } from "./transaction-boundary.ts";
 
 const ADMIN = { database: ADMIN_DATABASE };
 
@@ -124,6 +125,26 @@ describe("claimPrepRun（作り物の SqlExecutor）", () => {
     await expect(claimPrepRun(fake, "")).rejects.toThrow();
     expect(fake.calls).toHaveLength(0);
   });
+});
+
+describe("claimPrepRun のトランザクションの境（作り物の SqlExecutor）", () => {
+  for (const [present, inserted] of [[true, true], [false, true], [true, false]] as const) {
+    describe(`表が${present ? "有る" : "無い"}・${inserted ? "first" : "duplicate"}`, () => {
+      itKeepsTransactionBoundary(
+        (fake) => claimPrepRun(fake, "prep-1"),
+        () => {
+          const fake = new FakeSqlExecutor();
+          fake.respond = (sql) => {
+            if (sql.includes("AS present")) return [{ present }];
+            if (sql.includes("RETURNING")) return inserted ? [{ prep_id: "prep-1" }] : [];
+            return [];
+          };
+          return fake;
+        },
+        1,
+      );
+    });
+  }
 });
 
 describePg("claimPrepRun（PostgreSQL）", () => {
