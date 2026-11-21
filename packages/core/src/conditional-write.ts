@@ -278,6 +278,15 @@ function isAppendOnlyPut(item: TransactItem): boolean {
   return item.op === "put" && item.condition.kind === "not_exists" && item.condition.path === "pk";
 }
 
+// 記録の表は無いときだけ足す。書き換え・消し・上書きを組んだら確定しない（I9）。
+// writeAtomically の前の照らしと、送る境の Db.transactWrite（createDb）の両方が呼ぶ。既にある鍵への Put は更新と削除の権限が無くても
+// Put の権限で上書きできるため、権限だけに頼らず送る前に止める
+export function checkAuditAppendOnly(items: readonly TransactItem[]): void {
+  for (const item of items) {
+    if (item.table === "audit" && !isAppendOnlyPut(item)) throw new AuditAppendOnlyError(`記録の表へ ${item.op} を書かない（追記だけ）`);
+  }
+}
+
 function checkItems(items: readonly TransactItem[]): void {
   if (items.length === 0) throw new WriteSpecError("書き込みが 0 件");
   if (items.length > TRANSACT_MAX_ITEMS) throw new WriteSpecError(`書き込みが ${TRANSACT_MAX_ITEMS} 件を越える: ${items.length}`);
@@ -286,9 +295,8 @@ function checkItems(items: readonly TransactItem[]): void {
     const id = rowId(item);
     if (seen.has(id)) throw new WriteSpecError(`同じ行を 2 回指す（表 ${item.table}）`);
     seen.add(id);
-    // 記録の表は無いときだけ足す。書き換え・消し・上書きを組んだら確定しない（I9）
-    if (item.table === "audit" && !isAppendOnlyPut(item)) throw new AuditAppendOnlyError(`記録の表へ ${item.op} を書かない（追記だけ）`);
   }
+  checkAuditAppendOnly(items);
 }
 
 function tablesOf(items: readonly TransactItem[]): string[] {

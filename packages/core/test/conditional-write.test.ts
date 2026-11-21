@@ -241,6 +241,23 @@ describe("記録の表は追記だけ", () => {
     expect(table.rows("teams")).toEqual([]);
   });
 
+  it("Db.transactWrite は writeAtomically を通らずに呼ばれても、記録の表の書き換え・消し・上書きを送らない", async () => {
+    const { createDb } = await import("../src/db.ts");
+    const sent: unknown[] = [];
+    const client = { send: async (command: unknown) => sent.push(command) };
+    const names = Object.fromEntries(["users", "teams", "projects", "sprints", "events", "decisions", "notices", "usage", "audit", "idempotency"].map((n) => [n, `acme-dev-db-${n}`]));
+    const db = createDb(client as never, names as never);
+    const rewrite: TransactItem = { table: "audit", op: "update", key: auditKey, update: [{ kind: "set", path: "operation", value: "x" }], condition: cond.exists("pk"), onConflict: "fail" };
+    const del: TransactItem = { table: "audit", op: "delete", key: auditKey, condition: cond.exists("pk"), onConflict: "fail" };
+    const overwrite: TransactItem = { table: "audit", op: "put", key: auditKey, item: { ...auditKey, schema_version: 1, operation: "x" }, condition: cond.exists("pk"), onConflict: "fail" };
+    const state = putIfAbsent({ table: "teams", item: teamRow(), onConflict: "fail" });
+    for (const item of [rewrite, del, overwrite]) await expect(db.transactWrite([state, item])).rejects.toBeInstanceOf(AuditAppendOnlyError);
+    expect(sent).toEqual([]);
+    // 追記（無いときだけの Put）は送る
+    await db.transactWrite([putIfAbsent({ table: "audit", item: { ...auditKey, schema_version: 1, operation: "x" }, onConflict: "fail" })]);
+    expect(sent).toHaveLength(1);
+  });
+
   it("Db.update は記録の表を書き換えない", async () => {
     const { createDb } = await import("../src/db.ts");
     const sent: unknown[] = [];

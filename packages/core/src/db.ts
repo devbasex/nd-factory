@@ -1,6 +1,6 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand, type TransactWriteCommandInput } from "@aws-sdk/lib-dynamodb";
-import { AuditAppendOnlyError, expressionsOf, type Condition, type TransactItem, type Update } from "./conditional-write.ts";
+import { AuditAppendOnlyError, checkAuditAppendOnly, expressionsOf, type Condition, type TransactItem, type Update } from "./conditional-write.ts";
 import { awsClient, type AwsClientConfig } from "./outbound.ts";
 
 // Db のポートと、DynamoDB の文書のクライアントで満たす実装。条件式は conditional-write の expressionsOf だけが書き出す
@@ -49,7 +49,8 @@ export type Db = {
   queryIndex(table: TableName, index: string, keyCond: KeyCondition, opts: QueryOptions): Promise<Page>;
   // 表の移しだけが使う（API の要求の処理は使わない）
   scan(table: TableName, opts: ScanOptions): Promise<{ readonly items: StoredRow[]; readonly lastKey: RowKey | null }>;
-  // 1 つのトランザクションで書く。条件の外れと衝突は SDK の TransactionCanceledException のまま投げる（訳しは writeAtomically）
+  // 1 つのトランザクションで書く。条件の外れと衝突は SDK の TransactionCanceledException のまま投げる（訳しは writeAtomically）。
+  // 記録の表への追記でない件（更新・削除・照らし・条件の無い上書き）があれば送らずに AuditAppendOnlyError を投げる
   transactWrite(items: readonly TransactItem[]): Promise<void>;
   // 1 行の条件つきの更新。条件が外れたら false
   update(table: TableName, key: RowKey, update: Update, condition: Condition): Promise<boolean>;
@@ -155,6 +156,8 @@ export function createDb(client: DynamoDBDocumentClient, names: TableNames): Db 
       return { items: out.Items ?? [], lastKey: rowKeyOf(out.LastEvaluatedKey) };
     },
     async transactWrite(items) {
+      // writeAtomically を通らずに呼ばれても、記録の表の書き換え・消し・上書きを送らない（I9）
+      checkAuditAppendOnly(items);
       await client.send(new TransactWriteCommand({ TransactItems: items.map((item) => transactItemOf(item, names)) }));
     },
     async update(table, key, update, condition) {

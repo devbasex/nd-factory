@@ -1,5 +1,5 @@
 import { TransactionCanceledException } from "@aws-sdk/client-dynamodb";
-import type { Condition, TransactItem, Update } from "../../src/conditional-write.ts";
+import { checkAuditAppendOnly, type Condition, type TransactItem, type Update } from "../../src/conditional-write.ts";
 import type { Db, KeyCondition, RowKey, StoredRow, TableName } from "../../src/db.ts";
 
 // 偽の表。DynamoDB を呼ばずに、条件と更新を構造の値のまま当てる。
@@ -170,6 +170,8 @@ export function fakeTable() {
       return { items: structuredClone(page), lastKey: more && last !== undefined ? { pk: String(last["pk"]), sk: typeof last["sk"] === "string" ? last["sk"] : null } : null };
     },
     async transactWrite(items) {
+      // 本物の createDb と同じく、送る境で記録の表の書き換え・消し・上書きを止める（送られた件に数えない）
+      checkAuditAppendOnly(items);
       transactions.push(items);
       const failure = failures.shift();
       if (failure === "conflict") throw cancelled(items.map(() => "TransactionConflict"));

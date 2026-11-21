@@ -184,6 +184,7 @@ nd-factory/
 | `writeAtomically` | トランザクションどうしの衝突 | 同じ行を同時に書く別の要求 | 件ごとの理由が `TransactionConflict` | `p-retry` で再試行（方針 `dynamodb-transaction`） | 使い切れば要求全体の 503 `unavailable` | 何も書かれていない。再実行できる |
 | `writeAtomically` | 表に届かない | 呼びすぎ・障害・時間切れ | SDK の例外 | 再試行の後に呼び出し元へ返す | 要求全体の 503（記録の行を含むなら `audit_unavailable`、含まなければ `unavailable`） | 何も書かれていない。冪等の鍵で再実行できる |
 | `writeAtomically` | 件の数が上限を越える | ハンドラーが組んだ書き込みが多すぎる | 送る前の数え | 止める（例外） | 要求全体の 503 `unavailable` とログの error | 設計の誤りで、テストが先に落とす |
+| `writeAtomically`・`Db.transactWrite` | 記録の表の書き換え・削除・上書きを組んだ | 書き手の誤り | 送る前の照らし（記録の表の件が `attribute_not_exists(pk)` の Put でない）。`writeAtomically` を通らない `Db.transactWrite` の呼び出しも、送る境の `createDb` が同じ照らしで止める（既にある鍵への Put は更新と削除の権限を外しても Put の権限で上書きできるため、権限だけに頼らない） | 止める（`AuditAppendOnlyError`。どの件も送らない） | 要求全体の 503 `unavailable` とログの error | 設計の誤りで、テストが先に落とす（I9） |
 | `authenticate` | token が無い・形が違う・署名が違う・期限切れ・取り消し済み・受け口に合わない | 呼び手の誤りか古い token | 種類ごとの照らし | 呼び出し元へ返す（`unauthorized`） | 要求全体の 401 `unauthorized`（理由によらず同じ本文） | 後始末なし。新しい token で再実行できる |
 | `authenticate` | IdP の公開鍵を取れない・表に届かない | ネットワーク・依存先の障害 | `aws-jwt-verify` の鍵の取得の失敗（組み込みの取り手 `SimpleFetcher` が `responseTimeout` で時間を切り、失敗を 1 回すぐに打ち直す）と読みの失敗 | 呼び出し元へ返す（`unavailable`） | 要求全体の 503 `unavailable`（401 にしない） | 再実行できる |
 | `authenticate` | 委任の最後に使った時刻を書けない | 表の失敗・条件の外れ | 条件つきの更新の失敗 | 既定値で続ける（主体は決めたまま） | 無し。ログの warn | 次の要求で書き直す |
