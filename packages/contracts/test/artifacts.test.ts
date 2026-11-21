@@ -23,17 +23,57 @@ import { FIXTURE_CREATE, FIXTURE_LIST, FIXTURE_OPERATIONS } from "./fixtures/ope
 
 const ALL: readonly OperationDef[] = [...OPERATIONS, ...FIXTURE_OPERATIONS];
 
+// JSON Schema の値が参照のキーワード $ref を持つか。列挙値・定数などの値と、properties などの名前の鍵は $ref と見ない
+const DATA_KEYWORDS = new Set(["enum", "const", "default", "examples", "example"]);
+const NAME_MAP_KEYWORDS = new Set(["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]);
+function hasRefKeyword(schema: unknown): boolean {
+  if (Array.isArray(schema)) return schema.some(hasRefKeyword);
+  if (schema === null || typeof schema !== "object") return false;
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "$ref") return true;
+    if (DATA_KEYWORDS.has(key)) continue;
+    if (NAME_MAP_KEYWORDS.has(key) && value !== null && typeof value === "object") {
+      if (Object.values(value).some(hasRefKeyword)) return true;
+      continue;
+    }
+    if (hasRefKeyword(value)) return true;
+  }
+  return false;
+}
+
 // buildOpenApi の components.schemas のうち、再帰しない形（$defs の値に $ref を持たない形。z.toJSONSchema は再帰だけを $ref で出す）が $defs と同じ値か。
-// 再帰する形は zod-openapi が再帰を components.schemas の別の名前（__schemaN）へ切り出すため照らさず、件数も数えない
+// 再帰する形が無ければ components.schemas の名前は problem と操作の名前だけ。再帰する形があるときは、zod-openapi が再帰を切り出す __schemaN だけを余分に許し、再帰する形の値は照らさない
 function expectFlatSchemasMatchDefs(ops: readonly OperationDef[]): void {
   const schemas = buildOpenApi(ops).components?.schemas ?? {};
   const defs = buildOperationSchemas(ops).$defs;
   const names = ops.filter((op) => op.endpoint === "user").flatMap((op) => [`${op.name}.item`, `${op.name}.result`]);
-  expect(Object.keys(schemas)).toEqual(expect.arrayContaining(names));
-  const flat = names.filter((name) => !JSON.stringify(defs[name]).includes('"$ref"'));
+  expect(Object.keys(defs)).toEqual(expect.arrayContaining(names));
+  const flat = names.filter((name) => !hasRefKeyword(defs[name]));
   expect(flat.length).toBeGreaterThan(0);
+  const expected = ["problem", ...names].sort();
+  if (flat.length === names.length) {
+    expect(Object.keys(schemas).sort()).toEqual(expected);
+  } else {
+    expect(Object.keys(schemas)).toEqual(expect.arrayContaining(expected));
+    const extra = Object.keys(schemas).filter((name) => !expected.includes(name));
+    for (const name of extra) expect(name).toMatch(/^__schema\d+$/);
+  }
   for (const name of flat) expect(schemas[name], name).toEqual(defs[name]);
 }
+
+describe("hasRefKeyword", () => {
+  it.each([
+    ["列挙値の $ref", { type: "string", enum: ["$ref"] }, false],
+    ["定数の $ref", { const: { $ref: "#" } }, false],
+    ["$ref という名前の項目", { type: "object", properties: { $ref: { type: "string" } }, required: ["$ref"] }, false],
+    ["項目の値の $ref", { type: "object", properties: { $ref: { $ref: "#/$defs/a" } } }, true],
+    ["配列の要素の $ref", { type: "array", items: { $ref: "#" } }, true],
+    ["anyOf の中の $ref", { anyOf: [{ type: "null" }, { $ref: "#/$defs/a" }] }, true],
+  ] as const)("%s は %s", (_label, schema, expected) => {
+    expect(hasRefKeyword(schema)).toBe(expected);
+  });
+});
+
 const UUID_V7 = "01935b4e-7c2a-7d10-8f3e-2b6f0c9a1d42";
 
 // 見本を書いた操作。値の形と作り物の値の決まりを照らす
