@@ -8,7 +8,7 @@
 | --- | --- |
 | `packages/contracts/` | 形の正本。設定のファイル・API の経路・画面の設定の値・設置のコマンドの終了コードの形を zod で持ち、JSON Schema と見本と文書の表を作る |
 | `apps/api/` | API の経路（Lambda） |
-| `apps/web/` | 画面（Vite と素の TypeScript）と e2e |
+| `apps/web/` | 画面（React と TypeScript、Vite で束ねる）と e2e |
 | `infra/` | AWS CDK のスタック（アプリのスタック・反映のパイプライン）と設置のコマンド |
 | `tools/` | 参照の検査と CI の定義のテスト |
 | `docs/operations/` | 設置・設定のファイル・反映の承認・IdP のクライアントと App の作り方 |

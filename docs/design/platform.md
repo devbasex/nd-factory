@@ -447,12 +447,12 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 | 項目 | 決まり | 縛るもの |
 | --- | --- | --- |
-| 言語 | コードは TypeScript だけで書く。Node 24 の型の剥がし（STD84）で直に打ち、出力のための変換の段を持たない（Lambda の束ねは esbuild、画面は Vite） | 根の `tsconfig.json`（`noEmit`） |
+| 言語 | コードは TypeScript だけで書く。画面の外（API・インフラ・設置のコマンド・検査）は Node 24 の型の剥がし（STD84）で直に打ち、出力のための変換の段を持たない（Lambda の束ねは esbuild）。画面は TSX で書き、Vite と vitest が変換する | 根の `tsconfig.json`（`noEmit`） |
 | 使う構文 | 型の注釈を消すだけで JavaScript に戻る構文だけを使う。enum・引数のプロパティ・namespace を使わない。閉じた語の集まりは zod の列挙で持つ（[定数とデータの置き場の基準](#定数とデータの置き場の基準)） | `erasableSyntaxOnly`（型検査が落とす） |
 | 型の厳しさ | `strict` と `noUncheckedIndexedAccess` を外さない | 根の `tsconfig.json` |
 | import | 型だけの import は `import type` で書く。相対の import は拡張子 `.ts` まで書く | `verbatimModuleSyntax`・`allowImportingTsExtensions`、ESLint の `consistent-type-imports` |
 | 使わない名前 | 使わない引数と変数は `_` で始める | ESLint の `no-unused-vars` |
-| 画面の組み方 | UI のフレームワークを入れず、素の TypeScript と DOM の API で部品を組む。JSX を使わない。束ねと開発のサーバーは Vite（LIB86） | `apps/web/package.json` の実行の時の依存。足すときは [費用が増える構成を足すとき](#費用が増える構成を足すとき) の表と決定 140 の見直し |
+| 画面の組み方 | 部品は React 19（LIB87）の関数の部品として TSX で書く。束ねと開発のサーバーは Vite（LIB86）と React の Vite のプラグイン（LIB90）。部品の単体テストは vitest で書く。画面の外のコードは TSX と React を import しない | `apps/web/package.json` の依存・根の `tsconfig.json` の `jsx`・`eslint.config.js` の置き場ごとの規則 |
 | テスト | 振る舞いを足すときは先に落ちるテストを書く。単体は vitest、画面は Playwright の e2e | `npm run check`・`npm run e2e`（[基本の検査](#基本の検査)） |
 | NDF の版 | NDF の版の数字を読んで大小を比べない | 参照の検査 |
 
@@ -505,10 +505,11 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | LIB83 | CloudFront の OAC | — | AWS のサービス | — | 無し | 満たす。OAI より OAC を推す（全リージョンの S3・SSE-KMS）。定額の Free プランは配信ごとに月 100 万回・100 GB | https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html ・ https://aws.amazon.com/cloudfront/pricing/ （2026-11-17） |
 | LIB84 | AWS Budgets と Amazon SNS（運用の知らせ） | — | AWS のサービス | — | 無し | 満たす。予算の監視と知らせは無料。動作つきの予算は 2 つまで無料。SNS は時間の課金を持たず、月 100 万回の要求とメールの 1,000 通までは無料の枠 | https://aws.amazon.com/aws-cost-management/aws-budgets/pricing/ （2026-11-17）・ https://aws.amazon.com/sns/pricing/ （2026-11-18） |
 | LIB85 | ECR のライフサイクルの規則 | — | AWS のサービス | — | 無し | 満たす。押した数（`imageCountMoreThan`）か日数で古いイメージを 24 時間のうちに消す | https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html （2026-11-17） |
-| LIB86 | `vite` | 8.3.8 | MIT | 2026-11-11 | 無し | 満たす。素の TypeScript の画面を束ね、開発のサーバーを持つ。開発の依存だけで、配る画面に実行の時の依存を足さない。今の `apps/web` が使っている | https://registry.npmjs.org/vite （2026-11-18） |
-| LIB87 | `react`・`react-dom` | 19.3.1 | MIT | 2026-10-14 | 無し | 満たす。ただし実行の時の依存が 2 つ増え（`react-dom` の展開後 約 7.7 MiB）、部品を JSX で書くと Node の型の剥がしで打てない（STD84） | https://registry.npmjs.org/react ・ https://registry.npmjs.org/react-dom （2026-11-18） |
-| LIB88 | `preact` | 11.2.0 | MIT | 2026-11-06 | 無し | 満たす。小さいが、実行の時の依存が 1 つ増え、JSX は LIB87 と同じく型の剥がしで打てない | https://registry.npmjs.org/preact （2026-11-18） |
-| LIB89 | `lit` | 3.3.3 | BSD-3-Clause | 2026-05-14 | 無し | 満たす。Web Components の上で JSX を使わずに書ける。実行の時の依存が 1 つ増え、宣言の書き方の多くがデコレーターに寄る | https://registry.npmjs.org/lit （2026-11-18） |
+| LIB86 | `vite` | 8.3.8 | MIT | 2026-11-11 | 無し | 満たす。画面を束ね、開発のサーバーを持つ。開発の依存だけで、配る画面に実行の時の依存を足さない。今の `apps/web` が使っている | https://registry.npmjs.org/vite （2026-11-18） |
+| LIB87 | `react`・`react-dom` | 19.3.1 | MIT | 2026-10-14 | 無し | 満たす。採る（決定 140）。部品・国際化・PWA・テストの周りの部品と資料が最も多い。実行の時の依存が 2 つ増える（`react-dom` の展開後 約 7.7 MiB。配る束は圧縮と木の刈り込みの後で数十 KB〜百数十 KB）。TSX は Node の型の剥がしで打てないため、画面のコードは Vite と vitest で変換する（STD84） | https://registry.npmjs.org/react ・ https://registry.npmjs.org/react-dom （2026-11-18） |
+| LIB88 | `preact` | 11.2.0 | MIT | 2026-11-06 | 無し | 満たす。React と書き方が近く小さいが、互換の層を通すと React の周りの部品の動きが保証されない | https://registry.npmjs.org/preact （2026-11-18） |
+| LIB89 | `lit` | 3.3.3 | BSD-3-Clause | 2026-05-14 | 無し | 満たす。Web Components の上で JSX を使わずに書ける。宣言の書き方の多くがデコレーターに寄り、画面の周りの部品と資料が React より少ない | https://registry.npmjs.org/lit （2026-11-18） |
+| LIB90 | `@vitejs/plugin-react` | 6.3.0 | MIT | 2026-11-09 | 無し | 満たす。Vite で TSX を変換し、開発のサーバーで部品を差し替える。開発の依存だけ | https://registry.npmjs.org/@vitejs/plugin-react （2026-11-21） |
 
 ### 確かめられなかったこと
 
@@ -762,18 +763,18 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 根拠: Value 9（MVV 版 1）
 
-### 決定 140: 子の課題が言語と画面の組み方を 1 か所から読めるよう、書き方の細則をプラットフォームの文書に置き、画面は UI のフレームワークを入れずに素の TypeScript で組む
+### 決定 140: 子の課題が言語と画面の組み方を 1 か所から読めるよう、書き方の細則をプラットフォームの文書に置き、画面は React 19 と TSX で組む
 
-結論: 書き方の細則を [言語と書き方の決まり](#言語と書き方の決まり) に置き、`AGENTS.md` はそこを指す。画面は UI のフレームワークを入れず、素の TypeScript と DOM の API で部品を組み、Vite で束ねる。
+結論: 書き方の細則を [言語と書き方の決まり](#言語と書き方の決まり) に置き、`AGENTS.md` はそこを指す。画面は React 19（LIB87）の関数の部品を TSX で書き、Vite（LIB86）と React の Vite のプラグイン（LIB90）で束ねる。画面の外のコードは今までどおり Node の型の剥がしで直に打ち、TSX と React を持たない。
 
-理由: 画面の部品は画面の基盤として先に固める（Value 2）。部品の数は画面の文書の部品の一覧に収まり、状態の持ち方も確定待ちと控えに限られるため、フレームワークの仮想 DOM や状態の管理の仕組みを使う場面が少ない。フレームワークを入れると配る画面に実行の時の依存が増え（Value 6）、JSX で書いた部品は Node の型の剥がしで打てず、単体テストに変換の段が要る（STD84）。
+理由: Value 2 は画面の基盤（画面の地図・共通の部品・端末の幅・オフライン・国際化）を先に固め、20 の機能の画面をダミーデータで作り切ることを求める。オフラインの確定待ちと控え・国際化・部品の組み合わせを DOM の API で自前に書くと、DOM の差分の更新と状態の扱いを作り直すことになる。実績のある最新のフレームワークを使えば、その部分を書かずに部品と画面へ手を回せ、周りの部品（国際化・PWA・テスト）も選べる。React は候補の中で部品と資料が最も多い。Value 6 は運用の費用が増える構成や依存を足すときに理由と代わりの案を示すことを求め、依存を足すこと自体は禁じていない。React で配る束が増えても CloudFront と S3 の費用はほぼ変わらず、理由と代わりの案はこの決定に置いた。TSX は Node の型の剥がしで打てないが（STD84）、画面は Vite と vitest が変換するため、変換の段を持たない決まりは画面の外に限れば保てる。
 
-採らなかった案: React（LIB87）は依存が 2 つ増え、JSX が型の剥がしで打てない。Preact（LIB88）は小さいが JSX の事情が同じ。Lit（LIB89）は JSX を使わずに書けるが、依存が 1 つ増え、宣言の書き方の多くがデコレーターに寄る。どれも要件は満たすが、部品の数と状態の範囲に対して依存を足す分の得が無い。
+採らなかった案: UI のフレームワークを入れず、素の TypeScript と DOM の API で組む形（この決定の直す前の結論。骨組みの画面の形をそのまま決まりにしたもので、Value 6 を「依存を足さない」と読んでいた。画面の基盤の範囲に対して自前で書く量が多い）。Preact（LIB88）は小さいが、互換の層を通すと React の周りの部品の動きが保証されない。Lit（LIB89）は JSX を使わずに書けるが、宣言の書き方がデコレーターに寄り、周りの部品と資料が少ない。
 
-見直す条件: 部品の一覧が画面の文書の範囲を超えて増え、DOM の差分の更新を自前で書く箇所が出てきたとき。足すときは [費用が増える構成を足すとき](#費用が増える構成を足すとき) の表を置き、この決定を改める。
+見直す条件: React の大きな版が出て、今の版の保守が終わるとき。または配る束の大きさが画面の性能の目標（決定 94）を損なうと測れたとき。
 
-- 作り方: 自前で作る
-- 比べた候補: LIB86 / LIB87 / LIB88 / LIB89 / STD84
+- 作り方: 既存の部品を使う
+- 比べた候補: LIB86 / LIB87 / LIB88 / LIB89 / LIB90 / STD84
 
 根拠: Value 2 / Value 6（MVV 版 1）
 
