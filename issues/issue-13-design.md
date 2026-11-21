@@ -120,7 +120,7 @@ graph TD
 | ネットワーク（`infra/lib/network.ts`） | VPC・4 つのサブネット・S3 の Gateway のエンドポイント・タスクの SG・Aurora の SG |
 | 進行表の DB（`infra/lib/progress-db.ts`） | Aurora Serverless v2 のクラスタ（Data API を有効）・書き手・管理の役割の秘密の器 |
 | ECS のクラスタ（`infra/lib/tasks.ts`） | ECS のクラスタ・タスクの実行の役割・文を持たないタスクの役割・ログの群。ランナーのタスクの定義が使う値（クラスタ・サブネット・SG・既定の大きさ）を #6 へ渡す |
-| DB の用意の関数の資源（`infra/lib/db-prep-function.ts`） | Lambda（VPC の外・Node 24・ARM64・時間切れ 5 分・自動の再試行 0 回・待ち行列の最大の年齢 60 秒）と、Data API と 2 種類の秘密の器の読み取りの権限 |
+| DB の用意の関数の資源（`infra/lib/db-prep-function.ts`） | Lambda（VPC の外・Node 24・ARM64・時間切れ 5 分・自動の再試行 0 回・待ち行列の最大の年齢 60 秒）と、Data API と 2 種類の秘密の器の権限。終わりの記録の口が要る DynamoDB の権限（プロジェクトの表と操作の記録の表だけ）は、口をつなぐ #6 が `grantCompletionAccess` で足す |
 | 費用の見張り（`infra/lib/cost-watch.ts`） | 運用の知らせの SNS のトピックと宛先の購読・月の予算と 3 つの知らせ |
 | DB の用意の関数（`apps/api/src/entries/db-prep.ts`・`apps/api/src/db-prep/`） | 用意の ID の読み直し・用意の手順の 1〜6・差し替え・終わりの記録の口の呼び出し。I10 の守り。SQL は `SqlExecutor` の裏で打つ |
 | 形の正本（`packages/contracts/`） | 設定のファイルのキー・DB の用意の関数の呼び出しの値と終わりの結果の形 |
@@ -416,6 +416,7 @@ flowchart TD
 | `setup.md` と終了コード | 前提の表に Docker と、profile に要る ECR の許しを足す。終了コード 0・5・6 の「AWS へ書いたか」を自前の ECR への push に合わせる（`packages/contracts/data/exit-codes.json`） |
 | DB の用意の関数を呼ぶ側 | 用意の ID を置いてから `Invoke`（`InvocationType: Event`）で `dbPrepInvocation` を渡す。呼べるのは API の関数と見回りの関数だけ（`lambda:InvokeFunction` を許す） |
 | 終わりの記録の口 | `PrepCompletionPort`（`isCurrent`・`readTarget`・`record`）を、プロジェクトのモジュールの操作（用意の ID と差し替えの番号の条件つきの書き込み）で作り、`apps/api/src/entries/db-prep.ts` で渡す |
+| 口が要る DynamoDB の権限 | 口をつなぐ同じ変更で、`AppStack` から `DbPrepFunction.grantCompletionAccess` をプロジェクトの表と操作の記録の表で呼ぶ。許すのはプロジェクトの表への `GetItem`・`UpdateItem`・`ConditionCheckItem` と、操作の記録の表への `PutItem` だけ（詳細設計の「DB の用意の関数の資源」）。`DbPrepFunction` の合成のテストの DynamoDB の期待を、`AppStack` の合成の出力で照らす形へ移す |
 | 見回り | 作成の時間切れ（I18）と差し替えの呼び直し（I22）。期限 15 分・間隔 5 分・呼び直しの上限 3 回（決定 9） |
 | ランナーのタスクの大きさ | 1 vCPU・2 GB・x86_64・一時の保存 20 GiB（決定 5） |
 | タスクのタグの伝播 | `RunTask` に `propagateTags: TASK_DEFINITION` を渡し、API の関数の役割に `ecs:TagResource` を許す（決定 6・LIB19） |

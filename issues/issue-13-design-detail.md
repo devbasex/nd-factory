@@ -221,14 +221,16 @@ package-lock.json
 | `DbPrepFunction` の `constructor` | `infra/lib/db-prep-function.ts` | 新設 | `(scope, id, props: { db: ProgressDb; names: AppResourceNames; secretPrefix: string })` | `NodejsFunction`（起点 `DB_PREP_ENTRY`・名前 `<prefix>-<environment>-db-prep`・Node 24・ARM64・VPC の外・時間切れ 5 分・非同期の呼び出しの `retryAttempts: 0` と `maxEventAge` 60 秒・ログの群）。役割は、クラスタへの `rds-data:ExecuteStatement`・`BeginTransaction`・`CommitTransaction`・`RollbackTransaction` と、管理の役割の秘密の器と `<prefix>/<environment>/progress-db/*` への `secretsmanager:GetSecretValue` だけ。クラスタと管理の秘密の器の ARN と秘密の器の頭は環境変数で渡す（合成の出力では参照） |
 | `DB_PREP_ENTRY` | 同上 | 新設 | 定数（`apps/api/src/entries/db-prep.ts` のパス） | 起点のパス。コードは import しない |
 | `DbPrepFunction` の公開の値 | 同上 | 新設 | `fn` | #6 が API の関数と見回りの関数に呼ぶ権限（`lambda:InvokeFunction`）を許す |
+| `DbPrepFunction.grantCompletionAccess` | 同上 | 新設 | `(tables: { projects: dynamodb.ITableV2; audit: dynamodb.ITableV2 }) => void` | 終わりの記録の口（`PrepCompletionPort`。同じ Lambda の中で動く）が要る DynamoDB の権限だけを関数の役割へ足す。プロジェクトの表（`db-projects`）の表の ARN だけへ `dynamodb:GetItem`（`isCurrent`・`readTarget` の強い整合の読み）・`dynamodb:UpdateItem`・`dynamodb:ConditionCheckItem`（`record` の条件つきの書き込み。`TransactWriteItems` は項目ごとにこの 2 つで照らされる）、操作の記録の表（`db-audit`）の表の ARN だけへ `dynamodb:PutItem`（3 つの処理の記録の行。[API の文書の DB の用意の関数の処理](../docs/design/api.md#ランナー手元のマシンの-http-の経路)）。索引の ARN・`Query`・`Scan`・`DeleteItem`・ほかの表は許さない |
 
 - 事後条件: 関数は `VpcConfig` を持たない（スタックの決まりの検査の `lambda_in_vpc` はそのまま当たる）。関数を呼べる主体はこの課題では足さない（#6）
+- DynamoDB の権限の付与は #6 が受け持つ。プロジェクトの表と操作の記録の表はまだ無く（#2・#5 が作る）、口の本番の実装も #6 が作るため、#6 が口を `apps/api/src/entries/db-prep.ts` へつなぐ同じ変更で、`AppStack` から `grantCompletionAccess` を 2 つの表で呼ぶ（「#6 へ渡すこと」）。この課題の版は呼ばない。呼ばないまま口をつなぐと `isCurrent` が権限の不足で投げ、SQL の前に止まる（終わりは記さない）ため、安全の側に外れる
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `DbPrepFunction` | 合成の出力の関数が `VpcConfig` を持たず、`Timeout` 300・`Architectures` が `arm64`。`AWS::Lambda::EventInvokeConfig` の `MaximumRetryAttempts` 0・`MaximumEventAgeInSeconds` 60。役割の文が上の操作と資源だけ | — | 再試行を 1 以上にする・最大の年齢を外す・`rds-data:*` か `secretsmanager:*` にする・資源を `*` に広げると落ちる |
+| `DbPrepFunction` | 合成の出力の関数が `VpcConfig` を持たず、`Timeout` 300・`Architectures` が `arm64`。`AWS::Lambda::EventInvokeConfig` の `MaximumRetryAttempts` 0・`MaximumEventAgeInSeconds` 60。役割の文が上の操作と資源だけで、DynamoDB の文を持たない | テスト用の 2 つの表で `grantCompletionAccess` を呼んだ合成の出力で、DynamoDB の文が上の 4 つの操作と 2 つの表の ARN だけ（#6 は同じテストの期待を `AppStack` の合成の出力へ移す） | 再試行を 1 以上にする・最大の年齢を外す・`rds-data:*` か `secretsmanager:*` か `dynamodb:*` にする・資源を `*` か索引の ARN に広げる・`Query` か `Scan` を足すと落ちる |
 
 ## 設置のコマンド
 
