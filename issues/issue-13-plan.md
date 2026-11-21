@@ -20,7 +20,7 @@
 | Task 4 | 差し替え: `rotateRole`・`terminateRoleConnections` | `apps/api/src/db-prep/rotate.ts`・`apps/api/test/db-prep/rotate.test.ts` |
 | Task 5 | 関数の本体: `createDbPrepHandler`・`PrepCompletionPort`・ロガー・`readVersionPassword`・`promoteVersion`・起点の `handler` | `apps/api/src/db-prep/handler.ts`・`secret-version.ts`・`apps/api/src/entries/db-prep.ts` と各テスト |
 | Task 6 | インフラの資源: `Network`・`ProgressDb`・`TaskPlatform`・`CostWatch`・`AppStack` の組み立てと AZ・利用者の表の PITR・スタックの決まりの検査と Aurora の許し | `infra/lib/network.ts`・`progress-db.ts`・`tasks.ts`・`cost-watch.ts`・`app-stack.ts`・`naming.ts`・`infra/test/support.ts`・`app-stack.test.ts`・`stack-rules.test.ts`・`naming.test.ts` |
-| Task 7 | DB の用意の関数の資源: `DbPrepFunction` と `grantCompletionAccess`、`AppStack` への組み込み | `infra/lib/db-prep-function.ts`・`app-stack.ts`・`infra/test/db-prep-function.test.ts` |
+| Task 7 | DB の用意の関数の資源: `DbPrepFunction` と `grantCompletionAccess`、`AppStack` への組み込み | `infra/lib/db-prep-function.ts`・`app-stack.ts`・`naming.ts`（関数の名前）・`infra/test/db-prep-function.test.ts`・`naming.test.ts` |
 | Task 8 | 足りない設定の一覧: `MISSING_CHECKS`・`collectMissingSettings`・`printMissingSettings`、AWS の読み手 3 つ、`runDiff` の足し | `infra/setup/missing-settings.ts`・`aws-reader.ts`・`nd-setup.ts`・`infra/test/missing-settings.test.ts`・`aws-reader.test.ts`・`nd-setup.test.ts`・`infra/package.json` |
 
 依存の向き: Task 1 がほかのすべての前にある。Task 2 → 3 → 4 → 5 は SQL の口と手順の順で積む。Task 6 と Task 8 は Task 1 だけに依る。Task 7 は Task 5（起点のファイル）と Task 6（`ProgressDb`）の後に置く。`NodejsFunction` は合成のときに起点を束ねるため、起点の無いまま資源を足すと `synth` が落ちるからである。

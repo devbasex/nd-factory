@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
-import type { Settings } from "@nd-factory/contracts/settings";
-import { CfnOutput, Duration, SecretValue, Stack, type StackProps } from "aws-cdk-lib";
+import { infraValues, type Settings } from "@nd-factory/contracts/settings";
+import { CfnOutput, Duration, Fn, RemovalPolicy, SecretValue, Stack, type StackProps } from "aws-cdk-lib";
 import { CorsHttpMethod, HttpApi, HttpMethod } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpJwtAuthorizer } from "aws-cdk-lib/aws-apigatewayv2-authorizers";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
@@ -20,10 +20,16 @@ import { BlockPublicAccess, Bucket, BucketEncryption } from "aws-cdk-lib/aws-s3"
 import { BucketDeployment, Source } from "aws-cdk-lib/aws-s3-deployment";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import type { Construct } from "constructs";
+import { CostWatch } from "./cost-watch.ts";
 import { appResourceNames, applyTags, loginDomainUrl } from "./naming.ts";
+import { Network } from "./network.ts";
+import { ProgressDb } from "./progress-db.ts";
+import { TaskPlatform } from "./tasks.ts";
 
-// アプリのスタック: 利用者プール・画面の配信・API・利用者の表・画面の設定の値。
-// 戻り先の URL が配信の名前を要り、画面の設定の値がすべてを要るため、1 つのスタックに置く
+// アプリのスタック: 利用者プール・画面の配信・API・利用者の表・画面の設定の値と、
+// ネットワーク・進行表の DB・ECS のクラスタ・費用の見張り。
+// 戻り先の URL が配信の名前を要り、画面の設定の値がすべてを要るため、1 つのスタックに置く。
+// 承認する人が 1 つの差分と確認の値で読めるよう、インフラの資源も同じスタックに置く
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const API_ENTRY = fileURLToPath(new URL("../../apps/api/src/users-handler.ts", import.meta.url));
@@ -38,12 +44,19 @@ export type AppStackProps = StackProps & {
 export class AppStack extends Stack {
   // 配信の置き場の config.json に書く値。反映のときに値が決まる部分はトークンのまま持つ
   readonly webConfig: { api_url: string; authority: string; client_id: string; login_ready: boolean };
+  readonly network: Network;
+  // #6 のランナーのタスクの定義と RunTask の値が使う
+  readonly tasks: TaskPlatform;
+  // DB の用意の関数（U7）が使う
+  readonly progressDb: ProgressDb;
+  readonly costWatch: CostWatch;
 
   constructor(scope: Construct, id: string, props: AppStackProps) {
     super(scope, id, props);
     const s = props.settings;
     const names = appResourceNames(s);
     const clientId = s.login.google.client_id;
+    const infra = infraValues(s);
 
     // 利用者の表。要求の数の課金にし、時間で費用を掛けない
     const table = new TableV2(this, "UsersTable", {
@@ -51,6 +64,8 @@ export class AppStack extends Stack {
       partitionKey: { name: "pk", type: AttributeType.STRING },
       sortKey: { name: "sk", type: AttributeType.STRING },
       billing: Billing.onDemand(),
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      removalPolicy: RemovalPolicy.RETAIN,
     });
 
     // 経路の Lambda。Docker を使わず手元の esbuild で束ねる
@@ -75,6 +90,7 @@ export class AppStack extends Stack {
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
       encryption: BucketEncryption.S3_MANAGED,
       enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
     });
     const oac = new S3OriginAccessControl(this, "WebOriginAccess", { originAccessControlName: names.webOriginAccess });
     const distribution = new Distribution(this, "WebDistribution", {
@@ -167,9 +183,27 @@ export class AppStack extends Stack {
       distributionPaths: ["/*"],
     });
 
+    this.network = new Network(this, "Network", { cidr: infra.vpcCidr, names });
+    this.tasks = new TaskPlatform(this, "Tasks", { network: this.network, names });
+    this.progressDb = new ProgressDb(this, "ProgressDb", { network: this.network, maxAcu: infra.maxAcu, names });
+    this.costWatch = new CostWatch(this, "CostWatch", {
+      budgetUsd: infra.budgetUsd,
+      budgetScope: infra.budgetScope,
+      emails: infra.opsEmails,
+      tags: { prefix: s.prefix, env: s.environment },
+      names,
+    });
+
     new CfnOutput(this, "WebUrl", { value: webRoot });
     new CfnOutput(this, "ApiUrl", { value: api.apiEndpoint });
 
     applyTags(this, s);
+  }
+
+  // AZ を反映の時に Fn::GetAZs から 2 つ選ぶ。既定の getter は環境を明示したスタックで lookup を走らせ、
+  // 合成に資格情報が要り、cdk.context.json に設置先の値が残る
+  override get availabilityZones(): string[] {
+    const azs = Fn.getAzs();
+    return [Fn.select(0, azs), Fn.select(1, azs)];
   }
 }

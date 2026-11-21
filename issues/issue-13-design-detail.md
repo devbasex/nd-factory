@@ -244,8 +244,8 @@ package-lock.json
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `MISSING_CHECKS` | `infra/setup/missing-settings.ts` | 新設 | `readonly MissingCheck[]`（`MissingCheck = (ctx: MissingContext) => Promise<MissingItem[]>`） | 4 種類の照らし。ほかの子は配列へ足すだけ |
-| `collectMissingSettings` | 同上 | 新設 | `(ctx: MissingContext, checks: readonly MissingCheck[]) => Promise<MissingItem[]>` | 照らしを順に打ち、結果を並べる。1 つの照らしの失敗は「確かめられない」の 1 行にする |
+| `MISSING_CHECKS` | `infra/setup/missing-settings.ts` | 新設 | `readonly MissingCheck[]`（`MissingCheck = { label: string; run: (ctx: MissingContext) => Promise<MissingItem[]> }`。`label` は利用者へ出す照らしの名前） | 4 種類の照らし。ほかの子は配列へ足すだけ |
+| `collectMissingSettings` | 同上 | 新設 | `(ctx: MissingContext, checks: readonly MissingCheck[]) => Promise<MissingItem[]>` | 照らしを順に打ち、結果を並べる。1 つの照らしの失敗は「<label> を確かめられない（<例外>）。…diff を打ち直す」の 1 行にする |
 | `printMissingSettings` | 同上 | 新設 | `(items: MissingItem[], out: (line: string) => void) => void` | 「足りない設定:」の見出しと 1 件 1 行。0 件なら「足りない設定: 無し」 |
 | `readCostAllocationTags` | `infra/setup/aws-reader.ts` | 新設 | `(target: Target, keys: string[]) => Promise<Record<string, "Active" \| "Inactive" \| "Missing">>` | `ListCostAllocationTags` でタグの状態を読む |
 | `readOrganizationManager` | 同上 | 新設 | `(target: Target) => Promise<{ member: boolean; managementAccount: string \| null } \| "unknown">` | `DescribeOrganization` で組織の管理のアカウントを読む。組織に入っていなければ `member: false`。権限が無ければ `unknown` |
@@ -253,9 +253,9 @@ package-lock.json
 | `runDiff` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 確認の値を出した後に `collectMissingSettings` と `printMissingSettings` を打つ。終了コードは変えない |
 
 - `SetupDeps` に `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount` を足す（テストは本物の AWS を呼ばない）
-- `MISSING_CHECKS` の 4 種類: Google のクライアントの ID が無い・`budget.scope` が `tags` でタグ `app-prefix`・`app-env` が `Active` でない（下のタグの行と、読めないときの行。`account` なら照らさない）・`ops.notify_emails` が空・`readGetAzsCount` が 2 未満（「`Fn::GetAZs` が返す AZ が <数> つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --availability-zone <AZ>`）か、既定のサブネットをすべて消す」。読めなければ「確かめられない（`ec2:DescribeSubnets`・`ec2:DescribeAvailabilityZones` を許した profile で読む）」）
+- `MISSING_CHECKS` の 4 種類: Google のクライアントの ID が無い・`budget.scope` が `tags` でタグ `app-prefix`・`app-env` が `Active` でない（下のタグの行と、読めないときの行。`account` なら照らさない）・`ops.notify_emails` が空・`readGetAzsCount` が 2 未満（「`Fn::GetAZs` が返す AZ が <数> つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --profile=<profile> --region=<リージョン> --availability-zone <AZ>`。`target` の値を入れる）か、既定のサブネットをすべて消す」。読めなければ「確かめられない（`ec2:DescribeSubnets`・`ec2:DescribeAvailabilityZones` を許した profile で読む）」）
 - 読めないときの行の文（設計文書の決定 12）: 「コスト配分タグ `app-prefix`・`app-env` が有効かを確かめられない。有効でなければ予算は 0 を数え続け、予算の知らせは鳴らない。次の操作: <操作>」。読めない原因は SDK の例外だけでは権限の不足と組織の制限を分けられないため、`readOrganizationManager` で分ける。<操作> は、`member: false` なら「`ce:ListCostAllocationTags` を許した profile で `diff` を打ち直す」、`member: true` なら「組織の管理のアカウント <ID> にタグの有効化を確かめて頼む（メンバーのアカウントでは権限を足しても有効にできない）。頼めなければ設定のファイルの `budget.scope` を `account` にする」、`unknown` なら両方を「組織に入っていなければ …。組織のメンバーなら …」の 2 つに分けて示す（管理のアカウントの ID は「組織の管理のアカウント」とだけ示す）
-- タグの行の文（設計文書の決定 6）: 「コスト配分タグ <有効でないタグ> が有効でない。有効になるまで予算は 0 を数え続け、予算の知らせは鳴らない。有効にする先: <先>。有効にできなければ設定のファイルの `budget.scope` を `account` にする（アカウントの全体を数える）」。<先> は `readOrganizationManager` が `member: false` なら「このアカウント（請求の画面のコスト配分タグ）」、`member: true` なら「組織の管理のアカウント <ID>（メンバーのアカウントでは有効にできない）」、`unknown` なら「組織に入っていなければこのアカウント、組織のメンバーなら組織の管理のアカウント」
+- タグの行の文（設計文書の決定 6）: 「コスト配分タグ <有効でないタグ> が有効でない。有効になるまで予算は 0 を数え続け、予算の知らせは鳴らない。<待ち>有効にする先: <先>。有効にできなければ設定のファイルの `budget.scope` を `account` にする（アカウントの全体を数える）」。<先> は `readOrganizationManager` が `member: false` なら「このアカウント（請求の画面のコスト配分タグ）」、`member: true` なら「組織の管理のアカウント <ID>（メンバーのアカウントでは有効にできない）」、`unknown` なら「組織に入っていなければこのアカウント、組織のメンバーなら組織の管理のアカウント」。<待ち> は `Missing` のキーがあるときだけ「<Missing のキー> はタグの付いた資源がまだ無く、請求の画面のコスト配分タグの一覧に出ていないため、まだ有効にできない。deploy でタグの付いた資源を作り、一覧にキーが出るまで最大 24 時間待ってから有効にする。」
 
 ### 異常系の処理
 
