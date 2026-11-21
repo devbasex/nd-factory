@@ -9,8 +9,11 @@
     "./log": "./src/log.ts",
     "./retry": "./src/retry.ts",
     "./outbound": "./src/outbound.ts",
+    "./idempotency": "./src/idempotency.ts",
     "./db": "./src/db.ts",
-    "./conditional-write": "./src/conditional-write.ts"
+    "./conditional-write": "./src/conditional-write.ts",
+    "./auth": "./src/auth/authenticate.ts",
+    "./audit": "./src/audit.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."
