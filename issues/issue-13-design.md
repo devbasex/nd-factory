@@ -239,7 +239,7 @@ sequenceDiagram
 ### 決定 1: 人が承認したイメージだけを反映し古い版を確実に消すため、イメージを自前の ECR へ push してダイジェストで引く（全体の設計を直した）
 
 - **質問**: ランナーと DB の用意のイメージをどこに置き、どう確認の値で縛り、古い版をどう消すか
-- **選んだ案**: `app` のスタックにイメージごとの nd-factory 専用の ECR を置く。設置のコマンド（`diff` の前）と反映のパイプライン（準備のアクション）が作って push し、テンプレートはダイジェスト（`<リポジトリ>@sha256:…`）で引く。中身が変わればダイジェストが変わり、テンプレートと確認の値が変わるため、承認した中身だけが反映される（Value 8）。古い版は ECR のライフサイクルの規則で消す（決定 2）。ダイジェストは合成の入力（環境の値で渡すファイル）で受け、設定のファイルには置かない（詳細設計の「イメージ」）。全体の設計は [プラットフォームの文書の決定 87](../docs/design/platform.md#決定の記録) を直し、ECR の行・費用の見込みの ECR の行・設置の段の表・ランナーのイメージの前提・未確認のまま残ることを合わせた。#6 のランナーのイメージも同じ部品・同じ置き場・同じ規則に乗る
+- **選んだ案**: `app` のスタックにイメージごとの nd-factory 専用の ECR を置く。設置のコマンド（`diff` の前）と反映のパイプライン（準備のアクション）が作って push し、テンプレートはダイジェスト（`<リポジトリ>@sha256:…`）で引く。中身が変わればダイジェストが変わり、テンプレートと確認の値が変わるため、承認した中身だけが反映される（Value 8）。古い版は ECR のライフサイクルの規則で消す（決定 2）。ダイジェストは合成の入力（CDK の context で渡す一覧のファイルのパス）で受け、設定のファイルには置かない（詳細設計の「イメージ」）。全体の設計は [プラットフォームの文書の決定 87](../docs/design/platform.md#決定の記録) を直し、ECR の行・費用の見込みの ECR の行・設置の段の表・ランナーのイメージの前提・未確認のまま残ることを合わせた。#6 のランナーのイメージも同じ部品・同じ置き場・同じ規則に乗る
 - 採らなかった案: 直す前の全体の設計の決定 87 のとおり、イメージを CDK のアセットにする（アセットのイメージは CDK の bootstrap のアセットのリポジトリにしか置けず、自前の ECR に掛けるライフサイクルの規則（LIB85）で古い版を消せない）
 - 採らなかった案: イメージを CDK のアセットのままにし、使われなくなったアセットを CDK の CLI のアセットの片付けで消す（片付けが設置する人の手の操作に依り、その機能は安定でない（`--unstable` を付けたときだけ動く）。アセットの置き場は CDK の bootstrap のリポジトリで、ほかのアプリと共有されうるため、片付けがほかのアプリのアセットにも及ぶ）
 - 採らなかった案: アセットのイメージを自前の ECR へ写してライフサイクルの規則を掛ける（写す部品の依存が増え、写す元の bootstrap のリポジトリに古い版が残るため保管の費用が下がらない）
@@ -386,6 +386,31 @@ sequenceDiagram
 - **代償**: カタログの分け方が Aurora で外せない場合に分かるのが #6 の後になる。CI の PostgreSQL のテスト（決定 8）で分け方の SQL は毎回確かめる
 - 根拠: Value 6 / Value 9（MVV 版 1）。plan.md の「1 子の大きさ」
 
+### 決定 14: 自前の実装を減らすため、自前で作る処理ごとに広く使われるライブラリとサービスを比べ、使えるものに乗り換える（MVV 版 2 の Value 15）
+
+- **質問**: この設計が自前で作るとした処理のうち、広く使われ保守の活発な既存のライブラリ・サービス・CDK の構成部品で置き換えられるものはどれか
+- **選んだ案**: 処理ごとに次の表のとおり決めた。乗り換えたのは、管理の接続と終わりの報告の再試行（`p-retry`）・DB の用意のタスクのログ（`pino`）・ダイジェストを合成へ渡す道（CDK の context）の 3 つである。比べた候補の版・ライセンス・保守の様子は「外部の調査」の LIB8〜LIB17 にある
+
+| 処理 | 選んだもの | 比べて採らなかったもの（理由） |
+| --- | --- | --- |
+| PostgreSQL への接続と SQL | `pg`（LIB3）。識別子と文字列の組み立ては `pg` の `escapeIdentifier`・`escapeLiteral` | `postgres`（LIB4。DDL の組み立てに利点が無い）・`pg-format`（LIB9。最後のリリースが 2022 年で保守が止まっている） |
+| 管理の接続の再試行・終わりの報告の再試行 | `p-retry`（LIB8）。回数と間隔だけを渡す | 自前の繰り返し（Value 15）。横断の部品の再試行（#2 がまだ作っていない。そろえ方は #56） |
+| DB の用意のタスクのログ | `pino`（LIB10）。1 行の JSON を標準出力へ出し、伏せる項目を `redact` で外す | AWS Lambda Powertools の Logger（LIB11。Lambda の文脈を前提にした項目が多く、ECS のタスクでは利点が少ない）・自前の `JSON.stringify`（Value 15。横断の部品とのそろえ方は #56） |
+| 資格情報の差し替え | 今の設計のまま、DB の用意のタスクが差し替える（全体の設計の決定 95） | Secrets Manager の公式のローテーションの Lambda（LIB12。Lambda を VPC に入れ、Secrets Manager の端点へ NAT か Interface 型のエンドポイントで出る必要があり、時間で費用が掛かる。予定による差し替えで、割り当ての移しを引き金に番号を照らす I17 の形を持たない） |
+| 管理の役割のパスワード | 今の設計のまま、CDK が生成して自前の秘密の器 `<prefix>/<environment>/progress-db-admin` に置く | Aurora が管理するマスターユーザーのパスワード（LIB13。秘密の器の名前を選べず `rds!cluster-…` になり、API の関数が読める器を `<prefix>/<environment>/` の頭に絞る全体の設計の決定 90 と合わない。7 日ごとの差し替えでクラスタが起きる） |
+| DB の用意そのもの | 今の設計のまま、ECS の DB の用意のタスク | RDS Data API（LIB14。API の関数から VPC に入らずに SQL を打て、タスク・イメージ・引き換えの経路・時間切れの見回りを外せる見込みがある。ただし全体の設計の決定 83 が使わないと決めており、`data.md`・`api.md` に及ぶため、この課題では乗り換えず #55 で確かめる） |
+| イメージを作って ECR へ push する | Docker の CLI と AWS SDK の ECR のクライアント | CDK の `DockerImageAsset`（決定 1）・`cdk-ecr-deployment`（LIB15。アセットを写すため bootstrap のリポジトリに古い版が残る）・`cdk-docker-image-deployment`（LIB16。版が 0.0 のままで、中継の ECR にアセットの仕組みで置き、ダイジェストで引く形を持たない） |
+| ダイジェストを合成へ渡す | CDK の context（`cdk synth -c nd:images=<一覧のファイル>`。スタックは `node.tryGetContext` で読む） | 自前の環境の値（CDK に値を渡す標準の仕組みがあり、要らない） |
+| スタックの決まりの検査 | `aws-cdk-lib/assertions` の `Template` で照らす今の形 | `cdk-nag`（LIB17。広く使われる規則の集まりだが、この課題の 8 つの決まり（NAT 0 件・ECS のサービス 0 件など）は製品の決まりで、独自の規則を書く手間は変わらない） |
+| 予算と知らせ | CDK の `CfnBudget`（AWS の公式の構成部品）と SNS | — |
+| 足りない設定の一覧 | 自前の小さい関数の並び | 当たるライブラリが無い（設置のコマンドの出力の欄） |
+
+- 採らなかった案: 今の設計のまま比べ直さない（Value 15 は調べた候補と選んだ理由を設計文書に書くことを求め、自前の再試行とログが残る）
+- **代償**: DB の用意のタスクの依存が 2 つ増える（`p-retry`・`pino`）。横断の部品（#2）が別の形を選ぶと 2 か所に分かれうるため、#56 でそろえる
+- 作り方: ライブラリやサービスを使う
+- 比べた候補: LIB3 / LIB4 / LIB8 / LIB9 / LIB10 / LIB11 / LIB12 / LIB13 / LIB14 / LIB15 / LIB16 / LIB17
+- 根拠: Value 15 / Value 13 / Value 6（MVV 版 2）
+
 ## 影響と危険
 
 - **働く範囲**: このリポジトリの `app` と `pipeline` のスタック・設置のコマンド・形の正本・新しい `apps/db-prep/`・CI の `check` のジョブ。全体の設計は `platform.md` だけを直した。#6 のランナーのイメージは、この課題の部品（イメージの置き場・push・在りかの確かめ）を使う
@@ -463,11 +488,22 @@ sequenceDiagram
 | LIB5 | EventBridge Scheduler | — | AWS のサービス | — | 無し | 満たす。月 1,400 万回の呼び出しまでは無料の枠。例の計算では枠の外は 100 万回あたり 1.00 ドル | https://aws.amazon.com/eventbridge/pricing/ （2026-11-21） |
 | LIB6 | CloudFormation の `Fn::GetAZs` | — | AWS のサービス | — | 無し | 条件つきで満たす。既定の VPC の既定のサブネットがある AZ だけを返し、既定のサブネットが無ければ使える AZ をすべて返す。既定のサブネットが 1 つの AZ にだけあると 1 つしか返さない | https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/intrinsic-function-reference-getavailabilityzones.html （2026-11-21） |
 | LIB7 | ECR のライフサイクルの規則の評価 | — | AWS のサービス | — | 無し | 満たす。規則はすべて同時に評価し、優先の順に当てる。1 つのイメージを消すのは 0 か 1 つの規則で、ある規則のタグの条件に当たるイメージは、それより優先の低い規則では消えない。`imageCountMoreThan` は push の時刻の新しい順に並べて数を超えたものを消す。`tagPrefixList` は `tagStatus` が `tagged` のときだけ使える。消すのは条件に当たってから 24 時間のうち | https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html ・ https://docs.aws.amazon.com/AmazonECR/latest/userguide/lifecycle_policy_parameters.html （2026-11-21） |
+| LIB8 | `p-retry` | 9.0.0 | MIT | 2026-11-02 | 無し | 満たす。Promise を返す処理を回数と間隔（指数の待ち）で繰り返す。広く使われ、保守が続く | `npm view p-retry version license time.modified`（2026-11-21） |
+| LIB9 | `pg-format` | 1.0.4 | MIT | 2022-06-23 | 無し | 満たさない。識別子と文字列の組み立てを書式で行えるが、最後のリリースが 2022 年で保守が止まっている。`pg` の `escapeIdentifier`・`escapeLiteral` で足りる | `npm view pg-format version license time.modified`（2026-11-21） |
+| LIB10 | `pino` | 10.4.0 | MIT | 2026-10-02 | 無し | 満たす。1 行の JSON のログを速く出し、項目を `redact` で伏せられる。広く使われ、保守が続く | `npm view pino version license time.modified`（2026-11-21） |
+| LIB11 | AWS Lambda Powertools の Logger（`@aws-lambda-powertools/logger`） | 2.36.0 | MIT-0 | 2026-10-06 | 無し | 条件つきで満たす。構造化したログを出すが、Lambda の文脈の項目を前提にしている | `npm view @aws-lambda-powertools/logger version license time.modified`（2026-11-21） |
+| LIB12 | Secrets Manager の Lambda によるローテーション | — | AWS のサービス | — | 無し | 満たさない。ローテーションの関数は Secrets Manager の端点へ届く必要があり、インターネットへ出られない VPC の中では Interface 型のエンドポイントか NAT が要る。予定で差し替える | https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotation-function-network-access.html ・ https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotate-secrets_lambda.html （2026-11-21） |
+| LIB13 | Aurora が管理するマスターユーザーのパスワード（Secrets Manager との統合） | — | AWS のサービス | — | 無し | 条件つきで満たす。Aurora がパスワードを作って Secrets Manager に置き、既定で 7 日ごとに差し替える。秘密の器の名前は Aurora が決める（例の ARN は `rds!cluster-…`） | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/rds-secrets-manager.html （2026-11-21） |
+| LIB14 | RDS Data API | — | AWS のサービス | — | 無し | 条件つきで満たす。HTTPS の端点で SQL を打て、Lambda を VPC に入れずに届く。資格情報は Secrets Manager の秘密の器から使う。Aurora Serverless v2 では、一時停止の間に要求が来ると書き手を再開してから処理する | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html （2026-11-21） |
+| LIB15 | `cdk-ecr-deployment` | 4.2.92 | Apache-2.0 | 2026-11-17 | 無し | 満たさない。CDK のアセットのイメージを別の ECR へ写すため、写す元の bootstrap のリポジトリに古い版が残る | `npm view cdk-ecr-deployment version license time.modified`（2026-11-21） |
+| LIB16 | `cdk-docker-image-deployment` | 0.0.1042 | Apache-2.0 | 2026-11-16 | 無し | 満たさない。手元のイメージをアセットの仕組みで中継の ECR に置き、CodeBuild がタグを付けて送り先へ push する。版が 0.0 のままで、送り先をダイジェストで引く形は書かれていない | https://github.com/cdklabs/cdk-docker-image-deployment ・ `npm view cdk-docker-image-deployment version license time.modified`（2026-11-21） |
+| LIB17 | `cdk-nag` | — | Apache-2.0 | — | 無し | 条件つきで満たす。CDK のスタックを規則の集まりで照らす広く使われる道具で、独自の規則も書ける | 試していない（下の「確かめられなかったこと」） |
 
 ### 確かめられなかったこと
 
 | 対象 | 試した手段 | 結果と理由 |
 | --- | --- | --- |
+| `cdk-nag` の版と保守の様子 | 試していない | 独自の規則を書く手間が変わらないため採らないと決め、版を取得しなかった |
 | DynamoDB の PITR とストリームの単価 | 試していない | 見込みの額への効きが小さいため、実測の段で単価の頁を読む |
 
-調べた量: 候補 7 件・取得の試み 10 回（2026-11-21。レビューの指摘で LIB6 とコスト配分タグの頁を、イメージの置き場の作り直しで LIB7 を足した。反映のアクションの確かめのために調べた AWS CLI の出力の絞りは、その確かめを外したため表から外した）。
+調べた量: 候補 17 件・取得の試み 19 回（2026-11-21。レビューの指摘で LIB6 とコスト配分タグの頁を、イメージの置き場の作り直しで LIB7 を、MVV 版 2 の Value 15 に照らして LIB8〜LIB17 を足した）。

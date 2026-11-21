@@ -61,9 +61,9 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `infra/setup/aws-reader.ts` | 変更 | コスト配分タグ・組織・AZ を読む | AWS SDK（Cost Explorer・Organizations・EC2） | モジュール | `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount`（新設） |
 | `infra/setup/nd-setup.ts` | 変更 | `diff` の合成の前にイメージを push する。`diff` の最後に一覧を出す | 上の 2 つ | モジュール | `runDiff`・`synthesize`・`defaultDeps`（変更） |
 | `infra/test/support.ts` | 変更 | スタックの決まりの検査 | — | モジュール | `stackRuleViolations`（新設）・`hourlyCostResources`（変更） |
-| `apps/db-prep/src/main.ts` | 新設 | タスクの入口。引き換え → 用意か差し替え → 終わりの報告 | 下の 3 つ・contracts | モジュール | `main` |
-| `apps/db-prep/src/exchange.ts` | 新設 | タスクの ID を読み、API と話す | contracts | モジュール | `readTaskArn`・`exchange`・`complete` |
-| `apps/db-prep/src/provision.ts` | 新設 | 管理の接続・I10 の守り・用意の手順の 1〜6 | `pg` | モジュール | `connectAdmin`・`claimBinding`・`checkIsolationGuard`・`provisionProject` |
+| `apps/db-prep/src/main.ts` | 新設 | タスクの入口。引き換え → 用意か差し替え → 終わりの報告 | 下の 3 つ・contracts・`pino` | モジュール | `main` |
+| `apps/db-prep/src/exchange.ts` | 新設 | タスクの ID を読み、API と話す | contracts・`p-retry` | モジュール | `readTaskArn`・`exchange`・`complete` |
+| `apps/db-prep/src/provision.ts` | 新設 | 管理の接続・I10 の守り・用意の手順の 1〜6 | `pg`・`p-retry` | モジュール | `connectAdmin`・`claimBinding`・`checkIsolationGuard`・`provisionProject` |
 | `apps/db-prep/src/rotate.ts` | 新設 | 差し替えと古い接続の切り | `pg` | モジュール | `rotateRole`・`terminateRoleConnections` |
 | `.github/workflows/ci.yml` | 変更 | `check` のジョブに PostgreSQL 16 のサービスコンテナと接続の値を足す | — | — | — |
 
@@ -215,14 +215,14 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `KEEP_IMAGES` | 同上 | 新設 | 定数 `30` | リポジトリごとに残す版の数（設計文書の決定 2） |
 | `imageRepositoryName` | 同上 | 新設 | `(s: Settings, key: ImageKey) => string` | リポジトリの名前 `<prefix>-<environment>-<key>` を返す。`ImageRepository` と `buildAndPushImages` がこれで名前を作る |
 | `ImageRepository` の `constructor` | 同上 | 新設 | `(scope, id, props: { name: string })` | ECR のリポジトリ（名前は `imageRepositoryName` の値・タグは書き換え不可・push の時の検査・`RemovalPolicy.RETAIN`）と、規則 1 つ（`tagStatus: any`・`imageCountMoreThan: KEEP_IMAGES`） |
-| `readImageDigests` | 同上 | 新設 | `(env: NodeJS.ProcessEnv) => ImageDigests` | 環境の値 `ND_IMAGES` が指す一覧のファイル（`nd-setup-images.json`。形は `{ "<key>": { "repository": "<名前>", "digest": "sha256:…" } }`）を読み、キーごとの組を返す。無ければ空。形が違えば投げる |
+| `readImageDigests` | 同上 | 新設 | `(scope: Construct) => ImageDigests` | CDK の context `nd:images` が指す一覧のファイル（`nd-setup-images.json`。形は `{ "<key>": { "repository": "<名前>", "digest": "sha256:…" } }`）を `node.tryGetContext` で読み、キーごとの組を返す。無ければ空。形が違えば投げる |
 | `buildAndPushImages` | `infra/setup/images.ts` | 新設 | `(target: Target, s: Settings, out: string, deps: ImageDeps) => Promise<ImagesResult>` | `IMAGE_SPECS` のキーごとにリポジトリがあるかを読み、あるキーごとに `docker build --platform linux/amd64` → `build-<UTC の時刻>` のタグで push → ダイジェストを読み、得たキーだけを組で `<out>/nd-setup-images.json` に書く。結果は `{ digests: ImageDigests; noRepository: ImageKey[] }`。リポジトリのあるキーが 1 つも無ければ一覧を書かない |
 | `main` | `infra/setup/images-cli.ts` | 新設 | `(argv: string[], deps: ImageDeps) => Promise<number>` | `push --settings <file> --out <dir>` を打つ。パイプラインの CodeBuild の資格情報（既定の解き方）で動く |
-| `synthesize` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 選んだスタックに `app` が含まれるときだけ、画面のビルドの後、合成の前に `buildAndPushImages` を打ち、一覧のファイルを `ND_IMAGES` で合成へ渡す。一覧は合成の結果の置き場にあるため要約値に入る。`app` を含まない（`--stack pipeline` だけ）ときは push せず、一覧も書かない |
+| `synthesize` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 選んだスタックに `app` が含まれるときだけ、画面のビルドの後、合成の前に `buildAndPushImages` を打ち、一覧のファイルのパスを `cdk synth -c nd:images=<パス>` で合成へ渡す。一覧は合成の結果の置き場にあるため要約値に入る。`app` を含まない（`--stack pipeline` だけ）ときは push せず、一覧も書かない |
 
 - `SetupDeps` と `ImageDeps` に `docker: (args: string[]) => Promise<{ code: number; stdout: string }>` と `ecr`（`DescribeRepositories`・`GetAuthorizationToken`・`DescribeImages` の包み）を置く（テストは本物の Docker と AWS を呼ばない）
 - push の前の `docker login` は `GetAuthorizationToken` の値を標準入力で渡し、値をログ・出力に出さない
-- `AppStack` の props に `images: ImageDigests` を足し、`bin/app.ts` が `readImageDigests(process.env)` で渡す。`AppStack` はキーごとにタスクの定義を作るかを決める（新しいリポジトリ（#6 の `runner`）を足す初回の反映でも、`db-prep` のタスクの定義は残る）。組の `repository` が `imageRepositoryName` の値と違えば合成を誤りにする。CI の合成は `ND_IMAGES` を持たず、タスクの定義を作らない版になる。スタックのテストは作り物の組（`digest` は `sha256:` と 0 を 64 桁）を渡して、タスクの定義を持つ版を照らす
+- `AppStack` の props に `images: ImageDigests` を足し、`bin/app.ts` が `readImageDigests(app)` で渡す。`AppStack` はキーごとにタスクの定義を作るかを決める（新しいリポジトリ（#6 の `runner`）を足す初回の反映でも、`db-prep` のタスクの定義は残る）。組の `repository` が `imageRepositoryName` の値と違えば合成を誤りにする。CI の合成は context `nd:images` を持たず、タスクの定義を作らない版になる。スタックのテストは作り物の組（`digest` は `sha256:` と 0 を 64 桁）を渡して、タスクの定義を持つ版を照らす
 - ビルドはビット単位で再現しない前提に置く（設計文書の決定 2）。中身を変えない `diff` や準備でも、毎回ダイジェストの違う版が push され、30 の数に入る
 - `deploy` と反映のアクションは、引くイメージの在りかを確かめない（設計文書の決定 2）
 
@@ -240,7 +240,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `imageRepositoryName` | `prefix` `nd`・`environment` `prod`・キー `db-prep` で `nd-prod-db-prep` | — | — |
 | `ImageRepository` | 合成の出力のリポジトリの名前が `imageRepositoryName` の値で、タグ書き換え不可のリポジトリと、`imageCountMoreThan` が 30 の規則 1 つがある | — | 規則が日数になる・数が変わると落ちる |
 | `AppStack`（ダイジェストあり） | DB の用意のタスクの定義のイメージが `<リポジトリ>@sha256:…` | ダイジェストなしでタスクの定義を作らない。一覧が `db-prep` だけでも DB の用意のタスクの定義を作る | ダイジェストを変えると要約値が変わる（合成の結果の要約値の比べ）。組の `repository` が違うと合成が投げる |
-| `readImageDigests` | 一覧の組をキーごとに返す | `ND_IMAGES` が無ければ空 | `digest` か `repository` の無い組・`sha256:` で始まらないダイジェストで投げる |
+| `readImageDigests` | 一覧の組をキーごとに返す | context `nd:images` が無ければ空 | `digest` か `repository` の無い組・`sha256:` で始まらないダイジェストで投げる |
 | `buildAndPushImages` | リポジトリがあれば作って push し、一覧を書く | リポジトリが 1 つも無ければ何もしない。`db-prep` のリポジトリだけがあると `db-prep` だけを push し、`noRepository` が `runner` になる | Docker の失敗・push の失敗で投げ、一覧を書かない。login の値が出力に出ない |
 | `synthesize` | `--stack app` と既定で `buildAndPushImages` を呼ぶ | `--stack pipeline` だけで呼ばず、置き場に一覧が無い | — |
 
@@ -308,7 +308,7 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `PipelineStack` の `constructor` | `infra/lib/pipeline-stack.ts` | 変更 | 変えない | 準備のアクションの CodeBuild を `privileged: true` にし、その役割に `ecr:GetAuthorizationToken`（資源を絞れない）と、`<prefix>-<environment>-` の頭の自前のリポジトリへの `DescribeRepositories`・`DescribeImages`・`BatchCheckLayerAvailability`・`InitiateLayerUpload`・`UploadLayerPart`・`CompleteLayerUpload`・`PutImage`・`BatchGetImage` を許す。反映のアクションは変えない（引き受ける bootstrap の役割は今の `deploy`・`file-publishing` のまま） |
-| `prepareBuildSpec` | 同上 | 変更 | 変えない | 画面のビルドの後、`infra/setup/images-cli.ts` があれば `node infra/setup/images-cli.ts push --settings <設定> --out .nd-images` を打つ。リポジトリのまだ無いキーごとに「<キー> の ECR がまだ無いため、そのイメージのタスクの定義を持たない版を合成した。この反映の後に準備を再び走らせる（決定 11）」を記録へ出す。一覧があれば `ND_IMAGES` にそのパスを付けて合成し、一覧を `cdk.out/nd-setup-images.json` へ写す（要約値に入る） |
+| `prepareBuildSpec` | 同上 | 変更 | 変えない | 画面のビルドの後、`infra/setup/images-cli.ts` があれば `node infra/setup/images-cli.ts push --settings <設定> --out .nd-images` を打つ。リポジトリのまだ無いキーごとに「<キー> の ECR がまだ無いため、そのイメージのタスクの定義を持たない版を合成した。この反映の後に準備を再び走らせる（決定 11）」を記録へ出す。一覧があれば `-c nd:images=<そのパス>` を付けて合成し、一覧を `cdk.out/nd-setup-images.json` へ写す（要約値に入る） |
 
 ### 移行の間の動き
 
@@ -337,8 +337,8 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 | `main` | `apps/db-prep/src/main.ts` | 新設 | `(env: NodeJS.ProcessEnv, deps: PrepDeps) => Promise<number>` | 引き換え → `kind` で用意か差し替え → 終わりの報告。終了コードは報告できたら 0 |
 | `readTaskArn` | `apps/db-prep/src/exchange.ts` | 新設 | `(metadataUri: string, fetchFn: typeof fetch) => Promise<string>` | `${ECS_CONTAINER_METADATA_URI_V4}/task` の `TaskARN` を読む |
 | `exchange` | 同上 | 新設 | `(apiUrl: string, token: string, taskArn: string, fetchFn) => Promise<ExchangeResult>` | `/v1/db_prep/exchanges/create` を 1 回だけ呼び、応答を形の正本で照らす |
-| `complete` | 同上 | 新設 | `(apiUrl: string, completionToken: string, body: DbPrepCompletion, fetchFn) => Promise<void>` | `/v1/db_prep/completions/create` を呼ぶ。届いたか分からない失敗だけを 3 回まで繰り返す（同じ本文は API で冪等） |
-| `connectAdmin` | `apps/db-prep/src/provision.ts` | 新設 | `(admin: AdminConnection, opts: { attempts: number; delayMs: number }) => Promise<pg.Client>` | Aurora の再開を待って管理の接続を開く（既定 12 回・5 秒おき = 約 60 秒） |
+| `complete` | 同上 | 新設 | `(apiUrl: string, completionToken: string, body: DbPrepCompletion, fetchFn) => Promise<void>` | `/v1/db_prep/completions/create` を呼ぶ。届いたか分からない失敗だけを `p-retry` で 3 回まで繰り返す（同じ本文は API で冪等） |
+| `connectAdmin` | `apps/db-prep/src/provision.ts` | 新設 | `(admin: AdminConnection, opts: { attempts: number; delayMs: number }) => Promise<pg.Client>` | Aurora の再開を待って管理の接続を開く。繰り返しは `p-retry`（既定 12 回・5 秒おき = 約 60 秒） |
 | `claimBinding` | 同上 | 新設 | `(client: pg.Client, project: ProjectIdent) => Promise<"bound" \| "retry" \| "conflict">` | 1 つのトランザクションで `pg_advisory_xact_lock(hashtext('nd-prep:bindings'))` を取り、`nd_prep.bindings`（`project_id` 主キー・`database_name` 一意・`role_name` 一意・`bound_at`）を `project_id`・`database_name`・`role_name` のどれかで引く。下の処理の手順の表で分ける。`bound` のときだけ行を足す。データベースと役割を作る前に打つ |
 | `checkIsolationGuard` | 同上 | 新設 | `(client: pg.Client, project: ProjectIdent) => Promise<"ok" \| "conflict">` | データベースか役割が、渡されたもの以外へ `CONNECT` で結ばれていれば `conflict`（`claimBinding` の後に打つ二重の守り） |
 | `provisionProject` | 同上 | 新設 | `(client: pg.Client, connectTo: (database: string) => Promise<pg.Client>, project: ProjectIdent & { password: string }) => Promise<void>` | [用意の手順](../docs/design/data.md#用意の手順) の 1〜6。何度打っても同じ結果になる |
@@ -386,13 +386,14 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `main` | 用意の ID・種類・結果・理由のコード・所要時間 | 標準出力の JSON の 1 行（ログの群へ） | パスワード・管理の接続の値・token・データベースと役割の名前 |
+| `main` | 用意の ID・種類・結果・理由のコード・所要時間 | `pino` の 1 行の JSON を標準出力へ（ログの群へ） | パスワード・管理の接続の値・token・データベースと役割の名前（`redact` で伏せる） |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `complete` の再試行 | `callHttp`（[詳細設計の横断の部品](../docs/design/detail.md)） | `ls packages/` | 使えない。`packages/core` は #2 が作り、まだ無い。#2 の後に置き換える（`out-of-scope` で起票しない。#2 の境界の検査が拾う） |
+| `complete`・`connectAdmin` の再試行 | `p-retry`（設計文書の LIB8）・横断の部品の `callHttp`（[詳細設計の横断の部品](../docs/design/detail.md)） | 設計文書の決定 14・`ls packages/` | `p-retry` を使う。`packages/core` は #2 が作り、まだ無い。そろえ方は #56 |
+| `main` のログ | `pino`（設計文書の LIB10）・横断の部品の `createLogger` | 設計文書の決定 14 | `pino` を使い、パスワード・管理の接続の値・token を `redact` で伏せる。そろえ方は #56 |
 | 識別子の組み立て | `pg` の `escapeIdentifier` | LIB3 | 使う |
 
 ### 単体テストの観点
