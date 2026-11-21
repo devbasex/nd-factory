@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { isPending, type ItemOf, type OperationDef, type ResultOf, resultSchemaOf } from "./operation.ts";
 import { OPERATIONS } from "./operations/index.ts";
-import { isRequestReasonPair, problemSchema } from "./reasons.ts";
+import { requestProblemOf } from "./reasons.ts";
 
 // 画面とテストが操作を呼ぶ口と、生成したダミーを返す送り手（設計の決定 16）。
 // 画面の外のコードのため、zod と操作の表だけを読み、React・DOM・node: の組み込みを import しない
@@ -52,9 +52,8 @@ export function createOperationClient<const Ops extends readonly OperationDef[] 
       if (res.status !== 200) {
         // 要求全体の誤りは、生成物と同じ problem の形で、本文の status が HTTP の状態と同じで、理由の表の組のときだけ受ける。
         // それ以外（中継が返した 502 の本文など）は API が返した正規の失敗とみなさない
-        const problem = problemSchema.safeParse(res.body);
-        const valid = problem.success && problem.data.status === res.status && isRequestReasonPair(problem.data.reason, res.status);
-        return valid ? { ok: false, status: res.status, reason: problem.data.reason } : RESPONSE_INVALID;
+        const problem = requestProblemOf(res.status, res.body);
+        return problem === null ? RESPONSE_INVALID : { ok: false, status: res.status, reason: problem.reason };
       }
       if (isPending(op.result) || !Array.isArray(res.body) || res.body.length !== items.length) return RESPONSE_INVALID;
       const parsed = z.array(resultSchemaOf(op)).safeParse(res.body);

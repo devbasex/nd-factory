@@ -7,7 +7,7 @@ import type { DummyDoc } from "../src/client.ts";
 import { SECRET_SHAPES } from "../src/data.ts";
 import { PREFIX_SHAPE } from "../src/settings.ts";
 import { isPending, itemReasonsOf, MAX_ITEMS, type OperationDef, resultSchemaOf, type Shape } from "../src/operation.ts";
-import { ITEM_REASONS, problemSchema, type ReasonDef, REQUEST_REASONS } from "../src/reasons.ts";
+import { ITEM_REASONS, problemBody, type ReasonDef, REQUEST_REASONS } from "../src/reasons.ts";
 import { AWS_ACCOUNT_ID, itemsArray } from "../src/values.ts";
 
 // 操作の表から生成物を組む（設計の「生成物」の表）。どの関数も値を返すだけで、書くのは generate.ts
@@ -115,7 +115,7 @@ function sameAsJsonSchema(ctx: { zodSchema: z.core.$ZodType; jsonSchema: Record<
 
 // 受け口 user の操作の OpenAPI 3.1.1。要素と結果の形は .meta({ id }) の名前で components.schemas に出る
 export function buildOpenApi(ops: readonly OperationDef[]): OpenApiDoc {
-  const problem = problemSchema.meta({ id: "problem" });
+  const problem = problemBody.meta({ id: "problem" });
   const paths: Record<string, unknown> = {};
   for (const op of ops) {
     if (op.endpoint !== "user") continue;
@@ -429,8 +429,9 @@ export function examplesOf(op: OperationDef): ExampleSet {
   return { ...picked, empty: emptyOf(op) };
 }
 
+// 要素か結果のどちらかの形が未定なら作らない（buildPending と同じ判定。ダミーの送り手はその操作に 503 を返す）
 export function buildDummy(op: OperationDef): DummyDoc | null {
-  if (isPending(op.result)) return null;
+  if (isPending(op.item) || isPending(op.result)) return null;
   const { normal, edge, empty } = examplesOf(op);
   const failures = itemReasonsOf(op).map((r) => ({ ok: false as const, status: r.status, reason: r.code }));
   return { operation: op.name, normal, empty, edge, failures };

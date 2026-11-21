@@ -46,8 +46,8 @@ export const ITEM_REASONS = [
 ] as const satisfies readonly ReasonDef[];
 
 // 要求全体の誤りの本文（RFC 9457 の形。title・detail を持たず、拡張の reason に理由のコードを置く）。
-// 生成物（openapi.json の problem）と呼び出しの口の検証が同じ形を使う
-export const problemSchema = z.strictObject({
+// 生成物（openapi.json の problem）と呼び出しの口の検証が同じこの形を読む
+export const problemBody = z.strictObject({
   type: z.literal("about:blank"),
   status: z.int(),
   reason: z.enum(REQUEST_REASONS.map((r) => r.code) as [RequestReasonCode, ...RequestReasonCode[]]),
@@ -55,9 +55,13 @@ export const problemSchema = z.strictObject({
 
 export type RequestReasonCode = (typeof REQUEST_REASONS)[number]["code"];
 
-const REQUEST_STATUS = new Map<string, number>(REQUEST_REASONS.map((r) => [r.code, r.status]));
+const REQUEST_REASON_STATUS = new Map<string, number>(REQUEST_REASONS.map((r) => [r.code, r.status]));
 
-// problem の本文の status と reason が理由の表の組か
-export function isRequestReasonPair(reason: string, status: number): boolean {
-  return REQUEST_STATUS.get(reason) === status;
+// 本文の理由が正本に登録した状態と合い、本文の status が HTTP の状態と同じとき、その本文を返す。合わなければ null
+// （中継が返した 502 の本文などは API が返した正規の失敗とみなさない）
+export function requestProblemOf(httpStatus: number, body: unknown): z.infer<typeof problemBody> | null {
+  const parsed = problemBody.safeParse(body);
+  if (!parsed.success) return null;
+  const { status, reason } = parsed.data;
+  return status === httpStatus && REQUEST_REASON_STATUS.get(reason) === status ? parsed.data : null;
 }
