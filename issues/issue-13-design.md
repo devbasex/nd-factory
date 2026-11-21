@@ -397,7 +397,7 @@ sequenceDiagram
 | 処理 | 選んだもの | 比べて採らなかったもの（理由） |
 | --- | --- | --- |
 | PostgreSQL への接続と SQL | `pg`（LIB3）。識別子と文字列の組み立ては `pg` の `escapeIdentifier`・`escapeLiteral` | `postgres`（LIB4。DDL の組み立てに利点が無い）・`pg-format`（LIB9。最後のリリースが 2022 年で保守が止まっている） |
-| 管理の接続の再試行・終わりの報告の再試行 | `p-retry`（LIB8）。回数と間隔だけを渡す | 自前の繰り返し（Value 15）。横断の部品の再試行（#2 がまだ作っていない。そろえ方は #56） |
+| 管理の接続の再試行・終わりの報告の再試行 | `p-retry`（LIB8）。渡す値（回数・間隔・期限・繰り返さない失敗）は詳細設計の「DB の用意のタスク」に決める | 自前の繰り返し（Value 15）。横断の部品の再試行（#2 がまだ作っていない。そろえ方は #56） |
 | DB の用意のタスクのログ | `pino`（LIB10）。1 行の JSON を標準出力へ出し、伏せる項目を `redact` で外す | AWS Lambda Powertools の Logger（LIB11。Lambda の文脈を前提にした項目が多く、ECS のタスクでは利点が少ない）・自前の `JSON.stringify`（Value 15。横断の部品とのそろえ方は #56） |
 | 資格情報の差し替え | 今の設計のまま、DB の用意のタスクが差し替える（全体の設計の決定 95） | Secrets Manager の公式のローテーションの Lambda（LIB12。Lambda を VPC に入れ、Secrets Manager の端点へ NAT か Interface 型のエンドポイントで出る必要があり、時間で費用が掛かる。予定による差し替えで、割り当ての移しを引き金に番号を照らす I17 の形を持たない） |
 | 管理の役割のパスワード | 今の設計のまま、CDK が生成して自前の秘密の器 `<prefix>/<environment>/progress-db-admin` に置く | Aurora が管理するマスターユーザーのパスワード（LIB13。秘密の器の名前を選べず `rds!cluster-…` になり、API の関数が読める器を `<prefix>/<environment>/` の頭に絞る全体の設計の決定 90 と合わない。7 日ごとの差し替えでクラスタが起きる） |
@@ -491,7 +491,7 @@ sequenceDiagram
 | LIB5 | EventBridge Scheduler | — | AWS のサービス | — | 無し | 満たす。月 1,400 万回の呼び出しまでは無料の枠。例の計算では枠の外は 100 万回あたり 1.00 ドル | https://aws.amazon.com/eventbridge/pricing/ （2026-11-21） |
 | LIB6 | CloudFormation の `Fn::GetAZs` | — | AWS のサービス | — | 無し | 条件つきで満たす。既定の VPC の既定のサブネットがある AZ だけを返し、既定のサブネットが無ければ使える AZ をすべて返す。既定のサブネットが 1 つの AZ にだけあると 1 つしか返さない | https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/intrinsic-function-reference-getavailabilityzones.html （2026-11-21） |
 | LIB7 | ECR のライフサイクルの規則の評価 | — | AWS のサービス | — | 無し | 満たす。規則はすべて同時に評価し、優先の順に当てる。1 つのイメージを消すのは 0 か 1 つの規則で、ある規則のタグの条件に当たるイメージは、それより優先の低い規則では消えない。`imageCountMoreThan` は push の時刻の新しい順に並べて数を超えたものを消す。`tagPrefixList` は `tagStatus` が `tagged` のときだけ使える。消すのは条件に当たってから 24 時間のうち | https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html ・ https://docs.aws.amazon.com/AmazonECR/latest/userguide/lifecycle_policy_parameters.html （2026-11-21） |
-| LIB8 | `p-retry` | 9.0.0 | MIT | 2026-11-02 | 無し | 満たす。Promise を返す処理を回数と間隔（指数の待ち）で繰り返す。広く使われ、保守が続く | `npm view p-retry version license time.modified`（2026-11-21） |
+| LIB8 | `p-retry` | 9.0.0 | MIT | 2026-11-02 | 無し | 満たす。Promise を返す処理を回数と間隔で繰り返す。既定は `retries: 10`（初回を除いた回数）・`factor: 2` の指数の待ちで、`factor: 1` と同じ `minTimeout`・`maxTimeout` で固定の間隔にできる。`maxRetryTime` で全体の期限を、`AbortError` と `shouldRetry` で繰り返さない失敗を決められる。広く使われ、保守が続く | `npm view p-retry version license time.modified`（2026-11-21） |
 | LIB9 | `pg-format` | 1.0.4 | MIT | 2022-06-23 | 無し | 満たさない。識別子と文字列の組み立てを書式で行えるが、最後のリリースが 2022 年で保守が止まっている。`pg` の `escapeIdentifier`・`escapeLiteral` で足りる | `npm view pg-format version license time.modified`（2026-11-21） |
 | LIB10 | `pino` | 10.4.0 | MIT | 2026-10-02 | 無し | 満たす。1 行の JSON のログを速く出し、項目を `redact` で伏せられる。広く使われ、保守が続く | `npm view pino version license time.modified`（2026-11-21） |
 | LIB11 | AWS Lambda Powertools の Logger（`@aws-lambda-powertools/logger`） | 2.36.0 | MIT-0 | 2026-10-06 | 無し | 条件つきで満たす。構造化したログを出すが、Lambda の文脈の項目を前提にしている | `npm view @aws-lambda-powertools/logger version license time.modified`（2026-11-21） |
