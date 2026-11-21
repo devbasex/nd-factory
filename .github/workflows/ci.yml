@@ -17,6 +17,27 @@ jobs:
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    services:
+      # DB の用意の手順を pg の実装で打つテストの相手。イメージは要約値で固定する
+      postgres:
+        image: postgres:16@sha256:3950ad7c3148ca2175ef1b6c36c9efbf78957ae8fbe8b3a5d7c35af50500382f
+        env:
+          # 使い捨てのコンテナの作り物の値
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # 値が無いと、CI では DB のテストが落ちる
+      ND_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+      # このジョブだけの使い捨てのコンテナ。クラスタ全体の権限を変える DB のテストを許す
+      ND_TEST_PG_DISPOSABLE_CLUSTER: "1"
+      # 認証の時間切れを短くして起こした、認証の時間切れのテストだけが使うコンテナ（下の手順で起こす）
+      ND_TEST_PG_AUTH_TIMEOUT_URL: postgres://postgres:postgres@localhost:5433/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -26,6 +47,18 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
+      # サーバーの設定を起動の引数で決める（サービスコンテナは起動の引数を渡せない）。ほかのテストが使うクラスタの設定を
+      # ALTER SYSTEM で変えないため、別のコンテナにする。値はテストの PG_AUTH_TIMEOUT_S と同じ
+      - name: 認証の時間切れを短くした PostgreSQL を起こす
+        run: |
+          docker run -d --name pg-auth-timeout -p 5433:5432 -e POSTGRES_PASSWORD=postgres \
+            postgres:16@sha256:3950ad7c3148ca2175ef1b6c36c9efbf78957ae8fbe8b3a5d7c35af50500382f -c authentication_timeout=3s
+          for _ in $(seq 60); do
+            docker exec pg-auth-timeout pg_isready -U postgres -h localhost && exit 0
+            sleep 1
+          done
+          docker logs pg-auth-timeout
+          exit 1
       - name: lint・型検査・生成物の差・単体テストとスタックのテスト
         run: npm run check
       - name: 置き場の間の依存の向き

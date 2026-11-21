@@ -61,6 +61,32 @@ npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> 
 | 戻り先の URL | `app` を選んだときだけ。Google のクライアントに登録する URL（例 `https://acme-test-login.auth.us-west-2.amazoncognito.com/oauth2/idpresponse`）。使い方は [idp-and-apps.md](idp-and-apps.md) にある |
 | 確認の値 | 下の「確認の値」の形。`deploy` に渡す |
 | 次に打つコマンド | 確認の値を入れた `deploy` のコマンド |
+| 足りない設定 | 出力の最後の欄。反映の前に直すとよい設定を 1 件 1 行で示し、無ければ「足りない設定: 無し」を出す。下の「足りない設定」にある |
+
+## 足りない設定
+
+`diff` は出力の最後に「足りない設定」の欄を出す。足りない設定があっても反映はでき、終了コードは 0 のまま変わらない。反映の前に直すかは設置する人が決める。欄を作るために AWS を読むだけで、AWS へは書かない。
+
+| 行 | 出るとき | 直し方 |
+| --- | --- | --- |
+| Google のクライアントの ID が無い | 設定のファイルに `login.google.client_id` が無い | 画面はログインの設定を待つ。[idp-and-apps.md](idp-and-apps.md) の順でクライアントを作り、`client_id` を書いて `diff` と `deploy` を打ち直す |
+| コスト配分タグが有効でない | `budget.scope` が `tags`（既定）で、タグ `app-prefix`・`app-env` のどれかが有効でない | 有効になるまで予算は 0 を数え続け、予算の知らせは鳴らない。行が示す先（組織に入っていなければこのアカウントの請求の画面、組織のメンバーなら組織の管理のアカウント）で有効にする。請求の画面のコスト配分タグの一覧にキーがまだ無ければ（タグの状態が `Missing`）、すぐには有効にできない（行はそのキーを「一覧にまだ出ていない」と挙げる）。`Missing` は一覧にキーが無いことだけを示し、タグの付いた資源がまだ無いときのほか、資源はあるが一覧への反映を待っているときも出る。タグの付いた資源がまだ無ければ（初めての設置など）`deploy` で作り、すでにあれば `deploy` を打たずに一覧への反映を待つ（資源ができてから最大 24 時間）。一覧にキーが出てから有効にし、`diff` を打ち直して行が消えたことを確かめる（[AWS のタグの有効化](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/activating-tags.html)）。有効にできなければ `budget.scope` を `account` にする（[settings.md](settings.md)） |
+| コスト配分タグが有効かを確かめられない | タグの状態を読めない | 行が示す次の操作に従う。組織に入っていなければ `ce:ListCostAllocationTags` を許した profile で打ち直し、組織のメンバーなら組織の管理のアカウントへ有効化を頼むか `budget.scope` を `account` にする |
+| 運用の知らせの宛先が空 | 設定のファイルの `ops.notify_emails` が無いか空 | 宛先のメールを書く。無いと予算と運用の知らせがどこにも届かない |
+| `Fn::GetAZs` が返す AZ が 2 つ未満 | 既定の VPC の既定のサブネットが 1 つの AZ にだけある | 反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --profile=<profile> --region=<リージョン> --availability-zone <AZ>`。行は `diff` に渡した profile と、それが解いたリージョンを入れて示す）か、既定のサブネットをすべて消す |
+| `Fn::GetAZs` が返す AZ の数を確かめられない | サブネットか AZ を読めない | 下の許しを持つ profile で打ち直す |
+| <照らし> を確かめられない（<例外の名前>: <文>） | 上の行の照らし（Google のクライアントの ID・コスト配分タグ・運用の知らせの宛先・`Fn::GetAZs` が返す AZ の数）が、上の行で扱わない例外を投げた。AWS の読みの失敗（例: タグの状態は読めたが組織を読めない。認証の期限切れ・通信の失敗・権限の不足）のほか、照らしのコードの不具合（例: `TypeError`）でも出る | 行は原因を決めつけないため、括弧の中の例外で原因を確かめる。AWS の読みの失敗なら profile の認証と通信を直し、権限が足りなければ下の許しを足して `diff` を打ち直す。コードの不具合なら打ち直しでは直らないため、行をそのまま添えて知らせる。ほかの照らしは続くため、その照らしの行だけが欠ける |
+
+`budget.scope` が `account` のときは、コスト配分タグの行を出さず、タグの状態も読まない。
+
+欄を作るために、`diff` に渡す profile には次の読み取りの許しが要る。無くても `diff` は止まらず、その行が「確かめられない」になる。
+
+| 許し | 読むもの |
+| --- | --- |
+| `ce:ListCostAllocationTags` | コスト配分タグ `app-prefix`・`app-env` の状態 |
+| `organizations:DescribeOrganization` | 組織に入っているかと、組織の管理のアカウント（タグを有効にする先を示すため） |
+| `ec2:DescribeSubnets` | 既定のサブネットのある AZ |
+| `ec2:DescribeAvailabilityZones` | 既定のサブネットが無いときの、使える AZ |
 
 ## 確認の値
 
@@ -111,16 +137,82 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 
 1. 設定のファイルに `"login": { "google": {} }` を置く（`client_id` は書かない）
 2. `diff` を打ち、差分と資源の名前を読む
-3. 差分に納得したら、出た確認の値で `deploy` を打つ。秘密の器ができ、画面は「ログインの設定を待っています」を示す
+3. 差分に納得したら、出た確認の値で `deploy` を打つ。確認の値は端末にしか出ないため、控えておく（スタックを消して作り直すときに、反映した先のアカウントとリージョンの出所になる）。秘密の器ができ、画面は「ログインの設定を待っています」を示す
 4. [idp-and-apps.md](idp-and-apps.md) の順で Google のクライアントを作り、器へ secret を入れて確かめる
 5. 設定のファイルへ `client_id` を書き、`diff` と `deploy` を打ち直す
 
 ### 運用する環境
 
 - 設置のコマンドで反映するのはパイプラインのスタックだけにする。`diff` に `--stack pipeline` を渡す。アプリのスタックは反映のパイプラインが、人の承認の後に反映する（[pipeline-approval.md](pipeline-approval.md)）
-- パイプラインのスタックの `diff` の差分をリリース承認ゲートで承認した後にだけ `deploy` を打つ（自動の承認では通さない）。設定を変えるときも同じ（[settings.md](settings.md) の「運用する環境で設定を変える」）
+- パイプラインのスタックの `diff` の差分をリリース承認ゲートで承認した後にだけ `deploy` を打つ（自動の承認では通さない）。`deploy` に渡した確認の値は、承認の記録と一緒に控えておく。アプリのスタックはパイプラインのスタックと同じアカウントとリージョンに反映されるため、アプリのスタックを消して作り直すときの接続先の出所になる。設定を変えるときも同じ（[settings.md](settings.md) の「運用する環境で設定を変える」）
 - パイプラインのスタックを初めて反映した後は、GitHub との接続を有効にし、承認を拒む方針を AI の主体へ付けて確かめるまで、起点のブランチへ push しない（[pipeline-approval.md](pipeline-approval.md)）
 - 設定を変えるときの手順は [settings.md](settings.md) にある
+
+### 進行表の DB のログと監査の設定
+
+DB の用意の関数は、プロジェクトの役割のパスワードを SCRAM-SHA-256 の検証子にして引数で渡す。検証子も認証に使う秘密のため、関数は送る前に次の設定を読み、1 つでも外れていれば検証子を送らずに止まる（用意と差し替えが通らない）。
+
+| 設定 | 求める値 | 置く所 |
+| --- | --- | --- |
+| `log_parameter_max_length` | `0`（文のログに引数の値を書かない） | スタックがクラスタのパラメータの群で置く。管理の役割はセッションで変えられない |
+| `log_parameter_max_length_on_error` | `0`（失敗のログに引数の値を書かない） | スタックがクラスタのパラメータの群で置き、関数もトランザクションの中だけで置く |
+| `pgaudit.log_parameter` | 無いか `off` | pgAudit を使うときに、クラスタのパラメータの群か役割の設定で守る |
+| `pgaudit.log` | 無いか、`role` を含まない（`all` も `role` を含む。`all, -role` は通る） | 同上。役割の文は本文に検証子を持つため |
+| `rds.restrict_password_commands` | 有効なら、管理の役割が `rds_password` の役割を持つ（パスワードを書く文をその役割に限るため） | スタックがクラスタのパラメータの群で `1` に置く。管理の役割はクラスタの master の利用者で、`rds_superuser` として `rds_password` を既定で持つ |
+
+クラスタのパラメータの群をスタックの外で書き換えて上の値から外すと、次の用意か差し替えで止まる。
+
+### 進行表の DB のパスワードの変更の禁止
+
+スタックはクラスタのパラメータの群で `rds.restrict_password_commands` を `1` に置き、プロジェクトの役割が自分のパスワードを変えられないようにする（[データの用意の手順](../design/data.md#用意の手順)）。このパラメータは静的で、群に置いただけでは動いているクラスタに効かず、書き込みのインスタンスを再起動して初めて効く（[Aurora のパスワードの管理](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Appendix.PostgreSQL.CommonDBATasks.RestrictPasswordMgmt.html)）。DB の用意の関数は差し替えの SQL を打つ前に実効値を読み、`off` なら何も書かずに止まる（差し替えが通らず、保留が残る）。
+
+- 初めての反映で作るクラスタは、作るときからこの群で起動するため、再起動は要らない
+- 既にあるクラスタ（この値を持たない版のスタックで作ったもの・群をスタックの外で書き換えたもの）は、この値を持つ版を反映した後（設置のコマンドの `deploy` か反映のパイプライン）に、次の順で書き込みのインスタンスを再起動して実効値を確かめる。スタックは再起動しない。各コマンドの末尾には、反映した先の `--profile <profile> --region <region>` を付ける（例では「…」と略す）
+
+1. 書き込みのインスタンスと群の反映の状態を読む: `aws rds describe-db-clusters --db-cluster-identifier <prefix>-<environment>-progress-db --query 'DBClusters[0].DBClusterMembers[?IsClusterWriter].[DBInstanceIdentifier,DBClusterParameterGroupStatus]' …`。状態が `pending-reboot` なら 2 へ進む。`in-sync` でも 3 で実効値を確かめる
+2. 書き込みのインスタンスを再起動し、使えるまで待つ: `aws rds reboot-db-instance --db-instance-identifier <1 の名前> …` の後に `aws rds wait db-instance-available --db-instance-identifier <1 の名前> …`。再起動の間は進行表の DB へ接続できないため、ホステッドのレーンが動いていない時間に打つ
+3. 1 を打ち直して状態が `in-sync` であることを読み、実効値を読む: `aws rds-data execute-statement --resource-arn <クラスタの ARN> --secret-arn <管理の役割の秘密の器の ARN> --database postgres --sql "SHOW rds.restrict_password_commands" …` が `on` を返すことを確かめる。一時停止の後は `DatabaseResumingException` が返るため、間を置いて打ち直す。`off` なら群の値がスタックの値と合っているかを確かめて 2 から打ち直す
+
+実効値が `on` になるまで、プロジェクトの役割のパスワードの差し替えを始めない（始めても関数が止まり、保留が残る）。
+
+## アプリのスタックを消した後に作り直す
+
+データを失わないため、アプリのスタックを消しても次の資源は消えずに残る（CloudFormation の `DeletionPolicy` と `UpdateReplacePolicy` が `Retain`）。
+
+| 資源 | 名前 | 同じ接頭辞と環境で作り直すとき |
+| --- | --- | --- |
+| 進行表の DB のクラスタと書き手 | `<prefix>-<environment>-progress-db`（書き手の名前は CloudFormation が付ける） | クラスタの名前が衝突する |
+| 進行表の DB の管理の役割の秘密の器 | `<prefix>/<environment>/progress-db-admin` | 名前が衝突する |
+| 利用者の表 | `<prefix>-<environment>-accounts` | 名前が衝突する |
+| DB のパラメーターのグループとサブネットのグループ・出口の無い 2 つのサブネット・DB の SG・VPC | 名前は CloudFormation が付ける（SG と VPC の名前は VPC ごとに別） | 衝突しない。残ったクラスタが使う間は消せないため、クラスタと一緒に残す |
+| 画面の置き場・利用者プール | 名前は CloudFormation が付ける（利用者プールの名前は重なってよい） | 衝突しない |
+
+名前は設定の接頭辞と環境から決まり、変える口を持たない。名前が衝突する資源を残したまま同じ設定で `deploy` を打つと、作成が失敗して CloudFormation が戻す（終了コード 8）。作り直す前に、残った資源を次の順で消す。データが要るときは、各段の退避を先に取る。
+
+各コマンドには、消したアプリのスタックがあったアカウントで作業する profile と、そのリージョンを `--profile <profile> --region <region>` で必ず渡す。省くと既定の profile とリージョン（環境変数 `AWS_PROFILE`・`AWS_REGION` を含む）が先になり、同じ接頭辞と環境の名前を持つ別のアカウントかリージョンの DB・秘密の器・表を消しうる。初めに接続先を確かめる。
+
+アプリのスタックを消すときは、消す前に `aws cloudformation describe-stacks --stack-name <prefix>-<environment>-app --query 'Stacks[0].StackId' --profile <profile> --region <region>` の Stack ID と、消した日時を削除の記録として控えておく。Stack ID はスタックごとに一意で、消してからの日数によらず接続先の出所になる。
+
+0. 接続先を確かめる: 消したアプリのスタック `<prefix>-<environment>-app` があったアカウントとリージョンを、次の出所のうち手元にあるものから取る。上のものほど確かである。profile の `region`（`aws configure get region`）は出所にしない。反映のときに環境変数 `AWS_REGION` が先になっていると、実際の反映先と食い違う
+   - 設置のコマンドで反映した場合（自分で設置する人）: 反映したときに `diff` が出し `deploy` へ渡した確認の値（`<要約値>:<アカウント>:<リージョン>:<スタックの一覧>`）の 2 つ目をアカウント、3 つ目を `<region>` とする
+   - 反映のパイプラインで反映した場合（運用する環境）: アプリのスタックの反映に使った確認の値は無い。パイプラインは、パイプラインのスタックと同じアカウントとリージョンでアプリのスタックを合成して反映する。そのため、パイプラインのスタック `<prefix>-<environment>-pipeline` を設置したときの確認の値（承認の記録と一緒に控えたもの）の 2 つ目と 3 つ目を使う
+   - 確認の値は無いが削除の記録に Stack ID がある場合: Stack ID（`arn:aws:cloudformation:<リージョン>:<アカウント>:stack/<スタックの名前>/<一意の ID>`）の 4 つ目をリージョン、5 つ目をアカウントとする。スタックの名前が `<prefix>-<environment>-app` であることも確かめる
+   - 上のどれも無い場合: CloudFormation が残す、消したスタックの記録（消してから 90 日残る）から探す。候補のアカウントの profile と候補のリージョンの組を、思い当たるものすべてで `aws cloudformation list-stacks --stack-status-filter DELETE_COMPLETE --query "StackSummaries[?StackName=='<prefix>-<environment>-app'].[StackId,DeletionTime]" --profile <候補の profile> --region <候補のリージョン>` を打つ。出た Stack ID の 4 つ目がリージョン、5 つ目がアカウントである。同じ名前は別のアカウントやリージョン（別の環境）にも、同じ組の中にも何度でも残りうるため、出た 1 件で決めない。削除の記録（消した日時、パイプラインの実行やチケットの記録など）と `DeletionTime` を照らし、合う記録が全候補を通して 1 件だけのときに限ってその Stack ID を使う。パイプラインのスタックが残っていれば、`aws cloudformation describe-stacks --stack-name <prefix>-<environment>-pipeline --query 'Stacks[0].[StackId,CreationTime]' --profile <候補の profile> --region <候補のリージョン>` の Stack ID からも同じ 2 つを取れる。このときも全候補で打ち、残っているのが 1 か所だけで、作った日時がパイプラインを設置した記録と合うときに限る
+   - どれからも 1 つに決められない場合（控えも削除の記録も無く、消してから 90 日を過ぎて記録も出ない。記録が複数の候補に出て削除の記録で絞れない。など）: 1 以降の削除へ進まない。作業を止め、反映や削除をした人・パイプラインの記録・アカウントの管理者に当たって接続先を調べる。名前だけで決めて消すと、別の環境の DB や表を消しうる
+   - 決めた後、どの出所でも `aws sts get-caller-identity --profile <profile> --region <region> --query Account` が上のアカウントと同じであることを確かめる。確認の値か削除の記録の Stack ID から取った場合の照合はこれだけで、`list-stacks` で消したスタックの記録が出ることは求めない（消してから 90 日を過ぎると出ないため、出なくても止めない）。違えば profile を選び直す
+
+以下の 1〜6 の AWS CLI のコマンドは、どれも末尾に `--profile <profile> --region <region>` を付けて打つ（例では「…」と略す）。
+
+1. 書き手とクラスタの名前を読む: `aws rds describe-db-clusters --db-cluster-identifier <prefix>-<environment>-progress-db --query 'DBClusters[0].DBClusterMembers[].DBInstanceIdentifier' …`
+2. クラスタの削除の保護を外す: `aws rds modify-db-cluster --db-cluster-identifier <prefix>-<environment>-progress-db --no-deletion-protection --apply-immediately …`
+3. 書き手を消す: `aws rds delete-db-instance --db-instance-identifier <1 の名前> …`。消え終わるまで待つ（`aws rds wait db-instance-deleted --db-instance-identifier <1 の名前> …`）
+4. クラスタを消す: `aws rds delete-db-cluster --db-cluster-identifier <prefix>-<environment>-progress-db --final-db-snapshot-identifier <スナップショットの名前> …`。退避が要らなければ `--final-db-snapshot-identifier` の代わりに `--skip-final-snapshot` を渡す。削除は非同期のため、消え終わるまで待つ（`aws rds wait db-cluster-deleted --db-cluster-identifier <prefix>-<environment>-progress-db …`）。待ちが時間切れで止まったときは、同じ待ちを打ち直す
+5. 管理の役割の秘密の器を消す: `aws secretsmanager delete-secret --secret-id <prefix>/<environment>/progress-db-admin --force-delete-without-recovery …`。回復の期間を置くと、その間は同じ名前で作れない。回復の期間を置かなくても削除は非同期で、名前がすぐには空かない。`aws secretsmanager describe-secret --secret-id <prefix>/<environment>/progress-db-admin …` が `ResourceNotFoundException` を返すまで、間を置いて打ち直す
+6. 利用者の表を消す: 退避が要れば `aws dynamodb create-backup --table-name <prefix>-<environment>-accounts --backup-name <名前> …` を先に打ち、`aws dynamodb delete-table --table-name <prefix>-<environment>-accounts …`。消え終わるまで待つ（`aws dynamodb wait table-not-exists --table-name <prefix>-<environment>-accounts …`）
+7. 残った DB のグループ・サブネット・SG・VPC は、クラスタが消えた後に消せる。消さなくても作り直しは衝突しないが、VPC はリージョンごとの数の上限（既定 5）に数えられる
+8. 4〜6 の待ちと確かめがすべて終わってから、`diff` と `deploy` を打つ。終わる前に打つと、名前がまだ空いておらず作成が失敗する（終了コード 8）
+
+退避したスナップショットやバックアップを新しいスタックの資源へ戻す手順は、まだこの文書に無い。
 
 ## 終了コード
 
