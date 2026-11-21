@@ -51,10 +51,10 @@
 
 ### Task 5: gitleaks の `leak-check` のジョブ
 
-- **対象ファイル:** `.gitleaks.toml`・`tools/checks/leak-scan.sh`・`.github/workflows/ci.yml`（`leak-check`）・`tools/test/leak-scan.integration.test.ts`・`.ndf/project.json`（必須のチェック）・`AGENTS.md`（`LEAK_CHECK_PATTERN` の行）・`issues/issue-1-design.md`・`issues/issue-1-design-detail.md`（承認で足したこと 1）
-- **変更内容:** 詳細設計書の「gitleaks の設定と `leak-check` のジョブ」。gitleaks のすべての実行を `tools/checks/leak-scan.sh` で打ち、`--ignore-gitleaks-allow` と `--gitleaks-ignore-path <空の一時のディレクトリ>` を渡し、`--baseline-path` を渡さない。gitleaks は探す木の根の `.gitleaksignore` を引数によらず読むので、スクリプトはそれが在れば探さずに失敗する。スクリプトを足すのは、ジョブと結合のテストが同じ引数と照らしで打つため
+- **対象ファイル:** `.gitleaks.toml`・`tools/checks/leak-scan.sh`・`tools/checks/gitleaks-default.toml`・`.github/workflows/ci.yml`（`leak-check`）・`tools/test/leak-scan.integration.test.ts`・`.ndf/project.json`（必須のチェック）・`AGENTS.md`（`LEAK_CHECK_PATTERN` の行）・`issues/issue-1-design.md`・`issues/issue-1-design-detail.md`（承認で足したこと 1）
+- **変更内容:** 詳細設計書の「gitleaks の設定と `leak-check` のジョブ」。gitleaks のすべての実行を `tools/checks/leak-scan.sh` で打ち、`--ignore-gitleaks-allow` と `--gitleaks-ignore-path <空の一時のディレクトリ>` を渡し、`--baseline-path` を渡さない。設定は毎回明示し（既定の規則は `[extend] useDefault = true` の `tools/checks/gitleaks-default.toml`）、履歴は `--log-opts="-m <範囲>"` でマージのコミットの差分を含めて探し、`.gitleaks.toml` の許可は規則ごとの `[[rules.allowlists]]` に書く。gitleaks は探す木の根の `.gitleaksignore` を引数によらず読むので、スクリプトはそれが在れば探さずに失敗する。スクリプトを足すのは、ジョブと結合のテストが同じ引数と照らしで打つため
 - **満たす受け入れ条件:** 1・2・3
-- **進め方:** 許可の値に合わず検出の規則に合う値を置いた一時の木で当たり、報告に値が出ないことと、値の行の `gitleaks:allow` と `.gitleaksignore` の両方を付けても `dir` と `git` の両方で検出することを確かめる結合のテスト → スクリプトと設定とジョブ。その値は実行のときに生成した架空の値に限る（乱数の 12 桁・架空の ARN と端点・形だけ合わせた token）。実在のアカウント・資源・端点の値と有効な token は使わず、リポジトリにも置かない
+- **進め方:** 許可の値に合わず検出の規則に合う値を置いた一時の木で当たり、報告に値が出ないことと、作り物の値の許可が `.gitleaks.toml` と重ねた設定の両方で効くことと、根に `.gitleaks.toml` が在っても既定の規則の設定で架空の token が当たることと、マージのコミットでだけ足して後で消した値が履歴の探しで当たることと、`dir` と `git` のそれぞれで、値の行の `gitleaks:allow` だけを付けた値が対象の規則の当たりとして報告されるケースと、根に `.gitleaksignore` を置くと探さずに失敗するケースを別に確かめる結合のテスト → スクリプトと設定とジョブ。その値は実行のときに生成した架空の値に限る（乱数の 12 桁・架空の ARN と端点・形だけ合わせた token）。実在のアカウント・資源・端点の値と有効な token は使わず、リポジトリにも置かない
 
 ### Task 6: zizmor の `workflow-audit` のジョブ
 
