@@ -39,7 +39,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | Value 7（値を置かない） | 作り物でない AWS のアカウント ID・ARN（アカウントの欄の無いものを含む）・資源の ID・端点、既知の提供者の token と私有鍵、CI の秘密に置いた実際の値（アカウント・profile・環境の名前）。今の木と Pull Request の途中のコミットの両方 | gitleaks。自前の規則と作り物の値の許可は既定を読まない `.gitleaks.toml`、既定の規則は `.gitleaks-default.toml`、実際の値の規則は包み（`tools/checks/src/leak-check.ts`）が CI の秘密から組み、既定の枝の定義と包みで Pull Request の内容をデータとして探す（決定 3） | `leak-check`（新設）・`leak-real-value`（新設。別のワークフロー） |
 | 横断の部品を 1 か所に（プラットフォームの決定 91） | `apps/` の実行時のコードでの `Date.now`・引数なしの `new Date()`・乱数からの ID・`console`・`fetch`・AWS SDK の import・`ConditionExpression` を組む書き込み | ESLint の組み込みの規則を `eslint.config.js` で置き場ごとに（決定 1） | `check` |
-| I8（使える量の判定は 1 か所） | 判定のモジュールの外での料金プランの値の import・画面での料金プランの名前の文字列 | 同上 | `check` |
+| I8（使える量の判定は 1 か所） | 判定のモジュールの外での料金プランの値の import（公開の指定子と相対のパスの両方）・画面での料金プランの名前の文字列 | 同上。相対のパスの import は解決したファイルで照らす dependency-cruiser の規則（決定 2） | `check` |
 | I14（画面の操作は API と MCP にもある） | 画面と `apps/api`・`infra` での HTTP の経路の直書き。生成した呼び出しのうち画面が使わないもの。MCP の道具と人だけでない操作の食い違い・人だけの操作の読み出しの欠け・どの操作にも無い機能。API Gateway に実際に登録した経路と Lambda の振り分けが受ける経路の、操作の表との食い違い | 経路の直書きは ESLint、使わない呼び出しは knip、表の照らしは形の正本の往復のテスト、実際の経路は合成の結果のテスト（`infra/test/api-routes.test.ts`）と振り分けのテスト（#2 の `apps/api/test/dispatch-routes.test.ts`）（決定 8） | `check` |
 | 依存の向き（全体の設計の詳細設計の依存の表）と決定 140（画面の外は React と TSX を使わない） | `packages/contracts` → `packages/core` → `apps/*` の一方向に反する依存・`apps/*` どうし・`infra` から `apps/*`・画面の外の React の import（型だけの import を含む）。画面の外の `*.tsx` | dependency-cruiser の `.dependency-cruiser.cjs`（決定 2）。`*.tsx` の置き場は ESLint（決定 1） | `check` |
 | Value 13（使わないものを残さない） | 使っていないファイル・書き出し・依存 | knip の `knip.jsonc`（決定 4） | `check` |
@@ -100,8 +100,8 @@ flowchart TB
 
 | # | 欠け | なぜ要るか |
 | --- | --- | --- |
-| K29-1 | 料金プランの名前を形の正本の閉じた語の集まりとして `@nd-factory/contracts` の書き出し `planNames`（`readonly string[]`）に、料金プランの値を `packages/contracts/data/plan-values.json` に置き、値を読む書き出しを `@nd-factory/contracts/plan-values` の 1 つにする。置き場と名前は `eslint.config.js` の定数 `PLAN_NAMES_EXPORT`・`PLAN_VALUES_SPECIFIER` と同じにし、変えるときは同じ Pull Request で定数も変える | ESLint の I8 の規則が、値の書き出しの import を判定の外で落とし、名前を画面で落とす（詳細設計の「ESLint の設定」） |
-| K29-2 | 書き出しを置く Pull Request で、`eslint.config.js` の定数 `PLAN_EXPORT_REQUIRED` を真にする。同じ Pull Request の `check` で、`lint-config.test.ts` の実物のテスト（定数の置き場から読んだ実際の書き出しの名前と値の指定子を使い、テストに写さない）が、判定のモジュールの外の値の import と、画面の名前の文字列の両方で誤りを出す | 偽の間は、名前の書き出しを読めなければ画面の名前の規則を作らずに通る。真の後は、書き出しを読めない（消した・名前や置き場を変えた・読み込みが壊れた）と `eslint.config.js` が設定の読み込みで止まり、`check` が落ちる。I8 の規則が黙って無効になることも、落とす指定子が実際の書き出しとずれたまま通ることも無い |
+| K29-1 | 料金プランの名前を形の正本の閉じた語の集まりとして `@nd-factory/contracts` の書き出し `planNames`（`readonly string[]`）に、料金プランの値を `packages/contracts/data/plan-values.json` に置き、値を読む書き出しを `@nd-factory/contracts/plan-values` の 1 つにする。その書き出しは `package.json` の `exports` でモジュール `packages/contracts/src/plan-values.ts` を直に指し、`plan-values.json` を import するのはこのモジュールだけにする。`packages/contracts/src/` のほかのモジュール（`@nd-factory/contracts` の入口を含む）はこのモジュールも JSON も import せず、値を書き出し直さない。置き場と名前は `eslint.config.js` の定数 `PLAN_NAMES_EXPORT`・`PLAN_VALUES_SPECIFIER` と `.dependency-cruiser.cjs` の定数 `PLAN_VALUES_FILES`（モジュールと JSON のパス）と同じにし、変えるときは同じ Pull Request で定数も変える | ESLint の I8 の規則が、値の書き出しの公開の指定子の import を判定の外で落とし、名前を画面で落とす（詳細設計の「ESLint の設定」）。ESLint は指定子の文字列しか見ないので、相対のパスでモジュールか JSON を import すると素通りし、依存の表は `apps/` から `packages/contracts/` への依存を許すので向きの規則にも当たらない。解決したファイルで照らす dependency-cruiser の規則 `plan-values-only-in-usage-limit` が、指定子の書き方を問わず判定の外からの依存を落とす（詳細設計の「dependency-cruiser の設定」）。ほかのモジュールが書き出し直すと、その入口を経て値に届くので、書き出し直しも同じ設定の `plan-values-not-reexported` が落とす |
+| K29-2 | 書き出しを置く Pull Request で、`eslint.config.js` の定数 `PLAN_EXPORT_REQUIRED` を真にする。同じ Pull Request の `check` で、`lint-config.test.ts` の実物のテスト（定数の置き場から読んだ実際の書き出しの名前と値の指定子を使い、テストに写さない）が、判定のモジュールの外の値の import と、画面の名前の文字列の両方で誤りを出す。同じ `check` の `npm run deps-check` が実際の木で `plan-values-only-in-usage-limit`・`plan-values-not-reexported` に当たらず、`deps-config.test.ts` の実物のテスト（`PLAN_EXPORT_REQUIRED` が真のときだけ走る）が、`PLAN_VALUES_FILES` のモジュールが実際の木にあり、`PLAN_VALUES_SPECIFIER` をそのモジュールへ解決することを示す | 偽の間は、名前の書き出しを読めなければ画面の名前の規則を作らずに通る。真の後は、書き出しを読めない（消した・名前や置き場を変えた・読み込みが壊れた）と `eslint.config.js` が設定の読み込みで止まり、`check` が落ちる。I8 の規則が黙って無効になることも、落とす指定子が実際の書き出しとずれたまま通ることも無い。モジュールの置き場を変えて `PLAN_VALUES_FILES` を直し忘れると、解決の照らしが落ちるので、dependency-cruiser の規則が別のパスを見たまま通ることも無い |
 
 ### #6 へ渡す欠け
 
@@ -131,7 +131,7 @@ flowchart TB
 ### 決定 2: 置き場の間の依存の向きを実際に解決したファイルで照らすため、dependency-cruiser を使う
 
 - **質問**: 依存の向き（型だけの import を含む）と画面の外の React の import を、どの道具で落とすか
-- **選んだ案**: dependency-cruiser の `.dependency-cruiser.cjs` に `forbidden` の規則を置き場ごとに書き、`check` のジョブで `npm run deps-check` として走らせる。`tsPreCompilationDeps` で型だけの import も数え、workspaces の名前（`@nd-factory/*`）も相対のパスも、解決した先のファイルの置き場で照らす
+- **選んだ案**: dependency-cruiser の `.dependency-cruiser.cjs` に `forbidden` の規則を置き場ごとに書き、`check` のジョブで `npm run deps-check` として走らせる。`tsPreCompilationDeps` で型だけの import も数え、workspaces の名前（`@nd-factory/*`）も相対のパスも、解決した先のファイルの置き場で照らす。I8 の料金プランの値も、判定の外から値のモジュールと JSON への依存を同じ解決で落とす（公開の指定子の import は ESLint も落とすが、相対のパスは ESLint の指定子の照らしの外にあるため。K29-1）
 - 採らなかった案: ESLint の `no-restricted-imports` の置き場ごとの設定（import の文字列の形で照らすので、workspaces の名前と相対のパスと再書き出しの経路ごとに形を書き足すことになり、書き漏れが通る）
 - 採らなかった案: eslint-plugin-boundaries（flat config と ESLint 10 への対応を一次情報で確かめられなかった。star 約 1,000 で dependency-cruiser（約 7,400）より使われている広さが小さい）
 - 採らなかった案: eslint-plugin-import-x の `no-restricted-paths`（ESLint 10 に対応するが、置き場の間の規則の表し方が dependency-cruiser より限られ、依存と解決の設定が lint の側に増える）

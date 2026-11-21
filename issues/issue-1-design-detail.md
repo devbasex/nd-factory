@@ -68,7 +68,7 @@ nd-factory/
 | `apps/*` | `no-restricted-syntax` | 引数なしの `new Date()`・鍵 `ConditionExpression` を持つオブジェクトの性質 | 時計・条件つきの書き込み |
 | `apps/*` | `no-restricted-globals`（`checkGlobalObject`） | `console`・`fetch` | ログと伏せ字・外部の呼び出し |
 | `apps/*` | `@typescript-eslint/no-restricted-imports`（`allowTypeImports`） | `@aws-sdk/*`・`node:http`・`node:https`・`node:crypto` の `randomUUID`・`randomBytes`・`uuid` | 外部の呼び出し・条件つきの書き込み・操作の記録の書き手・ID |
-| `apps/**` と `packages/core/src/**`（使える量の判定のモジュール `packages/core/src/usage-limit*` を除く） | `no-restricted-imports` | 料金プランの値の書き出し（#29 が置く 1 つの書き出し。指定子は下の `PLAN_VALUES_SPECIFIER`） | I8 |
+| `apps/**` と `packages/core/src/**`（使える量の判定のモジュール `packages/core/src/usage-limit*` を除く） | `no-restricted-imports` | 料金プランの値の書き出し（#29 が置く 1 つの書き出し。指定子は下の `PLAN_VALUES_SPECIFIER`）。指定子の文字列だけを見るので、相対のパスでの import は dependency-cruiser の `plan-values-only-in-usage-limit` が落とす | I8 |
 | `apps/web/src/**` | `no-restricted-syntax` | 料金プランの名前と同じ文字列（JSX の属性の値と `JSXText` を含む）。名前は #29 の書き出しから読む（読めないときの扱いは下の `PLAN_EXPORT_REQUIRED`） | I8（画面） |
 | `apps/runner/src/**` | `no-restricted-properties` | `JSON.parse`（NDF のファイルと区間の報告は形の正本の読み取りの関数で読み、ランナーは JSON を自分で解かない。#6 へ渡す欠け K6-4） | F23 の照らしがランナーの読み取りにも効くこと（設計文書の決定 7） |
 | `apps/web/src/**` | `no-restricted-imports`（`importNames`） | `screen-pending.json` に並ぶ操作の生成した呼び出しの import（画面を作るなら同じ Pull Request で行を消す。K2-2）。データが無ければこの選び方を作らない | I14（画面の無い間の除外の陳腐化） |
@@ -103,7 +103,10 @@ nd-factory/
 | `infra-does-not-import-apps` | `^infra/` | `^apps/` |
 | `tools-depends-on-contracts-only` | `^tools/` | `^packages/core/`・`^apps/`・`^infra/` |
 | `react-only-in-web` | `apps/web/` の外 | `react`・`react-dom`・`@vitejs/plugin-react` |
+| `plan-values-only-in-usage-limit` | `^apps/`・`^packages/core/src/`（`pathNot` で `^packages/core/src/usage-limit` を除く。ESLint の I8 の塊と同じ置き場） | `PLAN_VALUES_FILES`（`^packages/contracts/src/plan-values\.ts$` と `^packages/contracts/data/plan-values\.json$`）。解決したファイルで照らすので、公開の指定子 `@nd-factory/contracts/plan-values`・相対のパス・JSON の直の import のどれでも当たる |
+| `plan-values-not-reexported` | `^packages/contracts/src/`（`pathNot` で `^packages/contracts/src/plan-values\.ts$` を除く） | `PLAN_VALUES_FILES`。ほかのモジュールが値を書き出し直すと、判定の外はその入口から値に届き、上の規則に当たらないため |
 
+- `PLAN_VALUES_FILES` は `.dependency-cruiser.cjs` の定数に置き、#29 へ設計文書の K29-1 で同じ値を渡す。公開の指定子を解決したファイルで照らすため、`options` に `enhancedResolveOptions: { exportsFields: ["exports"], conditionNames: ["import", "types", "default"] }` を置き、`package.json` の `exports` を読ませる（ワークスペースの `node_modules/@nd-factory/contracts` は実のパスへ解決する。`preserveSymlinks` は既定の偽のまま）。2 つの I8 の規則は #29 が値を置く前でも有効で、ファイルが無い間は当たる依存が無いので通る
 - 今の当たりは、試しの規則で 0 件だった（設計文書の LIB4）。当たれば、検査を足す Pull Request で直すか、dependency-cruiser の標準の除外（規則の `pathNot`）に課題の番号を `comment` に添えて外す
 
 ### 単体テストの観点（`tools/test/deps-config.test.ts`）
@@ -111,6 +114,8 @@ nd-factory/
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | 規則（dependency-cruiser の API の `cruise` を、一時の木に置いた作り物のファイルへ設定のファイルのまま打つ） | 規則ごとに、違反の import を 1 つ置いた木で、その規則の名前の誤りが 1 件出る | 型だけの import でも出る。`@nd-factory/*` の名前の import と相対のパスの import の両方で出る。`apps/web` の `react` の import では出ない | 規則を 1 つ消した設定で、その違反が出なくなる（テストが落ちる） |
+| 料金プランの値の規則（一時の木に `packages/contracts/package.json` の `exports` の `./plan-values`・`PLAN_VALUES_FILES` の 2 つの作り物・ワークスペースのリンクを置く） | `apps/api/src/` と `packages/core/src/`（判定の外）から、公開の指定子 `@nd-factory/contracts/plan-values`・モジュールへの相対のパス・JSON への相対のパスのそれぞれで import すると `plan-values-only-in-usage-limit` が 1 件ずつ出る。`packages/contracts/src/index.ts` がモジュールを書き出し直すと `plan-values-not-reexported` が出る | `packages/core/src/usage-limit.ts` からの同じ 3 つの import では出ない。`plan-values.ts` から JSON への import では出ない。型だけの import でも出る | 公開の指定子を解決できない（`couldNotResolve`）と、その観点が落ちる（解決の設定を外すと素通りするのを、テストが落ちることで示す） |
+| 実物の料金プランの値の置き場（`PLAN_EXPORT_REQUIRED` が真のときだけ走る。偽の間は「相手が無い」の名前で飛ばす） | 実際の木で `PLAN_VALUES_SPECIFIER` を dependency-cruiser の解決で引くと、`PLAN_VALUES_FILES` のモジュールのパスになり、2 つのファイルがどちらもある（定数とテストに写さず、`eslint.config.js` と `.dependency-cruiser.cjs` から読む） | — | 置き場を変えて定数を直し忘れると落ちる |
 
 ## gitleaks の設定と `leak-check` のジョブ
 
