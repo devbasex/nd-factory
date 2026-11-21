@@ -1,0 +1,302 @@
+[
+  {
+    "operation": "sessions.create",
+    "owner": "#4"
+  },
+  {
+    "operation": "sessions.delete",
+    "owner": "#4"
+  },
+  {
+    "operation": "users.get",
+    "owner": "#4"
+  },
+  {
+    "operation": "users.update",
+    "owner": "#4"
+  },
+  {
+    "operation": "logins.create",
+    "owner": "#4"
+  },
+  {
+    "operation": "logins.delete",
+    "owner": "#4"
+  },
+  {
+    "operation": "teams.list",
+    "owner": "#4"
+  },
+  {
+    "operation": "teams.get",
+    "owner": "#4"
+  },
+  {
+    "operation": "teams.create",
+    "owner": "#4"
+  },
+  {
+    "operation": "teams.update",
+    "owner": "#4"
+  },
+  {
+    "operation": "seats.list",
+    "owner": "#4"
+  },
+  {
+    "operation": "seats.update",
+    "owner": "#4"
+  },
+  {
+    "operation": "seats.delete",
+    "owner": "#4"
+  },
+  {
+    "operation": "invitations.list",
+    "owner": "#4"
+  },
+  {
+    "operation": "invitations.create",
+    "owner": "#4"
+  },
+  {
+    "operation": "invitations.accept",
+    "owner": "#4"
+  },
+  {
+    "operation": "invitations.delete",
+    "owner": "#4"
+  },
+  {
+    "operation": "projects.list",
+    "owner": "#5"
+  },
+  {
+    "operation": "projects.get",
+    "owner": "#5"
+  },
+  {
+    "operation": "projects.create",
+    "owner": "#5"
+  },
+  {
+    "operation": "projects.update",
+    "owner": "#5"
+  },
+  {
+    "operation": "github_installations.list",
+    "owner": "#5"
+  },
+  {
+    "operation": "github_installations.link",
+    "owner": "#5"
+  },
+  {
+    "operation": "repositories.list",
+    "owner": "#5"
+  },
+  {
+    "operation": "repositories.add",
+    "owner": "#5"
+  },
+  {
+    "operation": "repositories.remove",
+    "owner": "#5"
+  },
+  {
+    "operation": "project_transfers.list",
+    "owner": "#5"
+  },
+  {
+    "operation": "project_transfers.create",
+    "owner": "#5"
+  },
+  {
+    "operation": "project_transfers.accept",
+    "owner": "#5"
+  },
+  {
+    "operation": "project_transfers.delete",
+    "owner": "#5"
+  },
+  {
+    "operation": "projects.close",
+    "owner": "#5"
+  },
+  {
+    "operation": "waiting_counts.get",
+    "owner": "#6"
+  },
+  {
+    "operation": "issue_candidates.list",
+    "owner": "#6"
+  },
+  {
+    "operation": "sprints.create",
+    "owner": "#6"
+  },
+  {
+    "operation": "sprints.list",
+    "owner": "#6"
+  },
+  {
+    "operation": "sprints.get",
+    "owner": "#6"
+  },
+  {
+    "operation": "lanes.list",
+    "owner": "#6"
+  },
+  {
+    "operation": "progress_events.list",
+    "owner": "#6"
+  },
+  {
+    "operation": "sprints.cancel",
+    "owner": "#6"
+  },
+  {
+    "operation": "approvals.list",
+    "owner": "#8"
+  },
+  {
+    "operation": "approvals.get",
+    "owner": "#8"
+  },
+  {
+    "operation": "approvals.answer",
+    "owner": "#8"
+  },
+  {
+    "operation": "questions.list",
+    "owner": "#8"
+  },
+  {
+    "operation": "questions.get",
+    "owner": "#8"
+  },
+  {
+    "operation": "questions.answer",
+    "owner": "#8"
+  },
+  {
+    "operation": "notices.list",
+    "owner": "#8"
+  },
+  {
+    "operation": "notices.mark_read",
+    "owner": "#8"
+  },
+  {
+    "operation": "notification_targets.list",
+    "owner": "#8"
+  },
+  {
+    "operation": "notification_targets.create",
+    "owner": "#8"
+  },
+  {
+    "operation": "notification_targets.test",
+    "owner": "#8"
+  },
+  {
+    "operation": "notification_targets.delete",
+    "owner": "#8"
+  },
+  {
+    "operation": "delegations.list",
+    "owner": "#11"
+  },
+  {
+    "operation": "delegations.create",
+    "owner": "#11"
+  },
+  {
+    "operation": "delegations.revoke",
+    "owner": "#11"
+  },
+  {
+    "operation": "execution_settings.get",
+    "owner": "#6"
+  },
+  {
+    "operation": "execution_settings.update",
+    "owner": "#6"
+  },
+  {
+    "operation": "model_keys.list",
+    "owner": "#6"
+  },
+  {
+    "operation": "model_keys.create",
+    "owner": "#6"
+  },
+  {
+    "operation": "model_keys.delete",
+    "owner": "#6"
+  },
+  {
+    "operation": "machines.list",
+    "owner": "#7"
+  },
+  {
+    "operation": "machines.create",
+    "owner": "#7"
+  },
+  {
+    "operation": "machines.delete",
+    "owner": "#7"
+  },
+  {
+    "operation": "usage.get",
+    "owner": "#29"
+  },
+  {
+    "operation": "usage_records.list",
+    "owner": "#29"
+  },
+  {
+    "operation": "spend_caps.update",
+    "owner": "#29"
+  },
+  {
+    "operation": "audit_records.list",
+    "owner": "#11"
+  },
+  {
+    "operation": "runner.exchanges.create",
+    "owner": "#6"
+  },
+  {
+    "operation": "runner.events.create",
+    "owner": "#6"
+  },
+  {
+    "operation": "runner.heartbeats.create",
+    "owner": "#6"
+  },
+  {
+    "operation": "runner.answers.list",
+    "owner": "#6"
+  },
+  {
+    "operation": "runner.answer_deliveries.create",
+    "owner": "#6"
+  },
+  {
+    "operation": "machine.heartbeats.create",
+    "owner": "#7"
+  },
+  {
+    "operation": "machine.lane_claims.create",
+    "owner": "#7"
+  },
+  {
+    "operation": "db_prep.exchanges.create",
+    "owner": "#13"
+  },
+  {
+    "operation": "db_prep.completions.create",
+    "owner": "#13"
+  }
+]

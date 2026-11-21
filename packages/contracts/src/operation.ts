@@ -28,7 +28,8 @@ export type SuccessEnvelope = z.ZodObject<{ ok: z.ZodLiteral<true> } & z.core.$Z
 
 export type ResultShape = SuccessEnvelope | PendingShape;
 
-export type OperationExamples = { normal?: unknown[]; edge?: unknown[] };
+// 書いた場面だけ生成した見本を上書きする。empty は要素 1 個に返す空の結果 1 件（null は空の場面を持たない）
+export type OperationExamples = { normal?: unknown[]; edge?: unknown[]; empty?: unknown };
 
 // defineOperation へ渡す値。既定を持つ項目は省ける
 export type OperationInput<N extends string, I extends Shape, R extends ResultShape> = {
