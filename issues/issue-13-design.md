@@ -471,6 +471,7 @@ sequenceDiagram
 | LIB5 | EventBridge Scheduler | — | AWS のサービス | — | 無し | 満たす。月 1,400 万回の呼び出しまでは無料の枠。例の計算では枠の外は 100 万回あたり 1.00 ドル | https://aws.amazon.com/eventbridge/pricing/ （2026-11-21） |
 | LIB6 | CloudFormation の `Fn::GetAZs` | — | AWS のサービス | — | 無し | 条件つきで満たす。既定の VPC の既定のサブネットがある AZ だけを返し、既定のサブネットが無ければ使える AZ をすべて返す。既定のサブネットが 1 つの AZ にだけあると 1 つしか返さない | https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/intrinsic-function-reference-getavailabilityzones.html （2026-11-21） |
 | LIB7 | ECR のライフサイクルの規則の評価 | — | AWS のサービス | — | 無し | 満たす。規則はすべて同時に評価し、優先の順に当てる。1 つのイメージを消すのは 0 か 1 つの規則で、ある規則のタグの条件に当たるイメージは、それより優先の低い規則では消えない。`imageCountMoreThan` は push の時刻の新しい順に並べて数を超えたものを消す。`tagPrefixList` は `tagStatus` が `tagged` のときだけ使える。消すのは条件に当たってから 24 時間のうち | https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html ・ https://docs.aws.amazon.com/AmazonECR/latest/userguide/lifecycle_policy_parameters.html （2026-11-21） |
+| LIB8 | AWS CLI の出力の絞り（`--query`） | AWS CLI v2 | AWS の道具 | — | 無し | 条件つきで満たす。`--output json` と `yaml` では全ページを集めてから `--query` を当てるが、`text` ではページごとに当てる。反映のアクションの確かめは `--output json` を明示して、全ページを集めた結果で照らす（詳細設計の「反映のパイプライン」） | https://docs.aws.amazon.com/cli/latest/userguide/cli-usage-filter.html （2026-11-21。cross-review の指摘が示した頁） |
 
 ### 確かめられなかったこと
 
@@ -478,4 +479,4 @@ sequenceDiagram
 | --- | --- | --- |
 | DynamoDB の PITR とストリームの単価 | 試していない | 見込みの額への効きが小さいため、実測の段で単価の頁を読む |
 
-調べた量: 候補 7 件・取得の試み 9 回（2026-11-21。レビューの指摘で LIB6 とコスト配分タグの頁を、イメージの置き場の作り直しで LIB7 を足した）。
+調べた量: 候補 8 件・取得の試み 9 回（2026-11-21。レビューの指摘で LIB6 とコスト配分タグの頁を、イメージの置き場の作り直しで LIB7 を、cross-review の指摘で LIB8 を足した）。
