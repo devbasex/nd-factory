@@ -96,7 +96,7 @@ nd-factory/
 | `react-only-in-web` | `apps/web/` の外 | `react`・`react-dom`・`@vitejs/plugin-react` |
 | `plan-values-only-in-usage-limit` | `packages/core/src/usage-limit*` と `packages/contracts/` の外 | 料金プランの値のデータ `packages/contracts/data/plans.json` と、それを読む書き出しのファイル `packages/contracts/src/plans.ts`（`@nd-factory/contracts/plans`。#29 が置く。公開の名前の import も相対のパスの import も、解決したファイルで照らす） |
 
-- 料金プランの値のファイルの名前は `PLAN_VALUE_FILES` に固定する。`deps-config.test.ts` はリポジトリの `packages/contracts` のうち名前に `plan` を含むファイルと、`exports` の `./plans` の行き先が `PLAN_VALUE_FILES` に合うことを照らし、#29 が別の名前で置いたときに落とす
+- 料金プランの値のファイルの名前は `PLAN_VALUE_FILES` に固定する。`deps-config.test.ts` はリポジトリの `packages/contracts` のうち名前に `plan` を含むファイルと、`exports` の `./plans` の行き先と、行き先から dependency-cruiser で辿って実際に読み込む値のファイル（`packages/contracts` の JSON と、そこへ至る途中のモジュール。名前によらない）が `PLAN_VALUE_FILES` に合うことを照らし、#29 が別の名前や置き場で置いたときに落とす。名前に `plan` を含まない置き場（`data/pricing.json`）へ値を移した作り物の木で落ちることを確かめる
 - 今の当たりは、試しの規則で 0 件だった（設計文書の LIB4）。当たれば、検査を足す Pull Request で直すか、dependency-cruiser の標準の除外（規則の `pathNot`）に課題の番号を `comment` に添えて外す
 
 ### 単体テストの観点（`tools/test/deps-config.test.ts`）

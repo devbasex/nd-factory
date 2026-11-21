@@ -257,6 +257,44 @@ function planFilesOutsideRule(files: string[], exportsField: Record<string, unkn
   return [...new Set(candidates)].filter((f) => !pattern.test(f));
 }
 
+/**
+ * 書き出し `./plans` の行き先から実際に読み込む値のファイルのうち、規則の外のもの。値のファイルは、行き先そのものと、
+ * 行き先から辿れる `packages/contracts` の JSON と、その JSON へ至る途中のモジュール（値を出し直す）。名前によらない
+ */
+async function planValuesOutsideRule(baseDir: string, opts: Options, pattern: RegExp): Promise<string[]> {
+  const manifest = JSON.parse(readFileSync(join(baseDir, "packages/contracts/package.json"), "utf8")) as { exports?: Record<string, unknown> };
+  const target = manifest.exports?.["./plans"];
+  if (target === undefined) return [];
+  if (typeof target !== "string") throw new Error("packages/contracts の exports の ./plans が 1 つのパスでない");
+  const entry = posix.join("packages/contracts", target);
+  const tsConfig = extractTSConfig(join(baseDir, opts.tsConfig?.fileName ?? "tsconfig.base.json"));
+  const { ruleSet: _rules, ...rest } = opts;
+  const { output } = await cruise([entry], { ...rest, baseDir, validate: false }, {}, { tsConfig });
+  const deps = new Map((output as ICruiseResult).modules.map((m) => [m.source, m.dependencies.map((d) => d.resolved)]));
+  const inContracts = (f: string) => f.startsWith("packages/contracts/");
+  const reachesValues = new Map<string, boolean>();
+  const reaches = (f: string, seen: Set<string>): boolean => {
+    const known = reachesValues.get(f);
+    if (known !== undefined) return known;
+    if (seen.has(f)) return false;
+    seen.add(f);
+    const result = f.endsWith(".json") || (deps.get(f) ?? []).filter(inContracts).some((d) => reaches(d, seen));
+    reachesValues.set(f, result);
+    return result;
+  };
+  const values = [entry, ...[...deps.keys()].filter((f) => inContracts(f) && f !== entry && reaches(f, new Set()))];
+  return [...new Set(values)].filter((f) => !pattern.test(f));
+}
+
+/** 料金プランの書き出しだけを持つ作り物の形の正本の木を組む */
+function buildPlanTree(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), "deps-plans-"));
+  write(root, "tsconfig.base.json", JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext", allowImportingTsExtensions: true, resolveJsonModule: true, noEmit: true } }));
+  write(root, "packages/contracts/package.json", JSON.stringify({ name: "@nd-factory/contracts", type: "module", exports: { "./plans": "./src/plans.ts" } }));
+  for (const [path, content] of Object.entries(files)) write(root, path, content);
+  return root;
+}
+
 describe("受け入れ条件 4: 料金プランの値の規則がリポジトリの実際の配置を照らす（#29 への引き継ぎ）", () => {
   it("規則の外の名前（作り物）は見つかる", () => {
     const pattern = planValuePattern(options);
@@ -266,9 +304,50 @@ describe("受け入れ条件 4: 料金プランの値の規則がリポジトリ
     ]);
   });
 
-  it("packages/contracts の料金プランの値のファイルは、すべて規則の対象に入る", () => {
-    const manifest = JSON.parse(readFileSync(join(ROOT, "packages/contracts/package.json"), "utf8")) as { exports?: Record<string, unknown> };
-    const files = listFiles("packages/contracts").filter((f) => /^packages\/contracts\/(data|src)\//.test(f));
-    expect(planFilesOutsideRule(files, manifest.exports ?? {}, planValuePattern(options))).toEqual([]);
-  });
+  it(
+    "書き出しの行き先が読む値のファイルが、名前に plan を含まない置き場へ移ると見つかる",
+    async () => {
+      const pattern = planValuePattern(options);
+      const roots = [
+        buildPlanTree({
+          "packages/contracts/src/plans.ts": 'import data from "../data/pricing.json" with { type: "json" };\nexport const plans = data;\n',
+          "packages/contracts/data/pricing.json": '[{ "name": "acme-free" }]\n',
+        }),
+        buildPlanTree({
+          "packages/contracts/src/plans.ts": 'import { values } from "./pricing.ts";\nimport { names } from "./names.ts";\nexport const plans = { values, names };\n',
+          "packages/contracts/src/pricing.ts": 'import data from "../data/pricing.json" with { type: "json" };\nexport const values = data;\n',
+          "packages/contracts/src/names.ts": 'export const names = ["acme-free"] as const;\n',
+          "packages/contracts/data/pricing.json": '[{ "name": "acme-free" }]\n',
+        }),
+      ];
+      try {
+        expect(await planValuesOutsideRule(roots[0]!, options, pattern)).toEqual(["packages/contracts/data/pricing.json"]);
+        // 値を出し直す途中のモジュールも値のファイルに数え、値に至らない名前のモジュールは数えない
+        expect((await planValuesOutsideRule(roots[1]!, options, pattern)).sort()).toEqual(["packages/contracts/data/pricing.json", "packages/contracts/src/pricing.ts"]);
+      } finally {
+        for (const r of roots) rmSync(r, { recursive: true, force: true });
+      }
+    },
+    CRUISE_TIMEOUT,
+  );
+
+  it(
+    "規則どおりの配置（作り物の木）では、書き出しの行き先が読む値のファイルはすべて規則の対象に入る",
+    async () => {
+      expect(await planValuesOutsideRule(tree, options, planValuePattern(options))).toEqual([]);
+    },
+    CRUISE_TIMEOUT,
+  );
+
+  it(
+    "packages/contracts の料金プランの値のファイルは、すべて規則の対象に入る",
+    async () => {
+      const pattern = planValuePattern(options);
+      const manifest = JSON.parse(readFileSync(join(ROOT, "packages/contracts/package.json"), "utf8")) as { exports?: Record<string, unknown> };
+      const files = listFiles("packages/contracts").filter((f) => /^packages\/contracts\/(data|src)\//.test(f));
+      expect(planFilesOutsideRule(files, manifest.exports ?? {}, pattern)).toEqual([]);
+      expect(await planValuesOutsideRule(ROOT, options, pattern)).toEqual([]);
+    },
+    CRUISE_TIMEOUT,
+  );
 });
