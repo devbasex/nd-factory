@@ -157,23 +157,34 @@ export async function claimBinding(sql: SqlExecutor, project: ProjectIdent): Pro
 
 // --- I10 の守り（checkIsolationGuard） ---
 
-// データベースの CONNECT を持つ役割のうち、管理の役割（current_user。作った持ち主）と渡された役割のほかの数。
-// datacl が空なら既定の ACL（持ち主と PUBLIC）で読む。grantee 0 は PUBLIC で、別に返す（接続を許さない間は数えない）
+// 実効の CONNECT は、ACL の受け手の役割に属する（pg_has_role の MEMBER。継承か SET ROLE で使える）ことで読む。
+// ACL に直に載る役割だけを見ると、所属で CONNECT を受ける役割を見落とす。datacl が空なら既定の ACL（持ち主と PUBLIC）で読む。
+// 持ち主に属する役割も、持ち主の権限で CONNECT を与え直せるため数える。grantee 0 は PUBLIC。
+// superuser はどのデータベースにも接続でき、クラスタを管理する側の役割として数えない（pg_has_role が常に真を返すため、数えると照らせない）
+const CONNECT_VIA = (role: string) =>
+  `(pg_catalog.pg_has_role(${role}, d.datdba, 'MEMBER') OR EXISTS (SELECT 1 FROM aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a` +
+  ` WHERE a.privilege_type = 'CONNECT' AND a.grantee <> 0 AND pg_catalog.pg_has_role(${role}, a.grantee, 'MEMBER')))`;
+// 対象のデータベースへ実効の CONNECT を持つ役割のうち、管理の役割（current_user。作った持ち主）と渡された役割のほかの数。
+// 渡された役割に属する別の役割（渡された役割から CONNECT を受け継ぐ別のログイン）もここで数える。
+// PUBLIC は別に返す（接続を許さない間は数えない）
 const DATABASE_GRANTS =
   "SELECT d.datallowconn AS allow," +
-  " (SELECT count(*)::int FROM aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a" +
-  "   WHERE a.privilege_type = 'CONNECT' AND a.grantee <> 0" +
-  "   AND a.grantee <> (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user)" +
-  "   AND a.grantee IS DISTINCT FROM (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = :role_name)) AS others," +
+  " (SELECT count(*)::int FROM pg_catalog.pg_roles r WHERE NOT r.rolsuper" +
+  "   AND r.rolname <> current_user AND r.rolname <> :role_name AND " +
+  CONNECT_VIA("r.oid") +
+  ") AS others," +
   " EXISTS (SELECT 1 FROM aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a" +
   "   WHERE a.privilege_type = 'CONNECT' AND a.grantee = 0) AS public_connect" +
   " FROM pg_catalog.pg_database d WHERE d.datname = :database_name";
-// 渡された役割が、渡されたデータベースのほかで CONNECT を持つ数（持ち主であることを含む）。PUBLIC の分は数えない
+// 渡された役割が、渡されたデータベースのほかで実効の CONNECT を持つデータベースの数（所属・持ち主であることを含む）。
+// 接続を許さないデータベースも数える（作成の途中のほかのプロジェクトのデータベースへの結び付きも結び付きであるため）。
+// PUBLIC の分は数えない: PUBLIC は特定の役割への結び付きでなく、postgres・template1 は手順の 1、プロジェクトのデータベースは
+// 手順の 3 が PUBLIC から外し、外れたことを読み直してから役割に接続を与える。渡された役割が superuser なら、どこへでも接続できるため数える
 const ROLE_GRANTS =
-  "SELECT count(*)::int AS other_databases FROM pg_catalog.pg_database d" +
-  " CROSS JOIN LATERAL aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a" +
-  " WHERE a.privilege_type = 'CONNECT' AND d.datname <> :database_name" +
-  " AND a.grantee = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = :role_name)";
+  "SELECT count(*)::int AS other_databases FROM pg_catalog.pg_roles r CROSS JOIN pg_catalog.pg_database d" +
+  " WHERE r.rolname = :role_name AND d.datname <> :database_name AND (r.rolsuper OR " +
+  CONNECT_VIA("r.oid") +
+  ")";
 
 // データベースか役割が、渡されたもの以外へ CONNECT で結ばれていれば conflict（claimBinding の後に打つ 2 つ目の守り）
 export async function checkIsolationGuard(sql: SqlExecutor, project: ProjectIdent): Promise<"ok" | "conflict"> {
@@ -201,15 +212,86 @@ const ROLE_EXISTS = "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE roln
 const EXISTING_CATALOG_READS =
   "SELECT c.relname::text AS name FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace" +
   " WHERE n.nspname = 'pg_catalog' AND c.relname = ANY (string_to_array(:names, ',')) ORDER BY 1";
-// 管理の役割とプロジェクトの役割のほかの接続を切る。切った数を返すだけで、行は 1 つ（一覧を返さない）
-const TERMINATE_OTHERS =
-  "SELECT coalesce(sum(CASE WHEN pg_terminate_backend(pid) THEN 1 ELSE 0 END), 0)::int AS terminated" +
-  " FROM pg_catalog.pg_stat_activity WHERE datname = :database_name AND pid <> pg_backend_pid()" +
-  " AND backend_type = 'client backend' AND usename IS DISTINCT FROM current_user AND usename IS DISTINCT FROM :role_name";
+// 取り消しの後の読み直し。REVOKE は取り消す権限が無いと警告だけで終わるため、権限の今の状態を読んで照らす。
+// PUBLIC がまだ CONNECT か TEMPORARY を持つデータベースの数と、渡した名前のうち見つかったデータベースの数
+const PUBLIC_DATABASE_GRANTS =
+  "SELECT count(*) FILTER (WHERE pg_catalog.has_database_privilege('public', d.oid, 'CONNECT')" +
+  " OR pg_catalog.has_database_privilege('public', d.oid, 'TEMPORARY'))::int AS remaining, count(*)::int AS found" +
+  " FROM pg_catalog.pg_database d WHERE d.datname = ANY (string_to_array(:names, ','))";
+// PUBLIC がまだ表か列のどれかを読めるカタログの数（表の権限の取り消しは同じ種類の列の権限も外す）
+const PUBLIC_CATALOG_READS =
+  "SELECT count(*)::int AS remaining FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace" +
+  " WHERE n.nspname = 'pg_catalog' AND c.relname = ANY (string_to_array(:names, ','))" +
+  " AND pg_catalog.has_any_column_privilege('public', c.oid, 'SELECT')";
+// 切る相手: 渡したデータベースへの、管理の役割とプロジェクトの役割と superuser のほかのクライアントの接続。
+// superuser の接続はクラスタを管理する側のもので、superuser でない管理の役割（Aurora）には切れない
+const OTHER_SESSIONS =
+  " FROM pg_catalog.pg_stat_activity s WHERE s.datname = :database_name AND s.pid <> pg_backend_pid()" +
+  " AND s.backend_type = 'client backend' AND s.usename IS DISTINCT FROM current_user AND s.usename IS DISTINCT FROM :role_name" +
+  " AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles r WHERE r.oid = s.usesysid AND r.rolsuper)";
+// 終了のシグナルを送るだけで待たない（timeout 0。真はシグナルを送れたことだけを表す）。終わったかは下の読みで確かめる
+const SIGNAL_OTHERS = `SELECT count(*) FILTER (WHERE pg_terminate_backend(s.pid, 0))::int AS signalled${OTHER_SESSIONS}`;
+// 自動の確定で打つため、文ごとに新しい統計の写しを読む
+const REMAINING_OTHERS = `SELECT count(*)::int AS remaining${OTHER_SESSIONS}`;
+
+export type ProvisionOptions = {
+  // 手順の 5 で、残る接続が消えるのを待つ期限と読み直しの間隔（既定 15,000 と 500。terminateRoleConnections とそろえる）
+  deadlineMs?: number;
+  pollMs?: number;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+};
+
+async function readCount(
+  sql: SqlExecutor,
+  stmt: string,
+  params: SqlParam[] | undefined,
+  opts: { database: string; transactionId?: string },
+): Promise<{ remaining: number; found?: number }> {
+  const [row] = await sql.execute(stmt, params, opts);
+  const remaining = row?.remaining;
+  // 読めない形は残ったものとして扱う（用意を成功にしない）
+  if (typeof remaining !== "number") return { remaining: Number.POSITIVE_INFINITY };
+  return typeof row?.found === "number" ? { remaining, found: row.found } : { remaining };
+}
+
+// 渡したデータベースのどれかで PUBLIC の CONNECT・TEMPORARY が残っていれば投げる
+async function assertPublicDatabaseRevoked(
+  sql: SqlExecutor,
+  names: readonly string[],
+  opts: { database: string; transactionId?: string },
+): Promise<void> {
+  const got = await readCount(sql, PUBLIC_DATABASE_GRANTS, [{ name: "names", value: names.join(",") }], opts);
+  if (got.remaining !== 0 || got.found !== names.length) throw new Error("PUBLIC からデータベースの接続を外せなかった");
+}
+
+// 手順の 5。シグナルを送り、対象が消えたことを期限の内で読み直す。期限を過ぎても残れば投げる
+async function terminateOthers(sql: SqlExecutor, params: SqlParam[], options: ProvisionOptions): Promise<void> {
+  const deadlineMs = options.deadlineMs ?? 15_000;
+  const pollMs = options.pollMs ?? 500;
+  const now = options.now ?? (() => performance.now());
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const deadline = now() + deadlineMs;
+  for (;;) {
+    // 読み直しの間に繋いだ接続にも送る（PUBLIC の外れた後は、CONNECT を持つ役割だけが繋げる）
+    await sql.execute(SIGNAL_OTHERS, params, ADMIN);
+    // 期限を過ぎていても、読み直しを 1 回打ってから決める
+    const { remaining } = await readCount(sql, REMAINING_OTHERS, params, ADMIN);
+    if (remaining === 0) return;
+    const left = deadline - now();
+    if (left <= 0) throw new Error("ほかの接続が期限の内に終わらなかった");
+    await sleep(Math.min(pollMs, left));
+  }
+}
 
 // docs/design/data.md の用意の手順の 1〜6。何度打っても、最後に渡したパスワードで同じ結果になる。
-// パスワードの平文は SQL の文にも引数にも載せず、SCRAM-SHA-256 の検証子を文に載せる（失敗した文は DB の側のログに書かれうるため）
-export async function provisionProject(sql: SqlExecutor, project: ProjectIdent & { password: string }): Promise<void> {
+// パスワードの平文は SQL の文にも引数にも載せず、SCRAM-SHA-256 の検証子を文に載せる（失敗した文は DB の側のログに書かれうるため）。
+// 取り消した権限は読み直して照らし、残っていれば役割に接続を与える前に投げる
+export async function provisionProject(
+  sql: SqlExecutor,
+  project: ProjectIdent & { password: string },
+  options: ProvisionOptions = {},
+): Promise<void> {
   assertIdent(project);
   // 文を打つ前に作る。印字できない文字のパスワードはここで投げ、何も打たない
   const verifier = escapeLiteral(scramVerifier(project.password));
@@ -223,29 +305,35 @@ export async function provisionProject(sql: SqlExecutor, project: ProjectIdent &
   for (const name of SYSTEM_DATABASES) {
     await sql.execute(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier(name)} FROM PUBLIC`, undefined, ADMIN);
   }
+  await assertPublicDatabaseRevoked(sql, SYSTEM_DATABASES, ADMIN);
 
   // 2. 権限を整えるまで誰も接続できないように作る。CREATE DATABASE はトランザクションの中で打てないため自動の確定で打つ
   if (!(await readFlag(sql, DATABASE_EXISTS, "found", dbParam, ADMIN))) {
     await sql.execute(`CREATE DATABASE ${db} WITH ALLOW_CONNECTIONS false`, undefined, ADMIN);
   }
 
-  // 3. PUBLIC から外してから接続を許す。この時点で接続できるのは持ち主の管理の役割だけ
+  // 3. PUBLIC から外し、外れたことを読み直してから接続を許す。この時点で接続できるのは持ち主の管理の役割だけ
   await inTransaction(sql, ADMIN_DATABASE, async (opts) => {
     await sql.execute(`REVOKE CONNECT, TEMPORARY ON DATABASE ${db} FROM PUBLIC`, undefined, opts);
+    await assertPublicDatabaseRevoked(sql, [project.database], opts);
     await sql.execute(`ALTER DATABASE ${db} WITH ALLOW_CONNECTIONS true`, undefined, opts);
   });
 
   // 4. プロジェクトのデータベースで、他のデータベースと役割の名前と数を返すカタログと統計の読み取りを PUBLIC から外す（I2）。
   // 読み取りの既定の役割（pg_read_all_stats など）へは入れない
-  const catalogs = await sql.execute(EXISTING_CATALOG_READS, [{ name: "names", value: CATALOG_READS.join(",") }], inProject);
+  const nameParam = [{ name: "names", value: CATALOG_READS.join(",") }];
+  const catalogs = await sql.execute(EXISTING_CATALOG_READS, nameParam, inProject);
   const names = catalogs.flatMap((r) => (typeof r.name === "string" ? [r.name] : []));
   if (names.length > 0) {
     const list = names.map((n) => `pg_catalog.${escapeIdentifier(n)}`).join(", ");
     await sql.execute(`REVOKE SELECT ON ${list} FROM PUBLIC`, undefined, inProject);
   }
+  if ((await readCount(sql, PUBLIC_CATALOG_READS, nameParam, inProject)).remaining !== 0) {
+    throw new Error("PUBLIC からカタログの読み取りを外せなかった");
+  }
 
-  // 5. 作り直しのとき、権限を整える前から残る接続を断つ
-  await sql.execute(TERMINATE_OTHERS, [...dbParam, ...roleParam], ADMIN);
+  // 5. 作り直しのとき、権限を整える前から残る接続を断ち、終わったことを確かめる
+  await terminateOthers(sql, [...dbParam, ...roleParam], options);
 
   // 6. 役割を作るか（作り直しなら）パスワードを書き直し、専用のスキーマと search_path を置き、最後に接続と一時表を与える。
   // ALTER ROLE は SUPERUSER などの属性を書かない（属性を変えるには superuser が要り、Aurora の管理の役割は superuser でない）
@@ -254,6 +342,10 @@ export async function provisionProject(sql: SqlExecutor, project: ProjectIdent &
   } else {
     await sql.execute(`CREATE ROLE ${role} WITH LOGIN PASSWORD ${verifier}`, undefined, ADMIN);
   }
+  // スキーマをその役割の持ち物にするには、superuser でない管理の役割はその役割へ SET ROLE できる所属が要る。
+  // PostgreSQL 16 で CREATE ROLE の作り手に付くのは ADMIN OPTION だけのため、SET を明示して与える（作り直しでも打つ。
+  // 既にあれば何も変えない）。INHERIT は付けず、管理の役割がプロジェクトの役割の権限を受け継がないようにする
+  await sql.execute(`GRANT ${role} TO CURRENT_USER WITH SET TRUE, INHERIT FALSE`, undefined, ADMIN);
   // スキーマの名前は役割の名前にする（search_path の既定の "$user" とも合う）
   await sql.execute(`CREATE SCHEMA IF NOT EXISTS ${role} AUTHORIZATION ${role}`, undefined, inProject);
   await sql.execute(`ALTER SCHEMA ${role} OWNER TO ${role}`, undefined, inProject);

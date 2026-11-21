@@ -10,7 +10,7 @@ import {
 } from "../../src/db-prep/provision.ts";
 import { ADMIN_DATABASE, type SqlExecutor } from "../../src/db-prep/sql-executor.ts";
 import { FakeSqlExecutor, type SqlCall } from "./fake-sql-executor.ts";
-import { type TestDatabase, describePg, withTestDatabase } from "./pg-executor.ts";
+import { type TestDatabase, describePgDisposable, withTestDatabase } from "./pg-executor.ts";
 
 // 作り物の値だけを使う
 const PROJECT: ProjectIdent = { projectId: "prj_acme_a", database: "acme_db_aaaaaaaa", role: "acme_role_aaaaaaaa" };
@@ -30,11 +30,29 @@ type FakeState = {
   roleExists?: boolean;
   guardDatabase?: { allow: boolean; others: number; public_connect: boolean } | undefined;
   guardRoleOtherDatabases?: number;
+  // 取り消しの後の読み直しで、PUBLIC に残る権限の数（PUBLIC_DATABASE_GRANTS・PUBLIC_CATALOG_READS）
+  publicDatabaseRemaining?: number;
+  publicCatalogRemaining?: number;
+  // 手順の 5 の残りの読みが、呼ばれるたびに返す数。尽きたら最後の数を返し続ける
+  remainingSessions?: number[];
 };
 
 function fakeDb(state: FakeState = {}): FakeSqlExecutor {
   const fake = new FakeSqlExecutor();
-  fake.respond = (sql) => {
+  let reads = 0;
+  fake.respond = (sql, params) => {
+    if (sql.includes("AS remaining")) {
+      if (sql.includes("pg_database")) {
+        const names = String(params?.find((p) => p.name === "names")?.value ?? "").split(",");
+        return [{ remaining: state.publicDatabaseRemaining ?? 0, found: names.length }];
+      }
+      if (sql.includes("pg_class")) return [{ remaining: state.publicCatalogRemaining ?? 0 }];
+      const seq = state.remainingSessions ?? [0];
+      const n = seq[Math.min(reads, seq.length - 1)];
+      reads += 1;
+      return [{ remaining: n ?? 0 }];
+    }
+    if (sql.includes("AS signalled")) return [{ signalled: 0 }];
     if (sql.includes("AS present")) return [{ present: state.tablePresent ?? true }];
     if (sql.includes("FROM nd_prep.bindings")) return state.bindings ?? [];
     if (sql.includes("AS database_exists")) {
@@ -47,7 +65,6 @@ function fakeDb(state: FakeState = {}): FakeSqlExecutor {
       return [{ found: state.roleExists ?? false }];
     }
     if (sql.includes("AS name")) return CATALOG_READS.map((name) => ({ name }));
-    if (sql.includes("AS terminated")) return [{ terminated: 0 }];
     return [];
   };
   return fake;
@@ -258,12 +275,16 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
     const order = [
       at('REVOKE CONNECT, TEMPORARY ON DATABASE "postgres" FROM PUBLIC'),
       at('REVOKE CONNECT, TEMPORARY ON DATABASE "template1" FROM PUBLIC'),
+      at("has_database_privilege('public'"),
       at("CREATE DATABASE"),
       at(`REVOKE CONNECT, TEMPORARY ON DATABASE ${db} FROM PUBLIC`),
       at(`ALTER DATABASE ${db} WITH ALLOW_CONNECTIONS true`),
       at("REVOKE SELECT ON"),
+      at("has_any_column_privilege('public'"),
       at("pg_terminate_backend"),
+      at("AS remaining FROM pg_catalog.pg_stat_activity"),
       at(`CREATE ROLE ${role} WITH LOGIN PASSWORD`),
+      at(`GRANT ${role} TO CURRENT_USER WITH SET TRUE, INHERIT FALSE`),
       at(`CREATE SCHEMA IF NOT EXISTS ${role} AUTHORIZATION ${role}`),
       at(`ALTER ROLE ${role} SET search_path TO ${role}`),
       at(`GRANT CONNECT, TEMPORARY ON DATABASE ${db} TO ${role}`),
@@ -278,19 +299,91 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
     await provisionProject(fake, { ...PROJECT, password: PASSWORD });
     for (const c of fake.calls) {
       if (c.kind !== "execute") continue;
-      const inProject = c.sql.startsWith("REVOKE SELECT ON") || c.sql.includes("AS name") || c.sql.includes("SCHEMA");
+      const inProject =
+        c.sql.startsWith("REVOKE SELECT ON") || c.sql.includes("AS name") || c.sql.includes("has_any_column_privilege") || c.sql.includes("SCHEMA");
       expect(c.database, c.sql).toBe(inProject ? PROJECT.database : ADMIN_DATABASE);
     }
   });
 
-  it("3 の REVOKE と ALLOW_CONNECTIONS true を 1 つのトランザクションで打つ", async () => {
+  it("3 の REVOKE と読み直しと ALLOW_CONNECTIONS true を 1 つのトランザクションで打つ", async () => {
     const fake = fakeDb();
     await provisionProject(fake, { ...PROJECT, password: PASSWORD });
     const db = escapeIdentifier(PROJECT.database);
     const revoke = fake.calls.find((c) => c.kind === "execute" && c.sql === `REVOKE CONNECT, TEMPORARY ON DATABASE ${db} FROM PUBLIC`);
     const allow = fake.calls.find((c) => c.kind === "execute" && c.sql === `ALTER DATABASE ${db} WITH ALLOW_CONNECTIONS true`);
+    const verify = fake.calls.find(
+      (c) => c.kind === "execute" && c.sql.includes("has_database_privilege('public'") && c.params?.[0]?.value === PROJECT.database,
+    );
     expect(revoke?.kind === "execute" && revoke.transactionId).toBeTruthy();
     expect(allow?.kind === "execute" && allow.transactionId).toBe(revoke?.kind === "execute" && revoke.transactionId);
+    expect(verify?.kind === "execute" && verify.transactionId).toBe(revoke?.kind === "execute" && revoke.transactionId);
+  });
+
+  it("取り消しの後に PUBLIC の権限が残れば、役割を作らず接続を与えずに投げる（1・3・4 のどれでも）", async () => {
+    for (const state of [{ publicDatabaseRemaining: 1 }, { publicCatalogRemaining: 1 }]) {
+      const fake = fakeDb(state);
+      await expect(provisionProject(fake, { ...PROJECT, password: PASSWORD })).rejects.toThrow();
+      expect(fake.statements().some((x) => x.startsWith("CREATE ROLE") || x.startsWith("GRANT"))).toBe(false);
+    }
+    // 3 で残れば ALLOW_CONNECTIONS true を打たずに巻き戻す
+    const fake = fakeDb();
+    fake.respond = ((inner) => (sql, params) => {
+      if (sql.includes("has_database_privilege('public'") && params?.[0]?.value === PROJECT.database) return [{ remaining: 1, found: 1 }];
+      return inner(sql, params);
+    })(fake.respond);
+    await expect(provisionProject(fake, { ...PROJECT, password: PASSWORD })).rejects.toThrow();
+    expect(fake.statements().some((x) => x.includes("ALLOW_CONNECTIONS true"))).toBe(false);
+    expect(fake.calls.at(-1)?.kind).toBe("rollback");
+  });
+
+  it("取り消しの読み直しで見つかるデータベースの数が足りなければ投げる", async () => {
+    const fake = fakeDb();
+    fake.respond = ((inner) => (sql, params) => (sql.includes("has_database_privilege('public'") ? [{ remaining: 0, found: 1 }] : inner(sql, params)))(
+      fake.respond,
+    );
+    await expect(provisionProject(fake, { ...PROJECT, password: PASSWORD })).rejects.toThrow();
+    expect(fake.statements().some((x) => x.startsWith("CREATE DATABASE"))).toBe(false);
+  });
+
+  it("5 は待たないシグナルを送り、残りが 0 になるまで間隔をおいて読み直す", async () => {
+    const fake = fakeDb({ remainingSessions: [2, 1, 0] });
+    const waits: number[] = [];
+    await provisionProject(
+      fake,
+      { ...PROJECT, password: PASSWORD },
+      { deadlineMs: 15_000, pollMs: 500, now: () => 0, sleep: async (ms) => void waits.push(ms) },
+    );
+    expect(waits).toEqual([500, 500]);
+    const s = fake.statements();
+    expect(s.filter((x) => x.includes("pg_terminate_backend(s.pid, 0)"))).toHaveLength(3);
+    expect(s.filter((x) => x.includes("AS remaining FROM pg_catalog.pg_stat_activity"))).toHaveLength(3);
+    expect(s.some((x) => x.startsWith("GRANT CONNECT"))).toBe(true);
+  });
+
+  it("5 で期限を過ぎても接続が残れば、役割に接続を与えずに投げる。待ちは期限までの残りで切り詰める", async () => {
+    const fake = fakeDb({ remainingSessions: [1] });
+    let t = 0;
+    const waits: number[] = [];
+    const sleep = async (ms: number): Promise<void> => {
+      waits.push(ms);
+      t += ms;
+    };
+    await expect(
+      provisionProject(fake, { ...PROJECT, password: PASSWORD }, { deadlineMs: 1_200, pollMs: 500, now: () => t, sleep }),
+    ).rejects.toThrow();
+    expect(waits).toEqual([500, 500, 200]);
+    expect(fake.statements().filter((x) => x.includes("AS remaining FROM pg_catalog.pg_stat_activity"))).toHaveLength(4);
+    expect(fake.statements().some((x) => x.startsWith("CREATE ROLE") || x.startsWith("GRANT"))).toBe(false);
+  });
+
+  it("6 は作り直しでも、スキーマの前に管理の役割へ SET できる所属を与える", async () => {
+    const fake = fakeDb({ databaseExists: true, roleExists: true });
+    await provisionProject(fake, { ...PROJECT, password: PASSWORD });
+    const s = fake.statements();
+    const role = escapeIdentifier(PROJECT.role);
+    const grant = s.indexOf(`GRANT ${role} TO CURRENT_USER WITH SET TRUE, INHERIT FALSE`);
+    expect(grant).toBeGreaterThan(s.findIndex((x) => x.startsWith(`ALTER ROLE ${role} WITH LOGIN`)));
+    expect(grant).toBeLessThan(s.findIndex((x) => x.startsWith("CREATE SCHEMA")));
   });
 
   it("データベースが既にあれば作らない（作り直し）", async () => {
@@ -413,6 +506,11 @@ async function readableNames(db: TestDatabase, p: TestProject, query: string): P
   }
 }
 
+// 指定の文を打たずに空の行を返す SqlExecutor
+function skip(inner: SqlExecutor, matches: (sql: string) => boolean): SqlExecutor {
+  return { ...inner, execute: (s, p, o) => (matches(s) ? Promise.resolve([]) : inner.execute(s, p, o)) };
+}
+
 // 管理の役割（所有者）のほかに CONNECT を持つ役割
 async function connectGrantees(db: TestDatabase, database: string): Promise<string[]> {
   const c = await db.connect();
@@ -428,7 +526,7 @@ async function connectGrantees(db: TestDatabase, database: string): Promise<stri
   return res.rows.map((r) => r.name);
 }
 
-describePg("provisionProject（PostgreSQL）", () => {
+describePgDisposable("provisionProject（PostgreSQL）", () => {
   it("2 つのプロジェクトを作り、A の役割で A へ接続でき、B・postgres・template1 へ接続できない", async () => {
     await withTestDatabase(async (db) => {
       const sql = db.executor();
@@ -522,9 +620,50 @@ describePg("provisionProject（PostgreSQL）", () => {
       await expect(conn.query("SELECT 1")).rejects.toThrow();
     });
   });
+  it("superuser でない管理の役割で、初回の作成と作り直しが通り、役割が自分のスキーマを持つ", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = await db.nonSuperuserExecutor();
+      const a = newProject(db, "a");
+      expect(await prepare(sql, a)).toBe("bound");
+      const again = { ...a, password: randomBytes(24).toString("base64url") };
+      expect(await prepare(sql, again)).toBe("retry");
+      expect(await canConnect(db, a.database, again)).toBe(true);
+      const c = await db.connect(a.database, { user: a.role, password: again.password });
+      const owner = await c.query<{ o: string }>("SELECT pg_get_userbyid(nspowner)::text AS o FROM pg_namespace WHERE nspname = current_user");
+      expect(owner.rows[0]?.o).toBe(a.role);
+      await c.query("CREATE TABLE acme_t (id int)");
+    });
+  });
+
+  it("superuser でない管理の役割は、SET できる所属を与えないと専用のスキーマを作れない", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = skip(await db.nonSuperuserExecutor(), (s) => s.includes("TO CURRENT_USER WITH SET TRUE"));
+      await expect(prepare(sql, newProject(db, "a"))).rejects.toThrow();
+    });
+  });
+
+  it("取り消す権限の無い管理の役割では、REVOKE が警告だけで終わっても用意を失敗にし、役割を作らない", async () => {
+    await withTestDatabase(async (db) => {
+      const admin = await db.connect();
+      // 手順の 1 の取り消しが要る状態にするため、PUBLIC の CONNECT を戻す（使い捨てのクラスタだけで打つ）。
+      // 管理の役割は PUBLIC を通して CONNECT を持つため、取り消す権限が無くても REVOKE は警告だけで終わる
+      await admin.query("GRANT CONNECT ON DATABASE postgres, template1 TO PUBLIC");
+      const sql = await db.nonSuperuserExecutor({ inheritOwner: false });
+      const a = newProject(db, "a");
+      await expect(prepare(sql, a)).rejects.toThrow("PUBLIC からデータベースの接続を外せなかった");
+      const role = await admin.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [a.role]);
+      expect(role.rows).toHaveLength(0);
+      // 取り消せる管理の役割の用意で戻る
+      await prepare(db.executor(), newProject(db, "b"));
+      const left = await admin.query<{ c: boolean }>(
+        "SELECT bool_or(has_database_privilege('public', datname, 'CONNECT')) AS c FROM pg_database WHERE datname IN ('postgres', 'template1')",
+      );
+      expect(left.rows[0]?.c).toBe(false);
+    });
+  });
 });
 
-describePg("claimBinding（PostgreSQL）", () => {
+describePgDisposable("claimBinding（PostgreSQL）", () => {
   it("新しい名前で bound", async () => {
     await withTestDatabase(async (db) => {
       const sql = db.executor();
@@ -617,7 +756,7 @@ describePg("claimBinding（PostgreSQL）", () => {
   });
 });
 
-describePg("checkIsolationGuard（PostgreSQL）", () => {
+describePgDisposable("checkIsolationGuard（PostgreSQL）", () => {
   it("新しい名前で ok", async () => {
     await withTestDatabase(async (db) => {
       expect(await checkIsolationGuard(db.executor(), newProject(db, "a"))).toBe("ok");
@@ -676,6 +815,54 @@ describePg("checkIsolationGuard（PostgreSQL）", () => {
       const admin = await db.connect();
       await admin.query(`CREATE DATABASE ${escapeIdentifier(a.database)}`);
       expect(await checkIsolationGuard(db.executor(), a)).toBe("conflict");
+    });
+  });
+  it("A の役割が所属する役割から B のデータベースの CONNECT を受け継げば conflict", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      const a = newProject(db, "a");
+      const b = newProject(db, "b");
+      await prepare(sql, a);
+      await prepare(sql, b);
+      const group = `acme_g_role_${suffix()}`;
+      db.dropRoleLater(group);
+      const admin = await db.connect();
+      await admin.query(`CREATE ROLE ${escapeIdentifier(group)} NOLOGIN`);
+      await admin.query(`GRANT CONNECT ON DATABASE ${escapeIdentifier(b.database)} TO ${escapeIdentifier(group)}`);
+      expect(await checkIsolationGuard(sql, a)).toBe("ok");
+      await admin.query(`GRANT ${escapeIdentifier(group)} TO ${escapeIdentifier(a.role)}`);
+      expect(await checkIsolationGuard(sql, a)).toBe("conflict");
+      // B の側では、B のデータベースの CONNECT を持つ別の役割（と、それに所属する A の役割）を数える
+      expect(await checkIsolationGuard(sql, b)).toBe("conflict");
+      await admin.query(`REVOKE CONNECT ON DATABASE ${escapeIdentifier(b.database)} FROM ${escapeIdentifier(group)}`);
+    });
+  });
+
+  it("A の役割に所属する別のログインがあれば、A のデータベースで conflict", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      const a = newProject(db, "a");
+      await prepare(sql, a);
+      const other = `acme_x_role_${suffix()}`;
+      db.dropRoleLater(other);
+      const admin = await db.connect();
+      await admin.query(`CREATE ROLE ${escapeIdentifier(other)} LOGIN`);
+      await admin.query(`GRANT ${escapeIdentifier(a.role)} TO ${escapeIdentifier(other)}`);
+      expect(await checkIsolationGuard(sql, a)).toBe("conflict");
+    });
+  });
+
+  it("手順の 1 で外す postgres・template1 の PUBLIC の CONNECT は数えず、打ち直しが外し直す", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      const a = newProject(db, "a");
+      await prepare(sql, a);
+      const admin = await db.connect();
+      // 使い捨てのクラスタだけで打つ
+      await admin.query("GRANT CONNECT ON DATABASE template1 TO PUBLIC");
+      expect(await checkIsolationGuard(sql, a)).toBe("ok");
+      expect(await prepare(sql, a)).toBe("retry");
+      expect(await canConnect(db, "template1", a)).toBe(false);
     });
   });
 });
