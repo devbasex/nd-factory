@@ -187,6 +187,25 @@ describe("AppStack（client_id なし）", () => {
     built.template.hasResourceProperties("AWS::EC2::VPC", { CidrBlock: "10.80.0.0/16" });
   });
 
+  it("DB の用意の関数が app のスタックにあり、スタックの進行表の DB を指し、DynamoDB の権限を持たない（受け入れ条件 4）", () => {
+    const { stack, template } = built;
+    const fnId = stack.getLogicalId(stack.dbPrep.fn.node.defaultChild as CfnElement);
+    const fn = resources(template)[fnId]!;
+    expect(fn.Properties?.FunctionName).toBe("acme-test-db-prep");
+    expect(fn.Properties?.VpcConfig).toBeUndefined();
+    const clusterId = stack.getLogicalId(stack.progressDb.cluster.node.defaultChild as CfnElement);
+    const vars = (fn.Properties?.Environment as { Variables: Record<string, unknown> }).Variables;
+    expect(JSON.stringify(vars.DB_PREP_CLUSTER_ARN)).toContain(JSON.stringify({ Ref: clusterId }));
+    expect(vars.DB_PREP_SECRET_PREFIX).toBe("acme/test/progress-db/");
+    // 終わりの記録の口の権限は #6 が grantCompletionAccess で足す。この課題の版は足さない
+    const roleId = stack.getLogicalId(stack.dbPrep.fn.role!.node.defaultChild as CfnElement);
+    const policies = Object.values(resources(template)).filter(
+      (r) => r.Type === "AWS::IAM::Policy" && JSON.stringify(r.Properties?.Roles ?? []).includes(`"${roleId}"`),
+    );
+    expect(policies.length).toBeGreaterThan(0);
+    expect(JSON.stringify(policies)).not.toContain("dynamodb:");
+  });
+
   it("サブネットの AZ は Fn::GetAZs の先頭の 2 つで、合成は AZ の lookup を求めない（cdk.context.json を作らない）", () => {
     const subnets = Object.values(resources(built.template)).filter((r) => r.Type === "AWS::EC2::Subnet");
     const azs = subnets.map((r) => JSON.stringify(r.Properties?.AvailabilityZone)).sort();
