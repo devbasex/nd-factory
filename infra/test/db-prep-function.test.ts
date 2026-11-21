@@ -7,7 +7,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { DB_PREP_ENTRY, DbPrepFunction } from "../lib/db-prep-function.ts";
 import { appResourceNames, secretName } from "../lib/naming.ts";
 import { Network } from "../lib/network.ts";
-import { ProgressDb } from "../lib/progress-db.ts";
+import { PROGRESS_DB_ADMIN_USER, ProgressDb } from "../lib/progress-db.ts";
 import { BASE_SETTINGS, TEST_ENV, resources } from "./support.ts";
 
 // DB の用意の関数の資源を、それと進行表の DB だけを置いた小さなスタックで照らす。AppStack への組み込みは app-stack.test.ts が照らす
@@ -144,6 +144,30 @@ describe("DbPrepFunction", () => {
     expect(JSON.stringify(vars[DB_PREP_ENV.clusterArn])).toContain(ref(clusterId));
     expect(vars[DB_PREP_ENV.adminSecretArn]).toEqual({ Ref: adminId });
     expect(vars[DB_PREP_ENV.secretPrefix]).toBe("acme/test/progress-db/");
+  });
+
+  // 関数は管理の役割で役割のパスワードを書く。rds.restrict_password_commands の下でその文を打てるのは rds_password を持つ役割だけで、
+  // クラスタの master の利用者は rds_superuser として既定で持つ。渡す器がその利用者の秘密であることを照らす
+  it("関数へ渡す管理の秘密の器は、クラスタの master の利用者（PROGRESS_DB_ADMIN_USER）の秘密をクラスタへ結んだもの", () => {
+    const r = resources(built.template);
+    const clusterId = idOf(built.stack, built.db.cluster.node.defaultChild);
+    const attachmentId = idOf(built.stack, built.db.adminSecret.node.defaultChild);
+    const attachment = r[attachmentId]!;
+    expect(attachment.Type).toBe("AWS::SecretsManager::SecretTargetAttachment");
+    expect(attachment.Properties).toMatchObject({ TargetId: { Ref: clusterId }, TargetType: "AWS::RDS::DBCluster" });
+    const secretRef = attachment.Properties?.SecretId as { Ref: string };
+    const secret = r[secretRef.Ref]!;
+    expect(secret.Type).toBe("AWS::SecretsManager::Secret");
+    const template = (secret.Properties?.GenerateSecretString as { SecretStringTemplate: string }).SecretStringTemplate;
+    expect(JSON.parse(template)).toEqual({ username: PROGRESS_DB_ADMIN_USER });
+    // クラスタの master の利用者とパスワードは、同じ器から読む
+    const cluster = r[clusterId]!.Properties ?? {};
+    expect(cluster.MasterUsername).toBe(PROGRESS_DB_ADMIN_USER);
+    expect(cluster.MasterUserPassword).toEqual({
+      "Fn::Join": ["", ["{{resolve:secretsmanager:", { Ref: secretRef.Ref }, ":SecretString:password::}}"]],
+    });
+    const vars = (fnProps(built).Environment as { Variables: Record<string, unknown> }).Variables;
+    expect(vars[DB_PREP_ENV.adminSecretArn]).toEqual({ Ref: attachmentId });
   });
 
   it("役割の文は Data API の 4 つの操作と 2 種類の秘密の器の権限だけで、DynamoDB の文を持たない", () => {

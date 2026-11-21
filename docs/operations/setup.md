@@ -158,6 +158,7 @@ DB の用意の関数は、プロジェクトの役割のパスワードを SCRA
 | `log_parameter_max_length_on_error` | `0`（失敗のログに引数の値を書かない） | スタックがクラスタのパラメータの群で置き、関数もトランザクションの中だけで置く |
 | `pgaudit.log_parameter` | 無いか `off` | pgAudit を使うときに、クラスタのパラメータの群か役割の設定で守る |
 | `pgaudit.log` | 無いか、`role` を含まない（`all` も `role` を含む。`all, -role` は通る） | 同上。役割の文は本文に検証子を持つため |
+| `rds.restrict_password_commands` | 有効なら、管理の役割が `rds_password` の役割を持つ（パスワードを書く文をその役割に限るため） | スタックがクラスタのパラメータの群で `1` に置く。管理の役割はクラスタの master の利用者で、`rds_superuser` として `rds_password` を既定で持つ |
 
 クラスタのパラメータの群をスタックの外で書き換えて上の値から外すと、次の用意か差し替えで止まる。
 

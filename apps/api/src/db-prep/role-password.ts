@@ -19,7 +19,10 @@ import type { SqlExecutor } from "./sql-executor.ts";
 //    pg_stat_statements は track が all で track_utility が on なら、EXECUTE で打つ入れ子の役割の文の本文（検証子を含む）を
 //    クエリ統計に残す。どちらも SUSET で変えられないため、この組み合わせなら止める。
 //    最後に pgAudit の設定を読み、引数の値を書く設定（pgaudit.log_parameter）か、役割の文を書く分類（role・all）が
-//    効いていれば止める（役割の文は EXECUTE で打つ入れ子の文で、pgAudit はその本文を書く）。照らしが通らなければ検証子を送らない
+//    効いていれば止める（役割の文は EXECUTE で打つ入れ子の文で、pgAudit はその本文を書く）。
+//    あわせて、Aurora の rds.restrict_password_commands が有効なら、パスワードを書く文（CREATE ROLE … PASSWORD・
+//    ALTER ROLE … PASSWORD）は rds_password の役割を持つ役割しか打てないため、今の役割（管理の役割）がそれを持つことを照らす。
+//    設定が無い（Aurora の外）か無効なら照らさない。照らしが通らなければ検証子を送らない
 // 1. 検証子を引数で渡し、トランザクションの中だけの設定（set_config の is_local）に置く
 // 2. DO の中で設定から読み、format で組んだ文を EXECUTE で打つ。EXECUTE の文が失敗すると、PL/pgSQL は失敗の
 //    文脈に打った文の本文を載せるため、同じ所で受けて、決まった文の誤りに替えて投げ直す（SQLSTATE は残す）。
@@ -30,7 +33,8 @@ import type { SqlExecutor } from "./sql-executor.ts";
 const VERIFIER_SETTING = "nd_prep.role_verifier";
 
 // 0 の確かめ。どの設定も権限を要さずに読める。pgAudit・auto_explain・pg_stat_statements を読み込んでいないクラスタでは
-// pgaudit.*・auto_explain.*・pg_stat_statements.* が NULL になる
+// pgaudit.*・auto_explain.*・pg_stat_statements.* が NULL になる。Aurora の外では rds.restrict_password_commands が NULL になり、
+// rds_password の役割が無ければ has_rds_password も NULL になる（pg_has_role は名前で渡すと無い役割で失敗するため、oid で渡す）
 const CHECK_PARAM_LOG = [
   "SELECT current_setting('log_parameter_max_length') AS normal,",
   " set_config('log_parameter_max_length_on_error', '0', true) AS on_error,",
@@ -41,7 +45,9 @@ const CHECK_PARAM_LOG = [
   " current_setting('pg_stat_statements.track_utility', true) AS stmts_track_utility,",
   " current_setting('auto_explain.log_min_duration', true) AS explain_min_duration,",
   " current_setting('pgaudit.log', true) AS audit_log,",
-  " current_setting('pgaudit.log_parameter', true) AS audit_parameter",
+  " current_setting('pgaudit.log_parameter', true) AS audit_parameter,",
+  " current_setting('rds.restrict_password_commands', true) AS restrict_password,",
+  " (SELECT pg_has_role(current_user, r.oid, 'MEMBER') FROM pg_catalog.pg_roles r WHERE r.rolname = 'rds_password') AS has_rds_password",
 ].join("");
 
 const AUDIT_CLASSES = ["read", "write", "function", "role", "ddl", "misc", "misc_set"];
@@ -114,6 +120,20 @@ function splitIdentifierList(raw: string): string[] | undefined {
 
 // pgAudit を読み込めば真偽は on か off に揃う。読み込まずに置いた値は、偽と読める綴り以外を有効とみなす
 const OFF = new Set(["off", "false", "no", "0"]);
+const ON = new Set(["on", "true", "yes", "1"]);
+
+export type PasswordCommandsRestriction = "absent" | "on" | "off" | "unreadable";
+
+// rds.restrict_password_commands の実効値の読み。NULL か列が無いのは設定が無い（Aurora の外）。
+// Aurora は真偽を on か off で返す。PostgreSQL が真偽として受ける綴りのほかは読めないとする
+export function passwordCommandsRestriction(value: unknown): PasswordCommandsRestriction {
+  if (value === null || value === undefined) return "absent";
+  if (typeof value !== "string") return "unreadable";
+  const v = value.trim().toLowerCase();
+  if (ON.has(v)) return "on";
+  if (OFF.has(v)) return "off";
+  return "unreadable";
+}
 
 // 検証子を送ってよい設定か。返す文は誤りの文に載せ、値（設定の名前と分類）だけを持つ
 export function paramLogProblem(row: Record<string, unknown> | undefined): string | undefined {
@@ -146,6 +166,11 @@ export function paramLogProblem(row: Record<string, unknown> | undefined): strin
   const classes = typeof log === "string" ? auditClasses(log) : new Set<string>();
   if (classes === undefined) return "pgaudit.log を読めない";
   if (classes.has("role")) return "pgaudit.log が role の文を書く（役割の文の本文が監査のログに残る）";
+  const restriction = passwordCommandsRestriction(row?.restrict_password);
+  if (restriction === "unreadable") return "rds.restrict_password_commands を読めない";
+  if (restriction === "on" && row?.has_rds_password !== true) {
+    return "rds.restrict_password_commands が有効で、管理の役割が rds_password を持たない（パスワードを書く文が拒まれる）";
+  }
   return undefined;
 }
 
