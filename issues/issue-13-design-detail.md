@@ -368,6 +368,8 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 | `claimBinding` | 当たる行が 1 つで、3 つの値がすべて同じ | `retry`（途中で止まった作成の打ち直し） |
 | `claimBinding` | 当たる行が 1 つで値のどれかが違う、または当たる行が 2 つ以上 | `conflict` |
 | `checkIsolationGuard` | データベースが無い・役割が無い | `ok`（作り直しで片方だけあるときも、結び付きが渡されたものだけなら `ok`） |
+| `checkIsolationGuard` | データベースが `datallowconn = false` で、`PUBLIC` が `CONNECT` を持つ（`datacl` が空の既定の ACL か、`PUBLIC` の `CONNECT` を含む） | `PUBLIC` を結び付きに数えず、ほかの役割だけで照らす。用意の手順の 2 の後・3 の `REVOKE` の前に止まった状態で、誰も接続できないため。`provisionProject` の 3 が `PUBLIC` から外してから `ALLOW_CONNECTIONS true` にする |
+| `checkIsolationGuard` | データベースが `datallowconn = true` で、`PUBLIC` が `CONNECT` を持つ | `conflict`（用意の手順で作ったものでない） |
 
 ### 異常系の処理
 
@@ -407,7 +409,7 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 | --- | --- | --- | --- |
 | `provisionProject`（PostgreSQL のサービスコンテナ） | 2 つのプロジェクトを作り、A の役割で A へ接続できる | 同じ値で 2 回打っても同じ結果 | A の役割で B・`postgres`・`template1` へ接続できると落ちる。A の役割で `pg_database` と `pg_roles` から B の名前が読めると落ちる |
 | `claimBinding`（PostgreSQL のサービスコンテナ） | 新しい名前で `bound` | A の作成をデータベースと役割を作った後・最後の `GRANT` の前で止め、A の打ち直しが `retry` で用意を終える | 途中で止まった A に対し、B が A のデータベースの名前と B の役割・B のデータベースと A の役割・A の 2 つの名前を渡すとどれも `conflict`。行の無い既存のデータベースで `conflict`。2 つを同時に打って片方だけが `bound` |
-| `checkIsolationGuard` | 新しい名前で `ok` | 作り直し（片方だけある）で `ok` | B のデータベースに A の役割を渡す・A の役割に B のデータベースを渡すと `conflict` |
+| `checkIsolationGuard` | 新しい名前で `ok` | 作り直し（片方だけある）で `ok`。A の作成を `CREATE DATABASE … ALLOW_CONNECTIONS false` の直後・`REVOKE` の前で止め、同じ結び付きの打ち直しが `ok` になり、`provisionProject` が用意を終えて A の役割だけが `CONNECT` を持つ | B のデータベースに A の役割を渡す・A の役割に B のデータベースを渡すと `conflict`。`ALLOW_CONNECTIONS true` で `PUBLIC` が `CONNECT` を持つ既存のデータベースで `conflict` |
 | `rotateRole` | 記した番号 < n で書く | 記した番号 = n で書かない | 記した番号 > n で何も変えない。2 つを同時に打って番号の大きい方だけが残る |
 | `terminateRoleConnections`（PostgreSQL のサービスコンテナ） | 書く前に開いた役割の接続を切り、残り 0 | 境の時刻が記されていれば記し直さない | 順序の逆転: タスク T1 が番号 n を書いて切りの前で止まり、起こし直しの T2（同じ n）が `superseded_equal`・切り・終わりまで進み、その後に新しいパスワードで接続 C を開き、T1 を再開すると C が切られずに残る（C が切られると落ちる）。T1 が `rotateRole` の前で止まり、T2 が終わって C を開いた後に T1 を最初から打っても C が残る。記した番号が n+1 に上がった後の T1（n）は何も切らずに `superseded_greater` |
 | `exchange`・`complete` | 形の正本に合う `ok: true` の要素 | HTTP 200 の `ok: false`・`status: 409` を、HTTP 401 と別の結果として返す | 形の違う応答を誤りにする・HTTP 401 と HTTP 200 の `status: 409` の要素のどちらでも再試行しない |
