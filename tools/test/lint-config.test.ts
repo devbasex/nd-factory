@@ -105,6 +105,26 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
       ruleId: "@typescript-eslint/no-restricted-imports",
     },
     {
+      name: "http（node: を付けない表記）",
+      code: 'import { request } from "http";\nexport const r = request;\n',
+      ruleId: "@typescript-eslint/no-restricted-imports",
+    },
+    {
+      name: "https（node: を付けない表記）",
+      code: 'import { request } from "https";\nexport const r = request;\n',
+      ruleId: "@typescript-eslint/no-restricted-imports",
+    },
+    {
+      name: "crypto（node: を付けない表記）の randomUUID",
+      code: 'import { randomUUID } from "crypto";\nexport const id = randomUUID();\n',
+      ruleId: "@typescript-eslint/no-restricted-imports",
+    },
+    {
+      name: "crypto（node: を付けない表記）の randomBytes",
+      code: 'import { randomBytes } from "crypto";\nexport const b = randomBytes(4);\n',
+      ruleId: "@typescript-eslint/no-restricted-imports",
+    },
+    {
       name: "node:crypto の randomUUID",
       code: 'import { randomUUID } from "node:crypto";\nexport const id = randomUUID();\n',
       ruleId: "@typescript-eslint/no-restricted-imports",
@@ -118,7 +138,8 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
       name: "uuid",
       code: 'import { v4 } from "uuid";\nexport const id = v4();\n',
       ruleId: "@typescript-eslint/no-restricted-imports",
-    },    {
+    },
+    {
       name: "globalThis から分割代入した console",
       code: 'const { console: c } = globalThis;\nc.log("x");\n',
       ruleId: "no-restricted-syntax",
@@ -150,6 +171,30 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
     },
     { name: "node:https の動的な import", code: 'export const m = await import("node:https");\n', ruleId: "no-restricted-syntax" },
     { name: "node:http の動的な import", code: 'export const m = await import("node:http");\n', ruleId: "no-restricted-syntax" },
+    { name: "https の動的な import", code: 'export const m = await import("https");\n', ruleId: "no-restricted-syntax" },
+    { name: "http の動的な import", code: 'export const m = await import("http");\n', ruleId: "no-restricted-syntax" },
+    ...["node:crypto", "crypto"].flatMap((source) => [
+      {
+        name: `${source} の動的な import の randomUUID の直の参照`,
+        code: `export const id = (await import("${source}")).randomUUID();\n`,
+        ruleId: "no-restricted-syntax",
+      },
+      {
+        name: `${source} の動的な import の randomBytes の直の参照（計算した鍵・テンプレートの文字列）`,
+        code: `export const b = (await import(\`${source}\`))["randomBytes"](4);\n`,
+        ruleId: "no-restricted-syntax",
+      },
+      {
+        name: `${source} の動的な import からの randomUUID の分割代入`,
+        code: `const { randomUUID } = await import("${source}");\nexport const id = randomUUID();\n`,
+        ruleId: "no-restricted-syntax",
+      },
+      {
+        name: `${source} の動的な import からの randomBytes の分割代入（代入の式）`,
+        code: `let r;\n({ randomBytes: r } = await import("${source}"));\nexport const b = r;\n`,
+        ruleId: "no-restricted-syntax",
+      },
+    ]),
     { name: "uuid の動的な import", code: 'export const m = await import("uuid");\n', ruleId: "no-restricted-syntax" },
     { name: "node:console の動的な import", code: 'export const m = await import("node:console");\n', ruleId: "no-restricted-syntax" },
   ];
@@ -198,6 +243,11 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
       "export const d = new Date(0);",
       'export const h = createHash("sha256");',
       'export const z = await import("zod");',
+      'export const h2 = (await import("node:crypto")).createHash("sha256");',
+      'const { createHash: ch } = await import("crypto");',
+      "export const h3 = ch;",
+      'const { randomUUID: ru } = await import("zod");',
+      "export const z2 = ru;",
       "",
     ].join("\n");
     for (const path of APP_PATHS) {

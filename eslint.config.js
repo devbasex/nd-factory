@@ -43,6 +43,9 @@ const INFRA_LIB = ["infra/lib/**/*.ts", "infra/lib/**/*.tsx"];
 
 const BOUNDARY = "は横断の部品だけが使う（#1 の決定 1・プラットフォームの決定 91）";
 
+/** `node:crypto`（`crypto`）のうち、ID と冪等の鍵の生成に当たる関数 */
+const CRYPTO_ID_FUNCTIONS = ["randomUUID", "randomBytes"];
+
 /** `apps/*` の src で、横断の部品の外での直の利用を落とす選び方（`no-restricted-syntax` 以外） */
 const boundaryRules = {
   "no-restricted-properties": [
@@ -68,14 +71,18 @@ const boundaryRules = {
     "error",
     {
       paths: [
-        { name: "node:http", message: `外部の呼び出し${BOUNDARY}`, allowTypeImports: true },
-        { name: "node:https", message: `外部の呼び出し${BOUNDARY}`, allowTypeImports: true },
-        {
-          name: "node:crypto",
-          importNames: ["randomUUID", "randomBytes"],
+        // Node.js は `node:` を付けない指定子も受け付けるので、両方の表記を落とす
+        ...["node:http", "http", "node:https", "https"].map((name) => ({
+          name,
+          message: `外部の呼び出し${BOUNDARY}`,
+          allowTypeImports: true,
+        })),
+        ...["node:crypto", "crypto"].map((name) => ({
+          name,
+          importNames: CRYPTO_ID_FUNCTIONS,
           message: `ID と冪等の鍵の生成${BOUNDARY}`,
           allowTypeImports: true,
-        },
+        })),
         { name: "uuid", message: `ID と冪等の鍵の生成${BOUNDARY}`, allowTypeImports: true },
         { name: "node:console", message: `ログと伏せ字${BOUNDARY}`, allowTypeImports: true },
         { name: "console", message: `ログと伏せ字${BOUNDARY}`, allowTypeImports: true },
@@ -107,6 +114,22 @@ const dynamicImportSyntax = DYNAMIC_IMPORT_BANS.flatMap(({ source, message }) =>
 ]);
 
 /**
+ * `node:crypto`（`crypto`）の動的な import から ID と冪等の鍵の生成の関数を取り出すもの。静的な import の
+ * `importNames` と同じ対象を、直の参照（`(await import("node:crypto")).randomUUID`）と分割代入
+ * （`const { randomUUID } = await import("node:crypto")`）で落とす
+ */
+const CRYPTO_SOURCE = "/^(node:)?crypto$/";
+const CRYPTO_IMPORT = `ImportExpression:matches([source.value=${CRYPTO_SOURCE}], [source.quasis.0.value.cooked=${CRYPTO_SOURCE}])`;
+const CRYPTO_AWAITED = `AwaitExpression[argument.type="ImportExpression"]:has(> ${CRYPTO_IMPORT})`;
+const CRYPTO_NAME = `/^(${CRYPTO_ID_FUNCTIONS.join("|")})$/`;
+const CRYPTO_KEY = `:matches([key.name=${CRYPTO_NAME}], [key.value=${CRYPTO_NAME}])`;
+const dynamicCryptoSyntax = [
+  `MemberExpression:matches([property.name=${CRYPTO_NAME}][computed=false], [property.value=${CRYPTO_NAME}]):has(> ${CRYPTO_AWAITED}.object)`,
+  `VariableDeclarator:has(> ${CRYPTO_AWAITED}.init) > ObjectPattern > Property${CRYPTO_KEY}`,
+  `AssignmentExpression:has(> ${CRYPTO_AWAITED}.right) > ObjectPattern > Property${CRYPTO_KEY}`,
+].map((selector) => ({ selector, message: `ID と冪等の鍵の生成${BOUNDARY}` }));
+
+/**
  * 大域のオブジェクトからの分割代入（`const { console } = globalThis`）。`no-restricted-globals` の
  * `checkGlobalObject` は性質の参照だけを見るので、分割代入は `no-restricted-syntax` で落とす
  */
@@ -120,6 +143,7 @@ const globalDestructureSyntax = [
 /** `apps/*` の src で、時計と条件つきの書き込みと動的な import と大域のオブジェクトからの分割代入を落とす `no-restricted-syntax` の選び方 */
 const boundarySyntax = [
   ...dynamicImportSyntax,
+  ...dynamicCryptoSyntax,
   ...globalDestructureSyntax,
   { selector: "NewExpression[callee.name='Date'][arguments.length=0]", message: `時計${BOUNDARY}` },
   { selector: "Property[key.name='ConditionExpression']", message: `条件つきの書き込み${BOUNDARY}` },

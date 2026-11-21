@@ -61,9 +61,9 @@ nd-factory/
 | 置き場 | 規則 | 落とすもの | 全体の設計の行 |
 | --- | --- | --- | --- |
 | `apps/*` | `no-restricted-properties` | `Date.now`・`Math.random`・`crypto.randomUUID`・`crypto.getRandomValues` | 時計・ID と冪等の鍵 |
-| `apps/*` | `no-restricted-syntax` | 引数なしの `new Date()`・鍵 `ConditionExpression` を持つオブジェクトの性質・丸ごと落とす指定子（`@aws-sdk/*`・`node:http`・`node:https`・`uuid`・`node:console`）の動的な `import()` | 時計・条件つきの書き込み・外部の呼び出し・ログと伏せ字 |
-| `apps/*` | `no-restricted-globals`（`checkGlobalObject`・`globalObjects: ["global"]`） | `console`・`fetch`（`globalThis`・`global` からの参照と分割代入を含む） | ログと伏せ字・外部の呼び出し |
-| `apps/*` | `@typescript-eslint/no-restricted-imports`（`allowTypeImports`） | `@aws-sdk/*`・`node:http`・`node:https`・`node:crypto` の `randomUUID`・`randomBytes`・`uuid`・`node:console`・`console` | 外部の呼び出し・条件つきの書き込み・操作の記録の書き手・ID・ログと伏せ字 |
+| `apps/*` | `no-restricted-syntax` | 引数なしの `new Date()`・鍵 `ConditionExpression` を持つオブジェクトの性質・丸ごと落とす指定子（`@aws-sdk/*`・`node:http`・`http`・`node:https`・`https`・`uuid`・`node:console`・`console`）の動的な `import()`・`node:crypto`（`crypto`）の動的な `import()` からの `randomUUID`・`randomBytes` の直の参照（`(await import("node:crypto")).randomUUID`）と分割代入・大域のオブジェクト（`globalThis`・`global`・`window`・`self`）からの `console`・`fetch` の分割代入（`const { console } = globalThis`） | 時計・条件つきの書き込み・外部の呼び出し・ID・ログと伏せ字 |
+| `apps/*` | `no-restricted-globals`（`checkGlobalObject`・`globalObjects: ["global"]`） | `console`・`fetch`（`globalThis`・`global`・`window`・`self` からの性質の参照を含む。分割代入はこの規則では落ちないので上の `no-restricted-syntax` の行で落とす） | ログと伏せ字・外部の呼び出し |
+| `apps/*` | `@typescript-eslint/no-restricted-imports`（`allowTypeImports`） | `@aws-sdk/*`・`node:http`・`http`・`node:https`・`https`・`node:crypto`（`crypto`）の `randomUUID`・`randomBytes`・`uuid`・`node:console`・`console`（Node.js が受け付ける `node:` を付けない表記も落とす） | 外部の呼び出し・条件つきの書き込み・操作の記録の書き手・ID・ログと伏せ字 |
 | `apps/web/src/**` | `no-restricted-syntax` | 料金プランの名前と同じ文字列（JSX の属性の値と `JSXText` を含む）。名前は #29 の書き出しから読み、無ければこの選び方を作らない | I8（画面） |
 | `apps/web/src/**`・`apps/api/src/**`・`infra/lib/**` | `no-restricted-syntax` | `/v1/` を含む文字列とテンプレートの文字列（経路は形の正本の登録の書き出しからだけ読む。K2-2・K2-3） | I14（画面の呼び出し・HTTP の経路の登録） |
 | `apps/web/**` の外の `*.tsx` | `no-restricted-syntax` の `Program` | ファイルそのもの（1 ファイル 1 件） | 言語と書き方の決まりの画面の行（決定 140） |
