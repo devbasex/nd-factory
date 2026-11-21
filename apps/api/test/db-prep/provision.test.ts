@@ -470,7 +470,7 @@ describePg("provisionProject（PostgreSQL）", () => {
       const a = newProject(db, "a");
       await prepare(sql, a);
       const c = await db.connect(a.database, { user: a.role, password: a.password });
-      expect((await c.query<{ p: string }>("SHOW search_path")).rows[0]?.p).toBe(a.role);
+      expect((await c.query<{ p: string }>("SELECT current_setting('search_path') AS p")).rows[0]?.p).toBe(a.role);
       await c.query("CREATE TABLE acme_t (id int)");
       const owner = await c.query<{ s: string }>("SELECT n.nspname::text AS s FROM pg_class t JOIN pg_namespace n ON n.oid = t.relnamespace WHERE t.relname = 'acme_t'");
       expect(owner.rows[0]?.s).toBe(a.role);
