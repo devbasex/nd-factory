@@ -26,6 +26,7 @@
     "@nd-factory/contracts": "*",
     "@noble/hashes": "2.4.0",
     "@smithy/node-http-handler": "4.14.2",
+    "aws-jwt-verify": "5.2.1",
     "ky": "2.2.0",
     "p-retry": "9.0.0",
     "pino": "10.4.0",
