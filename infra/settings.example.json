@@ -15,8 +15,6 @@
     "scope": "tags"
   },
   "ops": {
-    "notify_emails": [
-      "ops@example.com"
-    ]
+    "notify_emails": []
   }
 }

@@ -81,7 +81,7 @@ describe("generateArtifacts", () => {
       network: { vpc_cidr: "10.80.0.0/16" },
       progress_db: { max_acu: 2 },
       budget: { monthly_usd: 30, scope: "tags" },
-      ops: { notify_emails: ["ops@example.com"] },
+      ops: { notify_emails: [] },
     });
     const schema = JSON.parse(readFileSync(join(root, OUTPUTS[0]!), "utf8")) as { required: string[] };
     expect(schema.required).toEqual(["prefix", "environment", "login"]);

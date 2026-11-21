@@ -33,7 +33,7 @@ describe("loadSettingsFile", () => {
       network: { vpc_cidr: "10.80.0.0/16" },
       progress_db: { max_acu: 2 },
       budget: { monthly_usd: 30, scope: "tags" },
-      ops: { notify_emails: ["ops@example.com"] },
+      ops: { notify_emails: [] },
     });
   });
 

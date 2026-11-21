@@ -93,7 +93,7 @@ package-lock.json
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `INFRA_DEFAULTS` | 定数 | `packages/contracts/src/settings.ts` | 上の 5 つの既定 |
-| `DB_PREP_TIMING` | 定数 | `packages/contracts/src/db-prep.ts` | `{ maxEventAgeSeconds: 60, functionTimeoutSeconds: 300, dataApiCallSeconds: 45, dataApiTxIdleSeconds: 180, prepDeadlineSeconds: 900, patrolIntervalSeconds: 300 }`。`DbPrepFunction` が最初の 2 つを、#6 の見回りと API が `prepDeadlineSeconds` と `patrolIntervalSeconds`（見回りのスケジュール）を読む。読み手は値を写さずこの定数を参照し、合成のテストで一致を照らす。後の 2 つは Data API が決める値（全体の設計の LIB91）で、関数は変えない |
+| `DB_PREP_TIMING` | 定数 | `packages/contracts/src/db-prep.ts` | `{ maxEventAgeSeconds: 60, functionTimeoutSeconds: 300, dataApiCallSeconds: 45, dataApiTxIdleSeconds: 180, prepDeadlineSeconds: 900, patrolIntervalSeconds: 300 }`。`DbPrepFunction` が最初の 2 つを、#6 の見回りと API が `prepDeadlineSeconds` と `patrolIntervalSeconds`（見回りのスケジュール）を読む。読み手は値を写さずこの定数を参照し、合成のテストで一致を照らす。`dataApiCallSeconds` と `dataApiTxIdleSeconds` は Data API が決める値（全体の設計の LIB91）で、関数は変えない |
 | `DB_PREP_FAILURE_REASONS` | 定数 | `packages/contracts/src/db-prep.ts` | `data_api_unavailable`・`guard_conflict`・`connections_remain`・`sql_failed` |
 
 ### 単体テストの観点
