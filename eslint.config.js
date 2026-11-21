@@ -9,8 +9,12 @@ import tseslint from "typescript-eslint";
  */
 export const PLAN_EXPORT_REQUIRED = false;
 
-/** 料金プランの名前の書き出し（#29 が置く）。書き出しの `planNames` は名前の文字列の配列 */
-const PLAN_EXPORT = "@nd-factory/contracts/plans";
+/**
+ * 料金プランの名前と値の書き出し（#29 が置く）。書き出しの `planNames` は名前の文字列の配列。
+ * `tools/test/deps-config.test.ts` もこの名前から `packages/contracts` の `exports` の鍵を読み、行き先が読む値のファイルを
+ * 料金プランの値の規則と照らす。`PLAN_EXPORT_REQUIRED` が真になった後は、鍵が無いとそのテストも落ちる
+ */
+export const PLAN_EXPORT = "@nd-factory/contracts/plans";
 
 /**
  * 料金プランの名前を読む。`required` が偽なら読めないときに null を返し、真なら例外を投げる。

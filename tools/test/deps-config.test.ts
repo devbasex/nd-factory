@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { type ICruiseOptions, type ICruiseResult, cruise } from "dependency-cruiser";
 import extractDepcruiseOptions from "dependency-cruiser/config-utl/extract-depcruise-options";
 import extractTSConfig from "dependency-cruiser/config-utl/extract-ts-config";
@@ -249,23 +249,50 @@ function listFiles(dir: string): string[] {
     .filter((f) => !f.split("/").includes("node_modules"));
 }
 
-/** 料金プランの値のファイルらしいもの（名前に plan を含むファイルと exports の ./plans の行き先）のうち、規則の外のもの */
-function planFilesOutsideRule(files: string[], exportsField: Record<string, unknown>, pattern: RegExp): string[] {
+/** eslint.config.js の書き出しのうち、料金プランの書き出しの名前と、それを必須にしたか */
+type PlanExportModule = { PLAN_EXPORT: string; PLAN_EXPORT_REQUIRED: boolean };
+// 式で組んだ指定子の import は型を持たないので、このテストが読む形で受ける
+const { PLAN_EXPORT, PLAN_EXPORT_REQUIRED } = (await import(pathToFileURL(join(ROOT, "eslint.config.js")).href)) as PlanExportModule;
+
+const CONTRACTS_NAME = "@nd-factory/contracts";
+
+/** 料金プランの書き出しの名前（`@nd-factory/contracts/<鍵>`）から、`packages/contracts` の `exports` の鍵を読む */
+function planExportKey(name: string): string {
+  if (!name.startsWith(`${CONTRACTS_NAME}/`) || name.length === CONTRACTS_NAME.length + 1) {
+    throw new Error(`料金プランの書き出し ${name} が ${CONTRACTS_NAME} の下の名前でない`);
+  }
+  return `.${name.slice(CONTRACTS_NAME.length)}`;
+}
+
+/** ESLint が読む料金プランの書き出しの、`packages/contracts` の `exports` の鍵 */
+const PLAN_EXPORT_KEY = planExportKey(PLAN_EXPORT);
+
+/** 料金プランの値のファイルらしいもの（名前に plan を含むファイルと exports の料金プランの鍵の行き先）のうち、規則の外のもの */
+function planFilesOutsideRule(files: string[], exportsField: Record<string, unknown>, pattern: RegExp, key = PLAN_EXPORT_KEY): string[] {
   const candidates = files.filter((f) => /plan/i.test(posix.basename(f)));
-  const target = exportsField["./plans"];
+  const target = exportsField[key];
   if (typeof target === "string") candidates.push(posix.join("packages/contracts", target));
   return [...new Set(candidates)].filter((f) => !pattern.test(f));
 }
 
 /**
- * 書き出し `./plans` の行き先から実際に読み込む値のファイルのうち、規則の外のもの。値のファイルは、行き先そのものと、
- * 行き先から辿れる `packages/contracts` の JSON と、その JSON へ至る途中のモジュール（値を出し直す）。名前によらない
+ * 料金プランの書き出しの行き先から実際に読み込む値のファイルのうち、規則の外のもの。値のファイルは、行き先そのものと、
+ * 行き先から辿れる `packages/contracts` の JSON と、その JSON へ至る途中のモジュール（値を出し直す）。名前によらない。
+ * 書き出しの鍵が無いとき、`required` が偽（#29 の前）なら照らさずに空を返し、真なら例外を投げる
  */
-async function planValuesOutsideRule(baseDir: string, opts: Options, pattern: RegExp): Promise<string[]> {
+async function planValuesOutsideRule(
+  baseDir: string,
+  opts: Options,
+  pattern: RegExp,
+  { key = PLAN_EXPORT_KEY, required = PLAN_EXPORT_REQUIRED }: { key?: string; required?: boolean } = {},
+): Promise<string[]> {
   const manifest = JSON.parse(readFileSync(join(baseDir, "packages/contracts/package.json"), "utf8")) as { exports?: Record<string, unknown> };
-  const target = manifest.exports?.["./plans"];
-  if (target === undefined) return [];
-  if (typeof target !== "string") throw new Error("packages/contracts の exports の ./plans が 1 つのパスでない");
+  const target = manifest.exports?.[key];
+  if (target === undefined) {
+    if (required) throw new Error(`packages/contracts の exports に料金プランの書き出しの鍵 ${key} が無い`);
+    return [];
+  }
+  if (typeof target !== "string") throw new Error(`packages/contracts の exports の ${key} が 1 つのパスでない`);
   const entry = posix.join("packages/contracts", target);
   const tsConfig = extractTSConfig(join(baseDir, opts.tsConfig?.fileName ?? "tsconfig.base.json"));
   const { ruleSet: _rules, ...rest } = opts;
@@ -287,10 +314,10 @@ async function planValuesOutsideRule(baseDir: string, opts: Options, pattern: Re
 }
 
 /** 料金プランの書き出しだけを持つ作り物の形の正本の木を組む */
-function buildPlanTree(files: Record<string, string>): string {
+function buildPlanTree(files: Record<string, string>, exportsField: Record<string, string> = { "./plans": "./src/plans.ts" }): string {
   const root = mkdtempSync(join(tmpdir(), "deps-plans-"));
   write(root, "tsconfig.base.json", JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext", allowImportingTsExtensions: true, resolveJsonModule: true, noEmit: true } }));
-  write(root, "packages/contracts/package.json", JSON.stringify({ name: "@nd-factory/contracts", type: "module", exports: { "./plans": "./src/plans.ts" } }));
+  write(root, "packages/contracts/package.json", JSON.stringify({ name: CONTRACTS_NAME, type: "module", exports: exportsField }));
   for (const [path, content] of Object.entries(files)) write(root, path, content);
   return root;
 }
@@ -298,7 +325,7 @@ function buildPlanTree(files: Record<string, string>): string {
 describe("受け入れ条件 4: 料金プランの値の規則がリポジトリの実際の配置を照らす（#29 への引き継ぎ）", () => {
   it("規則の外の名前（作り物）は見つかる", () => {
     const pattern = planValuePattern(options);
-    expect(planFilesOutsideRule(["packages/contracts/data/pricing-plans.json", "packages/contracts/data/plans.json"], { "./plans": "./src/plan-values.ts" }, pattern)).toEqual([
+    expect(planFilesOutsideRule(["packages/contracts/data/pricing-plans.json", "packages/contracts/data/plans.json"], { "./plans": "./src/plan-values.ts" }, pattern, "./plans")).toEqual([
       "packages/contracts/data/pricing-plans.json",
       "packages/contracts/src/plan-values.ts",
     ]);
@@ -321,11 +348,46 @@ describe("受け入れ条件 4: 料金プランの値の規則がリポジトリ
         }),
       ];
       try {
-        expect(await planValuesOutsideRule(roots[0]!, options, pattern)).toEqual(["packages/contracts/data/pricing.json"]);
+        const fake = { key: "./plans", required: true };
+        expect(await planValuesOutsideRule(roots[0]!, options, pattern, fake)).toEqual(["packages/contracts/data/pricing.json"]);
         // 値を出し直す途中のモジュールも値のファイルに数え、値に至らない名前のモジュールは数えない
-        expect((await planValuesOutsideRule(roots[1]!, options, pattern)).sort()).toEqual(["packages/contracts/data/pricing.json", "packages/contracts/src/pricing.ts"]);
+        expect((await planValuesOutsideRule(roots[1]!, options, pattern, fake)).sort()).toEqual(["packages/contracts/data/pricing.json", "packages/contracts/src/pricing.ts"]);
       } finally {
         for (const r of roots) rmSync(r, { recursive: true, force: true });
+      }
+    },
+    CRUISE_TIMEOUT,
+  );
+
+  it("書き出しの鍵は ESLint の料金プランの書き出しの名前から読む", () => {
+    expect(PLAN_EXPORT_KEY).toBe(planExportKey(PLAN_EXPORT));
+    expect(planExportKey("@nd-factory/contracts/pricing")).toBe("./pricing");
+    expect(() => planExportKey("@nd-factory/pricing")).toThrow();
+    expect(() => planExportKey("@nd-factory/contracts/")).toThrow();
+  });
+
+  it(
+    "公開の名前を変えると、変えた鍵の行き先が読む名前に plan を含まない値のファイルが見つかる",
+    async () => {
+      const pattern = planValuePattern(options);
+      const root = buildPlanTree(
+        {
+          "packages/contracts/src/pricing.ts": 'import data from "../data/pricing.json" with { type: "json" };\nexport const values = data;\n',
+          "packages/contracts/data/pricing.json": '[{ "name": "acme-free" }]\n',
+        },
+        { "./pricing": "./src/pricing.ts" },
+      );
+      try {
+        const key = planExportKey("@nd-factory/contracts/pricing");
+        expect((await planValuesOutsideRule(root, options, pattern, { key, required: true })).sort()).toEqual([
+          "packages/contracts/data/pricing.json",
+          "packages/contracts/src/pricing.ts",
+        ]);
+        // 古い鍵のままでは何も照らさず、必須にした後は鍵が無いことで落ちる
+        expect(await planValuesOutsideRule(root, options, pattern, { key: "./plans", required: false })).toEqual([]);
+        await expect(planValuesOutsideRule(root, options, pattern, { key: "./plans", required: true })).rejects.toThrow(/\.\/plans/);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
       }
     },
     CRUISE_TIMEOUT,
@@ -334,13 +396,13 @@ describe("受け入れ条件 4: 料金プランの値の規則がリポジトリ
   it(
     "規則どおりの配置（作り物の木）では、書き出しの行き先が読む値のファイルはすべて規則の対象に入る",
     async () => {
-      expect(await planValuesOutsideRule(tree, options, planValuePattern(options))).toEqual([]);
+      expect(await planValuesOutsideRule(tree, options, planValuePattern(options), { key: "./plans", required: true })).toEqual([]);
     },
     CRUISE_TIMEOUT,
   );
 
   it(
-    "packages/contracts の料金プランの値のファイルは、すべて規則の対象に入る",
+    "packages/contracts の料金プランの値のファイルは、すべて規則の対象に入る（ESLint の書き出しの名前の鍵で辿り、必須にした後は鍵が無いと落ちる）",
     async () => {
       const pattern = planValuePattern(options);
       const manifest = JSON.parse(readFileSync(join(ROOT, "packages/contracts/package.json"), "utf8")) as { exports?: Record<string, unknown> };
