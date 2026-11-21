@@ -209,6 +209,21 @@ describe("writeAtomically", () => {
     expect(records().at(-1)).toMatchObject({ level: "error", msg: "書き込みを表が断った", result: "rejected", class: "rejected", error: "ValidationException" });
   });
 
+  it.each([
+    ["取り消しの理由が書き込みの呼びすぎ", Object.assign(new Error("throttled"), { name: "TransactionCanceledException", $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: "None" }, { Code: "ThrottlingError" }] }), "retryable"],
+    ["名前の分からない 5xx", Object.assign(new Error("down"), { name: "SomethingUnexpected", $metadata: { httpStatusCode: 503 } }), "retryable"],
+    ["分類できない失敗", Object.assign(new Error("odd"), { name: "SerializationException", $metadata: { httpStatusCode: 400 } }), "unknown"],
+  ])("%s は WriteUnavailableError に包み、記録の行を含むことを運ぶ", async (_why, thrown, cls) => {
+    const { log, records } = logs();
+    const db = { transactWrite: async () => Promise.reject(thrown) } as unknown as Parameters<typeof writeAtomically>[0];
+    const audit = putIfAbsent({ table: "audit", item: { pk: "AUDIT#1", sk: "AUDIT", schema_version: 1 }, onConflict: "fail" });
+    const error = await writeAtomically(db, [audit], log).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(WriteUnavailableError);
+    expect((error as WriteUnavailableError).includesAudit).toBe(true);
+    expect((error as WriteUnavailableError).cause).toBe(thrown);
+    expect(records().at(-1)).toMatchObject({ level: "error", msg: "書き込みが表に届かない", result: "unavailable", class: cls });
+  });
+
   it("101 件と 0 件と同じ行の 2 回で止め、送らない", async () => {
     const table = fakeTable();
     await expect(writeAtomically(table.db, Array.from({ length: TRANSACT_MAX_ITEMS + 1 }, (_, i) => put(i)))).rejects.toBeInstanceOf(WriteSpecError);

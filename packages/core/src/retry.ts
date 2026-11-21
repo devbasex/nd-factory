@@ -19,6 +19,11 @@ const RETRYABLE_NAMES = new Set([
   "RequestLimitExceeded",
   "InternalServerError",
   "ServiceUnavailable",
+  "ServiceUnavailableException",
+  "InternalServerErrorException",
+  "RequestTimeout",
+  "RequestTimeoutException",
+  "TransactionInProgressException",
   "TransactionConflict",
 ]);
 const CONFLICT_NAMES = new Set(["ConditionalCheckFailedException"]);
@@ -44,10 +49,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
 
-// TransactWriteItems の取り消しのうち、ほかのトランザクションとの衝突（SDK はこれを繰り返さない）
-function isTransactionConflict(e: Record<string, unknown>): boolean {
+// TransactWriteItems の取り消しの理由のうち一時の失敗。ほかのトランザクションとの衝突と、書き込みの呼びすぎ（SDK はトランザクションの取り消しを繰り返さない）
+const RETRYABLE_CANCELLATION_CODES = new Set(["TransactionConflict", "ThrottlingError", "ProvisionedThroughputExceeded", "RequestLimitExceeded"]);
+
+function isRetryableCancellation(e: Record<string, unknown>): boolean {
   const reasons = e["CancellationReasons"];
-  return e["name"] === "TransactionCanceledException" && Array.isArray(reasons) && reasons.some((r) => isRecord(r) && r["Code"] === "TransactionConflict");
+  return (
+    e["name"] === "TransactionCanceledException" &&
+    Array.isArray(reasons) &&
+    reasons.some((r) => isRecord(r) && typeof r["Code"] === "string" && RETRYABLE_CANCELLATION_CODES.has(r["Code"]))
+  );
+}
+
+// AWS SDK の例外が持つ応答の状態（$metadata.httpStatusCode）
+function sdkStatusOf(e: Record<string, unknown>): number | undefined {
+  const metadata = e["$metadata"];
+  if (!isRecord(metadata)) return undefined;
+  const status = metadata["httpStatusCode"];
+  return typeof status === "number" && Number.isInteger(status) ? status : undefined;
 }
 
 function hasNetworkCode(e: unknown): boolean {
@@ -66,12 +85,16 @@ export function classifyFailure(e: unknown): FailureClass {
   if (!isRecord(e)) return "unknown";
   const name = e["name"];
   if (typeof name === "string") {
-    if (RETRYABLE_NAMES.has(name) || isTransactionConflict(e)) return "retryable";
+    if (RETRYABLE_NAMES.has(name) || isRetryableCancellation(e)) return "retryable";
     if (CONFLICT_NAMES.has(name)) return "conflict";
     if (NOT_FOUND_NAMES.has(name)) return "not_found";
     if (REJECTED_NAMES.has(name)) return "rejected";
   }
   if (hasNetworkCode(e)) return "retryable";
+  // 名前が集合に無い AWS SDK の例外は応答の状態で分ける（5xx・429 は retryable）。
+  // ただし 400 は DynamoDB が一時の失敗にも返す状態のため、名前で分からない 400 は unknown のままにする
+  const sdkStatus = sdkStatusOf(e);
+  if (sdkStatus !== undefined && sdkStatus !== 400) return classOfStatus(sdkStatus);
   // 応答の物（Response・OutboundResult）の状態
   const status = e["status"];
   if (typeof status === "number" && Number.isInteger(status)) return classOfStatus(status);

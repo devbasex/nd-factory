@@ -56,8 +56,8 @@ export class AuditAppendOnlyError extends Error {
   override name = "AuditAppendOnlyError";
 }
 
-// 再試行の後も表に届かない（分類が retryable の失敗だけ）。呼び手は要求全体の 503（記録の行を含むなら audit_unavailable、含まなければ unavailable）にする。
-// 表が断った失敗（ValidationException・AccessDeniedException・行の形の誤りなど、再実行しても通らない）はこれに包まず、元の例外のまま投げる
+// 再試行の後も表に届かない（分類が rejected でない失敗。retryable と、断ったと言い切れない unknown など）。呼び手は要求全体の 503（記録の行を含むなら audit_unavailable、含まなければ unavailable）にする。
+// 表が断った失敗（分類が rejected。ValidationException・AccessDeniedException など、再実行しても通らない）はこれに包まず、元の例外のまま投げる
 export class WriteUnavailableError extends Error {
   override name = "WriteUnavailableError";
   readonly includesAudit: boolean;
@@ -343,11 +343,12 @@ export async function writeAtomically(db: Db, items: readonly TransactItem[], lo
   } catch (error) {
     const name = error instanceof Error ? error.name : "unknown";
     const cls = classifyFailure(error);
-    if (cls !== "retryable") {
-      // 届かないのでなく表が断った（または分からない）。再実行しても通らないため「届かない」と言わず、元の例外のまま投げる
-      log?.error(cls === "rejected" ? "書き込みを表が断った" : "書き込みが届かない以外の失敗で止まった", { ...summary, result: "rejected", class: cls, error: name });
+    if (cls === "rejected") {
+      // 届かないのでなく表が断った。再実行しても通らないため「届かない」と言わず、元の例外のまま投げる
+      log?.error("書き込みを表が断った", { ...summary, result: "rejected", class: cls, error: name });
       throw error;
     }
+    // retryable と、断ったと言い切れない失敗（unknown など）は届かないとして包む。記録の行を含む書き込みの audit_unavailable の判別を失わない
     const includesAudit = items.some((item) => item.table === "audit");
     log?.error("書き込みが表に届かない", { ...summary, result: "unavailable", class: cls, error: name });
     throw new WriteUnavailableError(`書き込みを確定できない（${name}）`, { cause: error, includesAudit });

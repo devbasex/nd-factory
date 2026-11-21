@@ -57,6 +57,11 @@ describe("classifyFailure", () => {
     ["InternalServerError", "retryable"],
     ["ServiceUnavailable", "retryable"],
     ["TransactionConflict", "retryable"],
+    ["TransactionInProgressException", "retryable"],
+    ["RequestTimeout", "retryable"],
+    ["RequestTimeoutException", "retryable"],
+    ["ServiceUnavailableException", "retryable"],
+    ["InternalServerErrorException", "retryable"],
     ["ConditionalCheckFailedException", "conflict"],
     ["ResourceNotFoundException", "not_found"],
     ["ValidationException", "rejected"],
@@ -71,6 +76,20 @@ describe("classifyFailure", () => {
     const condition = awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ConditionalCheckFailed" }] });
     expect(classifyFailure(conflict)).toBe("retryable");
     expect(classifyFailure(condition)).toBe("unknown");
+  });
+
+  it.each(["ThrottlingError", "ProvisionedThroughputExceeded", "RequestLimitExceeded"])("トランザクションの取り消しの理由 %s は retryable", (code) => {
+    expect(classifyFailure(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "None" }, { Code: code }] }))).toBe("retryable");
+  });
+
+  it.each([
+    [500, "retryable"],
+    [503, "retryable"],
+    [429, "retryable"],
+    [403, "rejected"],
+    [400, "unknown"],
+  ])("名前の分からない AWS SDK の例外は $metadata の状態 %i で %s", (status, expected) => {
+    expect(classifyFailure(Object.assign(new Error("x"), { name: "SomethingUnexpected", $metadata: { httpStatusCode: status } }))).toBe(expected);
   });
 
   it("ky の時間切れとネットワークの誤りは retryable", async () => {
