@@ -115,7 +115,7 @@ infra/
 
 | 関数・定数 | 保存先 | 種類 | シグネチャと形 | 責務 |
 | --- | --- | --- | --- | --- |
-| `utcDateTime` | `values.ts` | 新設 | `z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/)` | RFC 3339 の UTC の日時だけを通す（I15） |
+| `utcDateTime` | `values.ts` | 新設 | `z.string().regex(UTC_DATE_TIME)`。`UTC_DATE_TIME` は下の正規表現 | RFC 3339 の UTC の日時のうち、実在する日付と範囲の中の時刻だけを通す（I15） |
 | `calendarMonth` | `values.ts` | 新設 | `z.strictObject({ month: /^\d{4}-(0[1-9]\|1[0-2])$/, time_zone: timeZone })` | 時刻帯つきの暦の月 |
 | `currencyCode` | `values.ts` | 新設 | `z.string().regex(/^[A-Z]{3}$/)` | ISO 4217 の英字 3 字 |
 | `money` | `values.ts` | 新設 | `z.strictObject({ amount_minor: z.int().min(0), currency: currencyCode })` | 通貨つきの最小単位の整数（I15） |
@@ -129,11 +129,20 @@ infra/
 | `REQUEST_REASONS` | `reasons.ts` | 新設 | `body_not_json`・`body_not_array`・`body_empty`・`too_many_items`・`duplicate_item`・`cursor_invalid`・`unauthorized`・`human_only`・`scope_insufficient`・`unavailable`・`audit_unavailable`・`too_many_requests` | 要求全体の理由のコード |
 | `ITEM_REASONS` | `reasons.ts` | 新設 | `item_invalid`・`not_found`・`role_insufficient`・`human_only`・`version_mismatch`・`state_mismatch`・`idempotency_key_reused`・`in_progress`・`not_applied` | どの操作の要素にも出うる理由のコード。操作ごとのコードは `reasons` に足す |
 
+`UTC_DATE_TIME`（`values.ts` の定数。`refine` を使わずに日付の実在を照らすため、月ごとの日の数とうるう年を正規表現で書く。JSON Schema の `pattern` へそのまま写り、Ajv も同じ合否になる）:
+
+```text
+^(?:\d{4}-(?:(?:0[1-9]|1[0-2])-(?:0[1-9]|1\d|2[0-8])|(?:0[13-9]|1[0-2])-(?:29|30)|(?:0[13578]|1[02])-31)|(?:\d{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]|[13579][26])00)-02-29)T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$
+```
+
+- 2 月 29 日は 4 で割れる年（100 で割れて 400 で割れない年を除く）だけを通す
+- 時は 00〜23、分と秒は 00〜59。うるう秒の `60` は通さない（RFC 3339 は許すが、この製品の日時は時計と DynamoDB の値から作り、`60` を出さないため。入力に来たら要素の 400 `item_invalid`）
+
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `utcDateTime` | `2026-11-17T03:04:05.123Z` | 小数なし・小数 1 桁 | `+09:00`・時刻帯なし・小数 4 桁・小文字の `z` |
+| `utcDateTime`（zod と、生成した JSON Schema を Ajv で検証した結果の両方で同じ合否を確かめる） | `2026-11-17T03:04:05.123Z` | 小数なし・小数 1 桁・`2024-02-29`・`2000-02-29`・各月の末日・`23:59:59` | `+09:00`・時刻帯なし・小数 4 桁・小文字の `z`・`2026-02-30T25:00:00Z`・`2026-02-29`・`1900-02-29`・`2026-04-31`・月 `00` と `13`・日 `00`・時 `24`・分 `60`・秒 `60`。加えて 1896〜2104 年の毎日を `Date.UTC` の実在と照らし、食い違いが 0 件 |
 | `money` | `{"amount_minor": 1234, "currency": "USD"}` | `amount_minor` が 0 | 通貨なし・`12.34`・`"usd"`・負の数 |
 | `timeZone` | `Asia/Tokyo`・`UTC`・`America/Argentina/Buenos_Aires` | `Etc/GMT+9` | `JST`・`+09:00`・`asia/tokyo` |
 | `languageTag` | `ja`・`pt-BR`・`zh-Hant-TW` | `es-419` | `ja_JP`・`JA`・空 |
