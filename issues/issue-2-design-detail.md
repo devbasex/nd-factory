@@ -56,7 +56,7 @@ packages/contracts/
 │   ├── generate.ts                 生成物を足す
 │   └── artifacts.ts            *   生成物を組む関数
 ├── generated/                  *   生成物（手で直さない）
-└── test/                           足す: values・operations・operations-roundtrip・rows・row-codec・ndf・data・artifacts
+└── test/                           足す: values・operations・operations-roundtrip・rows・row-codec・ndf・data・artifacts と fixtures/operations.ts（往復のテスト用の操作）
 packages/core/                  *
 ├── package.json · tsconfig.json
 ├── src/
@@ -310,12 +310,21 @@ infra/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| 往復（`operations-roundtrip.test.ts`） | 形のある操作ごとに、見本と反例（時刻帯の無い日時・通貨の無い金額・頭の違う ID・配列でない本文）が zod と Ajv（`Ajv2020`、`strict: true`、`validateFormats: false`）で同じ合否 | 要素 1 個と上限ちょうどの配列 | `refine` を使う形をテストの中で足すと食い違いを検出する（検出の仕組みのテスト） |
+| 往復（`operations-roundtrip.test.ts`） | 比べる操作は、`OPERATIONS` のうち形のある操作と、テスト用の操作（下の段落）の和。操作ごとに、要素（見本と反例: 時刻帯の無い日時・通貨の無い金額・頭の違う ID・配列でない本文）・成功の結果（`examples` の `normal` と `edge`）・失敗の結果（`buildDummy` の `failures` と、`ReasonDef` に無い `status` と `reason` の組の反例）を、zod（`ItemOf`・`ResultOf`）と、`buildOperationSchemas` が出した `<操作>.item`・`<操作>.result` を Ajv（`Ajv2020`、`strict: true`、`validateFormats: false`）で検証した結果とで同じ合否 | 要素 1 個と上限ちょうどの配列 | `refine` を使う形をテストの中で足すと食い違いを検出する（検出の仕組みのテスト）。比べた操作・要素・成功・失敗のどれかの件の数が 0 なら落ちる |
 | `checkExamples` | 作り物の値だけの見本は問題 0 | — | 通貨の無い金額・`ghs_` の値・`ops@corp.test`・12 桁の別の数で問題が出る |
 | `buildMcpTools` | 人だけの操作と受け口 `user` でない操作が無い。道具の順が操作の表の順 | 全部か無かの操作の `maxItems` | — |
 | `buildDummy` | `list` の空・`get` の 404・`itemReasonsOf(op)` のコードごとの失敗で、`status` が `ReasonDef` と同じ。どの失敗も `ResultOf` の zod を通る | 形の未定は `null` | — |
 | `itemReasonsOf` | 書く操作は `version_mismatch` を含み、操作ごとのコードが後ろに続く | 冪等の鍵の無い操作は `in_progress` を含まない | 操作ごとのコードに `not_found` を書くと `defineOperation` が投げる |
 | `generateArtifacts` | `write` の後の `check` が空 | 消えた操作のダミーのファイルが `check` で差になる | 見本の誤りで書かずに投げる |
+
+往復のテスト用の操作（`test/fixtures/operations.ts`）: この課題の間は全操作の要素と結果が `pendingShape` のため、`OPERATIONS` だけを比べると、実際の形の生成物を 1 件も比べずに受け入れ条件 7 を通せてしまう。そこで、本番の操作と同じ `defineOperation` で組んだ 2 つの操作を置き、本番と同じ `buildOperationSchemas`・`buildDummy` に `OPERATIONS` と並べて渡す（テスト用の経路を作らない）。生成物のファイルには書かない。
+
+| テスト用の操作 | 受け口・読み書き | 要素の形 | 結果の形 | 足す印 |
+| --- | --- | --- | --- | --- |
+| `fixture_notes.create` | `user`・`write` | `{project_id: idOf("prj"), title: 1〜200 字, due_at: utcDateTime, budget: money, language: languageTag, time_zone: timeZone, repo: githubRepo}` | `okItem({note_id: idOf("ntc"), version: 1 以上の整数, created_at: utcDateTime})` | `features: ["F1"]`・`delegationKind: "run"`・`idempotencyKey`・`allOrNothing: {maxItems: 2}`・操作ごとのコード `{code: "fixture_limit", status: 409, when: "always"}` |
+| `fixture_notes.list` | `user`・`read` | `{project_id: idOf("prj"), cursor: 文字列か null}` | `okList({note_id, title, due_at})` | `features: ["F1"]`・`delegationKind: "read"` |
+
+子が実際の形を入れた後も、テスト用の操作は残す（形の正本の値の形を 1 か所でまとめて往復させる見本として使い、本番の操作の形の入れ替えでこのテストが空にならないようにする）。
 
 ## 横断の部品
 
