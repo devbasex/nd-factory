@@ -40,7 +40,7 @@ flowchart LR
 | Value 7（値を置かない） | 作り物でない AWS のアカウント ID・ARN・資源の ID・端点、既知の提供者の token と私有鍵、CI の秘密に置いた実際の値（アカウント・profile・環境の名前）。今の木と Pull Request の途中のコミットの両方 | gitleaks。規則と作り物の値の許可は `.gitleaks.toml`、実際の値の規則はジョブが CI の秘密から重ねる（決定 3） | `leak-check`（新設） |
 | 横断の部品を 1 か所に（プラットフォームの決定 91） | `apps/` の実行時のコードでの `Date.now`・引数なしの `new Date()`・乱数からの ID・`console`・`fetch`・AWS SDK の import・`ConditionExpression` を組む書き込み | ESLint の組み込みの規則を `eslint.config.js` で置き場ごとに（決定 1） | `check` |
 | I8（使える量の判定は 1 か所） | 判定のモジュールの外での料金プランの値の import・画面での料金プランの名前の文字列 | 同上 | `check` |
-| I14（画面の操作は API と MCP にもある） | 画面と `apps/api`・`infra` での HTTP の経路の直書き。生成した呼び出しのうち画面が使わないもの。MCP の道具と人だけでない操作の食い違い・人だけの操作の読み出しの欠け・どの操作にも無い機能 | 経路の直書きは ESLint、使わない呼び出しは knip、残りは形の正本の往復のテスト（決定 8） | `check` |
+| I14（画面の操作は API と MCP にもある） | 画面と `apps/api`・`infra` での HTTP の経路の直書き。生成した呼び出しのうち画面が使わないもの。MCP の道具と人だけでない操作の食い違い・人だけの操作の読み出しの欠け・どの操作にも無い機能。API Gateway に実際に登録した経路と Lambda の振り分けが受ける経路の、操作の表との食い違い | 経路の直書きは ESLint、使わない呼び出しは knip、表の照らしは形の正本の往復のテスト、実際の経路は合成の結果のテスト（`infra/test/api-routes.test.ts`）と振り分けのテスト（#2 の `apps/api/test/dispatch-routes.test.ts`）（決定 8） | `check` |
 | 依存の向き（全体の設計の詳細設計の依存の表）と決定 140（画面の外は React と TSX を使わない） | `packages/contracts` → `packages/core` → `apps/*` の一方向に反する依存・`apps/*` どうし・`infra` から `apps/*`・画面の外の React の import（型だけの import を含む）。画面の外の `*.tsx` | dependency-cruiser の `.dependency-cruiser.cjs`（決定 2）。`*.tsx` の置き場は ESLint（決定 1） | `check` |
 | Value 13（使わないものを残さない） | 使っていないファイル・書き出し・依存 | knip の `knip.jsonc`（決定 4） | `check` |
 | Value 8（CI は資格情報を持たない） | ワークフローの広すぎる権限・資格情報の持ち出し・固定していない動作の参照など。AWS の資格情報の語・必須のチェックの宣言とジョブの食い違い | zizmor の `.github/zizmor.yml` と、CI の定義のテスト（`yaml` で読む）（決定 5） | `workflow-audit`（新設）・`check` |
@@ -83,7 +83,8 @@ flowchart TB
 | --- | --- | --- |
 | K2-1 | 操作の定義に機能（F1〜F20 の配列）を持たせる（全体の設計の操作の一覧の「機能」の列） | 往復のテストが「どの操作にも無い機能」を落とす |
 | K2-2 | 画面が呼ぶ生成した呼び出しは、利用者向けの操作ごとに 1 つの書き出しにする。画面は `/v1/` の経路を書かず、この書き出しだけを呼ぶ | 画面が使わない操作を knip が使われない書き出しとして落とし、表に無い操作の呼び出しは型の検査が落とす |
-| K2-3 | 操作の表・JSON Schema・OpenAPI・MCP の道具の一覧・HTTP の経路の登録を `packages/contracts` の書き出しから読め、利用者向けの操作と機械向けの経路を分けて読める。`apps/api` の振り分けと `infra/` の API Gateway の定義は、経路をこの登録からだけ読む | 往復のテストと ESLint の経路の直書きの規則 |
+| K2-3 | 操作の表・JSON Schema・OpenAPI・MCP の道具の一覧・HTTP の経路の登録を `packages/contracts` の書き出しから読め、利用者向けの操作と機械向けの経路を分けて読める。`apps/api` の振り分けと `infra/` の API Gateway の定義は、経路をこの登録からだけ読む | 往復のテストと ESLint の経路の直書きの規則。「登録からだけ読む」は、合成の結果の経路のテスト（#1）と振り分けの経路のテスト（K2-7）が、実際の経路を操作の表と照らして守る |
+| K2-7 | `apps/api/test/dispatch-routes.test.ts` を足し、Lambda の振り分けが受ける経路（方法と経路の組）の集合が、操作の表の経路の集合と等しいこと、表に無い経路の要求が振り分けで 404 になることを示す | 振り分けの登録を落としても、往復のテストと ESLint は形の正本の中しか見ないので通るため |
 | K2-4 | 日時の項目の名前を `_at` で終え、金額は `amount_minor` と `currency` の組にする | I15 の形を名前で見分ける |
 | K2-5 | 要素と結果の形に、JSON Schema に表せない制約（変換・独自の検査）を使わない | 往復のテストが食い違いとして落とす |
 | K2-6 | NDF の契約の使い方のデータ（受ける組・使う口・渡す環境変数・読むファイルと項目・区間の報告から読む値と項目）と、ランナーが NDF を起こす前に通す呼び出しの判定と、区間の報告（`unattended-report`）の読み取りの関数を `packages/contracts` に置く。区間の報告の読み取りは形の正本の区間の報告の形から作り、ランナー（#6）はこの関数だけで区間の報告を読む。置く Pull Request で、照合の定数 `CONTRACT_USE_REQUIRED` を真にする | F23 の照らす相手（決定 7）。真にした後は書き出しが無いと照合が失敗し、消しても必須のチェックが通らない |
@@ -176,8 +177,9 @@ flowchart TB
 ### 決定 8: 生成物の間の食い違いと I14 の表の欠けを形の正本の側で落とすため、往復のテストを 1 つ自前で書く
 
 - **質問**: 形の往復と、I14 のうち既存のツールで表せない照らし（MCP の道具と操作の表・人だけの操作の読み出し・機能の対応）を、どう落とすか
-- **選んだ案**: `tools/test/contracts-round-trip.test.ts` を 1 つ書く。操作ごとの見本と機械的な変形（必須の項目を 1 つ消す・型を変える・知らない項目を足す・配列を 1 件の値にする）を、zod の形・JSON Schema・OpenAPI の要素の形・MCP の道具の入力の形で検証し（JSON Schema は ajv の draft 2020-12）、通るか拒むかが違う組と、見本が通らない形を落とす。同じテストで、MCP の道具の名前と人だけでない操作の一致・人だけの操作に同じエンティティの人だけでない読む操作があること・F1〜F20 がどれかの操作の機能にあること・I12 と I15 の形を照らす。画面と操作の対応は、生成した呼び出しの使われない書き出し（knip）と型の検査で、経路の直書きは ESLint で落とすので、このテストは持たない
+- **選んだ案**: `tools/test/contracts-round-trip.test.ts` を 1 つ書く。操作ごとの見本と機械的な変形（必須の項目を 1 つ消す・型を変える・知らない項目を足す・配列を 1 件の値にする）を、zod の形・JSON Schema・OpenAPI の要素の形・MCP の道具の入力の形で検証し（JSON Schema は ajv の draft 2020-12）、通るか拒むかが違う組と、見本が通らない形を落とす。同じテストで、MCP の道具の名前と人だけでない操作の一致・人だけの操作に同じエンティティの人だけでない読む操作があること・F1〜F20 がどれかの操作の機能にあること・I12 と I15 の形を照らす。画面と操作の対応は、生成した呼び出しの使われない書き出し（knip）と型の検査で、経路の直書きは ESLint で落とすので、このテストは持たない。このテストの経路の照らし（登録の集合 = 操作の表）は形の正本の中だけを見るので、`infra` が API Gateway に実際に登録する経路は、合成の結果（`cdk.out` と同じ `Template`）の `AWS::ApiGatewayV2::Route` の `RouteKey` の集合を操作の表と比べる `infra/test/api-routes.test.ts`（#1 が書く）で、Lambda の振り分けが受ける経路は #2 の `apps/api/test/dispatch-routes.test.ts`（K2-7）で照らす。合成の結果を読むので、`HttpRoute`・`CfnRoute`・文字列の連結のどれで組んだ経路も当たる。OpenAPI の取り込み（`AWS::ApiGatewayV2::Api` の `Body`・`BodyS3Location`）・REST の API（`AWS::ApiGateway::*`）・すべてを受ける経路（`$default`・`{proxy+}`）は表と照らせないので、同じテストが置くこと自体を落とす
 - 採らなかった案: 画面と操作の対応を構文木で読む自前の検査（生成した呼び出しを操作ごとの書き出しにすれば、knip と型の検査で同じことを落とせる）
+- 採らなかった案: 実際の経路を照らさず、往復のテストの登録の照らしと ESLint の直書きの禁止だけに頼る（どちらも形の正本の中と文字列の形しか見ないので、`infra` か振り分けで登録を 1 件落としても通る）
 - 採らなかった案: fast-check で値を無作為に作る（zod から値を作る部品 `zod-fast-check` は最後のリリースが 2023-09 で、zod 4 と fast-check 4 を対応の範囲に持たない）
 - **代償**: #2 が操作の表を置くまで、テストは作り物の表でだけ落ちることを示し、リポジトリの表は照らさない
 - 作り方: ライブラリやサービスを使う・自前で作る（変形と比べ）
@@ -226,7 +228,7 @@ flowchart TB
 | 受け入れ条件 1・2・3（漏れ） | 実行の時に組み立てた作り物でない 12 桁・ARN・端点・token・実際の値を含むファイルを `docs/` の下に置いた一時の木を、`.gitleaks.toml` と重ねた設定で gitleaks に探させると当たり、報告と標準出力に値が現れない。作り物の値だけのファイルでは当たらない。途中のコミットで足して消した値が履歴の探しで当たる | 規則か許可を外す・`--redact` を外す・履歴を探さないと落ちる |
 | 受け入れ条件 1・6（横断の部品の外での直の利用） | 規則ごとに、違反を入れた文字列を `apps/` の置き場のパスで ESLint にかけると誤りが出て、`packages/core`・`infra/`・`tools/`・テストのパスでは出ない | 置き場の glob を外す・規則を消すと落ちる |
 | 受け入れ条件 1・4（I8） | 判定のモジュールの外で料金プランの値の書き出しを import する・画面で料金プランの名前の文字列を使うと誤りが出る | 判定のモジュールも対象にする・画面の規則を外すと落ちる |
-| 受け入れ条件 1・5（I14） | 画面・`apps/api`・`infra` に `/v1/` の文字列を書くと ESLint の誤り、生成した呼び出しを画面が使わないと knip の当たり、表の MCP の道具・人だけの操作の読み出し・機能の欠けを足した作り物の表で往復のテストが落ちる | どれかの照らしを外すと落ちる |
+| 受け入れ条件 1・5（I14） | 画面・`apps/api`・`infra` に `/v1/` の文字列を書くと ESLint の誤り、生成した呼び出しを画面が使わないと knip の当たり、表の MCP の道具・人だけの操作の読み出し・機能の欠けを足した作り物の表で往復のテストが落ちる。テストの中で組んだスタックから経路を 1 件落とす・表に無い経路を足す・OpenAPI の取り込みかすべてを受ける経路を置くと、合成の結果の経路のテストが落ちる | どれかの照らしを外すと落ちる |
 | 受け入れ条件 1・7（依存の向き） | 一時の木に `packages/core` から `apps/*`・`apps/*` どうし・`infra` から `apps/*`・画面の外から `react` の import（型だけを含む）を置くと dependency-cruiser が誤りを出す。`apps/web` の外の `*.tsx` で ESLint の誤りが出る | 置き場の規則を 1 つ外す・型だけの import を数えなくすると落ちる |
 | 受け入れ条件 1（形の往復） | 4 つの形のうち 1 つだけ必須の項目を外した作り物の操作で食い違いが返り、4 つがそろって見本を拒む操作で見本が拒まれたことが返る | 変形を作らない・見本が通ることを確かめないと落ちる |
 | 受け入れ条件 1・9（F23） | 固定の点の見本 1 件の判定を食い違わせた契約で終了コード 1、先端だけで食い違わせると終了コード 0 で要約に見本の id と契約のファイルのパスが並ぶ。どの起動でも固定の点を照らす | 先端の食い違いで失敗にする・Pull Request で照らさないと落ちる |
@@ -243,7 +245,7 @@ flowchart TB
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1 | 実装する | — | `eslint.config.js`、`.dependency-cruiser.cjs`（新設）、`.gitleaks.toml`（新設）、`knip.jsonc`（新設）、`.github/zizmor.yml`（新設）、`.github/workflows/ci.yml`、`.github/workflows/ndf-contract.yml`（新設）、`tools/checks/src/ndf-contract-check.ts`（新設）、`tools/test/ndf-contract-check.test.ts`（新設）、`tools/test/contracts-round-trip.test.ts`（新設）、`tools/test/lint-config.test.ts`（新設）、`tools/test/deps-config.test.ts`（新設）、`tools/test/knip-config.test.ts`（新設）、`tools/test/scan-config.integration.test.ts`（新設）、`tools/test/ci-definition.test.ts`、`tools/test/ref-check.test.ts`、`apps/api/src/users-handler.ts`、`apps/api/src/user-store.ts`、`apps/web/src/main.ts`、`apps/web/src/users-client.ts`、`infra/lib/app-stack.ts`、`tools/package.json`、`tools/tsconfig.json`、`package.json`、`package-lock.json`、`vitest.config.ts`、`.ndf/project.json`、`AGENTS.md` |
+| #1 | 実装する | — | `eslint.config.js`、`.dependency-cruiser.cjs`（新設）、`.gitleaks.toml`（新設）、`knip.jsonc`（新設）、`.github/zizmor.yml`（新設）、`.github/workflows/ci.yml`、`.github/workflows/ndf-contract.yml`（新設）、`tools/checks/src/ndf-contract-check.ts`（新設）、`tools/test/ndf-contract-check.test.ts`（新設）、`tools/test/contracts-round-trip.test.ts`（新設）、`tools/test/lint-config.test.ts`（新設）、`tools/test/deps-config.test.ts`（新設）、`tools/test/knip-config.test.ts`（新設）、`tools/test/scan-config.integration.test.ts`（新設）、`infra/test/api-routes.test.ts`（新設）、`tools/test/ci-definition.test.ts`、`tools/test/ref-check.test.ts`、`apps/api/src/users-handler.ts`、`apps/api/src/user-store.ts`、`apps/web/src/main.ts`、`apps/web/src/users-client.ts`、`infra/lib/app-stack.ts`、`tools/package.json`、`tools/tsconfig.json`、`package.json`、`package-lock.json`、`vitest.config.ts`、`.ndf/project.json`、`AGENTS.md` |
 
 ## 人へ残す判断
 

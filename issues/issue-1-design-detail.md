@@ -26,6 +26,7 @@ nd-factory/
 ├── apps/web/src/main.ts                   除外の注釈（#2）
 ├── apps/web/src/users-client.ts           除外の注釈（#4）
 ├── infra/lib/app-stack.ts                 除外の注釈（#2）
+├── infra/test/api-routes.test.ts        * 合成の結果の API Gateway の経路と操作の表の照らし
 └── tools/
     ├── package.json                       依存 @nd-factory/contracts・ajv・ajv-formats・yaml
     ├── tsconfig.json                      checks/src を含める
@@ -188,13 +189,34 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | 4 | F1〜F20 がどれかの操作の機能にある |
 | 5 | 利用者向けの操作の要求と応答の形が配列（I12） |
 | 6 | 名前が `_at` で終わる項目が UTC の日時の形、`amount_minor` を持つ要素が `currency` を必須にする（I15） |
-| 7 | HTTP の経路の登録の経路の集まりが、操作の表の経路の集まりと等しい |
+| 7 | HTTP の経路の登録の経路の集まりが、操作の表の経路の集まりと等しい（形の正本の中の照らし。実際の登録は下の「実際の経路の照らし」） |
 
 ### 単体テストの観点
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | 照らすこと 1〜7（作り物の操作の表をテストの中で組む） | 揃った表で 0 件 | 人だけの操作は 3 つの形で比べる。空の配列の見本 | 照らすことごとに、1 か所を壊した表（JSON Schema だけ必須の項目を外す・道具を 1 つ消す・人だけの操作の読み出しを消す・機能を消す・配列でない要求・時刻帯の無い日時・通貨の無い金額・表に無い経路）で 1 件 |
+
+## 実際の経路の照らし
+
+満たす決定: 設計の決定 8、受け入れ条件 1・5
+
+往復のテストの照らすこと 7 は形の正本の中の登録だけを見る。`infra` が API Gateway に実際に置く経路と、Lambda の振り分けが受ける経路は、次の 2 つのテストが操作の表と照らす。どちらも `check` の `npm run test` で走る。
+
+| テスト | 担当 | 読むもの | 照らすこと |
+| --- | --- | --- | --- |
+| `infra/test/api-routes.test.ts` | #1 | 今のテストと同じ組み方（`infra/test/support.ts` の作り物の設定）で合成した `AppStack` の `Template`（`cdk.out` に書く CloudFormation と同じ） | (a) `AWS::ApiGatewayV2::Route` の `RouteKey`（`<方法> <経路>`）の集合が、K2-3 の登録の利用者向けと機械向けの経路の集合と等しい。(b) `AWS::ApiGatewayV2::Api` が `Body`・`BodyS3Location` を持たない（OpenAPI の取り込みは経路を `Route` の資源に出さないため）。(c) `AWS::ApiGateway::*`（REST の API）の資源が無い。(d) `RouteKey` が `$default` でなく、経路が `{proxy+}` を含まない（すべてを受ける経路は表と照らせないため） |
+| `apps/api/test/dispatch-routes.test.ts` | #2（K2-7） | `apps/api` の振り分けの登録 | 振り分けが受ける `<方法> <経路>` の集合が操作の表の経路の集合と等しく、表に無い経路の要求が 404 になる |
+
+- 合成の結果を読むので、`HttpRoute`・`CfnRoute`・`addRoutes`・文字列の連結のどれで組んだ経路も同じ形で当たる
+- K2-3 の登録の書き出しが無い間は (a) を「相手が無い」の名前で飛ばし、(b)〜(d) は今のスタックで照らす（今の `/v1/users` の経路は (b)〜(d) に当たらない）。比べる関数 `routeKeysOf(template)` と `compareRoutes(keys, registry)` は、作り物の表とテストの中で組んだスタックで落ちることを示す
+- #2 の Pull Request の CI で、(a) が飛ばされずに走ったことをテストの出力で確かめる
+
+### 単体テストの観点（`infra/test/api-routes.test.ts`）
+
+| 対象 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `routeKeysOf`・`compareRoutes` と (b)〜(d) | 作り物の表と、その経路を `addRoutes` で置いたスタックで 0 件 | `HttpRoute` と `CfnRoute` で置いた経路も数える。同じ経路の方法違いを別に数える | 経路を 1 件落としたスタック・表に無い経路を足したスタックで 1 件ずつ。`Body` を持つ API・REST の API・`$default`・`{proxy+}` を置いたスタックでそれぞれ落ちる |
 
 ## NDF の契約の照合
 
