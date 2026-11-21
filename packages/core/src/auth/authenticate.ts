@@ -47,7 +47,7 @@ export type CognitoLogin = {
 export type Principal =
   // cognitoSub と bindingEpoch は sessions.create の冪等の鍵を結ぶ前後で同じにし、外した後に変えるために持つ（idempotencyPrincipalKey）。
   // sessionId は検証した token の origin_jti（そのサインインのセッションの識別子）。cognitoSub・sessionId・bindingEpoch は、
-  // login_links.create がつなぐ流れの行に書き、logins.create が同じセッション・同じ世代の対応の行から続けていることを照らす
+  // ログインをつなぐ流れ（#4）が、同じセッション・同じ世代の対応の行から続けていることを照らすのに使う
   | { readonly kind: "human"; readonly userId: Id<"usr">; readonly cognitoSub: string; readonly sessionId: string; readonly bindingEpoch: number }
   // Cognito の token は正しいが、まだ利用者へ結んでいない主体（初めてのサインイン）。sessions.create だけに渡し、そのハンドラーが
   // login の値（検証した主体とサーバーの側で得た IdP の主体）で利用者・ログインの組・IdP の主体の一意の行・Cognito の主体の対応の行を作る
@@ -160,19 +160,6 @@ export const SESSIONS_CREATE = "sessions.create";
 // 結ぶ要求をその場のサインインの流れに限り、前に漏れた token や外す前のセッションの token で結べないようにする
 export const LOGIN_BIND_FRESH_MS = 300_000;
 
-// ログインをつなぐ流れ（login_links.create が作る行）の期限。認可の画面での操作と戻りの間だけ使える
-export const LOGIN_LINK_TTL_MS = 600_000;
-
-// 外したログインの AdminUserGlobalSignOut の呼び出しの借りの長さ（docs/design/data.md の「Cognito の主体の対応の行」）。
-// 「行う予定」の行の実行は、外したときの世代の signing_out の行にこの長さの借りを取ってから呼び、借りの切れる前に呼び出しを打ち切る。
-// 方針 aws-control の再試行を使い切るまでの全体の期限（要求ごとの 5 秒 × 3 回と待ち）より長くし、借りが切れて他の実行が取るときに前の呼び出しを残さない
-export const SIGNOUT_LEASE_MS = 60_000;
-
-// AdminUserGlobalSignOut の応答を失った呼び出しの後、次の呼び出しを始めるまで待つ長さ（結果の分からない期間。対応の行の signout_unsettled_until）。
-// 借りの期限でクライアントの呼び出しを打ち切っても、Cognito に届いた実行は取り消せない。Cognito が受けた要求を処理し終えるか捨てるまでの上限として置き、
-// この期間が過ぎてから始めた呼び出しの成功だけで unlinked へ進める
-export const SIGNOUT_SETTLE_MS = 900_000;
-
 // 引き換えの token を受ける経路。ほかの経路は用途ごとの token（レーン・終わりの報告）だけを受ける
 const RUNNER_EXCHANGE = "runner.exchanges.create";
 const DB_PREP_EXCHANGE = "db_prep.exchanges.create";
@@ -222,40 +209,6 @@ async function human(token: string, operation: string, deps: AuthDeps): Promise<
   if (operation !== SESSIONS_CREATE) return unauthorized("unknown_principal");
   const login = await loginOf(checked.value, binding, deps);
   return login.ok ? ok({ kind: "newcomer", login: login.value }) : login;
-}
-
-// logins.create の要素の理由のコード（形の正本の logins.create の reasons）。link_invalid は流れを始め直す（流れの期限切れ・使い終え・
-// 別のセッションや世代の流れ・交換の失敗・選んだ IdP と違う・新しくないサインイン）、already_linked は IdP で別のアカウントを選び直す
-export type LinkFailure = "link_invalid" | "already_linked" | "unavailable";
-export type LinkVerdict = { readonly ok: true; readonly login: CognitoLogin } | { readonly ok: false; readonly reason: LinkFailure };
-
-// logins.create のハンドラーが、つなぐログインの access token を照らす。token は要求の本文から受けず、ハンドラーが
-// ログインをつなぐ流れの行（今の利用者とセッションに結んだ行）の code_verifier で認可コードを Cognito のトークンの端点と交換して得たものだけを渡す。
-// expectedIdp はその流れの行の idp（開始のときに選んだ IdP）。認可の URL の identity_provider はブラウザーの側で変えられるため、
-// サーバーの側で得た IdP がそれと違えば link_invalid にする。
-// 人の token と同じ検証・新しさの照らし・結び直せる状態の照らし・サーバーの側での IdP の主体の取得を通し、まだ結んでいない主体だけを返す。
-// 既に結んだ主体は、利用者プールから得た IdP が選んだ IdP と同じときだけ already_linked、ほかの外れ（選んだ IdP と違う既に結んだ主体を含む）は
-// link_invalid（どちらも要素の 409）、依存先に届かなければ unavailable。IdP の不一致は既に結んだことより先に照らす
-export async function verifyLoginToLink(loginToken: string, expectedIdp: CognitoLogin["idp"], deps: AuthDeps): Promise<LinkVerdict> {
-  try {
-    if (deps.cognito === null || !isJwtShape(loginToken)) return { ok: false, reason: "link_invalid" };
-    const checked = await deps.cognito(loginToken, deps.clock.epochMs());
-    if (!checked.ok) return { ok: false, reason: checked.reason === "unavailable" ? "unavailable" : "link_invalid" };
-    const binding = await deps.readers.userOfSubject(checked.value.sub);
-    if (binding !== null && binding.state === "bound") {
-      // 選んだ IdP と違うことを既に結んだことより先に照らす。流れを外れた戻り（identity_provider を変えた認可の URL）に、
-      // 別のアカウントを選び直す案内（already_linked）を出さず、流れを始め直させる
-      const identity = await deps.readers.cognitoIdentity(checked.value.username);
-      if (identity === null || identity.cognitoSub !== checked.value.sub || identity.idp !== expectedIdp) return { ok: false, reason: "link_invalid" };
-      return { ok: false, reason: "already_linked" };
-    }
-    const login = await loginOf(checked.value, binding, deps);
-    if (!login.ok) return { ok: false, reason: login.reason === "unavailable" ? "unavailable" : "link_invalid" };
-    if (login.value.idp !== expectedIdp) return { ok: false, reason: "link_invalid" };
-    return { ok: true, login: login.value };
-  } catch {
-    return { ok: false, reason: "unavailable" };
-  }
 }
 
 // 冪等の鍵の主体の部分（docs/design/api.md の「冪等の鍵」）。人と委任は主体の利用者。

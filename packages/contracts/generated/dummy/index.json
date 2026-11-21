@@ -3,7 +3,6 @@
   "sessions.delete": null,
   "users.get": null,
   "users.update": null,
-  "login_links.create": null,
   "logins.create": null,
   "logins.delete": null,
   "teams.list": null,

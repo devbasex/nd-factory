@@ -83,12 +83,12 @@ const userOps = OPERATIONS.filter((op) => op.endpoint === "user");
 const selfOps = OPERATIONS.filter((op) => op.endpoint !== "user");
 
 describe("OPERATIONS", () => {
-  it("利用者向けの 67 と自分向けの 9 を登録する", () => {
-    expect(USER_ROWS).toHaveLength(67);
+  it("利用者向けの 66 と自分向けの 9 を登録する", () => {
+    expect(USER_ROWS).toHaveLength(66);
     expect(SELF_ROUTES).toHaveLength(9);
-    expect(userOps).toHaveLength(67);
+    expect(userOps).toHaveLength(66);
     expect(selfOps).toHaveLength(9);
-    expect(OPERATIONS).toHaveLength(76);
+    expect(OPERATIONS).toHaveLength(75);
   });
 
   it("全体の設計の一覧の順に、利用者向け・自分向けの順で並ぶ", () => {

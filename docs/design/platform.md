@@ -215,7 +215,7 @@ graph TD
 | Aurora Serverless v2 | PostgreSQL（自動の一時停止を持つ版、LIB80）。出口の無いサブネット。書き手 1 台・読み手なし。最小 0 ACU。最大 ACU は設定のファイルで受ける | Value 6（使わない間は計算の費用が 0） |
 | Aurora の SG | タスクの SG からの 5432 だけを受ける | DB に触れるのはタスクだけ |
 | Cognito | 利用者プール。自分の登録を止め、Google（と GitHub）の IdP からだけ入る | Value 9（だれが入れるかをサーバーの側で決める） |
-| CloudFront と画面の S3 | 置き場は公開せず、配信は OAC で読む（LIB83）。料金は従量の課金（定額のプランに入らない）で、価格の区分は 100。画面の HTTP の経路を直に開けるよう、見る側の要求の段の CloudFront Function が、最後の区切りに `.` を持たない path（[画面の地図の 14 本](screens.md#http-の経路の一覧)と、サインインの手段をつなぐ戻り先 `/me/logins/return`。地図に無い path も画面が `/` へ移すため含める）の要求を `/index.html` に書き換えて S3 から返す。検索の値（`code`・`state`）は書き換えず画面へ渡す。`.` を持つ path（ビルドの出力・Service Worker・マニフェスト）はそのまま S3 から読み、無いファイルを `index.html` で隠さない（S3 の 403・404 を `index.html` に替える誤りの応答の設定は使わない）。検証は、`/me/logins/return?code=…&state=…` と地図の経路の 1 つを直に開いて `index.html` が返ることを配信の試しに入れる | Value 3（HTTPS の配信で Service Worker が動く）・Value 6 |
+| CloudFront と画面の S3 | 置き場は公開せず、配信は OAC で読む（LIB83）。料金は従量の課金（定額のプランに入らない）で、価格の区分は 100 | Value 3（HTTPS の配信で Service Worker が動く）・Value 6 |
 | 状態の S3 | 公開を止め、暗号化し、TLS だけ。NDF のファイルは 14 日で消す規則 | Value 7・Value 6 |
 | ECR | ランナーと DB の用意のイメージ。ライフサイクルの規則で古い版を消す（LIB85） | Value 6（保管の費用を抑える） |
 | Secrets Manager | 器は CDK が作り、値は人か API が入れる。名前は `<prefix>/<environment>/<用途>`（決定 90） | Value 7 |
