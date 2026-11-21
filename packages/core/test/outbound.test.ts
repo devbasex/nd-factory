@@ -294,6 +294,25 @@ describe("callHttp", () => {
     expect(result).toMatchObject(expected);
   });
 
+  it("全体の期限が本文の読み途中で切れると、中断を本文へ伝えない fetch でも本文の流れを取り消す", async () => {
+    const started = Date.now();
+    let cancelledAt: number | undefined;
+    // 頭書きはすぐ返し、本文は終わらない。要求の signal を見ないため、中断は流れへ届かない
+    const endless = () =>
+      new Response(new ReadableStream<Uint8Array>({ cancel: () => void (cancelledAt = Date.now()) }), { status: 200, headers: { "content-type": "application/json" } });
+    // 2 回の時間切れ（10 秒ずつ）と待ちの後、3 回目の本文の途中で全体の期限（30 秒）が来る。3 回目の試行の期限はその後
+    let count = 0;
+    const fetch = (input: Request) => {
+      count += 1;
+      return count < 3 ? hang(input) : Promise.resolve(endless());
+    };
+    const result = await settle(callHttp(get(), "http-github", { log: logs().log, clock: createClock(), fetch }));
+    expect(count).toBe(3);
+    expect(result).toMatchObject({ status: 0, body: null, class: "retryable" });
+    expect(cancelledAt).toBeDefined();
+    expect((cancelledAt ?? 0) - started).toBeLessThanOrEqual(30_000);
+  });
+
   it("頭書きと本文の合計が要求ごとの期限の中なら、その本文を返す", async () => {
     const { calls, fetch } = fakeFetch([slow(4_000, 4_000)]);
     const result = await settle(callHttp(get(), "http-github", { log: logs().log, clock: createClock(), fetch }));

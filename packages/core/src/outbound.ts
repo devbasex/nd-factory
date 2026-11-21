@@ -129,17 +129,26 @@ function parseBody(response: Response, text: string): unknown {
 const BODY_TIMED_OUT = Symbol("body timed out");
 
 // 試行ごとの期限。ky の timeout と同じく、試行の fetch を呼んだ時点から ms で切れる。
-// 本文の読み取りは、頭書きを待った時間を引いた残りの中で行う（頭書きと本文の合計が timeout_ms を超えない）
-type AttemptDeadline = { expired: Promise<typeof BODY_TIMED_OUT>; clear: () => void };
+// 本文の読み取りは、頭書きを待った時間を引いた残りの中で行う（頭書きと本文の合計が timeout_ms を超えない）。
+// release はタイマーを解き、読み途中の本文があればその場で期限切れとして読み手を取り消させる。
+// 全体の期限で ky が先に抜けたとき、fetch が中断を本文の流れへ伝えないと、ky の写しの取り消しは読み手の錠で失敗するため、ここで取り消す
+type AttemptDeadline = { expired: Promise<typeof BODY_TIMED_OUT>; release: () => void };
 
 function startAttemptDeadline(ms: number): AttemptDeadline {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let fire: () => void = () => undefined;
   const expired = new Promise<typeof BODY_TIMED_OUT>((resolve) => {
-    timer = setTimeout(() => resolve(BODY_TIMED_OUT), ms);
-    // 全体の期限で ky が先に切った後もこの待ちは残るため、プロセスの終わりを引き止めない
+    fire = () => resolve(BODY_TIMED_OUT);
+    timer = setTimeout(fire, ms);
     timer.unref?.();
   });
-  return { expired, clear: () => clearTimeout(timer) };
+  return {
+    expired,
+    release: () => {
+      clearTimeout(timer);
+      fire();
+    },
+  };
 }
 
 // 本文を試行の期限の中で読み切る。期限を過ぎたら読み手を取り消して流れを止め、印を返す。読み取りの誤り（接続の切断など）はそのまま投げる
@@ -199,11 +208,11 @@ export async function callHttp(req: OutboundRequest, policyName: HttpPolicyName,
   const policy = httpPolicyOf(policyName);
   const started = deps.clock.epochMs();
   let retries = 0;
-  // 試行ごとの期限は fetch を呼んだ時点で掛け直す。ky は試行ごとに fetch を呼ぶ
+  // 試行ごとの期限は fetch を呼んだ時点で掛け直す。ky は試行ごとに fetch を呼ぶ（前の試行の afterResponse は済んでいる）
   let deadline: AttemptDeadline | undefined;
   const baseFetch = deps.fetch ?? ((input: Request, init?: RequestInit) => globalThis.fetch(input, init));
   const fetchWithDeadline = (input: Request, init?: RequestInit): Promise<Response> => {
-    deadline?.clear();
+    deadline?.release();
     deadline = startAttemptDeadline(policy.timeout_ms);
     return baseFetch(input, init);
   };
@@ -249,7 +258,8 @@ export async function callHttp(req: OutboundRequest, policyName: HttpPolicyName,
     result = failureResult(error);
     lastRetriable = req.idempotent || (error instanceof Error && retryWhenNotDelivered({ error }));
   } finally {
-    deadline?.clear();
+    // 全体の期限で抜けた場合も、本文を読み途中の読み手を取り消す
+    deadline?.release();
   }
   if (result.class === "ok") deps.log.info("外への呼び出しが済んだ", summary(result.status, result.class));
   // 繰り返した回数が正でも、最後の失敗が繰り返す対象の外（冪等でない要求の 408・500・502・503・504・時間切れ）なら使い切ったと書かない
