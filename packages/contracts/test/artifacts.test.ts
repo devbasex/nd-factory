@@ -125,7 +125,14 @@ describe("buildDummy", () => {
     }
     expect(buildDummy(FIXTURE_LIST)?.empty).toEqual({ ok: true, items: [], next_cursor: null });
     expect(buildDummy(FIXTURE_CREATE)?.empty).toBeNull();
-    const get = defineOperation({ ...FIXTURE_LIST, name: "fixture_notes.get", order: null, owner: "#2" });
+    const get = defineOperation({
+      ...FIXTURE_LIST,
+      name: "fixture_notes.get",
+      order: null,
+      result: okItem(z.strictObject({ note_id: idOf("ntc"), title: z.string().min(1).max(200) })),
+      examples: null,
+      owner: "#2",
+    });
     expect(buildDummy(get)?.empty).toEqual({ ok: false, status: 404, reason: "not_found" });
   });
 
