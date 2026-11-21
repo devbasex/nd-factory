@@ -255,6 +255,34 @@ describe("writeAtomically", () => {
     expect(records().at(-1)).toMatchObject({ level: "error", msg: "書き込みを表が断った", result: "rejected", class: "rejected" });
   });
 
+  it.each(["ValidationError", "ItemCollectionSizeLimitExceeded"])(
+    "条件の外れと断った理由 %s が別の件に並ぶ取り消しは、条件の外れとして返さず、繰り返さずに元の例外のまま投げる",
+    async (code) => {
+      const { log, records } = logs();
+      // 件ごとに理由を対応させる: 0 番の版の比べが外れ、1 番の新しい行を表が断った
+      const thrown = Object.assign(new Error("canceled"), {
+        name: "TransactionCanceledException",
+        $metadata: { httpStatusCode: 400 },
+        CancellationReasons: [{ Code: "ConditionalCheckFailed" }, { Code: code }],
+      });
+      let calls = 0;
+      const db = {
+        transactWrite: async () => {
+          calls += 1;
+          return Promise.reject(thrown);
+        },
+      } as unknown as Parameters<typeof writeAtomically>[0];
+      const items = [
+        updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version: 1, set: { name: "x" }, onConflict: "version_mismatch" }),
+        putIfAbsent({ table: "events", item: { pk: "EVENT#1", sk: "EVENT", schema_version: 1 }, onConflict: "return_existing" }),
+      ];
+      const error = await writeAtomically(db, items, log).catch((e: unknown) => e);
+      expect(error).toBe(thrown);
+      expect(calls).toBe(1);
+      expect(records().at(-1)).toMatchObject({ level: "error", msg: "書き込みを表が断った", result: "rejected", class: "rejected", error: "TransactionCanceledException" });
+    },
+  );
+
   it.each([
     ["取り消しの理由が書き込みの呼びすぎ", Object.assign(new Error("throttled"), { name: "TransactionCanceledException", $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: "None" }, { Code: "ThrottlingError" }] }), "retryable"],
     ["名前の分からない 5xx", Object.assign(new Error("down"), { name: "SomethingUnexpected", $metadata: { httpStatusCode: 503 } }), "retryable"],

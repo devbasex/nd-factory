@@ -313,6 +313,9 @@ export async function writeAtomically(db: Db, items: readonly TransactItem[], lo
       await db.transactWrite(items);
       return { ok: true };
     } catch (error) {
+      // 断った取り消しの理由（ValidationError・ItemCollectionSizeLimitExceeded）が別の件に並ぶときは、条件の外れより先に元の例外のまま投げる。
+      // 断った件は直すまで通らず、条件の外れとして返すと呼び手が 409 や前の 1 件の結果にしてしまう
+      if (classifyFailure(error) === "rejected") throw error;
       const codes = cancellationCodes(error);
       // 条件の外れは繰り返さず、件の番号と扱いへ訳す。ほかの失敗は投げる（一時の失敗による取り消しだけ p-retry が繰り返す）
       if (codes !== null && codes.includes("ConditionalCheckFailed")) {
