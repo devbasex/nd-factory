@@ -272,6 +272,36 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
         code: `declare const other: { randomUUID(): string };\ndeclare const f: boolean;\nlet c = other;\nif (f) c = await import("${source}");\nexport const id = c.randomUUID();\n`,
         ruleId: CRYPTO_RULE,
       },
+      {
+        name: `${source} の動的な import を受けた変数に論理の代入をした後の randomUUID の参照（代入が飛ばされる道筋）`,
+        code: `declare const other: { randomUUID(): string };\nlet c: typeof other = await import("${source}");\nc ??= other;\nexport const id = c.randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import の既定の値つきの分割代入からの randomUUID の参照`,
+        code: `const { default: c = {} as { randomUUID(): string } } = await import("${source}");\nexport const id = c.randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import の約束を条件の式の分岐に置いた変数からの randomUUID の参照`,
+        code: `declare const flag: boolean;\nconst p = flag ? import("${source}") : import("${source}");\nexport const id = (await p).randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import の連鎖の代入の外側の変数からの randomUUID の参照`,
+        code: `let a, b;\na = b = await import("${source}");\nexport const id = a.randomUUID() + String(b);\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import の約束の連鎖の代入の外側の変数からの randomUUID の参照`,
+        code: `let a, b;\na = b = import("${source}");\nexport const id = (await a).randomUUID() + String(b);\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import を受けた外側の変数を呼び出しの後に関数の中で読む randomUUID の参照`,
+        code: `declare const other: { randomUUID(): string };\nlet c: typeof other = other;\nconst load = async () => {\n  c = await import("${source}");\n};\nawait load();\nexport const id = c.randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
     ]),
     { name: "uuid の動的な import", code: 'export const m = await import("uuid");\n', ruleId: "no-restricted-syntax" },
     { name: "node:console の動的な import", code: 'export const m = await import("node:console");\n', ruleId: "no-restricted-syntax" },
@@ -322,6 +352,15 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
       "export const id = c.randomUUID();",
       'const loading = import("crypto");',
       'export const h2 = (await loading).createHash("sha256");',
+      // 関数の中で別の値に上書きした後の参照は、関数の外の書き込みが届かない
+      "export function pick() {",
+      "  c = otherProvider;",
+      "  return c.randomUUID();",
+      "}",
+      // 別の値で上書きした後の論理の代入は、どちらの道筋でもモジュールの値を持たない
+      "c = otherProvider;",
+      "c ??= otherProvider;",
+      "export const id2 = c.randomUUID();",
       "",
     ].join("\n");
     for (const path of APP_PATHS) {

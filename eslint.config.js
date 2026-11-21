@@ -61,6 +61,30 @@ function keyName(key, computed) {
   return staticString(key);
 }
 
+/** 既定の値つきの束縛（`{ a: c = x }`）の、既定の値 `x` からの書き込みの参照 */
+const isDefaultValueWrite = (ref) =>
+  ref.writeExpr?.parent?.type === "AssignmentPattern" && ref.writeExpr.parent.right === ref.writeExpr;
+
+/**
+ * `node` の評価の値がそのまま評価の値になる親の式（条件の式の分岐・論理の式の両辺・並びの式の最後・
+ * 代入の式の右辺と論理の代入の左辺）。ほかは null
+ */
+function passThroughParent(node) {
+  const parent = node.parent;
+  switch (parent?.type) {
+    case "ConditionalExpression":
+      return parent.consequent === node || parent.alternate === node ? parent : null;
+    case "LogicalExpression":
+      return parent;
+    case "SequenceExpression":
+      return parent.expressions.at(-1) === node ? parent : null;
+    case "AssignmentExpression":
+      if (parent.right === node) return parent.operator === "=" || LOGICAL_ASSIGN.has(parent.operator) ? parent : null;
+      return parent.left === node && LOGICAL_ASSIGN.has(parent.operator) ? parent : null;
+  }
+  return null;
+}
+
 /** 型だけの import・export の宣言か指定子 */
 const typeOnly = (node) => node.importKind === "type" || node.exportKind === "type";
 
@@ -68,6 +92,10 @@ const typeOnly = (node) => node.importKind === "type" || node.exportKind === "ty
 const INITIAL = Symbol("initial");
 /** 読み出し地点に届く書き込みが分からないとき（すべての書き込みが届き得る） */
 const ANY = Symbol("any");
+/** 右辺を評価するかが左辺の値で決まる代入の演算子 */
+const LOGICAL_ASSIGN = new Set(["||=", "&&=", "??="]);
+/** 評価の途中でほかのコード（ほかの関数の中の書き込み）が走り得る式 */
+const RUNS_OTHER_CODE = new Set(["CallExpression", "NewExpression", "TaggedTemplateExpression", "AwaitExpression", "YieldExpression"]);
 
 /**
  * `node:crypto`（`crypto`）の `randomUUID`・`randomBytes` を、どの書き方で取り出しても落とす規則。
@@ -75,8 +103,9 @@ const ANY = Symbol("any");
  * からの取り出しを見ないので、モジュールの値を束縛まで追って、対象の関数を取り出したところだけを落とす。
  * 見るのは名前つきの import・名前空間と既定の import の束縛・動的な import（`await` と `.then` の引数。
  * 約束を変数に置いてからのものを含む）・再書き出しで、モジュールの値（とその `.default`）の性質の参照・
- * 分割代入・別の名前への代入と、モジュールの値を持つ束縛の書き出しを追う。変数の読み出しは、その地点に
- * 届き得る書き込み（コードの道筋で判定する）のどれかがモジュールの値のときだけモジュールとして扱う
+ * 分割代入・別の名前への代入（条件の式の分岐・論理の式・連鎖の代入の評価の値を含む）と、モジュールの値を持つ
+ * 束縛の書き出しを追う。変数の読み出しは、その地点に届き得る書き込み（コードの道筋で判定する）のどれかが
+ * モジュールの値のときだけモジュールとして扱う
  */
 const noCryptoIdRule = {
   meta: { type: "problem", schema: [], messages: { banned: CRYPTO_MESSAGE } },
@@ -112,6 +141,13 @@ const noCryptoIdRule = {
     const endSegment = (segment) => current.at(-1).delete(segment);
     const codePathStack = [];
 
+    // 論理の代入（`c ||= x`・`c &&= x`・`c ??= x`）の書き込みは、右辺を評価した道筋の右辺の終わりにだけ置く
+    const logicalWriteKeys = new Map();
+    const logicalWriteKey = (assignment) => {
+      if (!logicalWriteKeys.has(assignment)) logicalWriteKeys.set(assignment, { logicalWrite: assignment });
+      return logicalWriteKeys.get(assignment);
+    };
+
     // import の式と import の宣言の束縛は、すべての節を読んだ後に追う（届く書き込みの判定に道筋が要る）
     const seeds = [];
 
@@ -123,12 +159,18 @@ const noCryptoIdRule = {
       return null;
     }
 
-    /** 書き込みの参照の評価が終わる地点（代入の式・宣言の終わり。ほかは識別子そのもの） */
+    /**
+     * 書き込みの参照の評価が終わる地点（代入の式・宣言の終わり。論理の代入は右辺を評価した道筋の右辺の終わり。
+     * ほかは識別子そのもの）
+     */
     function writePosition(identifier) {
       for (let node = identifier; node.parent; node = node.parent) {
         const parent = node.parent;
         if (parent.type === "VariableDeclarator") return parent.id === node ? parent : identifier;
-        if (parent.type === "AssignmentExpression") return parent.left === node ? parent : identifier;
+        if (parent.type === "AssignmentExpression") {
+          if (parent.left !== node) return identifier;
+          return LOGICAL_ASSIGN.has(parent.operator) ? logicalWriteKey(parent) : parent;
+        }
         if (!["ObjectPattern", "ArrayPattern", "Property", "AssignmentPattern", "RestElement"].includes(parent.type)) {
           return identifier;
         }
@@ -139,24 +181,35 @@ const noCryptoIdRule = {
     const functionOf = (ref) => ref.from.variableScope.block;
     const reachCache = new Map();
 
-    /** 読み出しの参照に届き得る書き込みの参照（と INITIAL）の集まり。分からなければ ANY を含む */
+    /**
+     * 読み出しの参照に届き得る書き込みの参照（と INITIAL）の集まり。分からなければ ANY を含む。
+     * ほかの関数の中の書き込みは、読み出しの関数の中の書き込みを経ずに読み出しへ届く道筋に、ほかのコードが
+     * 走り得る地点（呼び出し・await・yield）か関数の入り口があるときだけ届き得るものとする
+     */
     function reachingWrites(variable, readRef) {
       if (reachCache.has(readRef)) return reachCache.get(readRef);
       const result = new Set();
       const writesAt = new Map();
+      const outerWrites = [];
       for (const ref of variable.references) {
         if (!ref.isWrite()) continue;
-        // ほかの関数の中の書き込みは、いつ走るか分からないので届き得るものとする
-        if (functionOf(ref) !== functionOf(readRef)) result.add(ref);
-        else writesAt.set(writePosition(ref.identifier), ref);
+        if (functionOf(ref) !== functionOf(readRef)) {
+          outerWrites.push(ref);
+          continue;
+        }
+        // 既定の値つきの分割代入は、同じ識別子に分割元と既定の値の書き込みの参照が同じ地点で並ぶ
+        const key = writePosition(ref.identifier);
+        writesAt.set(key, [...(writesAt.get(key) ?? []), ref]);
       }
+      const addOuter = () => outerWrites.forEach((ref) => result.add(ref));
       const home = variable.scope.variableScope.block;
       const visited = new Set();
       const scan = (segment, before) => {
         const events = segmentEvents.get(segment) ?? [];
         for (let i = before - 1; i >= 0; i--) {
-          const write = writesAt.get(events[i]);
-          if (write !== undefined) return void result.add(write);
+          const writes = writesAt.get(events[i]);
+          if (writes !== undefined) return void writes.forEach((ref) => result.add(ref));
+          if (RUNS_OTHER_CODE.has(events[i].type)) addOuter();
         }
         if (segment.prevSegments.length === 0) {
           result.add(codePathNode.get(segmentCodePath.get(segment)) === home ? INITIAL : ANY);
@@ -210,7 +263,10 @@ const noCryptoIdRule = {
       if (target.type === "Identifier") {
         const variable = findVariable(target, target.name);
         if (variable === null) return;
-        const write = initial ? INITIAL : variable.references.find((ref) => ref.identifier === target);
+        // 既定の値つきの分割代入は既定の値からの書き込みの参照も持つので、分割元からの書き込みを選ぶ
+        const write = initial
+          ? INITIAL
+          : variable.references.find((ref) => ref.identifier === target && !isDefaultValueWrite(ref));
         return trackWrite(variable, write ?? INITIAL, kind);
       }
       if (kind === "module" && target.type === "ObjectPattern") return checkPattern(target, initial);
@@ -233,6 +289,8 @@ const noCryptoIdRule = {
     /** `node` の評価の値がモジュール（かその `.default`）のとき、その使われ方を見る */
     function checkModuleValue(node) {
       const parent = node.parent;
+      const through = passThroughParent(node);
+      if (through !== null) checkModuleValue(through);
       switch (parent?.type) {
         case "TSAsExpression":
         case "TSNonNullExpression":
@@ -252,7 +310,7 @@ const noCryptoIdRule = {
           if (parent.init === node) checkTarget(parent.id, "module");
           return;
         case "AssignmentExpression":
-          if (parent.right === node) checkTarget(parent.left, "module");
+          if (parent.right === node && passThroughParent(node) !== null) checkTarget(parent.left, "module");
           return;
         case "ExportDefaultDeclaration":
           return report(parent);
@@ -262,6 +320,8 @@ const noCryptoIdRule = {
     /** 動的な import の約束の値（`await` か `.then` の関数の最初の引数・変数への保存）を見る */
     function checkImportPromise(node) {
       const parent = node.parent;
+      const through = passThroughParent(node);
+      if (through !== null) checkImportPromise(through);
       switch (parent?.type) {
         case "TSAsExpression":
         case "TSNonNullExpression":
@@ -274,7 +334,7 @@ const noCryptoIdRule = {
           if (parent.init === node) checkTarget(parent.id, "promise");
           return;
         case "AssignmentExpression":
-          if (parent.right === node) checkTarget(parent.left, "promise");
+          if (parent.right === node && passThroughParent(node) !== null) checkTarget(parent.left, "promise");
           return;
         case "ExportDefaultDeclaration":
           return report(parent);
@@ -310,6 +370,14 @@ const noCryptoIdRule = {
       Identifier: record,
       "VariableDeclarator:exit": record,
       "AssignmentExpression:exit": record,
+      // ほかのコードが走り得る地点（ほかの関数の中の書き込みが届き得る）
+      ...Object.fromEntries([...RUNS_OTHER_CODE].map((type) => [`${type}:exit`, record])),
+      "*:exit"(node) {
+        const parent = node.parent;
+        if (parent?.type === "AssignmentExpression" && parent.right === node && LOGICAL_ASSIGN.has(parent.operator)) {
+          record(logicalWriteKey(parent));
+        }
+      },
       ImportDeclaration(node) {
         if (!isCryptoSource(node.source) || typeOnly(node)) return;
         for (const spec of node.specifiers) {
