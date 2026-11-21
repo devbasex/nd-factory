@@ -15,7 +15,16 @@ import {
   stackName,
 } from "../lib/naming.ts";
 import { SettingsFileError, loadSettingsFile } from "../lib/settings-file.ts";
-import { ProfileError, type Target, readBootstrapVersion, resolveProfile } from "./aws-reader.ts";
+import {
+  ProfileError,
+  type Target,
+  readBootstrapVersion,
+  readCostAllocationTags,
+  readGetAzsCount,
+  readOrganizationManager,
+  resolveProfile,
+} from "./aws-reader.ts";
+import { MISSING_CHECKS, type MissingContext, collectMissingSettings, printMissingSettings } from "./missing-settings.ts";
 
 // 設置のコマンド。diff は確かめ・合成・差分・確認の値を出して止まり、AWS へ書かない。
 // deploy は diff が保存した合成の結果を合成し直さずに、確認の値が同じときだけ反映する。
@@ -49,6 +58,10 @@ export type SetupDeps = {
   run: (command: string, args: string[], options: RunOptions) => Promise<number>;
   resolveProfile: (profile: string) => Promise<Target>;
   readBootstrapVersion: (target: Target) => Promise<number | null>;
+  // 足りない設定の一覧のために読むもの（読むだけ）
+  readCostAllocationTags: MissingContext["readCostAllocationTags"];
+  readOrganizationManager: MissingContext["readOrganizationManager"];
+  readGetAzsCount: MissingContext["readGetAzsCount"];
   files: SetupFiles;
   digest: (dir: string) => Promise<string>;
   stdout: (line: string) => void;
@@ -300,6 +313,19 @@ export async function runDiff(a: DiffArgs, deps: SetupDeps): Promise<number> {
   printNames(settings, stacks, target, deps);
   deps.stdout(`確認の値: ${confirm}`);
   deps.stdout(`差分を承認した後に打つ: npm run nd-setup -- deploy --profile ${a.profile} --assembly ${out} --confirm ${confirm}`);
+
+  // 足りない設定は反映を止めないため、終了コードを変えない
+  const missing = await collectMissingSettings(
+    {
+      settings,
+      target,
+      readCostAllocationTags: deps.readCostAllocationTags,
+      readOrganizationManager: deps.readOrganizationManager,
+      readGetAzsCount: deps.readGetAzsCount,
+    },
+    MISSING_CHECKS,
+  );
+  printMissingSettings(missing, deps.stdout);
   return EXIT.OK;
 }
 
@@ -418,6 +444,9 @@ export function defaultDeps(): SetupDeps {
     run: runCommand,
     resolveProfile,
     readBootstrapVersion,
+    readCostAllocationTags,
+    readOrganizationManager,
+    readGetAzsCount,
     files: defaultFiles,
     digest: assemblyDigest,
     stdout: (line) => process.stdout.write(`${line}\n`),
