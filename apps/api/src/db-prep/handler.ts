@@ -179,15 +179,27 @@ function sqlFailure(e: unknown): Ran {
 
 type SessionWait = { now: () => number; sleep?: (ms: number) => Promise<void> };
 
-async function runCreate(sql: SqlExecutor, project: ProjectIdent, password: string, wait: SessionWait): Promise<Ran> {
+// 作成。applied なら promote で結んだ版へ AWSCURRENT を移す。promote の失敗は SQL の失敗として記さずに落ちる
+async function runCreate(
+  sql: SqlExecutor,
+  project: ProjectIdent,
+  password: string,
+  wait: SessionWait,
+  promote: () => Promise<void>,
+): Promise<Ran> {
   try {
     if ((await claimBinding(sql, project)) === "conflict") return failed("guard_conflict");
     if ((await checkIsolationGuard(sql, project)) === "conflict") return failed("guard_conflict");
     await provisionProject(sql, { ...project, password }, wait);
-    return { outcome: { result: "applied" } };
   } catch (e) {
     return sqlFailure(e);
   }
+  try {
+    await promote();
+  } catch (e) {
+    throw new StageFailure("promote", e);
+  }
+  return { outcome: { result: "applied" } };
 }
 
 // 差し替え。古い接続の残りが 0 と読んだら、差し替えの鎖と番号 n の読みを持ったまま promote で結んだ版へ AWSCURRENT を移し、
@@ -298,11 +310,7 @@ export function createDbPrepHandler(deps: PrepDeps): (event: unknown) => Promise
       // 分かる結果だけ（作るなら applied、差し替えなら applied か記した番号 = n の rotation_superseded。差し替えは鎖の中で移す）
       let ran: Ran;
       if (inv.kind === "create") {
-        ran = await runCreate(sql, project, password, wait);
-        if (ran.outcome.result === "applied") {
-          stage = "promote";
-          await promote();
-        }
+        ran = await runCreate(sql, project, password, wait, promote);
       } else {
         ran = await runRotate(sql, project, password, inv.rotation_seq, wait, promote);
       }
