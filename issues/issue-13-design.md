@@ -404,7 +404,7 @@ sequenceDiagram
 | DB の用意そのもの | 今の設計のまま、ECS の DB の用意のタスク | RDS Data API（LIB14。API の関数から VPC に入らずに SQL を打て、タスク・イメージ・引き換えの経路・時間切れの見回りを外せる見込みがある。ただし全体の設計の決定 83 が使わないと決めており、`data.md`・`api.md` に及ぶため、この課題では乗り換えず #55 で確かめる） |
 | イメージを作って ECR へ push する | Docker の CLI と AWS SDK の ECR のクライアント | CDK の `DockerImageAsset`（決定 1）・`cdk-ecr-deployment`（LIB15。アセットを写すため bootstrap のリポジトリに古い版が残る）・`cdk-docker-image-deployment`（LIB16。版が 0.0 のままで、中継の ECR にアセットの仕組みで置き、ダイジェストで引く形を持たない） |
 | ダイジェストを合成へ渡す | CDK の context（`cdk synth -c nd:images=<一覧のファイル>`。スタックは `node.tryGetContext` で読む） | 自前の環境の値（CDK に値を渡す標準の仕組みがあり、要らない） |
-| スタックの決まりの検査 | `aws-cdk-lib/assertions` の `Template` で照らす今の形 | `cdk-nag`（LIB17。広く使われる規則の集まりだが、この課題の 8 つの決まり（NAT 0 件・ECS のサービス 0 件など）は製品の決まりで、独自の規則を書く手間は変わらない） |
+| スタックの決まりの検査 | `aws-cdk-lib/assertions` の `Template` で照らす今の形 | `cdk-nag`（LIB17。週の取得が 88 万回を超え保守の続く規則の集まりだが、この課題の 8 つの決まり（NAT 0 件・ECS のサービス 0 件など）は製品の決まりで、独自の規則を書く手間は変わらない） |
 | 予算と知らせ | CDK の `CfnBudget`（AWS の公式の構成部品）と SNS | — |
 | 足りない設定の一覧 | 自前の小さい関数の並び | 当たるライブラリが無い（設置のコマンドの出力の欄） |
 
@@ -500,7 +500,7 @@ sequenceDiagram
 | LIB14 | RDS Data API | — | AWS のサービス | — | 無し | 条件つきで満たす。HTTPS の端点で SQL を打て、Lambda を VPC に入れずに届く。資格情報は Secrets Manager の秘密の器から使う。Aurora Serverless v2 では、一時停止の間に要求が来ると書き手を再開してから処理する | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html （2026-11-21） |
 | LIB15 | `cdk-ecr-deployment` | 4.2.92 | Apache-2.0 | 2026-11-17 | 無し | 満たさない。CDK のアセットのイメージを別の ECR へ写すため、写す元の bootstrap のリポジトリに古い版が残る | `npm view cdk-ecr-deployment version license time.modified`（2026-11-21） |
 | LIB16 | `cdk-docker-image-deployment` | 0.0.1042 | Apache-2.0 | 2026-11-16 | 無し | 満たさない。手元のイメージをアセットの仕組みで中継の ECR に置き、CodeBuild がタグを付けて送り先へ push する。版が 0.0 のままで、送り先をダイジェストで引く形は書かれていない | https://github.com/cdklabs/cdk-docker-image-deployment ・ `npm view cdk-docker-image-deployment version license time.modified`（2026-11-21） |
-| LIB17 | `cdk-nag` | — | Apache-2.0 | — | 無し | 条件つきで満たす。CDK のスタックを規則の集まりで照らす広く使われる道具で、独自の規則も書ける | 試していない（下の「確かめられなかったこと」） |
+| LIB17 | `cdk-nag` | 3.1.0 | Apache-2.0 | 2026-11-20 | 無し | 条件つきで満たす。CDK のスタックを規則の集まりで照らし、独自の規則も書ける。npm の週の取得は 883,437 回（2026-11-13〜19）で、2026-11-20 にも更新があり保守が続く | `npm view cdk-nag version license time.modified`・https://api.npmjs.org/downloads/point/last-week/cdk-nag （2026-11-21） |
 | LIB18 | Aurora PostgreSQL の TLS（`rds.force_ssl`） | — | AWS のサービス | — | 無し | 満たす。`rds.force_ssl` を 1 にすると TLS でない接続を断る。既定は Aurora PostgreSQL 17 以上で 1、16 以下で 0 | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.Security.html （2026-11-21） |
 | LIB19 | ECS の `RunTask` のタグの伝播（`propagateTags`） | — | AWS のサービス | — | 無し | 満たす。`propagateTags` に `TASK_DEFINITION` を渡すと、タスクの定義のタグを作る時に実行するタスクへ写す。値を渡さなければ写さず、作った後には `TagResource` でしか付けられない | https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RunTask.html （2026-11-21） |
 | LIB20 | AWS Budgets の SNS の知らせ | — | AWS のサービス | — | 無し | 満たす。トピックの資源の方針で `budgets.amazonaws.com` に `SNS:Publish` を許す。許していないトピックは「Invalid SNS topic」として受けない。暗号化したトピックは追加の許しが要る | https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-sns-policy.html （2026-11-21） |
@@ -509,7 +509,6 @@ sequenceDiagram
 
 | 対象 | 試した手段 | 結果と理由 |
 | --- | --- | --- |
-| `cdk-nag` の版と保守の様子 | 試していない | 独自の規則を書く手間が変わらないため採らないと決め、版を取得しなかった |
 | DynamoDB の PITR とストリームの単価 | 試していない | 見込みの額への効きが小さいため、実測の段で単価の頁を読む |
 
 調べた量: 候補 17 件・取得の試み 19 回（2026-11-21。レビューの指摘で LIB6 とコスト配分タグの頁を、イメージの置き場の作り直しで LIB7 を、MVV 版 2 の Value 15 に照らして LIB8〜LIB17 を足した）。
