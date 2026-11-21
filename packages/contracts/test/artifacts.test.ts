@@ -347,6 +347,20 @@ describe("buildDummy", () => {
     expect(checkExamples([written])).toEqual([]);
   });
 
+  it("examples.empty を求める診断は、足した必須の項目の名前を含めない", () => {
+    const op = defineOperation({
+      name: "runner.fixture_contacts.list",
+      endpoint: "runner",
+      access: "write",
+      item: z.strictObject({ lane_id: z.string() }),
+      result: okList(z.strictObject({ contact_id: z.string() })).extend({ "ops@corp.test": z.int().min(0) }),
+      owner: "#2",
+    });
+    const problems = checkExamples([op]);
+    expect(problems.some((p) => p.scene === "empty" && p.problem.includes("examples.empty"))).toBe(true);
+    for (const p of problems) expect(p.problem).not.toContain("corp.test");
+  });
+
   it("省ける項目だけを足した list の封筒は、examples.empty なしで空の一覧が形を通る", () => {
     const list = defineOperation({
       name: "runner.fixture_pages.list",

@@ -455,8 +455,9 @@ export function checkExamples(ops: readonly OperationDef[]): ExampleProblem[] {
     const schema = resultSchemaOf(op);
     const examples = examplesOf(op);
     const extra = extraListKeysOf(op);
+    // 項目の名前は診断に載せない（キーもメールや ID でありうり、見本の照らしでは伏せる値を CI のログに残さない）
     if (extra.length > 0 && !(op.examples && "empty" in op.examples)) {
-      problems.push({ operation: op.name, scene: "empty", index: 0, problem: `一覧の封筒が ok・items・next_cursor のほかに必須の項目（${extra.join("・")}）を持つため、examples.empty を書く` });
+      problems.push({ operation: op.name, scene: "empty", index: 0, problem: `一覧の封筒が ok・items・next_cursor のほかに必須の項目を持つため、examples.empty を書く` });
     }
     const scenes: Array<[ExampleScene, unknown[]]> = [
       ["normal", examples.normal],
