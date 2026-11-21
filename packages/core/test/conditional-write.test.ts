@@ -22,7 +22,7 @@ const TEAM = "team_01890a5d-ac96-774b-bcce-b302099a8057";
 
 function logs() {
   const lines: string[] = [];
-  return { records: () => lines.map((l) => JSON.parse(l) as Record<string, unknown>), log: createLogger({ request_id: "req-1", fn: "api" }, (l) => lines.push(l)) };
+  return { records: () => lines.map((l) => JSON.parse(l) as Record<string, unknown>), log: createLogger({ request_id: "req-1", fn: "api", endpoint: "user" }, (l) => lines.push(l)) };
 }
 
 const teamRow = (version = 1) => ({ pk: `TEAM#${TEAM}`, sk: "TEAM", schema_version: 1, version, team_id: TEAM, name: "acme" });
