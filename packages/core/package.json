@@ -1,0 +1,25 @@
+{
+  "name": "@nd-factory/core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./clock": "./src/clock.ts",
+    "./ids": "./src/ids.ts",
+    "./redact": "./src/redact.ts",
+    "./log": "./src/log.ts",
+    "./retry": "./src/retry.ts",
+    "./outbound": "./src/outbound.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@nd-factory/contracts": "*",
+    "ky": "2.2.0",
+    "pino": "10.4.0",
+    "uuid": "14.0.3"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-dynamodb": "3.1170.0"
+  }
+}
