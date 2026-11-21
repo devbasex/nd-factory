@@ -5,9 +5,12 @@ const { read, write, human } = ownedBy("#5");
 
 // 全部か無かの上限は要素 1 つの書き込みの件の数から見積もる（詳細設計の「全部か無かの上限」）。
 // projects.create はプロジェクト・主リポジトリ・割り当て・記録の行・冪等の済みの行の 5 件、
-// repositories.add はリポジトリの行・プロジェクトの行の照らし・記録の行・冪等の済みの行の 4 件
-export const PROJECTS_CREATE_MAX_ITEMS = 20;
-export const REPOSITORIES_ADD_MAX_ITEMS = 25;
+// repositories.add はリポジトリの行・プロジェクトの行の照らし・記録の行・冪等の済みの行の 4 件。
+// 主体が人のときは要求元の対応の行とセッションの取り消しの行の照らしの 2 件が 1 回だけ入るため、
+// 上限は 100 件から 2 件を残して決める（データの文書の「人の書き込みの要求元の照らし」）。
+// projects.create は 19 × 5 + 2 = 97 件、repositories.add は 24 × 4 + 2 = 98 件
+export const PROJECTS_CREATE_MAX_ITEMS = 19;
+export const REPOSITORIES_ADD_MAX_ITEMS = 24;
 
 export const PROJECT_OPERATIONS = [
   read("projects.list", ["F4", "F7"]),
