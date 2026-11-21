@@ -6,7 +6,11 @@
     "./settings": "./src/settings.ts",
     "./users-api": "./src/users-api.ts",
     "./web-config": "./src/web-config.ts",
-    "./exit-codes": "./src/exit-codes.ts"
+    "./exit-codes": "./src/exit-codes.ts",
+    "./values": "./src/values.ts",
+    "./ids": "./src/ids.ts",
+    "./tokens": "./src/tokens.ts",
+    "./reasons": "./src/reasons.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."

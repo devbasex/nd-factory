@@ -1,0 +1,44 @@
+// 理由のコードの共通の集まり。操作ごとのコードは操作の定義の reasons に足す（docs/design/api.md の「誤りの形」）
+
+export type ReasonStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 503;
+
+// 理由が起きうる操作の条件。always はどの操作にも、ほかは操作の印が当たるときだけ入る
+export type ReasonWhen = "always" | "write" | "idempotency" | "all_or_nothing" | "human_only_per_item";
+
+export type ReasonDef = {
+  readonly code: string;
+  readonly status: ReasonStatus;
+  readonly when: ReasonWhen;
+};
+
+// 理由のコードの形
+export const REASON_CODE = /^[a-z][a-z0-9_]*$/;
+
+// 要求全体の理由のコード。要素の結果でなく problem+json の本文で返す
+export const REQUEST_REASONS = [
+  { code: "body_not_json", status: 400, when: "always" },
+  { code: "body_not_array", status: 400, when: "always" },
+  { code: "body_empty", status: 400, when: "always" },
+  { code: "too_many_items", status: 400, when: "always" },
+  { code: "duplicate_item", status: 400, when: "always" },
+  { code: "cursor_invalid", status: 400, when: "always" },
+  { code: "unauthorized", status: 401, when: "always" },
+  { code: "human_only", status: 403, when: "always" },
+  { code: "scope_insufficient", status: 403, when: "always" },
+  { code: "unavailable", status: 503, when: "always" },
+  { code: "audit_unavailable", status: 503, when: "always" },
+  { code: "too_many_requests", status: 429, when: "always" },
+] as const satisfies readonly ReasonDef[];
+
+// どの操作の要素にも出うる理由のコード。when が操作の印に当たるものだけを itemReasonsOf が合わせる
+export const ITEM_REASONS = [
+  { code: "item_invalid", status: 400, when: "always" },
+  { code: "not_found", status: 404, when: "always" },
+  { code: "role_insufficient", status: 403, when: "always" },
+  { code: "human_only", status: 403, when: "human_only_per_item" },
+  { code: "version_mismatch", status: 409, when: "write" },
+  { code: "state_mismatch", status: 409, when: "write" },
+  { code: "idempotency_key_reused", status: 422, when: "idempotency" },
+  { code: "in_progress", status: 409, when: "idempotency" },
+  { code: "not_applied", status: 409, when: "all_or_nothing" },
+] as const satisfies readonly ReasonDef[];
