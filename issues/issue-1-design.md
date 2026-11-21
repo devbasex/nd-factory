@@ -1,6 +1,6 @@
 # このリポジトリの CI: 値の漏れ・設計の決まりの破れ・NDF の契約の食い違いを、既存のツールの設定で Pull Request ごとに落とす（#1）
 
-この設計は nd-factory 自体の開発（全体の設計の入口の区別の A）の、このリポジトリ（devbasex/nd-factory）の CI を決める。利用者のプロジェクトへ検査を提供する機能ではない（B の品質の確かめは NDF が担い、nd-factory は検査を持たない）。実装を終えると、このリポジトリへの Pull Request は、実際のインフラの値か秘密を含む・横断の部品を `apps/` で直に使う・置き場の間の依存の向きに反する・使っていないコードや依存を残す・ワークフローに広すぎる権限を足す・形の正本と生成物が食い違う・固定した NDF の契約と食い違う、のどれかで必須のチェックに落ちる。守り方はほとんどが既存のツール（gitleaks・ESLint・dependency-cruiser・knip・zizmor）の設定で、自前で書くのは NDF の契約の照合と形の正本の往復のテストだけである。比べた案は「決定の記録」に、候補の調べは「外部の調査」にある。
+この設計は nd-factory 自体の開発（全体の設計の入口の区別の A）の、このリポジトリ（devbasex/nd-factory）の CI を決める。利用者のプロジェクトへ検査を提供する機能ではない（B の品質の確かめは NDF が担い、nd-factory は検査を持たない）。実装を終えると、このリポジトリへの Pull Request は、実際のインフラの値か秘密を含む・横断の部品を `apps/` で直に使う・置き場の間の依存の向きに反する・使っていないコードや依存を残す・ワークフローに広すぎる権限を足す・形の正本と生成物が食い違う・固定した NDF の契約と食い違う、のどれかで必須のチェックに落ちる。守り方はほとんどが既存のツール（gitleaks・ESLint・dependency-cruiser・knip・zizmor）の設定で、自前で書くのは NDF の契約の照合と形の正本の往復のテストと、gitleaks の出力から値を伏せる包みだけである。比べた案は「決定の記録」に、候補の調べは「外部の調査」にある。
 
 ## 今の姿
 
@@ -37,7 +37,7 @@ flowchart LR
 
 | 守るもの | 落とすもの | ツールと設定 | ジョブ |
 | --- | --- | --- | --- |
-| Value 7（値を置かない） | 作り物でない AWS のアカウント ID・ARN・資源の ID・端点、既知の提供者の token と私有鍵、CI の秘密に置いた実際の値（アカウント・profile・環境の名前）。今の木と Pull Request の途中のコミットの両方 | gitleaks。規則と作り物の値の許可は `.gitleaks.toml`、実際の値の規則はジョブが CI の秘密から重ねる（決定 3） | `leak-check`（新設） |
+| Value 7（値を置かない） | 作り物でない AWS のアカウント ID・ARN（アカウントの欄の無いものを含む）・資源の ID・端点、既知の提供者の token と私有鍵、CI の秘密に置いた実際の値（アカウント・profile・環境の名前）。今の木と Pull Request の途中のコミットの両方 | gitleaks。自前の規則と作り物の値の許可は既定を読まない `.gitleaks.toml`、既定の規則は `.gitleaks-default.toml`、実際の値の規則は包み（`tools/checks/src/leak-check.ts`）が CI の秘密から重ねる（決定 3） | `leak-check`（新設） |
 | 横断の部品を 1 か所に（プラットフォームの決定 91） | `apps/` の実行時のコードでの `Date.now`・引数なしの `new Date()`・乱数からの ID・`console`・`fetch`・AWS SDK の import・`ConditionExpression` を組む書き込み | ESLint の組み込みの規則を `eslint.config.js` で置き場ごとに（決定 1） | `check` |
 | I8（使える量の判定は 1 か所） | 判定のモジュールの外での料金プランの値の import・画面での料金プランの名前の文字列 | 同上 | `check` |
 | I14（画面の操作は API と MCP にもある） | 画面と `apps/api`・`infra` での HTTP の経路の直書き。生成した呼び出しのうち画面が使わないもの。MCP の道具と人だけでない操作の食い違い・人だけの操作の読み出しの欠け・どの操作にも無い機能。API Gateway に実際に登録した経路と Lambda の振り分けが受ける経路の、操作の表との食い違い | 経路の直書きは ESLint、使わない呼び出しは knip、表の照らしは形の正本の往復のテスト、実際の経路は合成の結果のテスト（`infra/test/api-routes.test.ts`）と振り分けのテスト（#2 の `apps/api/test/dispatch-routes.test.ts`）（決定 8） | `check` |
@@ -64,7 +64,7 @@ flowchart TB
     check --> dc["dependency-cruiser<br/>.dependency-cruiser.cjs"]
     check --> knip["knip<br/>knip.jsonc"]
     check --> tests["テスト<br/>形の正本の往復・CI の定義"]
-    leak --> gl["gitleaks<br/>.gitleaks.toml と CI の秘密"]
+    leak --> gl["gitleaks（包み leak-check.ts）<br/>.gitleaks.toml・.gitleaks-default.toml と CI の秘密"]
     wa --> zz["zizmor<br/>.github/zizmor.yml"]
     ndfc --> up["devbasex/ai-plugins の<br/>固定の点と既定の枝の先端の契約"]
     decl[".ndf/project.json の必須のチェック 7 つ"] -.CI の定義のテストが照らす.- ci
@@ -120,13 +120,15 @@ flowchart TB
 ### 決定 3: 漏れの検査を広く使われる道具に任せるため、gitleaks を使い、規則と作り物の値の許可をリポジトリの `.gitleaks.toml` に、実際の値の規則を CI の秘密から重ねる
 
 - **質問**: 実際の値と秘密の混入を、どの道具で、どの規則で探すか
-- **選んだ案**: gitleaks の CLI を版と要約値で固定して取り、`leak-check` のジョブで、今の木（`gitleaks dir`）と、Pull Request では分岐点から head までのコミット（`gitleaks git --log-opts`）を探す。`.gitleaks.toml` は既定の規則を残し（`[extend] useDefault = true`）、AWS のアカウント ID・ARN・資源の ID・端点の規則と、作り物の値（`123456789012`・`us-west-2`・`acme`・`example.com`・印 `EXAMPLE`）の許可を持つ。実際の値（アカウント・profile・環境の名前）は CI の秘密 `LEAK_CHECK_PATTERN`（正規表現）から、ジョブの手順が一時の設定（`.gitleaks.toml` を `[extend] path` で読み、規則を 1 つ足す）を組んで重ねる。出力は `--redact` で伏せる
+- **選んだ案**: gitleaks の CLI を版と要約値で固定して取り、`leak-check` のジョブで、今の木（`gitleaks dir`）と、Pull Request では分岐点から head までのコミット（`gitleaks git --log-opts`）を探す。設定は 2 つに分ける。`.gitleaks.toml` は既定を読まず（`[extend]` を持たない）、AWS のアカウント ID・ARN（アカウントの欄の無いものを含む）・資源の ID・端点の規則と、その規則だけに掛ける（`targetRules`）作り物の値（`123456789012`・`us-west-2`・`acme`・`example.com`）の許可を持つ。`.gitleaks-default.toml` は既定の規則を読み（`[extend] useDefault = true`）、作り物の印 `EXAMPLE` の許可を既定の提供者の規則だけに掛ける。分けるのは、`useDefault` が既定の全体の許可（`package-lock.json` や画像などのパスを規則の評価の前に丸ごと飛ばす）も継承し、自前の規則と実際の値の規則にもそれが効くためである。実際の値（アカウント・profile・環境の名前）は CI の秘密 `LEAK_CHECK_PATTERN`（語を `|` でつないだもの）から、包み `tools/checks/src/leak-check.ts` が `.gitleaks.toml` に許可の無い規則 `nd-real-value` を足して重ねる。包みは gitleaks を `--redact=100` で起こし、報告を標準出力からメモリへ受けて規則・ファイル・行・コミットだけを写し、ファイルのパスの実際の値を伏せて出し、gitleaks の標準エラーを捨てる。行の注釈 `gitleaks:allow` と `.gitleaksignore` を効かせない（決定 9）
 - 採らなかった案: 自前の正規表現の走査（既知の提供者の token の形を自分で保守することになる。Value 15）
 - 採らなかった案: secretlint（Node で動くが、star 約 1,500 で gitleaks（約 31,000。GitLab の Secret Detection も内部で使う）より使われている広さが小さい）
 - 採らなかった案: trufflehog（AGPL-3.0）
 - 採らなかった案: 伏せ字（#2）と同じ秘密の形のデータから gitleaks の設定を生成する（前の全体の設計の「伏せ字と漏れの検査が同じものを読む」。生成の仕組みを足すことになるうえ、token の形は gitleaks の既定の規則が上流で保守されるので、こちらが堅い。伏せ字は実行の時のログの値を鍵の名前で伏せる別の役割で、形の正本のデータを読む。プラットフォームの文書をこの PR で直した）
 - 採らなかった案: GitHub の secret scanning に任せる（実際の値の照合と作り物の値の許可を持たない。公開のリポジトリでは無料で走るので、重ねて使える）
-- **代償**: Node の外の実行ファイルに依る。版と要約値の上げは手で行う。gitleaks の報告のファイルの名前は伏せないので、実際の値を名前に含むファイルを足すと、その名前が CI の記録に出る（ファイルの名前に環境の名前を書かない決まりは `AGENTS.md` にある）
+- 採らなかった案: gitleaks の出力をそのまま CI の記録へ流し、`--redact` だけで伏せる（`--redact=100` は `Secret`・`Match` と行の一部だけを伏せ、`File`・`Message`・`Author`・`Fingerprint` は伏せない。設定の読み込みの誤りでは、標準エラーに設定の中身、つまり秘密の正規表現が出る。受け入れ条件 2 と非機能の条件の「CI の秘密から受けた値を出力とログに出さない」に届かない）
+- 採らなかった案: 1 つの設定で `useDefault = true` に自前の規則を足す（既定の全体のパスの許可で、`package-lock.json` などに置いた実際の値と形の値が素通りする。全体の許可の `EXAMPLE` が `nd-real-value` にも掛かり、行に `EXAMPLE` を足せば隠せる）
+- **代償**: Node の外の実行ファイルに依る。版と要約値の上げは手で行う。包みを 1 つ自前で持つ。`LEAK_CHECK_PATTERN` は語を `|` でつないだ形に限り、正規表現の記号を使えない。履歴の探しはパスの名前を照らさないので、途中のコミットで実際の値を名前に含むファイルを足して消すと通る（今の木のパスは照らす）
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: PRD1 / PRD2 / LIB1 / LIB2 / LIB3 / STD4
 - 根拠: Value 7・Value 15・Value 17（MVV バージョン 2）。決定 92（プラットフォーム）
@@ -191,10 +193,11 @@ flowchart TB
 ### 決定 9: 検査を入れる時点の既知の当たりを独自の一覧を持たずに外すため、各ツールの標準の除外の書き方に課題の番号を添え、使われなくなった除外をツールに落とさせる
 
 - **質問**: 骨組みのコード（「今の姿」）が足す検査に当たる。#2 は「外で直に使うと境界の検査が落ちる」を受け入れ条件に持ち、#1 の検査を待つ。当たりをどう外すか
-- **選んだ案**: 検査を先に入れ、当たる行に各ツールの標準の除外を書き、理由に課題の番号を添える。ESLint は `// eslint-disable-next-line <規則> -- #2 が横断の部品へ移す` の形で、`linterOptions.reportUnusedDisableDirectives: "error"` で使われなくなった注釈を誤りにする。dependency-cruiser と knip は設定の標準の除外の欄に理由を添え、knip は使われない除外を誤りにする。gitleaks は今の木の当たりが 0 件なので除外を置かない
+- **選んだ案**: 検査を先に入れ、当たりを各ツールの標準の除外で外し、理由に課題の番号を添える。除外は設定のファイルに置く形を基本にし、値の行に紛れる行の注釈は、効く範囲を絞るか効かせない。ESLint は `// eslint-disable-next-line <規則> -- #2 が横断の部品へ移す` の形で、`linterOptions.reportUnusedDisableDirectives: "error"` で使われなくなった注釈を誤りにする。注釈が効くのは骨組みの 5 つのファイル（`eslint.config.js` の一覧）だけで、ほかのファイルは `noInlineConfig: true` で注釈が効かない。dependency-cruiser と knip は設定の標準の除外の欄に理由を添え、knip は使われない除外を誤りにする。gitleaks は行の注釈 `gitleaks:allow` を `--ignore-gitleaks-allow` で効かせず、`.gitleaksignore` を置かせず（包みが止める）、除外は `.gitleaks.toml` の `nd-aws-*` の規則だけに掛ける許可に置く。実際の値の規則 `nd-real-value` を外す書き方は無い。今の木の自前の規則の当たりは、同じ正規表現の近似で 1 件（テストの作り物の別のアカウント）で、これを `nd-aws-account-id` だけのパスと値の許可で外す（gitleaks そのもので打った当たりは「未確認のまま残ること」）。zizmor はワークフローの行の注釈 `zizmor: ignore` を使わず、`.github/zizmor.yml` の課題の番号の注つきの `ignore` の行に置く（CI の定義のテストが縛る）
 - 採らなかった案: 課題の番号つきの控えのファイルを独自に持ち、自前のテストで照らす（前の設計。ツールが持つ除外の仕組みを作り直し、読み手に独自の語と仕組みを覚えさせる）
 - 採らなかった案: #2 が骨組みを移すまで検査を入れない（#2 の受け入れ条件が #1 の検査を前提にし、互いに待つ）
-- **代償**: 除外の注釈が骨組みのコードの中に入り、#2・#4 がコードを移すときに消す。注釈を書けば新しい違反も外せるので、除外を足す変更はレビューで見る
+- 採らなかった案: 各ツールの行の注釈をそのまま使う（作者が値の行に `gitleaks:allow` を 1 つ足すだけで、実際の値を含む漏れの検査を通せる。Value 7 の主目的を弱める）
+- **代償**: 除外の注釈が骨組みのコードの中に入り、#2・#4 がコードを移すときに注釈と一覧の行を消す。骨組みの 5 つのファイルの中では注釈を書けば新しい違反も外せ、設定のファイルの除外（`.gitleaks.toml`・`.github/zizmor.yml`・`.dependency-cruiser.cjs`・`knip.jsonc`）は足せば効く。レビューでは、これらの設定のファイルと 5 つのファイルの注釈の差分を、除外を足す変更として読み、課題の番号と理由の無い除外を差し戻す
 - 根拠: Value 12・Value 13・Value 15（MVV バージョン 2）
 
 ### 決定 10: 落とすものを道具の設定で表せる範囲に保つため、構文で見分けられない 2 つを検査から外し、ほかの守りで守る
@@ -208,7 +211,7 @@ flowchart TB
 ## 影響と危険
 
 - **働く範囲**: このリポジトリの CI だけ（A）。利用者のプロジェクト（B）にも、自分で設置する人の環境にも何も足さない
-- **プロジェクトごとに違うもの**: 実際の値の正規表現は CI の秘密 `LEAK_CHECK_PATTERN` で受け、リポジトリに置かない。fork は秘密を持たないので、`.gitleaks.toml` の規則だけで探す
+- **プロジェクトごとに違うもの**: 実際の値の語（`|` でつないだもの）は CI の秘密 `LEAK_CHECK_PATTERN` で受け、リポジトリに置かない。fork は秘密を持たないので、`.gitleaks.toml` と `.gitleaks-default.toml` の規則だけで探す
 - **当たるモード**: `standard` の CI の必須のチェック
 - **必須のチェックが増える**: 宣言（`.ndf/project.json`）と GitHub の main の保護の必須のチェックの両方に `leak-check`・`workflow-audit`・`ndf-contract` を足す。食い違うとマージが待ちのまま残るか、足した検査が必須にならない
 - **同じファイルを触る別の変更**: #2 は `packages/contracts/` と骨組みのコード（除外の注釈を消す）を触る。#13 は `infra/` を触り、`infra/lib/app-stack.ts` の経路の直書きに除外の注釈が入る
@@ -219,7 +222,7 @@ flowchart TB
 
 | 値 | 置く所 | 持つ Issue |
 | --- | --- | --- |
-| 実際の値の正規表現 | CI の秘密 `LEAK_CHECK_PATTERN` と、必須にするかの変数 `LEAK_CHECK_REQUIRE_PATTERN` | #1（登録は持ち主） |
+| 実際の値の語（`\|` でつないだもの） | CI の秘密 `LEAK_CHECK_PATTERN` と、必須にするかの変数 `LEAK_CHECK_REQUIRE_PATTERN` | #1（登録は持ち主） |
 | gitleaks と zizmor の版と要約値 | `ci.yml` の各ジョブの環境変数 | #1 |
 | NDF のリポジトリの URL と契約の置き場 | `tools/checks/src/ndf-contract-check.ts` の出所つきの定数 | #1 |
 
@@ -227,7 +230,7 @@ flowchart TB
 
 | 受け入れ条件・決定 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 受け入れ条件 1・2・3（漏れ） | 実行の時に組み立てた作り物でない 12 桁・ARN・端点・token・実際の値を含むファイルを `docs/` の下に置いた一時の木を、`.gitleaks.toml` と重ねた設定で gitleaks に探させると当たり、報告と標準出力に値が現れない。作り物の値だけのファイルでは当たらない。途中のコミットで足して消した値が履歴の探しで当たる | 規則か許可を外す・`--redact` を外す・履歴を探さないと落ちる |
+| 受け入れ条件 1・2・3（漏れ） | 実行の時に組み立てた作り物でない 12 桁・ARN（アカウントの欄の無い S3 のバケットの ARN を含む）・端点・token・実際の値を含むファイルを `docs/` の下に置いた一時の木を包みに探させると当たり、標準出力と標準エラーに値と値を含むパスが現れない。同じ値を `package-lock.json` と画像の名前のファイルに置いても、`EXAMPLE` と `gitleaks:allow` を同じ行に足しても当たる。作り物の値だけのファイルでは当たらない。途中のコミットで足して消した値が履歴の探しで当たる | 規則か許可を外す・設定を 1 つにまとめる・`--redact` か報告の絞りかパスの伏せを外す・`--ignore-gitleaks-allow` を外す・履歴を探さないと落ちる |
 | 受け入れ条件 1・6（横断の部品の外での直の利用） | 規則ごとに、違反を入れた文字列を `apps/` の置き場のパスで ESLint にかけると誤りが出て、`packages/core`・`infra/`・`tools/`・テストのパスでは出ない | 置き場の glob を外す・規則を消すと落ちる |
 | 受け入れ条件 1・4（I8） | 判定のモジュールの外で料金プランの値の書き出しを import する・画面で料金プランの名前の文字列を使うと誤りが出る | 判定のモジュールも対象にする・画面の規則を外すと落ちる |
 | 受け入れ条件 1・5（I14） | 画面・`apps/api`・`infra` に `/v1/` の文字列を書くと ESLint の誤り、生成した呼び出しを画面が使わないと knip の当たり、表の MCP の道具・人だけの操作の読み出し・機能の欠けを足した作り物の表で往復のテストが落ちる。テストの中で組んだスタックから経路を 1 件落とす・表に無い経路を足す・OpenAPI の取り込みかすべてを受ける経路を置くと、合成の結果の経路のテストが落ちる | どれかの照らしを外すと落ちる |
@@ -238,7 +241,7 @@ flowchart TB
 | 受け入れ条件 10 | ジョブを宣言とワークフローの片方にだけ足す・どれかのワークフローに AWS の資格情報の語を足す・`permissions` に `contents: read` 以外を足すと CI の定義のテストが落ちる | `ci.yml` だけを読むと落ちる |
 | 受け入れ条件 12（knip） | 使われない書き出し・依存・ファイルを足した一時の木で knip が当たる。使われない除外を設定に置くと誤りになる。`@screenPending` の印の書き出しは使われなくても当たらず、印の無い同じ書き出しは当たる。印の操作の呼び出しを画面の置き場で import すると ESLint の誤りが出る | 設定の手掛かりを誤りにしない・`tags` を外す・`screen-pending.json` から ESLint の選び方を組まないと落ちる |
 | 受け入れ条件 13（zizmor） | ジョブの `permissions` に書き込みを足す・`persist-credentials: false` を外す・動作を枝の名前で参照したワークフローを一時の木に置くと zizmor が当たる | 対象を `ci.yml` だけにすると落ちる |
-| 受け入れ条件 14・決定 9 | 除外の注釈を残したまま違反を直すと ESLint が使われない注釈の誤りを出す | `reportUnusedDisableDirectives` を外すと落ちる |
+| 受け入れ条件 14・決定 9 | 除外の注釈を残したまま違反を直すと ESLint が使われない注釈の誤りを出す。骨組みの一覧に無いファイルの `eslint-disable` の注釈・`gitleaks:allow`・`.gitleaksignore`・`zizmor: ignore` では違反が外れない | `reportUnusedDisableDirectives` か `noInlineConfig` か `--ignore-gitleaks-allow` を外すと落ちる |
 | 受け入れ条件 11 | 詳細設計が、全体の設計の置き場・依存の向き・落とすものを引いて書かれ、変えたものは全体の設計を同じ PR で直している（cross-review が読む） | 全体の設計と食い違う書き方が残ると cross-review が落とす |
 
 詳細設計は [issue-1-design-detail.md](./issue-1-design-detail.md) にある（新設する関数が 2 つ以上あるため）。
@@ -247,7 +250,7 @@ flowchart TB
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1 | 実装する | — | `eslint.config.js`、`.dependency-cruiser.cjs`（新設）、`.gitleaks.toml`（新設）、`knip.jsonc`（新設）、`.github/zizmor.yml`（新設）、`.github/workflows/ci.yml`、`.github/workflows/ndf-contract.yml`（新設）、`tools/checks/src/ndf-contract-check.ts`（新設）、`tools/test/ndf-contract-check.test.ts`（新設）、`tools/test/contracts-round-trip.test.ts`（新設）、`tools/test/lint-config.test.ts`（新設）、`tools/test/deps-config.test.ts`（新設）、`tools/test/knip-config.test.ts`（新設）、`tools/test/scan-config.integration.test.ts`（新設）、`infra/test/api-routes.test.ts`（新設）、`tools/test/ci-definition.test.ts`、`tools/test/ref-check.test.ts`、`apps/api/src/users-handler.ts`、`apps/api/src/user-store.ts`、`apps/web/src/main.ts`、`apps/web/src/users-client.ts`、`infra/lib/app-stack.ts`、`tools/package.json`、`tools/tsconfig.json`、`package.json`、`package-lock.json`、`vitest.config.ts`、`.ndf/project.json`、`AGENTS.md` |
+| #1 | 実装する | — | `eslint.config.js`、`.dependency-cruiser.cjs`（新設）、`.gitleaks.toml`（新設）、`.gitleaks-default.toml`（新設）、`knip.jsonc`（新設）、`.github/zizmor.yml`（新設）、`.github/workflows/ci.yml`、`.github/workflows/ndf-contract.yml`（新設）、`tools/checks/src/ndf-contract-check.ts`（新設）、`tools/checks/src/leak-check.ts`（新設）、`tools/test/leak-check.test.ts`（新設）、`tools/test/ndf-contract-check.test.ts`（新設）、`tools/test/contracts-round-trip.test.ts`（新設）、`tools/test/lint-config.test.ts`（新設）、`tools/test/deps-config.test.ts`（新設）、`tools/test/knip-config.test.ts`（新設）、`tools/test/leak-scan.integration.test.ts`（新設）、`tools/test/workflow-audit.integration.test.ts`（新設）、`infra/test/api-routes.test.ts`（新設）、`tools/test/ci-definition.test.ts`、`tools/test/ref-check.test.ts`、`apps/api/src/users-handler.ts`、`apps/api/src/user-store.ts`、`apps/web/src/main.ts`、`apps/web/src/users-client.ts`、`infra/lib/app-stack.ts`、`tools/package.json`、`tools/tsconfig.json`、`package.json`、`package-lock.json`、`vitest.config.ts`、`.ndf/project.json`、`AGENTS.md` |
 
 ## 人へ残す判断
 
@@ -255,7 +258,7 @@ C1 と C7 は、NDF の共通原則が「AI が自分で進めずに必ず人の
 
 | 判断 | 当たるレッドライン | なぜ当たるか |
 | --- | --- | --- |
-| CI の秘密 `LEAK_CHECK_PATTERN` に実際の値の正規表現を登録し、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする（実装のマージの後に持ち主が GitHub の設定で行う） | C1 | 運用する環境の実際の値という秘密に触れる |
+| CI の秘密 `LEAK_CHECK_PATTERN` に実際の値の語を `\|` でつないで登録し、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする（実装のマージの後に持ち主が GitHub の設定で行う） | C1 | 運用する環境の実際の値という秘密に触れる |
 | `.ndf/project.json` の必須のチェックに 3 つを足し、`AGENTS.md` の「秘密とインフラの値を置かない」に `LEAK_CHECK_PATTERN` の行を足す | C7 | 利用者の設定と指示書を書き換える。実装の中でコミットし、承認ゲートで人が見る |
 
 ## 未確認のまま残ること
@@ -263,6 +266,7 @@ C1 と C7 は、NDF の共通原則が「AI が自分で進めずに必ず人の
 | 項目 | 内容 |
 | --- | --- |
 | zizmor の今のワークフローの当たり | `ci.yml` に zizmor を打った結果。実装の Pull Request で分かる |
+| gitleaks の自前の規則の今の木の当たり | `.gitleaks.toml` の `nd-aws-*` を gitleaks で打った結果。同じ正規表現を `git grep -P` で近似した当たりは 1 件（`infra/test/nd-setup.test.ts` の作り物の別のアカウント。詳細設計の「今の木の当たり」）で、コミットの SHA の断片などの別の当たりは近似では出なかった。gitleaks の正規表現（RE2）と近似の違いで増えうるので、実装の Pull Request で打って確かめ、当たりは決定 9 のとおり許可に置く |
 | dependency-cruiser の今のリポジトリの当たり | 規則を全部書いた設定での当たり。実装の Pull Request で分かる（試しの規則では 0 件） |
 | GitHub の main の保護の必須のチェックの今の値 | 宣言の 4 つと一致しているか。実装の Pull Request の前に持ち主の設定で分かる |
 | 上流の `ask-journal` の `fields` | #41 の決定 106 の依頼の答えで分かる。足されたら NDF の契約の照合の (4) が読む項目に入る |
@@ -296,7 +300,7 @@ C1 と C7 は、NDF の共通原則が「AI が自分で進めずに必ず人の
 
 | # | 候補 | バージョン | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | gitleaks（CLI）と gitleaks-action | v8.30.1・v3.0.0 | MIT・登録の判定なし | 2026-03-21・2026-05-30（リポジトリへの push は 2026-10-28） | 無し | 満たす（CLI）。採る（決定 3）。star 31,228。今の木（`dir`）と履歴の範囲（`git --log-opts`）を探せる。`--redact` で標準出力と報告の秘密を伏せる。リポジトリの `.gitleaks.toml` に独自の規則と許可を書け、`[extend] useDefault = true` で既定の規則を残し、`[extend] path` で別の設定を重ねられる。配布の資産がある。Action は組織のリポジトリで鍵の登録が要る | `gh api repos/gitleaks/gitleaks`・README（2026-11-21）。配布の v8.30.1 を要約値で確かめて取り、許可と `--redact=100` で一時の木を探して報告に値が現れないこと、このリポジトリの今の木を既定の規則で探して当たりが 0 件であることを確かめた（2026-11-21） |
+| LIB1 | gitleaks（CLI）と gitleaks-action | v8.30.1・v3.0.0 | MIT・登録の判定なし | 2026-03-21・2026-05-30（リポジトリへの push は 2026-10-28） | 無し | 満たす（CLI）。採る（決定 3）。star 31,228。今の木（`dir`）と履歴の範囲（`git --log-opts`）を探せる。`--redact` で標準出力と報告の秘密を伏せる。リポジトリの `.gitleaks.toml` に独自の規則と許可を書け、`[extend] useDefault = true` で既定の規則を残し、`[extend] path` で別の設定を重ねられる。`useDefault` は既定の規則と一緒に既定の全体の許可（`package-lock.json` などのパスと画像などの拡張子）も継承し、パスの許可は規則の評価の前に効く（前の設計で v8.30.1 の `config/config.go`・`detect/detect.go` を読んで確かめた。2026-11-21）。`--ignore-gitleaks-allow` で行の注釈 `gitleaks:allow` を効かせず、`--gitleaks-ignore-path` で `.gitleaksignore` を読む場所を変えられる。配布の資産がある。Action は組織のリポジトリで鍵の登録が要る | `gh api repos/gitleaks/gitleaks`・README（2026-11-21）。配布の v8.30.1 を要約値で確かめて取り、許可と `--redact=100` で一時の木を探して報告に値が現れないこと、このリポジトリの今の木を既定の規則で探して当たりが 0 件であることを確かめた（2026-11-21） |
 | LIB2 | trufflehog | v3.100.0 | AGPL-3.0 | 2026-11-19 | 無し | 形の置き場は LIB1 と同じ問題を持つ | `gh api repos/trufflesecurity/trufflehog/releases/latest`（2026-11-21） |
 | LIB3 | secretlint | 14.0.1 | MIT | 2026-11-16（登録簿の更新） | 無し | 満たす。Node で動き、独自の正規表現の規則と出力の伏せ字を持つ。star 1,503 で LIB1 より使われている広さが小さい | `npm view secretlint`・`gh api repos/secretlint/secretlint`（2026-11-21） |
 | LIB4 | dependency-cruiser | 18.8.0 | MIT | 2026-11-16（登録簿の更新。push は 2026-11-18） | 無し | 満たす。採る（決定 2）。star 7,448。置き場ごとの禁じる依存を `forbidden` の規則（`from`・`to` の `path`・`pathNot`）で書き、実際に解決したファイルの間の依存を照らす。`tsPreCompilationDeps` で型だけの import も依存として数える。`engines.node` は `^22\|\|^24\|\|>=26` | `npm view dependency-cruiser`・`gh api repos/sverweij/dependency-cruiser`（2026-11-21）。作業ディレクトリに 18.8.0 と typescript 6.0.3 を入れ、このリポジトリで `apps/web` から `apps/api` への型だけの import を足したファイルを照らして、規則の誤りが 1 件出ることを確かめた（2026-11-21） |
@@ -318,7 +322,7 @@ C1 と C7 は、NDF の共通原則が「AI が自分で進めずに必ず人の
 | trufflehog の許可の一覧と出力の伏せ字の設定 | 試していない | 上限。trufflehog は AGPL-3.0 の理由で退けたので、この結果に依らない |
 | npm の週のダウンロード数（secretlint・eslint-plugin-boundaries・eslint-plugin-import-x・dependency-cruiser・knip・yaml・fast-check） | `https://api.npmjs.org/downloads/point/last-week/<名前>` | 取得の制限（`error code: 1015`）で拒まれた。使われている広さは GitHub の star 数で比べた |
 | eslint-plugin-import-x の `no-restricted-paths` の仕様 | 試していない | 上限。採らないので、この結果に依らない。dependency-cruiser の型だけの import の扱いは実物で確かめた（LIB4） |
-| zizmor の `--offline` で効く点検・明示した `--config` で自動の探索が止まるか・行の中の例外の注釈 | zizmor の README と `docs/audits.md` を読んだ | 点検ごとの記載を `excessive-permissions`・`artipacked`・`unpinned-uses` について照らしておらず、実物も打っていない。実装の最初のタスクで文書を照らしてこの表に記し、`scan-config.integration.test.ts` で縛る（決定 5）。どれかがネットワークを要すれば、実装の前に決定 5 を直す |
+| zizmor の `--offline` で効く点検・明示した `--config` で自動の探索が止まるか・行の中の例外の注釈 | zizmor の README と `docs/audits.md` を読んだ | 点検ごとの記載を `excessive-permissions`・`artipacked`・`unpinned-uses` について照らしておらず、実物も打っていない。実装の最初のタスクで文書を照らしてこの表に記し、`workflow-audit.integration.test.ts` で縛る（決定 5）。どれかがネットワークを要すれば、実装の前に決定 5 を直す |
 | knip の JSDoc の印での除外（`tags: ["-screenPending"]`）が独自の印の名前で効くか | knip の文書の「JSDoc tags」を読んだだけで、実物を打っていない | 実装の最初のタスクで knip 6.47.0 を一時の木で打って確かめ、`knip-config.test.ts` で縛る。効かなければ、実装の前に K2-2 と決定 8 の段ごとの扱いを直す |
 | knip の入口のファイルの書き出しの扱い（`includeEntryExports`） | knip の文書の「Configuring Project Files」（https://knip.dev/guides/configuring-project-files）を cross-review の指摘（2026-11-21）が出典に挙げた。この設計の中では取得していない | 生成した画面の呼び出しを入口でないファイルに置けば効く。実装の最初のタスクで確かめ、受け入れ条件 12 のテストで縛る |
 | zizmor の配布の資産の要約値のファイル | `gh api repos/zizmorcore/zizmor/releases/latest` の資産の一覧 | 一覧に要約値のファイルが無い。実装で資産を取り、要約値をワークフローに固定する（gitleaks と同じく、配布元の値と比べない） |

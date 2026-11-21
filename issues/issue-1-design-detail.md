@@ -10,7 +10,8 @@
 nd-factory/
 ├── eslint.config.js                       置き場ごとの塊を足す
 ├── .dependency-cruiser.cjs              * 依存の向きの規則
-├── .gitleaks.toml                       * 漏れの規則と作り物の値の許可
+├── .gitleaks.toml                       * 自前の漏れの規則と作り物の値の許可（既定を読まない）
+├── .gitleaks-default.toml               * 既定の規則と作り物の印の許可
 ├── knip.jsonc                            * 入口
 ├── package.json                           スクリプト deps-check・knip・ndf-contract・test:integration、開発の依存
 ├── vitest.config.ts                       結合のテストを分ける
@@ -31,22 +32,26 @@ nd-factory/
     ├── package.json                       依存 @nd-factory/contracts・ajv・ajv-formats・yaml
     ├── tsconfig.json                      checks/src を含める
     ├── checks/src/ndf-contract-check.ts * NDF の契約の照合（CLI）
+    ├── checks/src/leak-check.ts         * gitleaks の包み（設定を組み、報告を絞って伏せる）
     └── test/
         ├── ndf-contract-check.test.ts   *
         ├── contracts-round-trip.test.ts *  形の正本の往復と I14 の表の照らし
         ├── lint-config.test.ts          *  ESLint の塊が落とすこと
         ├── deps-config.test.ts          *  dependency-cruiser の規則が落とすこと
         ├── knip-config.test.ts          *  knip の設定が落とすこと
-        ├── scan-config.integration.test.ts * gitleaks と zizmor の設定が落とすこと（実行ファイルを起こす）
+        ├── leak-check.test.ts           *  漏れの検査の包みの単体のテスト（gitleaks を起こさない）
+        ├── leak-scan.integration.test.ts * gitleaks の設定と包みが落とすこと（leak-check のジョブ）
+        ├── workflow-audit.integration.test.ts * zizmor の設定が落とすこと（workflow-audit のジョブ）
         ├── ci-definition.test.ts          すべてのワークフローを yaml で読む
         └── ref-check.test.ts              ワークフローの版の比べのテストを足す
 ```
 
-依存の向き: `tools/checks` と `tools/test` は `packages/contracts` だけを import し、ほかの置き場は文字として読む。ツールの設定のファイルはどの置き場のコードも import しない（`eslint.config.js` が料金プランの名前を `@nd-factory/contracts` から読むのを除く）。
+依存の向き: `tools/checks` と `tools/test` は `packages/contracts` だけを import し（`leak-check.ts` は何も import しない）、ほかの置き場は文字として読む。ツールの設定のファイルはどの置き場のコードも import しない（`eslint.config.js` が料金プランの名前を `@nd-factory/contracts` から読むのを除く）。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | 最上位の関数 |
 | --- | --- | --- | --- | --- |
 | `tools/checks/src/ndf-contract-check.ts` | 新設 | 固定の点と既定の枝の先端の NDF の契約を、形の正本の判定とデータで照らす | `@nd-factory/contracts`（NDF の契約の使い方） | `fetchContract`・`compareContract`・`renderSummary`・`mainNdfContractCheck`（新設） |
+| `tools/checks/src/leak-check.ts` | 新設 | gitleaks を 2 つの設定で起こし、黙らせる仕組みを効かせず、報告の値とパスを伏せて当たりを出す | Node の組み込みの部品・gitleaks の実行ファイル | `buildConfigs`・`runGitleaks`・`maskPath`・`mainLeakCheck`（新設） |
 | `tools/test/contracts-round-trip.test.ts` | 新設 | 見本と変形を 4 つの形で検証して比べ、I14・I12・I15 の表の照らしを行う | `@nd-factory/contracts`・ajv・ajv-formats | `mutate`・`representationsOf`（新設。テストの中の関数） |
 | `tools/test/ci-definition.test.ts` | 変更 | すべてのワークフローを `yaml` で読んで照らす | `yaml` | `loadWorkflows`・`triggersPullRequest`・`permissionBlocks`（新設）、`jobNames`（変更）、`credentialWords`（変えない） |
 
@@ -68,14 +73,14 @@ nd-factory/
 | `apps/web/src/**`・`apps/api/src/**`・`infra/lib/**` | `no-restricted-syntax` | `/v1/` を含む文字列とテンプレートの文字列（経路は形の正本の登録の書き出しからだけ読む。K2-2・K2-3） | I14（画面の呼び出し・HTTP の経路の登録） |
 | `apps/web/**` の外の `*.tsx` | `no-restricted-syntax` の `Program` | ファイルそのもの（1 ファイル 1 件） | 言語と書き方の決まりの画面の行（決定 140） |
 
-- すべての塊に `linterOptions: { reportUnusedDisableDirectives: "error" }` を置く（決定 9）。骨組みのコードの今の当たりは、当たる行の前に `// eslint-disable-next-line <規則> -- #2 が横断の部品へ移す` の形（`#4` の行は「#4 が置き換える」）で外す。外す行は「今の姿」の 5 つのファイルの当たる行だけで、実装で ESLint を打って決める
+- 行の注釈の除外は、骨組みの 5 つのファイルでだけ効かせる（決定 9）。置き場ごとの塊の後ろに、すべてのファイルへ `linterOptions: { noInlineConfig: true }` を置く塊を足し、さらにその後ろの塊で定数 `SKELETON_EXCEPTIONS`（「今の姿」の 5 つのファイルのパスと課題の番号の組。`eslint.config.js` の中）のファイルにだけ `linterOptions: { noInlineConfig: false, reportUnusedDisableDirectives: "error" }` を置く。ほかのファイルの `eslint-disable` の注釈は効かず、違反はそのまま出る。骨組みのコードの今の当たりは、当たる行の前に `// eslint-disable-next-line <規則> -- #2 が横断の部品へ移す` の形（`#4` の行は「#4 が置き換える」）で外す。外す行は 5 つのファイルの当たる行だけで、実装で ESLint を打って決める。#2・#4 がコードを移すときは、注釈を消し、同じ変更で `SKELETON_EXCEPTIONS` の行も消す（注釈が 1 つも無いファイルの行が残ると `lint-config.test.ts` が落ちる）。今のリポジトリに `eslint-disable` の注釈は無い（2026-11-21 に `git grep` で確かめた）
 - `eslint.config.js` は最上位の `await` で #29 の料金プランの名前の書き出しと、#2 の `packages/contracts/data/screen-pending.json` を読み、読めなければその選び方を作らない
 
 ### 単体テストの観点（`tools/test/lint-config.test.ts`）
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| 各塊（ESLint の API の `lintText` に置き場のパスを渡す） | 表の行ごとに、違反の文字列で誤りが出る | 掛けない置き場（`packages/core`・`infra/`（経路の行を除く）・`tools/`・`apps/*/test`）で出ない。型だけの `@aws-sdk/*` の import と `new Date(0)` は出ない。画面の `*.tsx` の JSX の属性と本文でも出る | 違反を直した行に除外の注釈が残ると、使われない注釈の誤りが出る |
+| 各塊（ESLint の API の `lintText` に置き場のパスを渡す） | 表の行ごとに、違反の文字列で誤りが出る | 掛けない置き場（`packages/core`・`infra/`（経路の行を除く）・`tools/`・`apps/*/test`）で出ない。型だけの `@aws-sdk/*` の import と `new Date(0)` は出ない。画面の `*.tsx` の JSX の属性と本文でも出る | 違反を直した行に除外の注釈が残ると、使われない注釈の誤りが出る。`SKELETON_EXCEPTIONS` に無いファイルに `eslint-disable-next-line` を書いても違反が出る。`SKELETON_EXCEPTIONS` のファイルが無いか注釈を 1 つも持たないと落ちる |
 
 ## dependency-cruiser の設定
 
@@ -104,30 +109,59 @@ nd-factory/
 
 ## gitleaks の設定と `leak-check` のジョブ
 
-満たす決定: 設計の決定 3、受け入れ条件 1・2・3
+満たす決定: 設計の決定 3・9、受け入れ条件 1・2・3
 
-`.gitleaks.toml`:
+設定は 2 つに分ける。gitleaks は `[extend] useDefault = true` で既定の規則と一緒に既定の全体の許可（`package-lock.json` などのパスと画像などの拡張子のパス。v8.30.1 の `config/gitleaks.toml` の `[allowlist]`）も継承し、パスの許可を規則の評価の前に当ててファイルを丸ごと飛ばす（`detect/detect.go`。前の設計で 2026-11-21 に v8.30.1 で確かめた）。同じ設定に自前の規則と実際の値の規則を入れると、そのパスに置いた値が素通りするため、自前の規則は既定を読まない設定に置く。
+
+`.gitleaks.toml`（自前の規則。`[extend]` を持たない）:
 
 | 欄 | 中身 |
 | --- | --- |
-| `[extend]` | `useDefault = true`（既定の規則を残す） |
 | `[[rules]]` `nd-aws-account-id` | 前後が英数字でない 12 桁の数（`secretGroup` で数の部分） |
 | `[[rules]]` `nd-aws-arn` | `arn:` とパーティション（`aws`・`aws-cn`・`aws-us-gov`）で始まり、アカウントの欄が 12 桁のもの |
+| `[[rules]]` `nd-aws-arn-no-account` | `arn:` とパーティションで始まり、アカウントの欄が空で（リージョンの欄は空でも値でもよい。`arn:aws:s3:::<バケット>` など。STD4）、資源の部分が英数字で始まるもの。アカウントの欄が `aws` の AWS の管理のポリシー（`arn:aws:iam::aws:policy/…`）は当たらない |
 | `[[rules]]` `nd-aws-resource-id` | AWS の資源の ID の頭（`vpc-`・`subnet-`・`sg-`・`i-`・`vol-`・`snap-`・`ami-`・`igw-`・`rtb-`・`eni-`・`nat-`・`eipalloc-`・`lt-`）と 8 か 17 桁の 16 進 |
 | `[[rules]]` `nd-aws-endpoint` | 資源ごとに名前の付く AWS の端点（`*.execute-api.<リージョン>.amazonaws.com`・`*.lambda-url.<リージョン>.on.aws`・`*.cloudfront.net`・`*.auth.<リージョン>.amazoncognito.com`・`*.rds.amazonaws.com`・`*.s3.amazonaws.com`）の資源の部分 |
-| `[[allowlists]]`（4 つの `nd-aws-*` の規則に掛ける。`targetRules`） | 値が作り物の `123456789012`・頭が `acme`・`us-west-2`・`example.com`・置き場所の記号（`<…>`・`${…}`）。作り物の UUID（`00000000-0000-7000-8000-…` の形）の 12 桁の部分 |
-| `[[allowlists]]`（全体） | 値に作り物の印 `EXAMPLE` を含む |
+| `[[allowlists]]`（5 つの `nd-aws-*` の規則だけに掛ける。`targetRules`） | 値が作り物の `123456789012`・頭が `acme`・`us-west-2`・`example.com`・置き場所の記号（`<…>`・`${…}`）。作り物の UUID（`00000000-0000-7000-8000-…` の形）の 12 桁の部分 |
+| `[[allowlists]]`（`nd-aws-account-id` だけ。`targetRules`・`paths`・`regexes`） | 今の木の既知の当たり（下の「今の木の当たり」）。行の注に理由を書く |
+
+- `.gitleaks.toml` は全体の許可（`[allowlist]` と `targetRules` の無い `[[allowlists]]`）を持たない。作り物の印 `EXAMPLE` の許可もここに置かない（`nd-real-value` に掛からないため）。`tools/test/leak-scan.integration.test.ts` が設定の中身を読んで縛る
+
+`.gitleaks-default.toml`（既定の規則）: `[extend] useDefault = true` と、作り物の印 `EXAMPLE` を値に含む当たりの許可だけを持つ。許可は既定の規則のうち私有鍵と提供者の token の規則（`private-key`・`github-pat`・`github-fine-grained-pat`・`aws-access-token`・`anthropic-api-key`・`slack-bot-token` など。ID は実装で v8.30.1 の既定の設定から写す）に `targetRules` で掛ける。自前の規則を置かない。既定の全体の許可のパスは、既定の規則にだけ効く（上流がその規則のために置いた許可なので受け入れる）。
+
+### 包み `tools/checks/src/leak-check.ts`
+
+gitleaks の標準出力と標準エラーをそのまま CI の記録へ流さないために、gitleaks を起こして報告を絞る包みを 1 つ持つ。正規表現で本文を探す処理は持たない。Node の組み込みの部品だけを使い、依存を入れる前に打てる。
+
+| 関数 | シグネチャ | 責務 |
+| --- | --- | --- |
+| `buildConfigs` | `(root: string, pattern: string \| null) => { own: string; defaults: string }` | `.gitleaks.toml` の文字列に、`pattern` があれば規則 `nd-real-value`（`regex = '''(?i)(?:<pattern>)'''`。許可を持たない）を足したものを `own`、`.gitleaks-default.toml` の文字列を `defaults` として返す。`pattern` は英数字・`-`・`_`・`\|` だけで書く（語を `\|` でつなぐ。`'''` と正規表現の記号を含みえない）。外れれば値を出さずに例外 |
+| `runGitleaks` | `(run: { mode: "dir"; root: string } \| { mode: "git"; root: string; range: string }, config: string) => Promise<GitleaksFinding[]>` | gitleaks を `--redact=100 --no-banner --ignore-gitleaks-allow --gitleaks-ignore-path <空の一時のディレクトリ> --report-format json --report-path - --exit-code 0` で起こす。設定は子の環境変数 `GITLEAKS_CONFIG_TOML` で渡してファイルに書かない（子の環境から `GITLEAKS_CONFIG` を除く）。報告は標準出力からメモリへ受け、`RuleID`・`File`・`StartLine`・`Commit` だけを写して残り（`Secret`・`Match`・`Message`・`Author`・`Email`・`Fingerprint` など）を捨てる。標準エラーはメモリで受けて捨てる（設定の読み込みの誤りで設定の中身、つまり秘密の正規表現を出すため）。0 以外の終了コードは道具の誤り |
+| `maskPath` | `(path: string, pattern: string \| null) => string` | パスの中の `pattern` の当たり（大小を区別しない）を `***` に置き換える |
+| `mainLeakCheck` | `(argv: string[], env: NodeJS.ProcessEnv) => Promise<number>` | 下の流れをつなぎ、当たりを出して終了コードを返す |
+
+- 黙らせる仕組みを効かせない: 行の注釈 `gitleaks:allow` は `--ignore-gitleaks-allow` で効かない。`.gitleaksignore` は gitleaks が `--gitleaks-ignore-path` と探す木の根から読むので、前者に空の一時のディレクトリを渡し、追跡しているファイルに `.gitleaksignore` があれば探す前に終了コード 2 で止める。基準の報告（`--baseline-path`）は渡さない。外しは `.gitleaks.toml` の `targetRules` つきの許可だけで、`nd-real-value` を外す書き方は無い（設計文書の決定 9）
+- 流れ: (1) `LEAK_CHECK_PATTERN` を読み（無いか空なら `null`）、`LEAK_CHECK_REQUIRE_PATTERN` が `1` で `null` なら終了コード 2。(2) 今の木を `dir` で `own` と `defaults` のそれぞれで 1 回ずつ探す。(3) `pattern` があれば `git ls-files -z` のパスに `pattern` を照らし、当たりを規則 `nd-real-path`・行 0 の当たりにする（gitleaks は本文だけを探すため）。(4) `--base` と `--head` があれば、`git merge-base` の分岐点から `--head` のコミットまでを `git` で `own` と `defaults` のそれぞれで探す。(5) 当たりを出す
+- 出力: 標準出力に当たりの行（`leak:<規則>\t<伏せたファイル>:<行>`。履歴は頭にコミットの短い SHA を足す）と件数。ファイルのパスはどの行でも `maskPath` を通す。git と gitleaks の誤りの文言（パスや設定を含みうる）は出さずに誤りの種類だけを標準エラーに出す
+- 終了コード: 当たり無しで 0、当たりで 1、道具の誤り・`.gitleaksignore` の存在・`pattern` の形の誤り・必須の `pattern` の欠けで 2
 
 ジョブ `leak-check` の手順:
 
-1. `actions/checkout`（`fetch-depth: 0`・`persist-credentials: false`）
+1. `actions/checkout`（`fetch-depth: 0`・`persist-credentials: false`）と `actions/setup-node`
 2. 環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の版の linux の資産を取り、`sha256sum` を `GITLEAKS_SHA256` と直接比べ、一致したときだけ展開して `PATH` へ置く（配布元のチェックサムのファイルと比べない。固定にならないため）
-3. 実際の値の規則を重ねる: 秘密 `LEAK_CHECK_PATTERN` があれば、一時のディレクトリに `[extend] path = "<リポジトリ>/.gitleaks.toml"` と規則 `nd-real-value`（`regex` に秘密の正規表現を `'''` で囲んで置く）の 2 つだけを持つ設定を書く。無ければ `.gitleaks.toml` をそのまま使い、`LEAK_CHECK_REQUIRE_PATTERN` が `1`（正本のリポジトリの中の実行。参照の検査と同じ式）なら手順を失敗にする
-4. `gitleaks dir . --config <設定> --redact=100 --no-banner --exit-code 1`（依存を入れる前なので、追跡していないファイルは木に無い）
-5. Pull Request では `gitleaks git . --config <設定> --redact=100 --no-banner --log-opts="<base.sha の分岐点>..<head.sha>"`。分岐点は `git merge-base` で求める
-6. 一時の設定のファイルを消す。`LEAK_CHECK_PATTERN` は手順の環境変数でだけ渡し、ほかの手順に渡さない
+3. 依存を入れる前に `node tools/checks/src/leak-check.ts`（Pull Request では `--base <base.sha> --head <head.sha>` を足す）。`LEAK_CHECK_PATTERN` はこの手順の環境変数でだけ渡し、ほかの手順に渡さない。依存を入れる前なので、追跡していないファイルは木に無い
+4. `npm ci` の後に `npm run test:integration -- leak-scan`（gitleaks だけを起こす結合のテスト）
 
-- 当たりは gitleaks の出力のまま（規則・ファイル・行・伏せた秘密）。正当な当たりは gitleaks の標準の除外（値の行の `gitleaks:allow` か `.gitleaksignore`）に、注か理由を添えて置く。今の木は既定の規則で当たり 0 件（設計文書の LIB1）
+### 今の木の当たり
+
+既定の規則の当たりは 0 件だった（設計文書の LIB1。gitleaks v8.30.1 を打った）。自前の規則は gitleaks では打っておらず、同じ正規表現を `git grep -P` で近似して今の木を照らした（2026-11-21）。当たりは `infra/test/nd-setup.test.ts` の作り物の別のアカウント `210987654321` の 1 件で、`nd-aws-account-id` に当たる。これは `.gitleaks.toml` の `nd-aws-account-id` だけに掛けるパスと値の許可で外し、注に「作り物の別のアカウント（設置のコマンドのテスト）」と書く。資源の ID・アカウントの欄の無い ARN は 0 件、端点はどれも頭が `acme` で許可に入る。gitleaks そのもので打った当たりは実装の Pull Request で確かめる（設計文書の「未確認のまま残ること」）
+
+### 単体テストの観点
+
+| 対象 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `buildConfigs`・`maskPath`（`tools/test/leak-check.test.ts`。gitleaks を起こさない） | `pattern` ありで `nd-real-value` の規則が 1 つ足され、許可を持たない | `pattern` が `null` なら `.gitleaks.toml` のまま。パスの大小違いの語も伏せる | `'''`・空白・正規表現の記号を含む `pattern` で例外になり、例外の文言に値が出ない |
+| `leak-scan.integration.test.ts`（gitleaks の実行ファイルを起こす。`leak-check` のジョブで打つ） | 作り物の値だけの一時の木で当たり 0 件 | 作り物の UUID・置き場所の記号・13 桁の数・`arn:aws:iam::aws:policy/…` で当たらない | 実行の時に組み立てた作り物でない 12 桁・ARN（アカウントの欄の無い S3 のバケットの ARN を含む）・端点・token と、重ねた規則の語を `docs/` の下に置くと当たり、標準出力と標準エラーに値が現れない。同じ値を `package-lock.json` と `*.png` の名前のファイルに置いても自前の規則と `nd-real-value` が当たる。語を含む行に `EXAMPLE` と `gitleaks:allow` を足しても当たる。`.gitleaksignore` を追跡すると終了コード 2。語を含むファイルの名前で `nd-real-path` が当たり、出力のパスが伏せられる。途中のコミットで足して消した値が `git` の探しで当たる。`.gitleaks.toml` に全体の許可を足すとテストが落ちる |
 
 ## knip の設定
 
@@ -147,7 +181,9 @@ nd-factory/
 
 満たす決定: 設計の決定 5、受け入れ条件 1・8・10・13
 
-`.github/zizmor.yml` は既定の点検を外さず、外すときは点検の名前と理由を書く。ジョブ `workflow-audit` は `persist-credentials: false` で取り、`ZIZMOR_VERSION` の版の linux の実行ファイルの資産を `ZIZMOR_SHA256` と直接比べてから置き、`zizmor --offline --config .github/zizmor.yml .github/workflows` を打つ。当たりで失敗する。
+`.github/zizmor.yml` は既定の点検を外さない。外すのは点検ごとの `ignore` の行（`<ファイル>:<行>` の形）だけで、行ごとに注で理由と課題の番号を書く。点検を丸ごと止める `disable` は使わない。ワークフローの行の注釈 `# zizmor: ignore[...]` は使わない（値の行に紛れてレビューで見落としやすいため。設計文書の決定 9）。どちらも CI の定義のテストが縛る。
+
+ジョブ `workflow-audit` の手順: (1) `actions/checkout`（`persist-credentials: false`）と `actions/setup-node`。(2) `ZIZMOR_VERSION` の版の linux の実行ファイルの資産を `ZIZMOR_SHA256` と直接比べてから `PATH` へ置く。(3) `zizmor --offline --config .github/zizmor.yml .github/workflows` を打ち、当たりで失敗する。(4) `npm ci` の後に `npm run test:integration -- workflow-audit`（zizmor だけを起こす結合のテスト）。gitleaks の実行ファイルは置かない。
 
 CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテストを残し、ワークフローを `yaml` で読む。
 
@@ -159,7 +195,7 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | `permissionBlocks` | 同上 | 新設 | `(doc: Workflow) => { scope: string; value: unknown }[]` | 最上位と各ジョブの `permissions` を、場所と値の組で返す |
 | `credentialWords` | 同上 | 変えない | `(yaml: string) => string[]` | 元の文字列で AWS の資格情報の語を探す |
 
-テストが照らすこと: Pull Request で起動するワークフローのジョブの名前の和集合が必須のチェックの宣言と等しい・ジョブの名前がワークフローの間で重ならない・どのワークフローにも AWS の資格情報の語が無い・最上位の `permissions` が `{ contents: read }` だけで、ジョブの `permissions` は持たないか同じ。参照の検査（`tools/ref-check`）は追跡しているファイルをすべて読むので変えず、ワークフローの文字列に NDF の版を読む式と比べを同じ行に置くと当たるテストを `tools/test/ref-check.test.ts` に足す。
+テストが照らすこと: Pull Request で起動するワークフローのジョブの名前の和集合が必須のチェックの宣言と等しい・ジョブの名前がワークフローの間で重ならない・どのワークフローにも AWS の資格情報の語が無い・最上位の `permissions` が `{ contents: read }` だけで、ジョブの `permissions` は持たないか同じ・どのワークフローの文字列にも `zizmor: ignore` が無い・`.github/zizmor.yml` が `disable` を持たず、`ignore` の行がどれも課題の番号の注を持つ。参照の検査（`tools/ref-check`）は追跡しているファイルをすべて読むので変えず、ワークフローの文字列に NDF の版を読む式と比べを同じ行に置くと当たるテストを `tools/test/ref-check.test.ts` に足す。
 
 ### 単体テストの観点
 
@@ -167,7 +203,8 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | --- | --- | --- | --- |
 | `loadWorkflows`・`triggersPullRequest`・`jobNames` | 2 つのワークフローを読み、Pull Request で起動するものを選ぶ | `on: pull_request`・`on: [pull_request]`・`on:` の下の鍵の 3 つの書き方 | 解けない YAML で失敗する。片方のワークフローにだけ資格情報の語・`id-token: write` を足すと当たる |
 | `permissionBlocks` | 今のワークフローで違反 0 件 | ジョブの `permissions: { contents: read }` は通る | ジョブに `pull-requests: write`・`write-all` を足すと場所つきで当たる |
-| `scan-config.integration.test.ts`（gitleaks と zizmor の実行ファイルを起こす。`leak-check` と `workflow-audit` のジョブで `npm run test:integration` として打つ） | 作り物の値だけの一時の木で gitleaks の当たり 0 件、今のワークフローを写した木で zizmor の当たり 0 件 | 作り物の UUID・置き場所の記号・13 桁の数で当たらない | 実行の時に組み立てた作り物でない 12 桁・ARN・端点・token と、重ねた規則の語を `docs/` の下に置くと当たり、報告に値が現れない。途中のコミットで足して消した値が `git` の探しで当たる。書き込みの権限・`persist-credentials` を外した取得・枝の名前で参照した動作で zizmor が当たる |
+| `zizmor` の注釈と設定（`ci-definition.test.ts`） | 今のワークフローと `.github/zizmor.yml` で 0 件 | 注のある `ignore` の行は通る | ワークフローに `# zizmor: ignore[...]` を足す・`disable: true` を足す・注の無い `ignore` の行を足すと当たる |
+| `workflow-audit.integration.test.ts`（zizmor の実行ファイルだけを起こす。`workflow-audit` のジョブで `npm run test:integration -- workflow-audit` として打つ） | 今のワークフローを写した木で当たり 0 件 | — | 書き込みの権限・`persist-credentials` を外した取得・枝の名前で参照した動作を置いた一時の木で当たる。`--config` に渡した設定の外の `.github/zizmor.yml` を一時の木に置いても、渡した設定だけが効く |
 
 ## 形の正本の往復のテスト
 
@@ -291,11 +328,11 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 
 | ファイル | 変える中身 |
 | --- | --- |
-| `.github/workflows/ci.yml` | ジョブ `check` の `npm run check` の後に `npm run deps-check` と `npm run knip` の手順を足す。ジョブ `leak-check`（上の「gitleaks の設定と `leak-check` のジョブ」の手順と、最後に `npm ci` の後の `npm run test:integration -- scan-config`）とジョブ `workflow-audit`（上の「zizmor の設定と CI の定義のテスト」）を足す。動作の版はコミットの SHA で固定する（今の `ci.yml` と同じ） |
+| `.github/workflows/ci.yml` | ジョブ `check` の `npm run check` の後に `npm run deps-check` と `npm run knip` の手順を足す。ジョブ `leak-check`（上の「gitleaks の設定と `leak-check` のジョブ」の手順。gitleaks の実行ファイルを置き、結合のテストは `leak-scan` だけを打つ）とジョブ `workflow-audit`（上の「zizmor の設定と CI の定義のテスト」の手順。zizmor の実行ファイルを置き、結合のテストは `workflow-audit` だけを打つ）を足す。動作の版はコミットの SHA で固定する（今の `ci.yml` と同じ） |
 | `.github/workflows/ndf-contract.yml`（新設） | `on` は `pull_request`・`push`（main）・`schedule`（毎日 1 回）・`workflow_dispatch`。`permissions: contents: read`。ジョブ `ndf-contract` は `npm ci` の後に `npm run ndf-contract -- --summary "$GITHUB_STEP_SUMMARY"` を打つ |
 | `.ndf/project.json` | `ci.required_checks` に `leak-check`・`workflow-audit`・`ndf-contract` を足す。`ci.workflows` に `ndf-contract.yml` の行を足す |
-| `package.json` | スクリプト `deps-check`・`knip`・`ndf-contract`・`test:integration`。開発の依存 `dependency-cruiser`・`knip` |
+| `package.json` | スクリプト `deps-check`・`knip`・`ndf-contract`・`leak-check`・`test:integration`（引数のファイル名の絞りで、ジョブごとに 1 つの結合のテストだけを打つ）。開発の依存 `dependency-cruiser`・`knip` |
 | `vitest.config.ts` | 結合のテスト（`*.integration.test.ts`）を `tools` の単体のテストから外し、`test:integration` でだけ打つ |
 | `tools/package.json` | 依存 `@nd-factory/contracts`・`ajv`・`ajv-formats`・`yaml` |
 | `tools/tsconfig.json` | `checks/src` を含める |
-| `AGENTS.md` | 「秘密とインフラの値を置かない」に、実際の値の正規表現は CI の秘密 `LEAK_CHECK_PATTERN` から受ける行を足す |
+| `AGENTS.md` | 「秘密とインフラの値を置かない」に、実際の値の語は CI の秘密 `LEAK_CHECK_PATTERN`（語を `\|` でつなぐ）から受ける行と、`gitleaks:allow`・`.gitleaksignore`・`zizmor: ignore` を使わず、除外は設定のファイルに課題の番号を添えて置く行を足す |
