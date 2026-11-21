@@ -172,7 +172,7 @@ describe("collectMissingSettings", () => {
     expect(await collect({ azs: 2 })).toEqual([]);
     const text = only(await collect({ azs: 1 }), "get_azs");
     expect(text).toBe(
-      "Fn::GetAZs が返す AZ が 1 つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（aws ec2 create-default-subnet --profile acme-test --region us-west-2 --availability-zone <AZ>）か、既定のサブネットをすべて消す",
+      "Fn::GetAZs が返す AZ が 1 つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（aws ec2 create-default-subnet --profile=acme-test --region=us-west-2 --availability-zone <AZ>）か、既定のサブネットをすべて消す",
     );
   });
 
@@ -180,7 +180,14 @@ describe("collectMissingSettings", () => {
     const c = ctx({ azs: 1 });
     c.target = { ...c.target, profile: "my prof's" };
     const text = only(await collectMissingSettings(c, MISSING_CHECKS), "get_azs");
-    expect(text).toContain("--profile 'my prof'\\''s' --region us-west-2 ");
+    expect(text).toContain("--profile='my prof'\\''s' --region=us-west-2 ");
+  });
+
+  it("ハイフンで始まる profile は、表示するコマンドで --profile の値に結び付く", async () => {
+    const c = ctx({ azs: 1 });
+    c.target = { ...c.target, profile: "--example" };
+    const text = only(await collectMissingSettings(c, MISSING_CHECKS), "get_azs");
+    expect(text).toContain(" --profile=--example --region=us-west-2 ");
   });
 
   it("shellArg は安全な文字だけならそのまま、ほかは単一引用符で囲む", () => {

@@ -126,7 +126,7 @@ export async function checkGetAzs(ctx: MissingContext): Promise<MissingItem[]> {
   return [
     {
       key: "get_azs",
-      text: `Fn::GetAZs が返す AZ が ${count} つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（aws ec2 create-default-subnet --profile ${shellArg(ctx.target.profile)} --region ${shellArg(ctx.target.region)} --availability-zone <AZ>）か、既定のサブネットをすべて消す`,
+      text: `Fn::GetAZs が返す AZ が ${count} つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（aws ec2 create-default-subnet --profile=${shellArg(ctx.target.profile)} --region=${shellArg(ctx.target.region)} --availability-zone <AZ>）か、既定のサブネットをすべて消す`,
     },
   ];
 }
