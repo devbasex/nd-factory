@@ -78,14 +78,16 @@
     "workflows": [
       {
         "path": ".github/workflows/ci.yml",
-        "jobs": 4
+        "jobs": 6
       }
     ],
     "required_checks": [
       "check",
       "synth",
       "e2e",
-      "ref-check"
+      "ref-check",
+      "leak-check",
+      "workflow-audit"
     ]
   },
   "services": {

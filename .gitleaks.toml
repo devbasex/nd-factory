@@ -1,0 +1,71 @@
+# nd-factory の漏れの規則と作り物の値の許可（#1 の決定 3。中身は issues/issue-1-design-detail.md の「gitleaks の設定」）。
+# [extend] を持たない: 既定の規則と既定の全体の許可（package-lock.json などのパス）を読まない。既定の規則は
+# tools/checks/gitleaks-default.toml で別に探す。すべての実行は tools/checks/leak-scan.sh を通す。
+# 許可は規則ごとの [[rules.allowlists]] に書く。最上位の [[allowlists]] の targetRules は、CI が秘密の規則を重ねる設定から
+# [extend] path で読まれると効かないため使わない。正当な当たりは当てた規則の許可に、理由と課題の番号の注を添えて足す。
+# 各規則の秘密（secretGroup）は値を見分ける部分（アカウント・資源の名前）にし、許可はその部分に掛ける
+title = "nd-factory"
+
+# 前後が英数字でない 12 桁。作り物の UUID（00000000-0000-7000-8000-<12 桁>）の最後の組を許可で見分けるため、
+# UUID の前の 4 組があれば当てた文字列に含める
+[[rules]]
+id = "nd-aws-account-id"
+description = "AWS のアカウント ID"
+regex = '''(?m)(?:^|[^0-9A-Za-z])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-)?([0-9]{12})(?:[^0-9A-Za-z]|$)'''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<…>・${…}。実際の名前に現れない文字）"
+regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''[<>{}]''', '''EXAMPLE''']
+
+[[rules.allowlists]]
+description = "別のアカウントの作り物。設置のコマンドのテストが、確認したアカウントと違う profile を作る（infra/test/nd-setup.test.ts。#1）"
+regexes = ['''^210987654321$''']
+
+[[rules.allowlists]]
+description = "作り物の UUID の最後の組（docs/design/screens.md の「見本の値」の ID の形）"
+regexTarget = "match"
+regexes = ['''00000000-0000-7000-8000-[0-9]{12}''']
+
+# アカウントの欄が 12 桁の ARN。秘密は ARN の全体（アカウントの欄の 12 桁は nd-aws-account-id も当てる）
+[[rules]]
+id = "nd-aws-arn"
+description = "AWS の ARN（アカウントの欄つき）"
+regex = '''arn:(?:aws|aws-cn|aws-us-gov):[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:[^\s"'`]*'''
+
+[[rules.allowlists]]
+description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<…>・${…}。実際の名前に現れない文字）"
+regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''[<>{}]''', '''EXAMPLE''']
+
+# アカウントとリージョンの欄の無い S3 の ARN。秘密は置き場の名前
+[[rules]]
+id = "nd-aws-arn-s3"
+description = "S3 の置き場の ARN"
+regex = '''arn:(?:aws|aws-cn|aws-us-gov):s3:::([A-Za-z0-9.<>${}_-]+)'''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<…>・${…}。実際の名前に現れない文字）"
+regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''[<>{}]''', '''EXAMPLE''']
+
+# AWS の資源の ID（頭と 8 か 17 桁の 16 進）
+[[rules]]
+id = "nd-aws-resource-id"
+description = "AWS の資源の ID"
+regex = '''\b((?:vpc|subnet|sg|i|vol|snap|ami|igw|rtb|eni|nat|eipalloc|lt)-(?:[0-9a-f]{17}|[0-9a-f]{8}))\b'''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<…>・${…}。実際の名前に現れない文字）"
+regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''[<>{}]''', '''EXAMPLE''']
+
+# 資源ごとに名前の付く AWS の端点。秘密は資源の部分（サービスとリージョンより前のラベル）
+[[rules]]
+id = "nd-aws-endpoint"
+description = "AWS の資源ごとの端点"
+regex = '''((?:[A-Za-z0-9<>${}_-]+\.)*[A-Za-z0-9<>${}_-]+)\.(?:execute-api\.[^.\s"'`/]+\.amazonaws\.com|lambda-url\.[^.\s"'`/]+\.on\.aws|cloudfront\.net|auth\.[^.\s"'`/]+\.amazoncognito\.com|rds\.amazonaws\.com|s3\.amazonaws\.com)'''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<…>・${…}。実際の名前に現れない文字）"
+regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''[<>{}]''', '''EXAMPLE''']

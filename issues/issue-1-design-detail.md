@@ -119,8 +119,10 @@ nd-factory/
 | `[[rules]]` `nd-aws-arn-s3` | アカウントとリージョンの欄の無い S3 の ARN（`arn:<パーティション>:s3:::`）の資源の名前 |
 | `[[rules]]` `nd-aws-resource-id` | AWS の資源の ID の頭（`vpc-`・`subnet-`・`sg-`・`i-`・`vol-`・`snap-`・`ami-`・`igw-`・`rtb-`・`eni-`・`nat-`・`eipalloc-`・`lt-`）と 8 か 17 桁の 16 進 |
 | `[[rules]]` `nd-aws-endpoint` | 資源ごとに名前の付く AWS の端点（`*.execute-api.<リージョン>.amazonaws.com`・`*.lambda-url.<リージョン>.on.aws`・`*.cloudfront.net`・`*.auth.<リージョン>.amazoncognito.com`・`*.rds.amazonaws.com`・`*.s3.amazonaws.com`）の資源の部分 |
-| 5 つの `nd-aws-*` の規則それぞれの `[[rules.allowlists]]` | 値が作り物の `123456789012`・頭が `acme`・`us-west-2`・`example.com`・置き場所の記号（`<…>`・`${…}`）。作り物の UUID（`00000000-0000-7000-8000-…` の形）の 12 桁の部分 |
+| 5 つの `nd-aws-*` の規則それぞれの `[[rules.allowlists]]` | 秘密（`secretGroup`。値を見分ける部分）が、作り物の `123456789012` を含む・頭が `acme`・`example.com` を含む・置き場所の記号の文字（`<`・`>`・`{`・`}`。`<…>`・`${…}` とテンプレートの式の切れ端で、実際の名前に現れない）を含む。リージョンは秘密に含めないので `us-west-2` で外さない（RDS の端点の秘密にはリージョンが入るため、`us-west-2` で外すと実際の資源の名前を見逃す） |
 | 5 つの `nd-aws-*` の規則それぞれの `[[rules.allowlists]]` | 値に作り物の印 `EXAMPLE` を含む |
+| `nd-aws-account-id` の `[[rules.allowlists]]`（`regexTarget = "match"`） | 作り物の UUID（`00000000-0000-7000-8000-<12 桁>`）の最後の組。規則の正規表現は UUID の前の 4 組があれば当てた文字列に含め、許可はその文字列で見分ける |
+| `nd-aws-account-id` の `[[rules.allowlists]]` | 今の木の正当な当たり: 別のアカウントの作り物 `210987654321`（`infra/test/nd-setup.test.ts` が確認したアカウントと違う profile を作る。#1） |
 
 許可は規則の中の `[[rules.allowlists]]` に書き、最上位の `[[allowlists]]` の `targetRules` を使わない。gitleaks v8.30.1 は `targetRules` の許可を最上位で読んだ設定にだけ付け、`[extend] path` で読まれた側の `targetRules` を捨てる（`config/config.go` の `Translate` は `extendDepth` が 0 のときだけ対象の規則へ付ける）。`LEAK_CHECK_PATTERN` を重ねた設定は `.gitleaks.toml` を `[extend] path` で読むので、`targetRules` では重ねた設定で作り物の値が当たる。規則の中の許可は重ねても規則と一緒に引き継がれる。
 
@@ -131,7 +133,7 @@ nd-factory/
 | `[extend] useDefault = true` | gitleaks の既定の規則と既定の全体の許可を読む。nd-factory の規則は持たない |
 | `[[rules]]` `id = "<既定の規則の id>"` と、その `[[rules.allowlists]]` | 既定の規則の正当な当たりを外すときだけ足す（規則の欄は id だけ書き、正規表現は既定から引き継ぐ）。今の木は当たり 0 件なので置かない |
 
-ジョブ `leak-check` の手順:
+ジョブ `leak-check` の手順（3〜6 は 1 つの手順で打ち、一時の設定は `trap` で手順の終わりに消す。秘密を読んだ後は `unset` し、gitleaks の子のプロセスに渡さない）:
 
 1. `actions/checkout`（`fetch-depth: 0`・`persist-credentials: false`）
 2. 環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の版の linux の資産を取り、`sha256sum` を `GITLEAKS_SHA256` と直接比べ、一致したときだけ展開して `PATH` へ置く（配布元のチェックサムのファイルと比べない。固定にならないため）
@@ -140,7 +142,7 @@ nd-factory/
 5. Pull Request では、分岐点（`git merge-base <base.sha> <head.sha>`）から head までのコミット（マージのコミットの差分を含む）を、同じ 2 つの設定で `tools/checks/leak-scan.sh git <設定> --range "<分岐点>..<head.sha>"` で探す
 6. 一時の設定のファイルを消す。`LEAK_CHECK_PATTERN` は手順の環境変数でだけ渡し、ほかの手順に渡さない
 
-`tools/checks/leak-scan.sh`（`<dir|git> <設定> [--range <範囲>]`）は、gitleaks の除外を効かなくして 1 回探す。gitleaks のすべての実行はこのスクリプトを通す（ジョブの手順に `gitleaks` を直に書かない）。設定は必ず渡し、無ければ探さずに失敗する（省くと gitleaks が探す木の根の `.gitleaks.toml` を読み、既定の規則で探したつもりで nd-factory の規則だけになるため）。
+`tools/checks/leak-scan.sh`（`<dir|git> <設定> [--range <範囲>] [--report <報告のファイル>]`。`--report` は結合のテストが当たりを JSON で受けるため）は、gitleaks の除外を効かなくして 1 回探す。gitleaks のすべての実行はこのスクリプトを通す（ジョブの手順に `gitleaks` を直に書かない）。設定は必ず渡し、無ければ探さずに失敗する（省くと gitleaks が探す木の根の `.gitleaks.toml` を読み、既定の規則で探したつもりで nd-factory の規則だけになるため）。
 
 | 除外 | 効かなくする方法 |
 | --- | --- |
@@ -149,7 +151,7 @@ nd-factory/
 | 探す木の根の `.gitleaksignore` | gitleaks は引数によらず、探す木の根の `.gitleaksignore` を読む（v8.30.1 の `cmd/root.go`）。スクリプトは探す前に `git ls-files --error-unmatch .gitleaksignore` と `test -e .gitleaksignore` を照らし、どちらかで在れば、名前を示して探さずに失敗する |
 | 前の報告（`--baseline-path`） | 渡さない |
 
-打つ引数は `gitleaks <dir . | git . --log-opts="-m <範囲>"> --redact=100 --no-banner --exit-code 1 --ignore-gitleaks-allow --gitleaks-ignore-path <空> --config <設定>` で、空の一時のディレクトリは終わりに消す。`-m` は、gitleaks が範囲を `git log -p -U0 <範囲>` に渡すだけで、そのままではマージのコミットの差分を出さないため（v8.30.1 の `sources/git.go`）に付ける。付けないと、競合の解消で入れて後のコミットで消した値が、今の木にも履歴の探しにも現れない。`-m` はマージのコミットを親ごとの差分で出す。
+打つ引数は `gitleaks <dir . | git . --log-opts="-m <範囲>"> --redact=100 --no-banner --verbose --exit-code 1 --ignore-gitleaks-allow --gitleaks-ignore-path <空> --config <設定> [--report-path <報告> --report-format json]` で、空の一時のディレクトリは終わりに消す。`--verbose` は当たりの規則・ファイル・行・伏せた秘密を記録に出すため。`git` では探す前に `git rev-list` で範囲を読めるか確かめ、読めなければ探さずに失敗する（gitleaks v8.30.1 は `git log` の失敗を当たり無しの終了コード 0 で終えるため。実物で確かめた）。`-m` は、gitleaks が範囲を `git log -p -U0 <範囲>` に渡すだけで、そのままではマージのコミットの差分を出さないため（v8.30.1 の `sources/git.go`）に付ける。付けないと、競合の解消で入れて後のコミットで消した値が、今の木にも履歴の探しにも現れない。`-m` はマージのコミットを親ごとの差分で出す。
 
 - 当たりは gitleaks の出力のまま（規則・ファイル・行・伏せた秘密）。正当な当たりは、当てた規則の `[[rules.allowlists]]` に、理由と課題の番号の注を添えて足す（設定の変更なのでレビューで見える）。`nd-*` の規則の当たりは `.gitleaks.toml` の規則の中に、既定の規則の当たりは `tools/checks/gitleaks-default.toml` にその規則の id の `[[rules]]` を置いて、その中に足す。最上位の `[[allowlists]]` の `targetRules` は重ねた設定で効かないので使わない。値の行の注と除外のファイルでは外せない。今の木は既定の規則で当たり 0 件（設計文書の LIB1）
 
@@ -171,7 +173,7 @@ nd-factory/
 
 満たす決定: 設計の決定 5、受け入れ条件 1・8・10・13
 
-`.github/zizmor.yml` は既定の点検を外さず、外すときは点検の名前と理由を書く。ジョブ `workflow-audit` は `persist-credentials: false` で取り、`ZIZMOR_VERSION` の版の linux の実行ファイルの資産を `ZIZMOR_SHA256` と直接比べてから置き、`zizmor --offline --config .github/zizmor.yml .github/workflows` を打つ。当たりで失敗する。
+`.github/zizmor.yml` は既定の点検を外さず、外すときは点検の名前と理由を書く。ジョブ `workflow-audit` は `persist-credentials: false` で取り、`ZIZMOR_VERSION` の版の linux の実行ファイルの資産を `ZIZMOR_SHA256` と直接比べてから置き、`zizmor --offline --config .github/zizmor.yml .github/workflows` を打つ。当たりで失敗する。`.github/zizmor.yml` は `unpinned-uses` の方針 `"*": hash-pin`（すべての動作を SHA での固定に限る。v1.32.0 の既定と同じだが、版を上げても緩まないよう明示する）だけを持つ。結合のテストは `ci.yml` の点検の手順の `run` を読んで同じ引数で打つ。
 
 CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテストを残し、ワークフローを `yaml` で読む。
 
