@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import type { Readable } from "node:stream";
 import { DescribeTableCommand, DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { awsClientConfigOf, DeadlineHttpHandler, type AwsClientConfig } from "../src/outbound.ts";
 
 // AWS SDK の要求の期限を、127.0.0.1 の実のソケットと実のタイマーで確かめる。AWS には繋がない
@@ -172,6 +172,30 @@ describe("DeadlineHttpHandler の流れの本文", () => {
     expect(error).toMatchObject({ name: "TimeoutError" });
     expect(Date.now() - started).toBeGreaterThanOrEqual(190);
     expect(Date.now() - started).toBeLessThan(200 + 1_000);
+    handler.destroy();
+  }, 10_000);
+});
+
+describe("DeadlineHttpHandler の期限のタイマー", () => {
+  it("本文を読まずに捨てても、期限のタイマーがプロセスの終わりを引き止めない（unref）", async () => {
+    const port = await listen(answerOk);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const original = globalThis.setTimeout;
+    const spy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((...args: Parameters<typeof setTimeout>) => {
+      const timer = original(...args);
+      timers.push(timer);
+      return timer;
+    }) as typeof setTimeout);
+    const handler = new DeadlineHttpHandler(60_000);
+    try {
+      await handler.handle(requestTo(port));
+    } finally {
+      spy.mockRestore();
+    }
+    const deadline = timers.find((t) => (t as unknown as { _idleTimeout?: number })._idleTimeout === 60_000);
+    expect(deadline).toBeDefined();
+    expect(deadline?.hasRef()).toBe(false);
+    clearTimeout(deadline);
     handler.destroy();
   }, 10_000);
 });

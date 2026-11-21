@@ -50,7 +50,8 @@ export function createOperationClient<const Ops extends readonly OperationDef[] 
       if (op === undefined) throw new TypeError(`操作の表に無い操作: ${name}`);
       const res = await transport(op, items);
       if (res.status !== 200) {
-        // 生成側と同じ problem の形で、正本に登録した理由と HTTP の状態の組だけを受ける
+        // 要求全体の誤りは、生成物と同じ problem の形で、本文の status が HTTP の状態と同じで、理由の表の組のときだけ受ける。
+        // それ以外（中継が返した 502 の本文など）は API が返した正規の失敗とみなさない
         const problem = requestProblemOf(res.status, res.body);
         return problem === null ? RESPONSE_INVALID : { ok: false, status: res.status, reason: problem.reason };
       }

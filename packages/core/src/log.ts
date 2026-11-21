@@ -153,6 +153,9 @@ export function createLogger(context: LogContext, sink?: (line: string) => void)
     base: null,
     timestamp: pino.stdTimeFunctions.isoTime,
     formatters: { level: levelLabel, bindings: loggable, log: loggable },
+    // Node の pino は err の鍵へ標準のエラーの直列化を掛け、redact が替えた {name, message} を type・stack 付きの形へ変える。
+    // ブラウザー版は掛けないため、ここで止めて両方の出力を redact の写しのままにそろえる
+    serializers: { err: (value: unknown) => value },
     hooks: {
       // 文も伏せる。項目は formatters.log、文脈は formatters.bindings が伏せる
       logMethod(args, method) {
