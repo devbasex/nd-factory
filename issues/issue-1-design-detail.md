@@ -70,7 +70,7 @@ nd-factory/
 | `apps/*` | `@typescript-eslint/no-restricted-imports`（`allowTypeImports`） | `@aws-sdk/*`・`node:http`・`node:https`・`node:crypto` の `randomUUID`・`randomBytes`・`uuid` | 外部の呼び出し・条件つきの書き込み・操作の記録の書き手・ID |
 | `apps/**` と `packages/core/src/**`（使える量の判定のモジュール `packages/core/src/usage-limit*` を除く） | `no-restricted-imports` | 料金プランの値の書き出し（#29 が置く 1 つの書き出し。指定子は下の `PLAN_VALUES_SPECIFIER`）。指定子の文字列だけを見るので、相対のパスでの import は dependency-cruiser の `plan-values-only-in-usage-limit` が落とす | I8 |
 | `apps/web/src/**` | `no-restricted-syntax` | 料金プランの名前と同じ文字列（JSX の属性の値と `JSXText` を含む）。名前は #29 の書き出しから読む（読めないときの扱いは下の `PLAN_EXPORT_REQUIRED`） | I8（画面） |
-| `apps/runner/src/**` | `no-restricted-properties` | `JSON.parse`（NDF のファイルと区間の報告は形の正本の読み取りの関数で読み、ランナーは JSON を自分で解かない。#6 へ渡す欠け K6-4） | F23 の照らしがランナーの読み取りにも効くこと（設計文書の決定 7） |
+| `apps/runner/src/**` | `no-restricted-properties` | `JSON.parse`（区間の報告・NDF のファイル・`ndf progress show` の出力は形の正本の読み取りの関数（#2 へ渡す欠け K2-6）で読み、ランナーは JSON を自分で解かない。#6 へ渡す欠け K6-4） | F23 の照らしがランナーの読み取りにも効くこと（設計文書の決定 7） |
 | `apps/web/src/**` | `no-restricted-imports`（`importNames`） | `screen-pending.json` に並ぶ操作の生成した呼び出しの import（画面を作るなら同じ Pull Request で行を消す。K2-2）。データが無ければこの選び方を作らない | I14（画面の無い間の除外の陳腐化） |
 | `apps/web/src/**`・`apps/api/src/**`・`infra/lib/**` | `no-restricted-syntax` | `/v1/` を含む文字列とテンプレートの文字列（経路は形の正本の登録の書き出しからだけ読む。K2-2・K2-3） | I14（画面の呼び出し・HTTP の経路の登録） |
 | `apps/web/**` の外の `*.tsx` | `no-restricted-syntax` の `Program` | ファイルそのもの（1 ファイル 1 件） | 言語と書き方の決まりの画面の行（決定 140） |
@@ -320,7 +320,7 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 
 - 先端では、通っても `C/hooks/unattended-report.json` の `shape` を固定の点と比べ、差分を要約に並べる（実行の文書の「通ったときの差分」）
 - `ask-journal` の行が `fields` を持つようになったら、要約の知らせの行へ出す（失敗にしない。#41 の決定 106 の答えを知るため）
-- この 6 つは形の正本の判定とデータ（#2）を契約と照らす。ランナー（#6）が起動する口（K2-6 の区分）ごとに実際に組み立てた正常な呼び出しを判定に通して通り、環境変数の名前の集合と翻訳が読む項目が口と実行の場ごとの使い方のデータと等しいこと（ホステッドと手元のマシンの両方）と、判定が拒む呼び出しで NDF を起こさないことは `apps/runner` のテストが照らす。環境変数と読む項目を使い方のデータからだけ組むことと、区間の報告を形の正本の読み取りの関数だけで読むことは、そのテストと ESLint の `apps/runner/src/**` の `JSON.parse` の禁止が縛る（設計文書の「#6 へ渡す欠け」K6-1〜K6-4）
+- この 6 つは形の正本の判定とデータ（#2）を契約と照らす。ランナー（#6）が起動する口（K2-6 の区分）ごとに実際に組み立てた正常な呼び出しを判定に通して通り、環境変数の名前の集合と翻訳が読む項目が口と実行の場ごとの使い方のデータと等しいこと（ホステッドと手元のマシンの両方）と、判定が拒む呼び出しで NDF を起こさないことは `apps/runner` のテストが照らす。環境変数と読む項目を使い方のデータからだけ組むことと、区間の報告・NDF のファイル・`ndf progress show` の出力を形の正本の読み取りの関数（K2-6。口ごとの対応は K6-4）だけで読むことは、そのテストと ESLint の `apps/runner/src/**` の `JSON.parse` の禁止が縛る（設計文書の「#6 へ渡す欠け」K6-1〜K6-4）
 
 ### 内部のデータと定数
 
