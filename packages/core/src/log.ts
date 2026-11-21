@@ -7,8 +7,8 @@ import { redact } from "./redact.ts";
 export type LogContext = {
   request_id: string;
   fn: string;
-  // 受け口
-  endpoint?: string;
+  // 受け口（必須。画面は自分が呼ぶ受け口の名前を渡す）
+  endpoint: string;
 };
 
 export type LogFields = Record<string, unknown>;
@@ -52,29 +52,40 @@ function quietly(write: () => void): void {
 const RESERVED = new Set(["time", "level", "msg", "request_id", "fn", "endpoint"]);
 const RESERVED_PREFIX = "field.";
 
-// 必須の名前に当たる呼び手の鍵は "field." を頭に付けて残す（黙って落とさない）
-function reserved(fields: LogFields): LogFields {
+// child の文脈（先）と呼び出しの項目（後）を 1 つの物へ組む。pino の child の束ねは使わない
+// （Node の pino は束ねと項目の同じ鍵を 2 度書き、JSON を読むと先の値が消えるため）。
+// 必須でない名前は後の値が先の値に勝つ。必須の名前は "field." を頭に付けて残し、避け先が埋まっていれば
+// "field.time#2" のように番号を付ける（黙って落とさない）。避け先は呼び手の鍵を先に置いてから決める
+function reserved(layers: readonly LogFields[]): LogFields {
   const out: LogFields = {};
-  for (const [key, value] of Object.entries(fields)) {
-    if (!RESERVED.has(key)) out[key] = value;
+  const moved: [string, unknown][] = [];
+  for (const layer of layers) {
+    for (const [key, value] of Object.entries(layer)) {
+      if (RESERVED.has(key)) moved.push([key, value]);
+      else out[key] = value;
+    }
   }
-  for (const [key, value] of Object.entries(fields)) {
-    if (RESERVED.has(key) && !(`${RESERVED_PREFIX}${key}` in out)) out[`${RESERVED_PREFIX}${key}`] = value;
+  for (const [key, value] of moved) {
+    const base = `${RESERVED_PREFIX}${key}`;
+    let target = base;
+    for (let n = 2; target in out; n += 1) target = `${base}#${n}`;
+    out[target] = value;
   }
   return out;
 }
 
-function wrap(base: PinoLogger): Logger {
+function wrap(base: PinoLogger, bound: readonly LogFields[]): Logger {
+  const line = (fields: LogFields | undefined): LogFields => reserved([...bound, fields ?? {}]);
   return {
-    info: (msg, fields) => quietly(() => base.info(reserved(fields ?? {}), msg)),
-    warn: (msg, fields) => quietly(() => base.warn(reserved(fields ?? {}), msg)),
-    error: (msg, fields) => quietly(() => base.error(reserved(fields ?? {}), msg)),
-    // 子の項目を扱えない（読むと投げる getter など）ときは、親のロガーのまま続ける
+    info: (msg, fields) => quietly(() => base.info(line(fields), msg)),
+    warn: (msg, fields) => quietly(() => base.warn(line(fields), msg)),
+    error: (msg, fields) => quietly(() => base.error(line(fields), msg)),
+    // 子の項目はこの時に伏せた写しを取って持つ。扱えない（読むと投げる getter など）ときは、親のロガーのまま続ける
     child: (fields) => {
       try {
-        return wrap(base.child(reserved(loggable(fields))));
+        return wrap(base, [...bound, loggable(fields)]);
       } catch {
-        return wrap(base);
+        return wrap(base, bound);
       }
     },
   };
@@ -118,5 +129,5 @@ export function createLogger(context: LogContext, sink?: (line: string) => void)
     },
   };
   const root = sink === undefined ? pino(options) : pino(options, { write: (line: string) => emit(withoutNewline(line)) });
-  return wrap(root.child(loggable(context)));
+  return wrap(root.child(loggable(context)), []);
 }

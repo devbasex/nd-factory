@@ -95,6 +95,29 @@ describe("createLogger", () => {
     expect(second).toMatchObject({ level: "info", request_id: "req-1", "field.request_id": "child", "field.level": "error" });
   });
 
+  it("必須の名前の避け先が埋まっていれば番号を付けて、どちらの値も残す", () => {
+    const out = capture();
+    const log = createLogger(context, out.sink);
+    log.info("同じ行", { time: "t", "field.time": "ft", request_id: "r", "field.request_id": "fr" });
+    log.child({ time: "child" }).info("子と呼び出し", { time: "call" });
+    log.child({ time: "c1" }).child({ time: "c2", "field.time": "own" }).info("孫", { time: "call" });
+    for (const line of out.lines) {
+      expect(line.match(/"field\.time":/g)).toHaveLength(1);
+      expect(line.match(/"time":/g)).toHaveLength(1);
+    }
+    const [first, second, third] = out.records();
+    expect(first).toMatchObject({ "field.time": "ft", "field.time#2": "t", "field.request_id": "fr", "field.request_id#2": "r", request_id: "req-1" });
+    expect(second).toMatchObject({ "field.time": "child", "field.time#2": "call" });
+    expect(third).toMatchObject({ "field.time": "own", "field.time#2": "c1", "field.time#3": "c2", "field.time#4": "call" });
+  });
+
+  it("child と呼び出しの同じ名前（必須でない）は呼び出しの値が勝ち、鍵を 2 度書かない", () => {
+    const out = capture();
+    createLogger(context, out.sink).child({ operation: "child" }).info("上書き", { operation: "call" });
+    expect(out.lines[0]?.match(/"operation":/g)).toHaveLength(1);
+    expect(out.records()[0]).toMatchObject({ operation: "call" });
+  });
+
   it("child の項目を読めなくても、親のロガーで続ける", () => {
     const out = capture();
     const fields = Object.defineProperty({}, "bad", {

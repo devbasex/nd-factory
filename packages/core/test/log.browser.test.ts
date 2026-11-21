@@ -11,7 +11,7 @@ vi.mock("pino", () => {
 
 const { createLogger } = await import("../src/log.ts");
 
-const context = { request_id: "req-1", fn: "web" };
+const context = { request_id: "req-1", fn: "web", endpoint: "user" };
 
 function capture() {
   const lines: string[] = [];
@@ -28,7 +28,7 @@ describe("createLogger（ブラウザー版の pino）", () => {
     createLogger(context, out.sink).child({ operation: "users.put" }).info("作った", { n: 1 });
     expect(out.lines).toHaveLength(1);
     const [record] = out.records();
-    expect(record).toMatchObject({ level: "info", msg: "作った", request_id: "req-1", fn: "web", operation: "users.put", n: 1 });
+    expect(record).toMatchObject({ level: "info", msg: "作った", request_id: "req-1", fn: "web", endpoint: "user", operation: "users.put", n: 1 });
     expect(record?.["time"]).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 
@@ -54,6 +54,17 @@ describe("createLogger（ブラウザー版の pino）", () => {
       { level: "warn", request_id: "req-1", "field.request_id": "other", "field.level": "info" },
       { level: "error", request_id: "req-1", "field.request_id": "child" },
     ]);
+  });
+
+  it("child と呼び出しの必須の名前は、避け先に番号を付けて両方を残す", () => {
+    const out = capture();
+    const log = createLogger(context, out.sink);
+    log.child({ time: "child" }).info("子と呼び出し", { time: "call" });
+    log.info("同じ行", { request_id: "r", "field.request_id": "fr" });
+    const [first, second] = out.records();
+    expect(first).toMatchObject({ "field.time": "child", "field.time#2": "call" });
+    expect(first?.["time"]).not.toBe("call");
+    expect(second).toMatchObject({ request_id: "req-1", "field.request_id": "fr", "field.request_id#2": "r" });
   });
 
   it("sink を省くと、レベルに合う console の口へ物でなく JSON の 1 行を渡す", () => {
