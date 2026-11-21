@@ -173,7 +173,7 @@ export async function callHttp(req: OutboundRequest, policyName: HttpPolicyName,
     lastRetriable = req.idempotent || (error instanceof Error && retryWhenNotDelivered({ error }));
   }
   if (result.class === "ok") deps.log.info("外への呼び出しが済んだ", summary(result.status, result.class));
-  // 繰り返した回数が正でも、最後の失敗が繰り返す対象の外（冪等でない要求の 408・5xx・時間切れ）なら使い切ったと書かない
+  // 繰り返した回数が正でも、最後の失敗が繰り返す対象の外（冪等でない要求の 408・500・502・503・504・時間切れ）なら使い切ったと書かない
   else if (result.class === "retryable" && retries > 0 && lastRetriable) deps.log.error("外への呼び出しが再試行を使い切った", summary(result.status, result.class));
   else if (result.class === "retryable") deps.log.error("外への呼び出しが一時の失敗で、繰り返さずに返した", summary(result.status, result.class));
   else deps.log.warn("外への呼び出しを相手が断った", summary(result.status, result.class));
