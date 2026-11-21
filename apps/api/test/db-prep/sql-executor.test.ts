@@ -574,7 +574,7 @@ describe("手順の文の長さ", () => {
     for (const present of [false, true]) {
       const fake = new FakeSqlExecutor();
       fake.respond = (sql) => {
-        if (sql.includes("to_regclass")) return [{ present }];
+        if (sql.includes("AS present")) return [{ present }];
         if (sql.includes("RETURNING")) return [{ prep_id: "prep-1" }];
         return [];
       };

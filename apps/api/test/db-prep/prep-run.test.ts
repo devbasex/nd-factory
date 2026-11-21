@@ -10,7 +10,7 @@ describe("claimPrepRun（作り物の SqlExecutor）", () => {
   function fakeWith(present: boolean, inserted: boolean): FakeSqlExecutor {
     const fake = new FakeSqlExecutor();
     fake.respond = (sql) => {
-      if (sql.includes("to_regclass")) return [{ present }];
+      if (sql.includes("AS present")) return [{ present }];
       if (sql.includes("RETURNING")) return inserted ? [{ prep_id: "prep-1" }] : [];
       return [];
     };
@@ -43,7 +43,7 @@ describe("claimPrepRun（作り物の SqlExecutor）", () => {
     const s = fake.statements();
     expect(s[0]).toContain("to_regclass");
     expect(s[1]).toContain("pg_advisory_xact_lock(hashtext('nd-prep:schema'))");
-    expect(s[2]).toContain("to_regclass");
+    expect(s[2]).toContain("pg_catalog.pg_class");
     const schema = s.findIndex((x) => x.includes("CREATE SCHEMA IF NOT EXISTS nd_prep"));
     const table = s.findIndex((x) => x.includes("CREATE TABLE IF NOT EXISTS nd_prep.prep_runs"));
     const insert = s.findIndex((x) => x.includes("ON CONFLICT (prep_id) DO NOTHING RETURNING prep_id"));
@@ -65,7 +65,7 @@ describe("claimPrepRun（作り物の SqlExecutor）", () => {
     let looks = 0;
     const respond = fake.respond;
     fake.respond = (sql, params) => {
-      if (sql.includes("to_regclass")) return [{ present: ++looks > 1 }];
+      if (sql.includes("AS present")) return [{ present: ++looks > 1 }];
       return respond(sql, params);
     };
     expect(await claimPrepRun(fake, "prep-1")).toBe("first");
@@ -233,7 +233,8 @@ describePg("claimPrepRun（PostgreSQL）", () => {
         throw e;
       }
       expect(await outcome).toEqual({ value: "first" });
-      expect(sent[2]).toContain("to_regclass");
+      // 見直しは syscache の控えでなく、カタログの表を文の写しで読む（to_regclass は 1 回目の「無い」の控えを使い続ける）
+      expect(sent[2]).toContain("pg_catalog.pg_class");
       expect(sent.some((x) => x.includes("CREATE"))).toBe(false);
     });
   });
