@@ -10,9 +10,15 @@ export type RowKey = { readonly pk: string; readonly sk: string | null };
 // エンティティの版。書くたびに 1 上げ、条件つきの書き込み（updateIfVersion）で照らす
 export const entityVersion = z.int().min(1);
 
-// TTL の列（expire_at）。UNIX の秒の整数で、DynamoDB の TTL の属性
+// TTL の列（expire_at）。UNIX の秒の整数で、DynamoDB の TTL の属性。
+// 行の形は 10 桁の秒の整数だけを通す（ミリ秒の値は DynamoDB が遠い先の時刻と見て消さないため落とす）
 export const TTL_ATTRIBUTE = "expire_at";
-export const expireAt = z.int().min(0);
+export const expireAt = z.int().min(1_000_000_000).max(9_999_999_999);
+
+// 期限の UNIX のミリ秒を、TTL の列に書く秒の整数にする。どの書き手もこれで expire_at を作る
+export function expireAtSeconds(ms: number): number {
+  return Math.floor(ms / 1000);
+}
 
 // 閉じた語の集まりのうち、値の集合をほかの子が決めるものの形（決定 15 の英小文字の識別子）
 export const identifier = z.string().regex(/^[a-z][a-z0-9_]*$/);

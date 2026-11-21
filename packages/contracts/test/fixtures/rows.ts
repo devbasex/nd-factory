@@ -9,7 +9,22 @@ import { assignmentKey, assignmentRow, githubTokenKey, githubTokenRow, projectKe
 import { laneKey, laneRow, segmentIdOf, segmentKey, segmentRow, sprintKey, sprintRow } from "../../src/rows/sprints.ts";
 import { invitationKey, invitationRow, machineKey, machineRow, seatKey, seatRow, teamKey, teamRow, usageMonthKey, usageMonthRow } from "../../src/rows/teams.ts";
 import { costRecordKey, costRecordRow } from "../../src/rows/usage.ts";
-import { delegationKey, delegationRow, loginKey, loginRow, loginSubjectKey, loginSubjectRow, userKey, userRow } from "../../src/rows/users.ts";
+import {
+  cognitoSubjectKey,
+  cognitoSubjectRow,
+  delegationKey,
+  delegationRow,
+  loginKey,
+  loginLinkKey,
+  loginLinkRow,
+  loginRow,
+  loginSubjectKey,
+  loginSubjectRow,
+  sessionRevocationKey,
+  sessionRevocationRow,
+  userKey,
+  userRow,
+} from "../../src/rows/users.ts";
 
 // 行の種類ごとの作り物の行（空を許す列を欠いた最小の行）。値は作り物だけ
 
@@ -35,9 +50,44 @@ export type RowCase = {
 };
 
 export const ROW_CASES: Readonly<Record<string, RowCase>> = {
-  user: { schema: userRow, keyOf: userKey, overwrite: true, sample: { schema_version: 1, version: 1, user_id: USR, display_name: "acme の人", created_at: AT } },
-  login: { schema: loginRow, keyOf: loginKey, overwrite: false, sample: { schema_version: 1, user_id: USR, idp: "google", subject: "1234567890", linked_at: AT } },
-  login_subject: { schema: loginSubjectRow, keyOf: loginSubjectKey, overwrite: false, sample: { schema_version: 1, user_id: USR, idp: "github", subject: "42" } },
+  user: { schema: userRow, keyOf: userKey, overwrite: true, sample: { schema_version: 1, version: 1, user_id: USR, login_count: 1, display_name: "acme の人", created_at: AT } },
+  login: {
+    schema: loginRow,
+    keyOf: loginKey,
+    overwrite: false,
+    sample: { schema_version: 1, user_id: USR, idp: "google", subject: "1234567890", cognito_sub: UUID, bound_auth_time: AT, linked_at: AT },
+  },
+  login_subject: { schema: loginSubjectRow, keyOf: loginSubjectKey, overwrite: false, sample: { schema_version: 1, user_id: USR, idp: "github", subject: "42", cognito_sub: UUID, bound_auth_time: AT } },
+  cognito_subject: {
+    schema: cognitoSubjectRow,
+    keyOf: cognitoSubjectKey,
+    overwrite: true,
+    sample: { schema_version: 1, version: 1, cognito_sub: UUID, cognito_username: "github_42", idp: "github", subject: "42", user_id: USR, bound_auth_time: AT },
+  },
+  session_revocation: {
+    schema: sessionRevocationRow,
+    keyOf: sessionRevocationKey,
+    overwrite: false,
+    sample: { schema_version: 1, cognito_sub: UUID, session_id: "session-1", revoked_at: AT, expire_at: 1797595445 },
+  },
+  login_link: {
+    schema: loginLinkRow,
+    keyOf: loginLinkKey,
+    overwrite: false,
+    sample: {
+      schema_version: 1,
+      link_id: UUID,
+      state: "open",
+      created_at: AT,
+      user_id: USR,
+      session_sub: UUID,
+      session_id: "session-1",
+      session_bound_auth_time: AT,
+      idp: "github",
+      expires_at: AT,
+      expire_at: 1795000000,
+    },
+  },
   delegation: {
     schema: delegationRow,
     keyOf: delegationKey,

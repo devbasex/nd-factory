@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ID_KINDS, idOf } from "../src/ids.ts";
 import { ITEM_REASONS, REASON_CODE, REQUEST_REASONS } from "../src/reasons.ts";
-import { delegationToken, machineToken } from "../src/tokens.ts";
+import { dbPrepTokenClaims, delegationToken, machineToken, runnerTokenClaims } from "../src/tokens.ts";
 import {
   calendarMonth,
   currencyCode,
@@ -260,6 +260,37 @@ describe("delegationToken・machineToken", () => {
     expect(passes(machineToken, `ndfm_${team}.${mch}.${secret}`)).toBe(true);
     expect(passes(machineToken, `ndfm_${usr}.${mch}.${secret}`)).toBe(false);
     expect(passes(machineToken, `ndfd_${team}.${mch}.${secret}`)).toBe(false);
+  });
+});
+
+describe("runnerTokenClaims・dbPrepTokenClaims", () => {
+  const lane = "lane_01890a5d-ac96-774b-bcce-000000000001";
+  const prj = "prj_01890a5d-ac96-774b-bcce-000000000002";
+  const runner = { aud: "lane", exp: 1_800_000_000, token_use: "lane", sub: lane, project_id: prj, generation: 2 };
+  const prep = { aud: "db_prep", exp: 1_800_000_000, token_use: "exchange", sub: "prep-1", project_id: prj };
+
+  it("ランナーの主張は宛先 lane・用途 exchange か lane・レーンの ID・プロジェクトの ID・整数の世代を持つ", () => {
+    expect(runnerTokenClaims.safeParse(runner).success).toBe(true);
+    expect(runnerTokenClaims.safeParse({ ...runner, token_use: "exchange", iat: 1 }).success).toBe(true);
+    for (const over of [{ aud: "db_prep" }, { token_use: "completion" }, { sub: prj }, { project_id: lane }, { generation: 1.5 }, { generation: "2" }, { exp: "1" }]) {
+      expect(runnerTokenClaims.safeParse({ ...runner, ...over }).success).toBe(false);
+    }
+    const { generation: _generation, ...withoutGeneration } = runner;
+    expect(runnerTokenClaims.safeParse(withoutGeneration).success).toBe(false);
+  });
+
+  it("DB の用意の主張は宛先 db_prep・用途 exchange か completion・空でない用意の ID・プロジェクトの ID を持つ", () => {
+    expect(dbPrepTokenClaims.safeParse(prep).success).toBe(true);
+    expect(dbPrepTokenClaims.safeParse({ ...prep, token_use: "completion" }).success).toBe(true);
+    for (const over of [{ aud: "lane" }, { token_use: "lane" }, { sub: "" }, { project_id: lane }, { exp: null }]) {
+      expect(dbPrepTokenClaims.safeParse({ ...prep, ...over }).success).toBe(false);
+    }
+  });
+
+  it("どちらの形も JSON Schema で表せる", () => {
+    for (const schema of [runnerTokenClaims, dbPrepTokenClaims]) {
+      expect(() => z.toJSONSchema(schema)).not.toThrow();
+    }
   });
 });
 
