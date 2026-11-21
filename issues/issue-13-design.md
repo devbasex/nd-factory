@@ -37,7 +37,7 @@ graph LR
 
 ## 文脈と制約
 
-- 全体の設計で決めた次の 3 つは決め直さない。資源の形（[プラットフォームの文書のインフラ](../docs/design/platform.md#インフラ)）・進行表の DB の用意の順（[データの文書の進行表の DB](../docs/design/data.md#進行表の-db)）・DB の用意のタスクの HTTP の経路（[API の文書](../docs/design/api.md#ランナー手元のマシンdb-の用意のタスクの-http-の経路)）である
+- 全体の設計で決めた次の 3 つは決め直さない。資源の形（[プラットフォームの文書のインフラ](../docs/design/platform.md#インフラ)）・進行表の DB の用意の順（[データの文書の進行表の DB](../docs/design/data.md#進行表の-db)）・DB の用意のタスクの HTTP の経路（[API の文書](../docs/design/api.md#ランナー手元のマシンの-http-の経路)）である
 - 全体の設計で直したのはイメージの置き場（決定 87）の 1 件だけで、利用者が 2026-11-21 に承認した
 - 並行する #41 が `docs/design/execution.md`・`overview.md` を直す。この課題は全体の設計のうち `platform.md` だけを直す
 - 設計の段では AWS に触れない。実測と戻しの予行は、リリース承認ゲートの承認の後に反映した環境で行う
@@ -149,7 +149,7 @@ graph TD
 
 ### DB の用意のタスクの HTTP の経路
 
-経路・主体・順序は [API の文書](../docs/design/api.md#ランナー手元のマシンdb-の用意のタスクの-http-の経路) のとおりで、この課題は要素の項目を決めて形の正本 `packages/contracts/src/db-prep-api.ts` に書く。本文は配列で、要素は 1 個である（I12）。
+経路・主体・順序は [API の文書](../docs/design/api.md#ランナー手元のマシンの-http-の経路) のとおりで、この課題は要素の項目を決めて形の正本 `packages/contracts/src/db-prep-api.ts` に書く。本文は配列で、要素は 1 個である（I12）。
 
 | 経路 | 向き | 項目 |
 | --- | --- | --- |

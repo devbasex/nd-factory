@@ -20,7 +20,7 @@
 | `packages/core/`・`packages/contracts/` | 横断の部品・操作の表の枠・サービスの表の列と索引・表の移し | detail.md（この文書）と #2 |
 | `apps/runner/` | ランナー | #6 |
 | `apps/nd-runtime/` | nd ランタイム | #7 |
-| `apps/db-prep/` | DB の用意 | #13 |
+| `apps/api/src/entries/` の DB の用意の関数 | DB の用意。用意と差し替えの SQL は `SqlExecutor` のインタフェースの裏に置き、本番は Data API の実装、CI は `pg` の実装（PostgreSQL のサービスコンテナ）で同じ手順を照らす | #13 |
 | `apps/api/src/entries/` の見回り | 見回りの起点と予定。処理ごとの中身は持ち主の子（失効のやり直し #5・マシンの途切れ #7・送達のやり直し #8） | #6 |
 | `apps/api/src/entries/` の知らせの送り手・`apps/api/src/modules/` の知らせ | 知らせ | #8 |
 | 要素の項目・型・理由のコード | 操作ごとの形の正本 | [API の文書の操作の一覧](api.md#操作の一覧) の受け持つ子の表 |
@@ -72,14 +72,13 @@ nd-factory/
 │   └── core/             * 横断の部品（時計・ID と冪等の鍵・ログと伏せ字・外部の呼び出しと再試行・
 │       └── src/              条件つきの書き込み・認証・認可の判定・使える量の判定・操作の記録の書き手・操作の振り分け）
 ├── apps/
-│   ├── api/                API と MCP の 1 つの関数・見回り・知らせの送り手・表の移し
+│   ├── api/                API と MCP の 1 つの関数・見回り・知らせの送り手・表の移し・DB の用意
 │   │   └── src/
-│   │       ├── entries/  * Lambda ごとの起点（api-fn・patrol・notifier・migrate）
+│   │       ├── entries/  * Lambda ごとの起点（api-fn・patrol・notifier・migrate・db-prep）
 │   │       └── modules/  * コンテキストごとのモジュール（操作のハンドラーと、認可の判定へ渡す読み手）
 │   ├── web/                画面
 │   ├── runner/           * ランナー（ECS のタスクと手元のコンテナで同じものが動く）
-│   ├── nd-runtime/       * nd ランタイム（手元のマシンで動く）
-│   └── db-prep/          * DB の用意（ECS のタスク。claude と NDF を含まない）
+│   └── nd-runtime/       * nd ランタイム（手元のマシンで動く）
 ├── infra/                  CDK のスタックと設置のコマンド
 │   ├── bin/
 │   ├── lib/
@@ -97,7 +96,7 @@ nd-factory/
 | --- | --- | --- |
 | `packages/contracts` | zod だけ | ほかに何にも依らない |
 | `packages/core` | `packages/contracts` だけ | 各コンテキストの表の行を読む所（席・割り当て・委任・マシン・レーン）は、`core` が読み手の型（ポート）だけを持ち、`apps/api/src/modules/` が中身を渡す。これで `core` から `apps` への向きの依存を作らない |
-| `apps/api`・`apps/runner`・`apps/nd-runtime`・`apps/db-prep` | `packages/core` と `packages/contracts` | `apps/*` どうしは互いに import しない（ランナーと API は HTTP の経路だけでつながる） |
+| `apps/api`・`apps/runner`・`apps/nd-runtime` | `packages/core` と `packages/contracts` | `apps/*` どうしは互いに import しない（ランナーと API は HTTP の経路だけでつながる） |
 | `apps/web` | `packages/contracts` と、`packages/core` のうちブラウザーで動くモジュール（`clock`・`ids`・`redact`・`log`）だけ | — |
 | `infra` | `packages/contracts` | `apps/*` を import せず、起点のファイルのパスをアセットとして束ねるだけにする |
 | `tools` | `packages/contracts` | ほかの置き場のコードを文字として読む |
@@ -118,16 +117,15 @@ nd-factory/
 | `packages/core/` | `usage-limit` | `judgeUsage`・`usageAddItem`（新設） |
 | `packages/core/` | `audit` | `auditItem`・`appendAudit`（新設） |
 | `packages/core/` | `dispatch` | `readHttpCall`・`readMcpCall`・`createMcpHandler`・`createMcpServer`・`serveMcp`・`dispatch`・`writeHttpResponse`・`writeMcpResponse`（新設） |
-| `apps/api/src/entries/` | API と MCP の 1 つの関数の起点・見回り・知らせの送り手・表の移し | 起点の関数（HTTP は `readHttpCall` → `dispatch` → `writeHttpResponse`、MCP は `readMcpCall` → `serveMcp` を呼ぶだけ。`serveMcp` は SDK へ渡す前に `authenticate` で主体を決め、実行環境ごとに 1 回作った `createMcpHandler` のハンドラーへ渡す。ハンドラーは要求ごとに `createMcpServer` でサーバーを作り、`tools/call` の道具の処理の中で決めた主体のまま `dispatch` → `writeMcpResponse` を呼ぶ。`dispatch` を通らなかった応答は、返す前に `serveMcp` が `appendAudit` で要約の行を書く） |
+| `apps/api/src/entries/` | API と MCP の 1 つの関数の起点・見回り・知らせの送り手・表の移し・DB の用意 | 起点の関数（HTTP は `readHttpCall` → `dispatch` → `writeHttpResponse`、MCP は `readMcpCall` → `serveMcp` を呼ぶだけ。`serveMcp` は SDK へ渡す前に `authenticate` で主体を決め、実行環境ごとに 1 回作った `createMcpHandler` のハンドラーへ渡す。ハンドラーは要求ごとに `createMcpServer` でサーバーを作り、`tools/call` の道具の処理の中で決めた主体のまま `dispatch` → `writeMcpResponse` を呼ぶ。`dispatch` を通らなかった応答は、返す前に `serveMcp` が `appendAudit` で要約の行を書く） |
 | `apps/api/src/modules/` | コンテキストごとのモジュール | 操作ごとのハンドラーと、`authorize` へ渡す読み手 |
 | `apps/web/` | 画面 | 画面ごとの関数（[画面](screens.md)） |
 | `apps/runner/` | ランナー | ランナーの関数。API への送信は `callHttp` を通す |
 | `apps/nd-runtime/` | nd ランタイム | nd ランタイムの関数。API への送信は `callHttp` を通す |
-| `apps/db-prep/` | DB の用意 | DB の用意の関数。API への送信は `callHttp` を通す |
 | `infra/` | スタックと設置のコマンド | スタックの構築子と設置のコマンドの関数。`packages/core` の関数を使わない |
-| `tools/checks/` | 足す検査 | 検査の関数。境界の検査は [プラットフォームの横断の部品の置き場の基準](platform.md#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」を、`apps/` の 5 つの置き場の実行時のコードでだけ探す。`packages/core` は部品の置き場そのもので、`infra/`・`tools/` は組み立てと反映の時だけ動くため対象から外す（プラットフォームの決定 91） |
+| `tools/checks/` | 足す検査 | 検査の関数。境界の検査は [プラットフォームの横断の部品の置き場の基準](platform.md#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」を、`apps/` の 4 つの置き場の実行時のコードでだけ探す。`packages/core` は部品の置き場そのもので、`infra/`・`tools/` は組み立てと反映の時だけ動くため対象から外す（プラットフォームの決定 91） |
 
-境界の検査の対象は、実行の時に動くコード（`apps/` の 5 つの置き場）である。`infra/` と `tools/` は組み立てと反映の時だけ動くため、対象から外す。`infra/setup/` は AWS SDK のクライアントを直に作ってよい。
+境界の検査の対象は、実行の時に動くコード（`apps/` の 4 つの置き場）である。`infra/` と `tools/` は組み立てと反映の時だけ動くため、対象から外す。`infra/setup/` は AWS SDK のクライアントを直に作ってよい。
 
 ## 関数の仕様
 
@@ -149,9 +147,9 @@ nd-factory/
 | `putIfAbsent` | `packages/core`（`conditional-write`） | 新設 | `(spec: { table: TableName; item: Row; onConflict: ConflictRule }) => TransactItem` | 行が無いときだけ足す書き込みを組む | `item` は `pk`・`sk`・`schema_version` を持つ | 戻り値は `attribute_not_exists(pk)` を条件にした 1 件で、外れたときの扱い（`state_mismatch`・`return_existing` など）を持つ | 無し |
 | `updateIfVersion` | `packages/core`（`conditional-write`） | 新設 | `(spec: { table: TableName; key: RowKey; version: number; set: Record<string, unknown>; extra?: Condition; onConflict: ConflictRule }) => TransactItem` | 読んだときの版と同じときだけ書き、版を 1 つ上げる書き込みを組む | `version` は 1 以上の整数。`set` に `pk`・`sk`・`version` を含まない | 戻り値は `version = :expected`（と `extra`）を条件にし、`version` を 1 上げる 1 件 | 無し |
 | `writeAtomically` | `packages/core`（`conditional-write`） | 新設 | `(db: Db, items: readonly TransactItem[]) => Promise<WriteOutcome>` | 組んだ書き込みを 1 つのトランザクションで確定し、外れた条件を件ごとの扱いへ訳す | `items` は 1〜100 件で、同じ行を 2 回指さない | `ok` のとき全件が書かれている。`conflict` のときどれも書かれておらず、外れた件の番号と扱いを返す | DynamoDB の `TransactWriteItems`（表をまたいでよい） |
-| `authenticate` | `packages/core`（`auth`） | 新設 | `(req: InboundRequest, deps: AuthDeps) => Promise<AuthResult>` | 受け口の種類と token の種類から、要求の主体を 1 つに決める | `req.endpoint` は受け口（`user`・`mcp`・`runner`・`machine`・`github`・`db_prep`。受けた HTTP の経路の頭で決まる）。`deps` は鍵と読み手を持つ | 戻り値は主体（人・委任・ランナー・手元のマシン・GitHub・DB の用意のタスク）か、`unauthorized`・`unavailable`。受け口に合わない token は `unauthorized` | IdP の公開鍵の取得（`aws-jwt-verify` の JWKS の控えが HTTPS で取り、関数の中で控える）・DynamoDB の強い整合の読み・委任の最後に使った時刻の条件つきの更新 |
+| `authenticate` | `packages/core`（`auth`） | 新設 | `(req: InboundRequest, deps: AuthDeps) => Promise<AuthResult>` | 受け口の種類と token の種類から、要求の主体を 1 つに決める | `req.endpoint` は受け口（`user`・`mcp`・`runner`・`machine`・`github`。受けた HTTP の経路の頭で決まる）。`deps` は鍵と読み手を持つ | 戻り値は主体（人・委任・ランナー・手元のマシン・GitHub）か、`unauthorized`・`unavailable`。受け口に合わない token は `unauthorized` | IdP の公開鍵の取得（`aws-jwt-verify` の JWKS の控えが HTTPS で取り、関数の中で控える）・DynamoDB の強い整合の読み・委任の最後に使った時刻の条件つきの更新 |
 | `createJwksCache` | `packages/core`（`auth`） | 新設 | `(fetchJwks: (uri: string) => Promise<Jwks>, clock: Clock) => JwksCache` | `aws-jwt-verify` の Cognito の検証へ渡す公開鍵の控えを作り、控えの保持期限と `kid` が無いときの取り直しの間隔を持たせる | `fetchJwks` は `callHttp`（方針 `http-idp-keys`）で JWKS を取る関数 | 戻り値は採用版（5.2.1）の `JwksCache` の口（`getJwk`・`getCachedJwk`・`addJwks`・`getJwks`）を満たす。鍵の集まりは取得の時刻とともに控え、`JWKS_MAX_AGE_MS` を過ぎた控えは次の要求で取り直してから使う。`kid` が控えに無いときは、前の取得から `JWKS_REFETCH_MS` 以上たっていれば 1 回だけ取り直し、たっていなければ取り直さずに鍵が無いと答える。同じ時に要る取り直しは 1 つの約束を共有する。`SimpleJwksCache` と `SimplePenaltyBox` は使わない（控えに期限が無く、待ちを登録するのは取り直した JWKS にも `kid` が無いときだけのため、この 2 つの値を守れない） | IdP の公開鍵の取得（HTTPS）。控えは実行環境のメモリだけ |
-| `visibleProjectIds` | `packages/core`（`authorize`） | 新設 | `(principal: Principal, scope: ScopeReader) => Promise<readonly ProjectId[]>` | 主体が今見られるプロジェクトの ID の集まりを求める | `principal` は `authenticate` が返したもの | 人は席を持つチームに今割り当てたプロジェクト、委任は委任した人の範囲と委任の範囲の重なり、ランナーと手元のマシンは自分のレーンのプロジェクトだけ、DB の用意のタスクは token に結んだ用意するプロジェクトだけを返す | 読み手を通した DynamoDB の読み（席・割り当て・レーン） |
+| `visibleProjectIds` | `packages/core`（`authorize`） | 新設 | `(principal: Principal, scope: ScopeReader) => Promise<readonly ProjectId[]>` | 主体が今見られるプロジェクトの ID の集まりを求める | `principal` は `authenticate` が返したもの | 人は席を持つチームに今割り当てたプロジェクト、委任は委任した人の範囲と委任の範囲の重なり、ランナーと手元のマシンは自分のレーンのプロジェクトだけ、DB の用意の関数は呼び出しで渡されたプロジェクトだけを返す | 読み手を通した DynamoDB の読み（席・割り当て・レーン） |
 | `authorize` | `packages/core`（`authorize`） | 新設 | `(principal: Principal, op: OperationDef, items: readonly unknown[], scope: ScopeReader) => Promise<AuthzDecision>` | 操作の表の印と主体から、要求全体と要素ごとに通すかを 1 か所で決める | `items` は形の正本の検証を通った要素の配列 | 戻り値は要求全体の拒み（`human_only`・`scope_insufficient`）か、要素ごとの `allow`（対象のプロジェクトの ID と席の役割つき）・`404 not_found`・`403 role_insufficient`・`403 human_only` | 読み手を通した DynamoDB の読み |
 | `judgeUsage` | `packages/core`（`usage-limit`） | 新設 | `(input: UsageInput, plan: PlanRow) => UsageVerdict` | 料金プランの値と使った量から、始めてよいか・割り当ててよいか・次の区間を起こしてよいかと理由を返す | `input.used` と `input.cap` は同じ形の金額（I15） | 戻り値は `allowed: true` か、`allowed: false` と理由のコード（`monthly_cap_reached`・`place_not_allowed`・`inference_not_allowed`・`concurrency_full`・`currency_mismatch`）と待てば解けるか。プランの名前で分けない | 無し |
 | `usageAddItem` | `packages/core`（`usage-limit`） | 新設 | `(team: TeamId, cost: Money, clock: Clock) => TransactItem` | チームの月の使った量の行へ費用を足す書き込みを組む | `cost.amount_minor` は 0 以上の整数 | 戻り値は `USAGE#<UTC の年月>` の行の通貨が同じことを条件にした加算の 1 件。行が無ければ作る | 無し |
@@ -232,14 +230,13 @@ nd-factory/
 | `authenticate` | 受け口 `runner` | Ed25519 の JWT で宛先「レーン」。引き換えの HTTP の経路だけ引き換えの token、ほかはレーンの token。レーンの行が終わっていないことと世代の番号を照らす |
 | `authenticate` | 受け口 `machine` で、token が `ndfm_` で始まる | 中のチームとマシンの ID で行を強い整合で読み、要約を一定時間で比べ、取り消しと期限を照らす |
 | `authenticate` | 受け口 `github` | `Authorization` を読まず、本文の HMAC-SHA256 を秘密の器の値と一定時間で比べる |
-| `authenticate` | 受け口 `db_prep` | Ed25519 の JWT で宛先「DB の用意」。引き換えの HTTP の経路だけ引き換えの token、終わりの報告の HTTP の経路だけ終わりの報告の token。どちらも 1 回だけで、そのプロジェクトの進行表の DB が作成中か差し替えの途中であることを照らす |
 | `authenticate` | Cognito の JWT の `kid` が控えに無い | `createJwksCache` の控えが、前の取得から `JWKS_REFETCH_MS` 以上たっていれば公開鍵を 1 回だけ取り直す。たっていないか、取り直しても無ければ `unauthorized` |
 | `authenticate` | Cognito の公開鍵の控えが `JWKS_MAX_AGE_MS` を過ぎた | 控えを使わずに取り直してから照らす。取り直せなければ `unavailable` |
-| `authenticate` | ランナーと DB の用意のタスクの JWT（Ed25519） | `aws-jwt-verify` を通さない。`node:crypto` の `verify` で、秘密の器から起動のときに 1 回読んだ nd-factory 自身の検証の鍵と照らす。IdP の鍵の取得は起きない |
+| `authenticate` | ランナーの JWT（Ed25519） | `aws-jwt-verify` を通さない。`node:crypto` の `verify` で、秘密の器から起動のときに 1 回読んだ nd-factory 自身の検証の鍵と照らす。IdP の鍵の取得は起きない |
 | `authorize` | 主体が人 | 見える集まり = 席を持つチームの今の割り当て。役割は席の役割 |
 | `authorize` | 主体が委任 | 見える集まり = 委任した人の今の集まり ∩ 委任の範囲のプロジェクト。役割は委任した人の席の役割 |
 | `authorize` | 主体がランナーか手元のマシン | 自分向けの HTTP の経路の操作だけ。見える集まりは自分のレーンのプロジェクトだけ |
-| `authorize` | 主体が DB の用意のタスク | 自分向けの HTTP の経路の操作だけ。見える集まりは token に結んだ用意するプロジェクトだけ |
+| `authorize` | 主体が DB の用意の関数 | 関数の中から呼ぶ用意の終わりの記録の操作だけ。見える集まりは呼び出しで渡されたプロジェクトだけ。利用者向けの操作は要求全体で拒む |
 | `authorize` | 主体が見回り | 保守の操作だけ。利用者向けの操作は要求全体で拒む |
 | `authorize` | 要素の対象が割り当てを移す途中のプロジェクトで、主体が移す先のチームの持ち主 | 名前だけを読む操作の要素だけ通す（I2 の例外）。ほかは 404 |
 | `authorize` | 対象の ID の種類の頭が操作と合わない | 404 `not_found`（`parseId` が `null`） |
@@ -360,7 +357,7 @@ nd-factory/
 | `putIfAbsent` | `@aws-sdk/lib-dynamodb` の条件式 `attribute_not_exists(pk)` | `apps/api/package.json` の依存 | 使う（条件式で `TransactItem` を組む） |
 | `updateIfVersion` | エンティティの版の条件の部品 | 依存のライブラリの一覧 | 使えない（無い）。作る |
 | `writeAtomically` | `@aws-sdk/lib-dynamodb` の `TransactWriteCommand` | `apps/api/package.json` の依存（`@aws-sdk/lib-dynamodb` 3.1170.0） | 使う（ライブラリのコマンドで送る）。外れた件の訳しは作る |
-| `authenticate` | API Gateway の JWT の前段（`HttpJwtAuthorizer`）・`jwt-decode`・`aws-jwt-verify`（LIB41）・`jose`・`node:crypto` | 依存のライブラリの一覧・決定 48・Node 24 の組み込み | JWT の前段は使えない（委任の token を読めない。[認証と主体](api.md#認証と主体)）。`jwt-decode` は署名を確かめないため使えない（画面の依存だけにある）。Cognito の access token は `aws-jwt-verify` を足して確かめる（決定 48）。公開鍵の控えは `createJwksCache` を渡す。`jose` は足さない。ランナーと DB の用意のタスクの Ed25519 の JWT は `node:crypto` の `verify` で確かめる。委任とマシンの token の比べは `node:crypto` の `timingSafeEqual`・`createHash` を使う |
+| `authenticate` | API Gateway の JWT の前段（`HttpJwtAuthorizer`）・`jwt-decode`・`aws-jwt-verify`（LIB41）・`jose`・`node:crypto` | 依存のライブラリの一覧・決定 48・Node 24 の組み込み | JWT の前段は使えない（委任の token を読めない。[認証と主体](api.md#認証と主体)）。`jwt-decode` は署名を確かめないため使えない（画面の依存だけにある）。Cognito の access token は `aws-jwt-verify` を足して確かめる（決定 48）。公開鍵の控えは `createJwksCache` を渡す。`jose` は足さない。ランナーの Ed25519 の JWT は `node:crypto` の `verify` で確かめる。委任とマシンの token の比べは `node:crypto` の `timingSafeEqual`・`createHash` を使う |
 | `createJwksCache` | `aws-jwt-verify` 5.2.1 の `SimpleJwksCache`・`SimplePenaltyBox` | 採用版の `jwk.ts` の実装 | 使えない。控えた鍵に期限が無く、待ちを登録するのは取り直した JWKS にも `kid` が無いときだけで、`JWKS_MAX_AGE_MS` と `JWKS_REFETCH_MS` を守れない。同じライブラリの `JwksCache` の口を満たす控えを作る |
 | `visibleProjectIds` | 席・割り当ての判定の部品 | 依存のライブラリの一覧 | 使えない（無い）。作る |
 | `authorize` | 認可のライブラリ | 依存のライブラリの一覧 | 使えない（無い）。見えないものを無いものと同じに返す判定を作る |
@@ -395,7 +392,7 @@ nd-factory/
 | `putIfAbsent` | 条件 `attribute_not_exists(pk)` と扱いを持つ 1 件 | `schema_version` の無い行を型で弾く | 無し |
 | `updateIfVersion` | 版の条件と `version + 1` を持つ 1 件 | `version` が 1・`extra` あり | `set` に `version` を含むと型で弾く |
 | `writeAtomically` | 全件が書かれ `ok` | 1 件と 100 件 | 条件の外れの件の番号と扱いを返す、衝突は再試行、届かないは再試行の後に投げる、101 件で止まる |
-| `authenticate` | 人・委任・ランナー・手元のマシン・GitHub・DB の用意のタスクの 6 つが決まる（見回りは HTTP の経路を持たず、認証を通らない） | 期限の 1 秒前と 1 秒後 | 形・署名・期限・取り消し・受け口の違いはすべて同じ `unauthorized`、鍵と表に届かないは `unavailable`、最後に使った時刻を書けなくても続く |
+| `authenticate` | 人・委任・ランナー・手元のマシン・GitHub の 5 つが決まる（見回りと DB の用意の関数は HTTP の経路を持たず、認証を通らない） | 期限の 1 秒前と 1 秒後 | 形・署名・期限・取り消し・受け口の違いはすべて同じ `unauthorized`、鍵と表に届かないは `unavailable`、最後に使った時刻を書けなくても続く |
 | `createJwksCache` | 控えた鍵で 2 回目は取りに行かない | 知らない `kid` の取り直しが前の取得から 59 秒では起きず 60 秒で起きる・控えが 1 時間ちょうどの前後で使う側と取り直す側に分かれる・同じ時の取り直しが 1 回 | 取り直しても `kid` が無い、取得の失敗を投げる |
 | `visibleProjectIds` | 人・委任・ランナーの集まり | 委任した人がチームを外れた次の要求で集まりから消える | 読み手の失敗を投げる |
 | `authorize` | 見える要素を `allow` | 見える要素と見えない要素の混ざり・移す途中の名前だけの読み | 見えないは 404、委任の人だけは要求全体の 403、種類の不足は 403、メンバーの持ち主だけの操作は要素の 403、読み手の失敗は投げる |

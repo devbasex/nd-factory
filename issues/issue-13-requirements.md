@@ -152,7 +152,7 @@
 
 - [全体の設計: 不変条件](https://github.com/devbasex/nd-factory/blob/main/docs/design/overview.md#不変条件)・[テスト設計](https://github.com/devbasex/nd-factory/blob/main/docs/design/overview.md#テスト設計)
 - [プラットフォーム: アーキテクチャ](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#アーキテクチャ)・[インフラ](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#インフラ)・[費用](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#費用)・[反映と設置](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#反映と設置)・[検査](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#検査)・[環境の値の受け方](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#環境の値の受け方)・[非機能の実現方式](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#非機能の実現方式)
-- [データ: 進行表の DB](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#進行表の-db)・[API: ランナー・手元のマシン・DB の用意のタスクの HTTP の経路](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#ランナー手元のマシンdb-の用意のタスクの-http-の経路)
+- [データ: 進行表の DB](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#進行表の-db)・[API: ランナー・手元のマシンの HTTP の経路](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#ランナー手元のマシンの-http-の経路)
 - [開発の計画: 子の一覧（K5）](https://github.com/devbasex/nd-factory/blob/main/docs/design-process/issue-24/plan.md#子の一覧)・[確かめる子](https://github.com/devbasex/nd-factory/blob/main/docs/design-process/issue-24/plan.md#確かめる子)
 
 ## 起票者の推定
