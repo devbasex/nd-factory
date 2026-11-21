@@ -43,7 +43,7 @@ packages/contracts/
 │   │   ├── audit.ts            *   操作の記録（全体の設計の列）
 │   │   └── idempotency.ts      *   冪等の鍵
 │   ├── tables.ts               *   10 の表の仕様（名前の末尾・鍵・索引・TTL・行の種類）
-│   ├── row-codec.ts            *   行の版の読み手と書き手（RowCodec・readRow・writeRow）
+│   ├── row-codec.ts            *   行の版の読み手と書き手（RowCodec・readRow・writeRow・rowUpdateOf）
 │   ├── ndf.ts                  *   受ける NDF の契約の組の形・答えの語
 │   └── data.ts                 *   data/*.json の読みと検証
 ├── data/
@@ -92,7 +92,7 @@ infra/
 | `packages/contracts/src/operations/*.ts` | 新設 | 操作の表の全行 | operation・ids・values | operations | `OPERATIONS`・`operationByName`・`operationByRoute` |
 | `packages/contracts/src/rows/*.ts` | 新設 | 表の行の形 | values・ids | rows | 行ごとの `<行>Row` の zod と `ROW_CODECS` |
 | `packages/contracts/src/tables.ts` | 新設 | 10 の表の仕様 | rows | tables | `TABLES`・`TableSpec` |
-| `packages/contracts/src/row-codec.ts` | 新設 | 行の版の読み手と書き手 | rows | row-codec | `rowCodec`・`readRow`・`writeRow` |
+| `packages/contracts/src/row-codec.ts` | 新設 | 行の版の読み手と書き手 | rows | row-codec | `rowCodec`・`readRow`・`writeRow`・`rowUpdateOf` |
 | `packages/contracts/src/ndf.ts` | 新設 | NDF の契約の値 | zod | ndf | `ndfContractSet`・`ndfAnswerWord` |
 | `packages/contracts/src/data.ts` | 新設 | データのファイルを形で検証して出す | ndf・values | data | `RETRY_POLICIES`・`SECRET_SHAPES`・`NDF_CONTRACTS`・`PLANS` |
 | `packages/contracts/scripts/artifacts.ts` | 新設 | 生成物を組む | operations・data | artifacts | `buildOperationSchemas`・`buildOpenApi`・`buildMcpTools`・`buildRoutes`・`buildReasons`・`buildDummy`・`buildPending`・`checkExamples` |
@@ -557,6 +557,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | `rowCodec` | `packages/contracts/src/row-codec.ts` | 新設 | `<L, P>(spec: { latest: { version: number; schema: ZodType<L> }; previous?: { version: number; schema: ZodType<P>; upgrade: (row: P) => L; downgrade: (row: L) => P }; writeVersion: number }) => RowCodec<L>` | 行の種類の、読み手が受ける 2 つの版と書き手が出す版をまとめる |
 | `readRow` | 同上 | 新設 | `<L>(codec: RowCodec<L>, raw: unknown) => ReadRowResult<L>` | `latest` の版はそのまま、`previous` の版は `upgrade` で `latest` の形へそろえて返し、ほかは拒む |
 | `writeRow` | 同上 | 新設 | `<L>(codec: RowCodec<L>, row: L) => Record<string, unknown>` | `writeVersion` の形の行（`schema_version` を含む）を返す。`writeVersion` が `previous.version` なら `downgrade` を通す |
+| `rowUpdateOf` | 同上 | 新設 | `<L>(codec: RowCodec<L>, raw: Record<string, unknown>, row: L) => { set: Record<string, unknown>; remove: string[] }` | 読んだ行（`raw`）を `row` へ書き換える更新の `set` と `remove` を作る。`set` は `writeRow(codec, row)` の戻り値から `pk`・`sk`・`version` を外したもの。`remove` は `raw` の列のうち `writeRow` の戻り値に無く、`pk`・`sk`・`version` でもない列の名前 |
 | `migrateTable` | `apps/api/src/entries/migrate.ts` | 新設 | `(input: { purpose: TablePurpose; cursor: RowKey \| null }, deps: MigrateDeps) => Promise<{ done: boolean; cursor: RowKey \| null; rewritten: number; skipped: number }>` | `previous` の版の行を `latest` の版へ書き換える |
 | `createMigrateHandler` | 同上 | 新設 | `(deps: MigrateDeps) => (event: MigrateEvent, context: Context) => Promise<void>` | `migrateTable` を呼び、終わっていなければ続きの位置を持って自分を非同期で起こし直す |
 
@@ -574,7 +575,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
     1. `db.scan(table, { limit: MIGRATE_PAGE_SIZE, startKey: cursor, consistent: true })` で 1 ページ読む
     2. ページの行を順に、行ごとに次を行う。行に取りかかる前に残り時間が `MIGRATE_RESERVE_MS` 以下なら、そこで止めて `{ done: false, cursor: <最後に処理を終えた行の鍵> }` を返す（このページでまだ 1 行も終えていなければ、受け取った `cursor` をそのまま返す）
        - `TableSpec.rows` の `skPattern` で行の種類を決める。どれにも当たらない行と、`schema_version` が `previous.version` でない行と、`writeVersion` が `latest.version` でない行の種類（1 段目か、書き手を戻した状態）の行は、書かずに処理を終えたものとする
-       - `readRow` で `latest` の形にし、`writeRow` で `latest` の版の列を作る。読んだ行の列のうち、`writeRow` の戻り値に無く、`pk`・`sk`・`version` でもない列（`latest` の版で消した列）を `remove` に集める。`updateIfSchemaVersion`（`set` は `writeRow` の戻り値、`remove` はその列の名前、`from` は `previous.version`、`version` は読んだ行の `version` か `null`）を `writeAtomically` で 1 件だけ確定する。条件が外れたら飛ばして `skipped` を 1 足す（同時に書き手が `latest` で書いたか、行が消えた）。`unavailable` は投げる（起こし直しの前の `cursor` から再び走る）
+       - `readRow` で `latest` の形にし、`rowUpdateOf(codec, 読んだ行, その形)` で `set` と `remove` を作る。`set` は `writeRow` が返す行全体から鍵（`pk`・`sk`）と `version` を外したもので、`updateIfSchemaVersion` の事前条件（`set` に `pk`・`sk`・`version` を含まない）を満たす。鍵は `key` に、読んだ `version` は条件に回し、`set` で書き換えない。`remove` は読んだ行にあって `writeRow` の戻り値に無い列（`latest` の版で消した列）。`updateIfSchemaVersion`（`key` は読んだ行の `pk`・`sk`、`set` と `remove` は `rowUpdateOf` の戻り値、`from` は `previous.version`、`version` は読んだ行の `version` か `null`）を `writeAtomically` で 1 件だけ確定する。条件が外れたら飛ばして `skipped` を 1 足す（同時に書き手が `latest` で書いたか、行が消えた）。`unavailable` は投げる（起こし直しの前の `cursor` から再び走る）
        - 処理を終えた行の鍵を「最後に処理を終えた行」として覚える
     3. ページの行を終えたら、`lastKey` が `null` なら `{ done: true, cursor: null }` を返す。でなければ `cursor` を `lastKey` にして 1 へ戻る
   - 事後条件: 返した `cursor` より前（走査の順）の行は、どれも `previous` の版でないか、書き手が同時に書いた行である。返した `cursor` より後の行は 1 行も飛ばしていない。`cursor` を次の呼び出しへ渡すと、その鍵の次の行から読む（DynamoDB の `Scan` の `ExclusiveStartKey` は、返された `LastEvaluatedKey` でなく既にある行の鍵でもその次から読む。偽の `Db` も同じ順と同じ再開をする）
@@ -616,6 +617,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | `rowCodec` | 版 1 と 2 の組で作れる | `previous` の無い行の種類 | `writeVersion` が 3・`previous.version` が `latest.version - 1` でない・`previous` があって `downgrade` が無い組で投げる |
 | `readRow`・`writeRow` | 1 段目（`latest` 2・`previous` 1・`writeVersion` 1）で、版 1 の行と版 2 の行をどちらも版 2 の形で読み、`writeRow` は版 1 の行を出す。2 段目（`writeVersion` 2）で、同じ 2 つの行を同じに読み、`writeRow` は版 2 の行を出す。書き手を戻した状態（1 段目と同じ値に戻した `RowCodec`）で、2 段目に書いた版 2 の行と版 1 の行をどちらも読み、`writeRow` は版 1 の行を出す。版 1 → `upgrade` → `downgrade` で元の行に戻る | `previous` の無い行の種類（版 1 だけを読む） | 版 0・版 3（`latest` より新しい）・形の違いを拒む。`writeRow` に版の形を外れた値を渡すと投げる |
 | 移しの止め（`infra/test/app-stack.test.ts`） | `migrate` の Lambda の非同期の起動の設定が `MaximumEventAgeInSeconds` 60・`MaximumRetryAttempts` 0。止める設定で合成すると予約の同時実行が 0 | — | — |
+| `rowUpdateOf` | `set` が `writeRow` の戻り値から `pk`・`sk`・`version` を外したものと一致し、`schema_version` を含む。`latest` の版で消した列が `remove` に並ぶ | `version` を持たない行（`set` と `remove` に `version` が出ない）・消した列が無い（`remove` が空） | `set` と `remove` のどちらにも `pk`・`sk`・`version` が出ない（`raw` が持っていても） |
 | `migrateTable` | 前の版の行が `latest` の版になり、`version` は変わらない。ログインの組（`version` を持たない行）も書き換わる。`latest` の版で消した列が行から消え、その列を鍵にした索引の引き（偽の `Db` の `queryIndex`）でその行が出なくなる | 残り時間がちょうど予備の時間で、取りかかる前に止まる。ページの途中（100 行のうち 3 行目を終えたところ）で残り時間が尽き、返した `cursor` が 3 行目の鍵で、その `cursor` で再び呼ぶと 4 行目から読み、2 回の呼び出しの後に前の版の行が 1 行も残らない。ページの 1 行目の前で尽きると受け取った `cursor` を返す | 2 回走らせても行が同じ。読んだ後に書き手が `latest` で書いた行と、消えた行を飛ばし、消えた行を作り直さない。`writeVersion` が前の版の行の種類は書き換えない |
 | `updateIfSchemaVersion` | `schema_version` の条件と `attribute_exists(pk)` を持つ 1 件。`remove` の列が `REMOVE` 句に並ぶ | `version: null`・`version` あり・`remove` が空（`REMOVE` 句を持たない） | `remove` が `set` の鍵か `pk`・`sk`・`version`・`schema_version` を含むと投げる。`set` に `version` を含むと型で弾く |
 | `Db.scan`（`createDb`） | 偽のクライアントへ `Limit`・`ExclusiveStartKey`・`ConsistentRead` が渡る | `startKey` が `null` | — |
