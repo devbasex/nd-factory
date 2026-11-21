@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { AuthDeps, DelegationRecord, Principal } from "../src/auth/authenticate.ts";
 import type { ScopeReader } from "../src/authorize.ts";
 import { createClock } from "../src/clock.ts";
-import { IDEMPOTENCY_LEASE_MS } from "../src/idempotency.ts";
 import { cond, putIfAbsent, updateIfVersion, type TransactItem } from "../src/conditional-write.ts";
 import { DISPATCH_RESERVE_MS, DISPATCH_SUMMARY_MS, dispatch, readHttpCall, type DispatchDeps, type DispatchResult, type Handler, type HttpEvent, type OperationCall } from "../src/dispatch/dispatch.ts";
 import { createLogger } from "../src/log.ts";
@@ -599,9 +598,7 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     const ok = await dispatch(call("logins.delete", [{ cognito_sub: OTHER_SUB, idempotency_key: IDEM_1 }]), { ...deps, handlers });
     expect(itemsOf(ok)).toEqual([{ ok: true, item: { cognito_sub: OTHER_SUB } }]);
     expect(called).toEqual(["cognito"]);
-    // 照らしの 2 件と、借りの行に外へ働きかけ始めた印を付ける 1 件を同じトランザクションで打つ
-    expect(shapeOf(table.transactions.find((t) => t.some((i) => i.op === "check")) ?? [])).toEqual(["users:check", "users:check", "idempotency:update"]);
-    expect(table.rows("idempotency")[0]).toMatchObject({ state: "settled", started_at: new Date(NOW).toISOString() });
+    expect(shapeOf(table.transactions.find((t) => t.every((i) => i.op === "check")) ?? [])).toEqual(["users:check", "users:check"]);
 
     revoke(table);
     // 照らしの後に外へ働きかけたつもりでも、照らしが外れた要素はハンドラーの戻り値によらず確定しない
@@ -714,7 +711,7 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     expect(table.rows("idempotency")[0]).toMatchObject({ state: "settled", result: { ok: true, item: { title: "stored" } } });
   });
 
-  it("同じ連番の並行の再送で省ける件と挙げた付随する書き込みの版も外れたら、版の違いでなく既にある行の結果を返す", async () => {
+  it("同じ連番の並行の再送で付随する書き込みの版も外れたら、版の違いでなく既にある行の結果を返す", async () => {
     const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
     const event: Handler = async (item) => {
       const note = item as { project_id: string; title: string };
@@ -724,7 +721,7 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
           putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: note.title }, onConflict: "return_existing" }),
           updateIfVersion({ table: "sprints", key: NOTE_KEY(P_A), version: 1, set: { title: note.title }, onConflict: "version_mismatch" }),
         ],
-        conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }), skippable: [1] }],
+        conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }) }],
       };
     };
     const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
@@ -734,147 +731,6 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
     expect(itemsOf(result)).toEqual([{ ok: true, item: { title: "stored" } }]);
     expect(table.row("sprints", NOTE_KEY(P_A))).toMatchObject({ title: "stored", version: 2 });
-  });
-
-  it("同じ連番の再送でも、省ける件と挙げない書き込み（レーンの世代の条件など）が外れたら既にある行の結果を返さない", async () => {
-    const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
-    const event: Handler = async (item) => {
-      const note = item as { project_id: string; title: string };
-      return {
-        result: { ok: true, item: { title: note.title } },
-        writes: [
-          putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: note.title }, onConflict: "return_existing" }),
-          updateIfVersion({ table: "sprints", key: NOTE_KEY(P_A), version: 1, set: { title: note.title }, onConflict: "state_mismatch" }),
-        ],
-        conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }) }],
-      };
-    };
-    const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
-    // 認証の後に世代が替わった
-    table.seed("sprints", { ...eventKey, schema_version: 1, version: 1, title: "stored" });
-    table.seed("sprints", { ...NOTE_KEY(P_A), schema_version: 1, version: 2, title: "next" });
-    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
-    expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "state_mismatch" }]);
-    expect(table.row("sprints", NOTE_KEY(P_A))).toMatchObject({ title: "next", version: 2 });
-  });
-
-  it("既にある行の結果を確定するトランザクションでも、省けない件の条件を書かずに照らし、省ける件は入れない", async () => {
-    const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
-    const laneKey = { pk: `PROJECT#${P_A}`, sk: "LANE#1" };
-    const event: Handler = async (item) => {
-      const note = item as { project_id: string; title: string };
-      return {
-        result: { ok: true, item: { title: note.title } },
-        writes: [
-          putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: note.title }, onConflict: "return_existing" }),
-          updateIfVersion({ table: "sprints", key: NOTE_KEY(P_A), version: 1, set: { title: note.title }, onConflict: "version_mismatch" }),
-          updateIfVersion({ table: "sprints", key: laneKey, version: 1, set: { title: note.title }, onConflict: "state_mismatch" }),
-        ],
-        conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }), skippable: [1] }],
-      };
-    };
-    const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
-    table.seed("sprints", { ...eventKey, schema_version: 1, version: 1, title: "stored" });
-    table.seed("sprints", { ...NOTE_KEY(P_A), schema_version: 1, version: 2, title: "stored" });
-    table.seed("sprints", { ...laneKey, schema_version: 1, version: 1, title: "lane" });
-    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
-    expect(itemsOf(result)).toEqual([{ ok: true, item: { title: "stored" } }]);
-    const last = table.transactions.filter((t) => t.some((i) => i.table === "idempotency")).at(-1) ?? [];
-    const sprints = last.filter((i) => i.table === "sprints");
-    expect(sprints.map((i) => [i.op, i.key.sk])).toEqual([["check", "LANE#1"]]);
-    expect(table.row("sprints", laneKey)).toMatchObject({ title: "lane", version: 1 });
-  });
-
-  it("版と世代を同じ行の 1 件に持つ省ける件は、版だけが進んだ再送を通し、世代が替わった再送を確定の時に拒む", async () => {
-    const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
-    const laneKey = { pk: `PROJECT#${P_A}`, sk: "LANE#1" };
-    const event: Handler = async (item) => {
-      const note = item as { project_id: string; title: string };
-      return {
-        result: { ok: true, item: { title: note.title } },
-        writes: [
-          putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: note.title }, onConflict: "return_existing" }),
-          updateIfVersion({ table: "sprints", key: laneKey, version: 1, set: { title: note.title }, extra: cond.and(cond.eq("generation", 1), cond.eq("status", "open")), onConflict: "version_mismatch" }),
-        ],
-        conflicts: [
-          {
-            existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }),
-            skippable: [1],
-            recheck: [{ index: 1, condition: cond.and(cond.eq("generation", 1), cond.eq("status", "open")), onConflict: "state_mismatch" }],
-          },
-        ],
-      };
-    };
-    const lane = (over: Record<string, unknown>) => ({ ...laneKey, schema_version: 1, version: 2, title: "stored", generation: 1, status: "open", ...over });
-    const run = async (row: Record<string, unknown>) => {
-      const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
-      table.seed("sprints", { ...eventKey, schema_version: 1, version: 1, title: "stored" });
-      table.seed("sprints", row);
-      const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
-      return { table, items: itemsOf(result) };
-    };
-    // 先に確定した同じ再送が版だけを進めた
-    const ok = await run(lane({}));
-    expect(ok.items).toEqual([{ ok: true, item: { title: "stored" } }]);
-    const last = ok.table.transactions.filter((t) => t.some((i) => i.table === "idempotency")).at(-1) ?? [];
-    expect(last.filter((i) => i.table === "sprints").map((i) => [i.op, i.key.sk])).toEqual([["check", "LANE#1"]]);
-    // 認証の後に世代が替わった・レーンが終わった
-    for (const row of [lane({ generation: 2 }), lane({ status: "ended" })]) {
-      const ng = await run(row);
-      expect(ng.items).toEqual([{ ok: false, status: 409, reason: "state_mismatch" }]);
-      expect(ng.table.rows("idempotency")[0]).toMatchObject({ state: "leased" });
-    }
-  });
-
-  it("照らし直す条件が省ける件を指さなければ 503 unavailable", async () => {
-    const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
-    const event: Handler = async () => ({
-      result: { ok: true, item: { title: "x" } },
-      writes: [putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: "x" }, onConflict: "return_existing" })],
-      conflicts: [{ existing: () => ({ ok: true, item: { title: "x" } }), recheck: [{ index: 0, condition: cond.exists("pk"), onConflict: "state_mismatch" }] }],
-    });
-    const { deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
-    await expect(dispatch(call("notes.create", [{ project_id: P_A, title: "x", idempotency_key: IDEM_1 }]), deps)).resolves.toEqual(problem(503, "unavailable"));
-  });
-
-  it("外へ働きかける前に借りを失っていたら、働きかけずに 409 in_progress", async () => {
-    const { table, deps } = setup();
-    const called: string[] = [];
-    const external: Handler = async (item, ctx) => {
-      // 借りの期限の後に別の要求が取り直した
-      const row = table.rows("idempotency")[0];
-      table.seed("idempotency", { ...row, owner_request_id: "req-other" } as never);
-      if (!(await ctx.checkRequester())) return { result: { ok: false, status: 409, reason: "state_mismatch" }, writes: [] };
-      called.push("cognito");
-      return noteHandlers["logins.delete"]!(item, ctx);
-    };
-    const result = await dispatch(call("logins.delete", [{ cognito_sub: OTHER_SUB, idempotency_key: IDEM_1 }]), { ...deps, handlers: { ...noteHandlers, "logins.delete": external } });
-    expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "in_progress" }]);
-    expect(called).toEqual([]);
-  });
-
-  it("外へ働きかけた後に済みの行を残せなかった鍵の再送は、初めての実行と分けて同じ試みの識別子をハンドラーへ渡す", async () => {
-    const { table, deps } = setup();
-    const seen: unknown[] = [];
-    let crash = true;
-    const external: Handler = async (item, ctx) => {
-      seen.push(ctx.attempt);
-      if (!(await ctx.checkRequester())) return { result: { ok: false, status: 409, reason: "state_mismatch" }, writes: [] };
-      // 通知先が送信を受理した直後に時間切れで落ちる
-      if (crash) throw new Error("timeout");
-      return noteHandlers["logins.delete"]!(item, ctx);
-    };
-    const handlers = { ...noteHandlers, "logins.delete": external };
-    const element = { cognito_sub: OTHER_SUB, idempotency_key: IDEM_1 };
-    expect(await dispatch(call("logins.delete", [element]), { ...deps, handlers })).toEqual(problem(503, "unavailable"));
-    crash = false;
-    const later = createClock(() => NOW + IDEMPOTENCY_LEASE_MS);
-    const again = await dispatch(call("logins.delete", [element], { requestId: "req-2" }), { ...deps, handlers, clock: later });
-    expect(itemsOf(again)).toEqual([{ ok: true, item: { cognito_sub: OTHER_SUB } }]);
-    const [firstAttempt, resumed] = seen as { id: string; resumed: boolean }[];
-    expect(firstAttempt).toMatchObject({ resumed: false });
-    expect(resumed).toEqual({ id: firstAttempt!.id, resumed: true });
-    expect(table.rows("idempotency")[0]).toMatchObject({ state: "settled", started_at: new Date(NOW).toISOString(), attempt_id: firstAttempt!.id });
   });
 
   it("同じ連番の再送でも、要求元の照らしが外れたら既にある行の結果より先に 409 state_mismatch", async () => {
@@ -889,28 +745,6 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     revoke(table);
     const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
     expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "state_mismatch" }]);
-  });
-
-  it("全部か無かで確定しなくても、外へ働きかけ始めた借りは手放さず、期限の後も元の中身でだけ取り直せる", async () => {
-    const external: Handler = async (item, ctx) => {
-      await ctx.checkRequester();
-      return noteHandlers["notes.bulk"]!(item, ctx);
-    };
-    const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.bulk": external } });
-    const items = [
-      { project_id: P_A, title: "one", idempotency_key: IDEM_1 },
-      { project_id: P_A, title: "two", idempotency_key: IDEM_2 },
-    ];
-    table.seed("sprints", { pk: `PROJECT#${P_A}`, sk: "NOTE#two", schema_version: 1, version: 1, title: "two" });
-    const first = await dispatch(call("notes.bulk", items), deps);
-    expect(itemsOf(first)).toEqual([
-      { ok: false, status: 409, reason: "not_applied" },
-      { ok: false, status: 409, reason: "state_mismatch" },
-    ]);
-    expect(table.rows("idempotency").map((r) => [r["state"], typeof r["started_at"]])).toEqual([
-      ["leased", "string"],
-      ["leased", "string"],
-    ]);
   });
 
   it("全部か無かの後始末は要約の記録と応答の時間を食わず、残り時間が足りなければ借りを手放さずに要約を書いて返す", async () => {
