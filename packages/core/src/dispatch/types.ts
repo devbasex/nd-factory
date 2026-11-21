@@ -5,14 +5,14 @@ import type { ItemAuthz, ScopeReader } from "../authorize.ts";
 import type { Clock } from "../clock.ts";
 import type { Condition, TransactItem } from "../conditional-write.ts";
 import type { Db, StoredRow } from "../db.ts";
-import type { ItemResult } from "../idempotency.ts";
+import type { ExternalAttempt, ItemResult } from "../idempotency.ts";
 import type { Id } from "../ids.ts";
 import type { Logger } from "../log.ts";
 
 // 操作の振り分けの型（docs/design/detail.md の「内部のデータと定数」、issues/issue-2-design-detail.md の項目の並び）。
 // MCP の型（McpCall ほか）は #11 が mcp.ts に置く（決定 7）
 
-export type { ItemResult };
+export type { ExternalAttempt, ItemResult };
 
 // 振り分けを通る受け口。GitHub の Webhook は操作の表の経路でないため振り分けを通らない
 export type CallEndpoint = Exclude<AuthEndpoint, "github">;
@@ -54,6 +54,11 @@ export type HandlerContext = {
   readonly db: Db;
   // authenticate の sessionRevokedAt（sessions.delete で取り消しの行があったときだけその revoked_at、ほかは null）
   readonly sessionRevokedAt: string | null;
+  // 冪等の鍵を借りた要素の、外へ働きかける試み（鍵を持たない操作は null）。resumed が true なら、前の持ち主が外へ働きかけ始めた後に結果を残さず落ちた鍵の再開で、
+  // 外の処理は済んでいるかもしれない（送信を受理した直後の時間切れなど）。外へ働きかけるハンドラーは、id を外の重複を除く識別子として渡す
+  // （同じ鍵の再開は同じ id になる）か、resumed のとき外の処理が済んだかを照らして済んでいれば働きかけずに済んだ結果を返す。どちらもできない
+  // 外の処理は、resumed のとき働きかけ直さず、操作の契約が決めた結果の分からない失敗を返す（同じ通知を二度届けない）
+  readonly attempt: ExternalAttempt | null;
   // 要求の中で同期に外へ働きかける操作（logins.delete の Cognito の呼び出し・notification_targets.test の送信）が、働きかける直前に呼ぶ要求元の照らし
   // （docs/design/data.md の「人の書き込みの要求元の照らし」の「要求の中で同期に外へ働きかける操作」）。照らしの 2 件だけのトランザクションを打ち、
   // 外れたら false を返す。false のときハンドラーは外へ働きかけずに返し、dispatch はハンドラーの戻り値によらず要素を 409 state_mismatch にして何も確定しない。

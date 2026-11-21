@@ -7,7 +7,7 @@ import { authenticate, idempotencyPrincipalKey, SESSIONS_DELETE, type Principal 
 import { authorize, type ItemAuthz, type ProjectId } from "../authorize.ts";
 import { AuditAppendOnlyError, cond, TRANSACT_MAX_ITEMS, WriteSpecError, WriteUnavailableError, writeAtomically, type ConflictRule, type TransactItem, type WriteOutcome } from "../conditional-write.ts";
 import type { StoredRow } from "../db.ts";
-import { claimIdempotency, idempotencyKeyOf, markIdempotencyStarted, settleIdempotency, type IdempotencyClaimInput, type ItemResult } from "../idempotency.ts";
+import { claimIdempotency, idempotencyKeyOf, markIdempotencyStarted, settleIdempotency, type ExternalAttempt, type IdempotencyClaimInput, type ItemResult } from "../idempotency.ts";
 import { newId, type Id } from "../ids.ts";
 import type { Logger } from "../log.ts";
 import { bodyFaultOf, canonicalJson, problem } from "./http.ts";
@@ -358,9 +358,9 @@ function checkOutput(c: Ctx, output: HandlerOutput | undefined): HandlerOutput &
 // 要素は 409 in_progress にする
 type RequesterCheck = { failed: boolean; lostLease: boolean; halted: Halt | null };
 
-async function checkRequesterOf(c: Ctx, state: RequesterCheck, claim: IdempotencyClaimInput | null): Promise<boolean> {
+async function checkRequesterOf(c: Ctx, state: RequesterCheck, taken: { readonly claim: IdempotencyClaimInput; readonly attempt: ExternalAttempt } | null): Promise<boolean> {
   const guards = requesterGuards(c.op, c.principal);
-  const items = claim === null ? guards : [...guards, markIdempotencyStarted(claim, c.req.deps.clock)];
+  const items = taken === null ? guards : [...guards, markIdempotencyStarted(taken.claim, taken.attempt, c.req.deps.clock)];
   if (items.length === 0) return true;
   let outcome: WriteOutcome;
   try {
@@ -383,6 +383,7 @@ async function prepare(c: Ctx, index: number, parsed: ParsedItem, authz: ItemAut
   if (authz === undefined || authz.decision === "deny") return failure(authz?.status ?? 404, authz?.reason ?? "not_found");
 
   let claim: IdempotencyClaimInput | null = null;
+  let attempt: ExternalAttempt | null = null;
   if (op.idempotencyKey) {
     const key = record(parsed.value)["idempotency_key"];
     if (typeof key !== "string" || key.length === 0) return failure(400, "item_invalid", [`/${index}/idempotency_key`]);
@@ -397,6 +398,7 @@ async function prepare(c: Ctx, index: number, parsed: ParsedItem, authz: ItemAut
     if (claimed.kind === "replay") return claimed.result;
     if (claimed.kind === "in_progress") return failure(409, "in_progress");
     if (claimed.kind === "reused") return failure(422, "idempotency_key_reused");
+    attempt = claimed.attempt;
     c.taken.push(claim);
   }
 
@@ -409,7 +411,8 @@ async function prepare(c: Ctx, index: number, parsed: ParsedItem, authz: ItemAut
       clock: req.deps.clock,
       db: req.deps.db,
       sessionRevokedAt: c.sessionRevokedAt,
-      checkRequester: () => checkRequesterOf(c, requester, claim),
+      attempt,
+      checkRequester: () => checkRequesterOf(c, requester, claim === null || attempt === null ? null : { claim, attempt }),
     });
   } catch (error) {
     if (error instanceof Halt) throw error;

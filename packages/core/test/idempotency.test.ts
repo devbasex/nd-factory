@@ -24,11 +24,14 @@ const claim = (over: Partial<IdempotencyClaimInput> = {}): IdempotencyClaimInput
   ...over,
 });
 
+// req-1 の 1 回目の試み
+const first = () => ({ id: "attempt-req-1", resumed: false });
+
 describe("claimIdempotency", () => {
   it("1 回目は fresh で、借りの行がある", async () => {
     const table = fakeTable();
     const { clock } = clockAt(T0);
-    expect(await claimIdempotency(table.db, claim(), clock)).toEqual({ kind: "fresh" });
+    expect(await claimIdempotency(table.db, claim(), clock)).toMatchObject({ kind: "fresh", attempt: { resumed: false } });
     expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({
       state: "leased",
       owner_request_id: "req-1",
@@ -54,7 +57,7 @@ describe("claimIdempotency", () => {
     set(T0 + IDEMPOTENCY_LEASE_MS - 1);
     expect(await claimIdempotency(table.db, claim({ requestId: "req-2" }), clock)).toEqual({ kind: "in_progress" });
     set(T0 + IDEMPOTENCY_LEASE_MS);
-    expect(await claimIdempotency(table.db, claim({ requestId: "req-2" }), clock)).toEqual({ kind: "fresh" });
+    expect(await claimIdempotency(table.db, claim({ requestId: "req-2" }), clock)).toMatchObject({ kind: "fresh", attempt: { resumed: false } });
     expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ owner_request_id: "req-2", state: "leased" });
   });
 
@@ -73,7 +76,7 @@ describe("claimIdempotency", () => {
     await claimIdempotency(table.db, claim(), clock);
     set(T0 + IDEMPOTENCY_LEASE_MS);
     const fixed = claim({ requestId: "req-2", fingerprint: "b".repeat(64) });
-    expect(await claimIdempotency(table.db, fixed, clock)).toEqual({ kind: "fresh" });
+    expect(await claimIdempotency(table.db, fixed, clock)).toMatchObject({ kind: "fresh", attempt: { resumed: false } });
     expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ state: "leased", owner_request_id: "req-2", fingerprint: "b".repeat(64) });
     expect((await writeAtomically(table.db, [settleIdempotency(claim(), { ok: true }, NO_ONCE_ONLY, clock)])).ok).toBe(false);
   });
@@ -82,7 +85,7 @@ describe("claimIdempotency", () => {
     const table = fakeTable();
     const { clock, set } = clockAt(T0);
     await claimIdempotency(table.db, claim(), clock);
-    expect((await writeAtomically(table.db, [markIdempotencyStarted(claim(), clock)])).ok).toBe(true);
+    expect((await writeAtomically(table.db, [markIdempotencyStarted(claim(), first(), clock)])).ok).toBe(true);
     set(T0 + IDEMPOTENCY_LEASE_MS);
     expect(await claimIdempotency(table.db, claim({ requestId: "req-2", fingerprint: "b".repeat(64) }), clock)).toEqual({ kind: "reused" });
     expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ owner_request_id: "req-1", fingerprint: "a".repeat(64), started_at: new Date(T0).toISOString() });
@@ -92,10 +95,10 @@ describe("claimIdempotency", () => {
     const table = fakeTable();
     const { clock, set } = clockAt(T0);
     await claimIdempotency(table.db, claim(), clock);
-    await writeAtomically(table.db, [markIdempotencyStarted(claim(), clock)]);
+    await writeAtomically(table.db, [markIdempotencyStarted(claim(), first(), clock)]);
     set(T0 + IDEMPOTENCY_LEASE_MS);
-    expect(await claimIdempotency(table.db, claim({ requestId: "req-2" }), clock)).toEqual({ kind: "fresh" });
-    expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ owner_request_id: "req-2", started_at: new Date(T0).toISOString() });
+    expect(await claimIdempotency(table.db, claim({ requestId: "req-2" }), clock)).toEqual({ kind: "fresh", attempt: { id: "attempt-req-1", resumed: true } });
+    expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ owner_request_id: "req-2", started_at: new Date(T0).toISOString(), attempt_id: "attempt-req-1" });
     set(T0 + 2 * IDEMPOTENCY_LEASE_MS);
     expect(await claimIdempotency(table.db, claim({ requestId: "req-3", fingerprint: "b".repeat(64) }), clock)).toEqual({ kind: "reused" });
   });
@@ -111,7 +114,7 @@ describe("claimIdempotency", () => {
       ...table.db,
       get: async (...args: Parameters<typeof table.db.get>) => {
         const row = await get(...args);
-        await writeAtomically(table.db, [markIdempotencyStarted(claim(), clock)]);
+        await writeAtomically(table.db, [markIdempotencyStarted(claim(), first(), clock)]);
         return row;
       },
     };
@@ -119,11 +122,49 @@ describe("claimIdempotency", () => {
     expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ owner_request_id: "req-1", fingerprint: "a".repeat(64) });
   });
 
+  it("送信を受理した直後に落ちた鍵の再開は、初めての試みと分けて前の試みの識別子を渡し、印は再開の識別子でだけ照らし直せる", async () => {
+    const table = fakeTable();
+    const { clock, set } = clockAt(T0);
+    const claimed = await claimIdempotency(table.db, claim(), clock);
+    if (claimed.kind !== "fresh") throw new Error("fresh でない");
+    expect(claimed.attempt.resumed).toBe(false);
+    expect(claimed.attempt.id).toMatch(/^[0-9a-f]{64}$/);
+    expect((await writeAtomically(table.db, [markIdempotencyStarted(claim(), claimed.attempt, clock)])).ok).toBe(true);
+    // 済みの行を書けずに借りの期限が過ぎる
+    set(T0 + IDEMPOTENCY_LEASE_MS);
+    const resumed = await claimIdempotency(table.db, claim({ requestId: "req-2" }), clock);
+    expect(resumed).toEqual({ kind: "fresh", attempt: { id: claimed.attempt.id, resumed: true } });
+    if (resumed.kind !== "fresh") throw new Error("fresh でない");
+    // 初めての試みとしての印は外れ、再開の識別子でだけ照らし直せる。印の時刻は書き換えない
+    expect((await writeAtomically(table.db, [markIdempotencyStarted(claim({ requestId: "req-2" }), { id: "other", resumed: false }, clock)])).ok).toBe(false);
+    expect((await writeAtomically(table.db, [markIdempotencyStarted(claim({ requestId: "req-2" }), { id: "other", resumed: true }, clock)])).ok).toBe(false);
+    expect((await writeAtomically(table.db, [markIdempotencyStarted(claim({ requestId: "req-2" }), resumed.attempt, clock)])).ok).toBe(true);
+    expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ started_at: new Date(T0).toISOString(), attempt_id: claimed.attempt.id });
+  });
+
+  it("同じ中身の取り直しは、読んだ後に前の持ち主が印を付けたら外れる（再開かどうかを読んだ値で決める）", async () => {
+    const table = fakeTable();
+    const { clock, set } = clockAt(T0);
+    await claimIdempotency(table.db, claim(), clock);
+    set(T0 + IDEMPOTENCY_LEASE_MS);
+    const get = table.db.get.bind(table.db);
+    const racing = {
+      ...table.db,
+      get: async (...args: Parameters<typeof table.db.get>) => {
+        const row = await get(...args);
+        await writeAtomically(table.db, [markIdempotencyStarted(claim(), first(), clock)]);
+        return row;
+      },
+    };
+    expect(await claimIdempotency(racing, claim({ requestId: "req-2" }), clock)).toEqual({ kind: "in_progress" });
+    expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ owner_request_id: "req-1" });
+  });
+
   it("印を付けられるのは借りの持ち主だけ", async () => {
     const table = fakeTable();
     const { clock } = clockAt(T0);
     await claimIdempotency(table.db, claim(), clock);
-    expect((await writeAtomically(table.db, [markIdempotencyStarted(claim({ requestId: "req-2" }), clock)])).ok).toBe(false);
+    expect((await writeAtomically(table.db, [markIdempotencyStarted(claim({ requestId: "req-2" }), first(), clock)])).ok).toBe(false);
   });
 
   it("済みの行で中身が違えば、借りの期限を過ぎても reused", async () => {
@@ -150,7 +191,7 @@ describe("claimIdempotency", () => {
     await claimIdempotency(table.db, claim(), clock);
     await writeAtomically(table.db, [settleIdempotency(claim(), { ok: true, item: {} }, NO_ONCE_ONLY, clock)]);
     set(T0 + IDEMPOTENCY_TTL_SECONDS * 1000);
-    expect(await claimIdempotency(table.db, claim({ requestId: "req-2", fingerprint: "b".repeat(64) }), clock)).toEqual({ kind: "fresh" });
+    expect(await claimIdempotency(table.db, claim({ requestId: "req-2", fingerprint: "b".repeat(64) }), clock)).toMatchObject({ kind: "fresh", attempt: { resumed: false } });
     const row = table.row("idempotency", idempotencyKeyOf(claim()));
     expect(row).toMatchObject({ state: "leased", owner_request_id: "req-2", fingerprint: "b".repeat(64) });
     expect(row).not.toHaveProperty("result");

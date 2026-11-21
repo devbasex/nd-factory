@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AuthDeps, DelegationRecord, Principal } from "../src/auth/authenticate.ts";
 import type { ScopeReader } from "../src/authorize.ts";
 import { createClock } from "../src/clock.ts";
+import { IDEMPOTENCY_LEASE_MS } from "../src/idempotency.ts";
 import { cond, putIfAbsent, updateIfVersion, type TransactItem } from "../src/conditional-write.ts";
 import { DISPATCH_RESERVE_MS, DISPATCH_SUMMARY_MS, dispatch, readHttpCall, type DispatchDeps, type DispatchResult, type Handler, type HttpEvent, type OperationCall } from "../src/dispatch/dispatch.ts";
 import { createLogger } from "../src/log.ts";
@@ -850,6 +851,30 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     const result = await dispatch(call("logins.delete", [{ cognito_sub: OTHER_SUB, idempotency_key: IDEM_1 }]), { ...deps, handlers: { ...noteHandlers, "logins.delete": external } });
     expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "in_progress" }]);
     expect(called).toEqual([]);
+  });
+
+  it("外へ働きかけた後に済みの行を残せなかった鍵の再送は、初めての実行と分けて同じ試みの識別子をハンドラーへ渡す", async () => {
+    const { table, deps } = setup();
+    const seen: unknown[] = [];
+    let crash = true;
+    const external: Handler = async (item, ctx) => {
+      seen.push(ctx.attempt);
+      if (!(await ctx.checkRequester())) return { result: { ok: false, status: 409, reason: "state_mismatch" }, writes: [] };
+      // 通知先が送信を受理した直後に時間切れで落ちる
+      if (crash) throw new Error("timeout");
+      return noteHandlers["logins.delete"]!(item, ctx);
+    };
+    const handlers = { ...noteHandlers, "logins.delete": external };
+    const element = { cognito_sub: OTHER_SUB, idempotency_key: IDEM_1 };
+    expect(await dispatch(call("logins.delete", [element]), { ...deps, handlers })).toEqual(problem(503, "unavailable"));
+    crash = false;
+    const later = createClock(() => NOW + IDEMPOTENCY_LEASE_MS);
+    const again = await dispatch(call("logins.delete", [element], { requestId: "req-2" }), { ...deps, handlers, clock: later });
+    expect(itemsOf(again)).toEqual([{ ok: true, item: { cognito_sub: OTHER_SUB } }]);
+    const [firstAttempt, resumed] = seen as { id: string; resumed: boolean }[];
+    expect(firstAttempt).toMatchObject({ resumed: false });
+    expect(resumed).toEqual({ id: firstAttempt!.id, resumed: true });
+    expect(table.rows("idempotency")[0]).toMatchObject({ state: "settled", started_at: new Date(NOW).toISOString(), attempt_id: firstAttempt!.id });
   });
 
   it("同じ連番の再送でも、要求元の照らしが外れたら既にある行の結果より先に 409 state_mismatch", async () => {
