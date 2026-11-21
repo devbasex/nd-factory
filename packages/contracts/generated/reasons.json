@@ -29,6 +29,10 @@
       "status": 401
     },
     {
+      "code": "session_ended",
+      "status": 401
+    },
+    {
       "code": "human_only",
       "status": 403
     },
@@ -176,6 +180,36 @@
         "status": 409
       }
     ],
+    "login_links.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
     "logins.create": [
       {
         "code": "item_invalid",
@@ -225,6 +259,14 @@
       },
       {
         "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
         "status": 409
       }
     ],
