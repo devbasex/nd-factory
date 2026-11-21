@@ -115,6 +115,8 @@ docs/operations/settings.md・setup.md
 | `subnetMask` | `/16` → 18 | `/20` → 22 | — |
 | `AppStack.availabilityZones` | 合成の出力のサブネットの AZ が `Fn::GetAZs` を引く | — | 合成が context の lookup を求めない（`cdk.context.json` が作られない） |
 
+`Fn::GetAZs` が 2 つ以上の AZ を返すことは合成では確かめられないため、設置の前提として `diff` の足りない設定の一覧で照らす（設計文書の決定 3・12。下の「設置のコマンド」の `readGetAzsCount`）。
+
 ## 進行表の DB
 
 満たす決定: 決定 4、受け入れ条件 3・4
@@ -201,10 +203,11 @@ docs/operations/settings.md・setup.md
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `MISSING_CHECKS` | `infra/setup/missing-settings.ts` | 新設 | `readonly MissingCheck[]`（`MissingCheck = (ctx: MissingContext) => Promise<MissingItem[]>`） | 4 種類の照らし。ほかの子は配列へ足すだけ |
+| `MISSING_CHECKS` | `infra/setup/missing-settings.ts` | 新設 | `readonly MissingCheck[]`（`MissingCheck = (ctx: MissingContext) => Promise<MissingItem[]>`） | 5 種類の照らし。ほかの子は配列へ足すだけ |
 | `collectMissingSettings` | 同上 | 新設 | `(ctx: MissingContext, checks: readonly MissingCheck[]) => Promise<MissingItem[]>` | 照らしを順に打ち、結果を並べる。1 つの照らしの失敗は「確かめられない」の 1 行にする |
 | `printMissingSettings` | 同上 | 新設 | `(items: MissingItem[], out: (line: string) => void) => void` | 「足りない設定:」の見出しと 1 件 1 行。0 件なら「足りない設定: 無し」 |
 | `readCostAllocationTags` | `infra/setup/aws-reader.ts` | 新設 | `(target: Target, keys: string[]) => Promise<Record<string, "Active" \| "Inactive" \| "Missing">>` | `ListCostAllocationTags` でタグの状態を読む |
+| `readGetAzsCount` | 同上 | 新設 | `(target: Target) => Promise<number>` | `DescribeSubnets`（`default-for-az=true`）で既定のサブネットのある AZ を数え、0 なら `DescribeAvailabilityZones`（`state=available`・種類 `availability-zone`）の数を返す。`Fn::GetAZs` が返す数の見なし（LIB6） |
 | `runDiff` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 確認の値を出した後に `collectMissingSettings` と `printMissingSettings` を打つ。終了コードは変えない |
 | `parseArgs` | 同上 | 変更 | 戻り値に `GcArgs` を足す | `gc --profile <p> [--confirm <値>] [--rollback-buffer-days <日数>]` を読む。日数は 1〜365 の整数（既定 30） |
 | `mainSetup` | 同上 | 変更 | 変えない | `gc` を `runGc` へ振り分ける |
@@ -212,8 +215,8 @@ docs/operations/settings.md・setup.md
 | `gcCliArgs` | 同上 | 新設 | `(mode: "print" \| "full", target: Target, days: number) => string[]` | `cdk gc aws://<アカウント>/<リージョン> --unstable=gc --type=all --action=<mode> --rollback-buffer-days=<日数> --created-buffer-days=1 --confirm=false --profile <profile>` |
 | `runGc` | 同上 | 新設 | `(a: GcArgs, deps: SetupDeps) => Promise<number>` | 確認の値なしは `print` を打って数と確認の値を示す。確認の値があれば照らし、同じときだけ `full` を打つ |
 
-- `SetupDeps` に `readCostAllocationTags` と `hasDocker: () => Promise<boolean>` を足す（テストは本物の AWS と Docker を呼ばない）
-- `MISSING_CHECKS` の 4 種類: Google のクライアントの ID が無い・タグ `app-prefix`・`app-env` が `Active` でない（読めなければ「確かめられない（`ce:ListCostAllocationTags` を許した profile で読む）」）・`ops.notify_emails` が空・`docker version` が 0 で終わらない
+- `SetupDeps` に `readCostAllocationTags`・`readGetAzsCount` と `hasDocker: () => Promise<boolean>` を足す（テストは本物の AWS と Docker を呼ばない）
+- `MISSING_CHECKS` の 5 種類: Google のクライアントの ID が無い・タグ `app-prefix`・`app-env` が `Active` でない（読めなければ「確かめられない（`ce:ListCostAllocationTags` を許した profile で読む）」）・`ops.notify_emails` が空・`docker version` が 0 で終わらない・`readGetAzsCount` が 2 未満（「`Fn::GetAZs` が返す AZ が <数> つで、反映が網を作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --availability-zone <AZ>`）か、既定のサブネットをすべて消す」。読めなければ「確かめられない（`ec2:DescribeSubnets`・`ec2:DescribeAvailabilityZones` を許した profile で読む）」）
 
 ### 異常系の処理
 
@@ -228,7 +231,8 @@ docs/operations/settings.md・setup.md
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `collectMissingSettings` | 4 種類が当たる入力でそれぞれ 1 行 | 0 件で「無し」 | 照らしが投げると「確かめられない」の 1 行 |
+| `collectMissingSettings` | 5 種類が当たる入力でそれぞれ 1 行 | 0 件で「無し」。AZ の数 2 で行が出ず 1 で出る | 照らしが投げると「確かめられない」の 1 行 |
+| `readGetAzsCount` | 既定のサブネットが 3 つの AZ にあれば 3 | 既定のサブネットが 1 つの AZ にだけあれば、使える AZ が 3 つでも 1。既定のサブネットが無ければ使える AZ の数 | — |
 | `runDiff` | 出力の最後に一覧の欄 | — | 足りない設定があっても終了コード 0 |
 | `parseArgs` | `gc` の 3 つの形 | 日数 1・365 は通り 0・366 は落ちる | `--profile` が無い |
 | `runGc` | 確認の値なしで `print` だけを打つ・同じ確認の値で `full` を打つ | — | 違う確認の値で CLI を呼ばない・CLI の失敗で `EXIT.BUILD` |
