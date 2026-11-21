@@ -93,7 +93,7 @@ package-lock.json
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `INFRA_DEFAULTS` | 定数 | `packages/contracts/src/settings.ts` | 上の 5 つの既定 |
-| `DB_PREP_TIMING` | 定数 | `packages/contracts/src/db-prep.ts` | `{ maxEventAgeSeconds: 60, functionTimeoutSeconds: 300, dataApiCallSeconds: 45, dataApiTxIdleSeconds: 180, prepDeadlineSeconds: 900 }`。`DbPrepFunction` が最初の 2 つを、#6 の見回りと API が `prepDeadlineSeconds` を読む。後の 2 つは Data API が決める値（全体の設計の LIB91）で、関数は変えない |
+| `DB_PREP_TIMING` | 定数 | `packages/contracts/src/db-prep.ts` | `{ maxEventAgeSeconds: 60, functionTimeoutSeconds: 300, dataApiCallSeconds: 45, dataApiTxIdleSeconds: 180, prepDeadlineSeconds: 900, patrolIntervalSeconds: 300 }`。`DbPrepFunction` が最初の 2 つを、#6 の見回りと API が `prepDeadlineSeconds` と `patrolIntervalSeconds`（見回りのスケジュール）を読む。読み手は値を写さずこの定数を参照し、合成のテストで一致を照らす。`dataApiCallSeconds` と `dataApiTxIdleSeconds` は Data API が決める値（全体の設計の LIB91）で、関数は変えない |
 | `DB_PREP_FAILURE_REASONS` | 定数 | `packages/contracts/src/db-prep.ts` | `data_api_unavailable`・`guard_conflict`・`connections_remain`・`sql_failed` |
 
 ### 単体テストの観点
@@ -103,7 +103,7 @@ package-lock.json
 | `settingsSchema` | 5 つのキーを持つ・持たない設定のファイル | CIDR の接頭辞 16 と 20 は通り 15 と 21 は落ちる。ACU の 1・16 は通り 0.5・16.5・1.25 は落ちる。予算の 1 は通り 0 は落ちる。範囲は `tags`・`account` が通り `tag` は落ちる | 未知のキー・メールでない宛先 |
 | `infraValues` | キーの無い設定で既定 | — | — |
 | `dbPrepInvocation` | `create` と `rotate` | — | `create` で `rotation_seq` がある・`rotate` で無い・ほかの項目（`password` など）を持つ |
-| `DB_PREP_TIMING` | `maxEventAgeSeconds + functionTimeoutSeconds + max(dataApiCallSeconds, dataApiTxIdleSeconds) < prepDeadlineSeconds`（540 < 900） | `maxEventAgeSeconds` が 60（`MaximumEventAgeInSeconds` の最小）。和と期限の差が見回りの間隔 300 秒以上 | 期限を 540 以下に、または関数の時間切れを 541 秒以上に変えると落ちる |
+| `DB_PREP_TIMING` | `maxEventAgeSeconds + functionTimeoutSeconds + max(dataApiCallSeconds, dataApiTxIdleSeconds) < prepDeadlineSeconds`（540 < 900） | `maxEventAgeSeconds` が 60（`MaximumEventAgeInSeconds` の最小）。和と期限の差が見回りの間隔 `patrolIntervalSeconds`（300 秒）以上 | 期限を 540 以下に、または関数の時間切れを 541 秒以上に変えると落ちる |
 | `dbPrepOutcome` | 3 つの `result` | — | `rotation_superseded` で `recorded_seq` が無い・`failed` で `reason` が無い・一覧に無い理由 |
 
 ## ネットワーク

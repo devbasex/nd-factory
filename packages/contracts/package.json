@@ -6,7 +6,8 @@
     "./settings": "./src/settings.ts",
     "./users-api": "./src/users-api.ts",
     "./web-config": "./src/web-config.ts",
-    "./exit-codes": "./src/exit-codes.ts"
+    "./exit-codes": "./src/exit-codes.ts",
+    "./db-prep": "./src/db-prep.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."
