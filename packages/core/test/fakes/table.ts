@@ -8,7 +8,7 @@ import type { Db, KeyCondition, RowKey, StoredRow, TableName } from "../../src/d
 
 type Mutable = Record<string, unknown>;
 
-export type InjectedFailure = "conflict" | "unavailable" | "invalid";
+export type InjectedFailure = "conflict" | "throttled" | "unavailable" | "invalid";
 
 function rowKey(key: RowKey): string {
   return `${key.pk}\u0000${key.sk ?? ""}`;
@@ -175,6 +175,7 @@ export function fakeTable() {
       transactions.push(items);
       const failure = failures.shift();
       if (failure === "conflict") throw cancelled(items.map(() => "TransactionConflict"));
+      if (failure === "throttled") throw cancelled(items.map((_, index) => (index === 0 ? "ThrottlingError" : "None")));
       if (failure === "unavailable") throw unavailable();
       if (failure === "invalid") throw validationError("One or more parameter values were invalid");
       const codes = items.map((item) => (evaluate(item.condition, tableOf(item.table).get(rowKey(item.key))) ? "None" : "ConditionalCheckFailed"));

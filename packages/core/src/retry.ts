@@ -71,6 +71,12 @@ function hasCancellationCode(e: Record<string, unknown>, codes: ReadonlySet<stri
   );
 }
 
+// 取り消しの理由に一時の失敗（衝突と書き込みの呼びすぎ）がある TransactionCanceledException。
+// SDK はトランザクションの取り消しを繰り返さないため、writeAtomically が p-retry で繰り返す対象にする
+export function isRetryableCancellation(e: unknown): boolean {
+  return isRecord(e) && hasCancellationCode(e, RETRYABLE_CANCELLATION_CODES);
+}
+
 // AWS SDK の例外が持つ応答の状態（$metadata.httpStatusCode）
 function sdkStatusOf(e: Record<string, unknown>): number | undefined {
   const metadata = e["$metadata"];

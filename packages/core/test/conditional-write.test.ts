@@ -179,6 +179,32 @@ describe("writeAtomically", () => {
     expect(warns[0]).toMatchObject({ policy: "dynamodb-transaction", attempt: 1, tables: ["events"], count: 1 });
   });
 
+  it.each(["ThrottlingError", "ProvisionedThroughputExceeded", "RequestLimitExceeded"])("取り消しの理由 %s は方針の回数まで繰り返して確定する", async (code) => {
+    const table = fakeTable();
+    const { log, records } = logs();
+    let calls = 0;
+    const thrown = Object.assign(new Error("throttled"), { name: "TransactionCanceledException", $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: code }] });
+    const db = {
+      transactWrite: async (items: readonly TransactItem[]) => {
+        calls += 1;
+        if (calls <= RETRY_POLICIES["dynamodb-transaction"].retries) throw thrown;
+        await table.db.transactWrite(items);
+      },
+    } as unknown as Parameters<typeof writeAtomically>[0];
+    expect(await writeAtomically(db, [put(0)], log)).toEqual({ ok: true });
+    expect(calls).toBe(RETRY_POLICIES["dynamodb-transaction"].retries + 1);
+    expect(table.rows("events")).toHaveLength(1);
+    expect(records().filter((r) => r["level"] === "warn")).toHaveLength(RETRY_POLICIES["dynamodb-transaction"].retries);
+  });
+
+  it("呼びすぎの取り消しを使い切ると WriteUnavailableError を投げ、何も書かない", async () => {
+    const table = fakeTable();
+    table.failNext("throttled", "throttled", "throttled");
+    await expect(writeAtomically(table.db, [put(0), put(1)])).rejects.toBeInstanceOf(WriteUnavailableError);
+    expect(table.transactions).toHaveLength(RETRY_POLICIES["dynamodb-transaction"].retries + 1);
+    expect(table.rows("events")).toEqual([]);
+  });
+
   it("衝突を使い切ると WriteUnavailableError を投げ、何も書かない", async () => {
     const table = fakeTable();
     table.failNext("conflict", "conflict", "conflict");

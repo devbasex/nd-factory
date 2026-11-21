@@ -2,11 +2,11 @@ import { RETRY_POLICIES } from "@nd-factory/contracts/data";
 import pRetry from "p-retry";
 import type { Db, Row, RowKey, TableName } from "./db.ts";
 import type { Logger } from "./log.ts";
-import { classifyFailure } from "./retry.ts";
+import { classifyFailure, isRetryableCancellation } from "./retry.ts";
 
 // 条件つきの書き込み。条件と更新は構造の値（Condition・Update）で組み、DynamoDB の式の文字列へはこのモジュールの
 // expressionsOf だけが書き出す（条件式の組み立てを部品の外に置かない。受け入れ条件 2）。
-// 確定は writeAtomically が 1 つのトランザクションで行い、トランザクションどうしの衝突だけを p-retry で繰り返す（決定 13・17）
+// 確定は writeAtomically が 1 つのトランザクションで行い、一時の失敗による取り消し（衝突と書き込みの呼びすぎ。SDK が繰り返さない）だけを p-retry で繰り返す（決定 13・17）
 
 // DynamoDB の 1 つのトランザクションの件の上限（TransactWriteItems の仕様の値。AWS の DynamoDB の API の文書の TransactItems の上限）
 export const TRANSACT_MAX_ITEMS = 100;
@@ -269,10 +269,6 @@ function cancellationCodes(error: unknown): readonly (string | undefined)[] | nu
   });
 }
 
-function isTransactionConflict(error: unknown): boolean {
-  return cancellationCodes(error)?.includes("TransactionConflict") ?? false;
-}
-
 function rowId(item: TransactItem): string {
   return `${item.table}\u0000${item.key.pk}\u0000${item.key.sk ?? ""}`;
 }
@@ -318,7 +314,7 @@ export async function writeAtomically(db: Db, items: readonly TransactItem[], lo
       return { ok: true };
     } catch (error) {
       const codes = cancellationCodes(error);
-      // 条件の外れは繰り返さず、件の番号と扱いへ訳す。衝突と届かない失敗は投げる（衝突だけ p-retry が繰り返す）
+      // 条件の外れは繰り返さず、件の番号と扱いへ訳す。ほかの失敗は投げる（一時の失敗による取り消しだけ p-retry が繰り返す）
       if (codes !== null && codes.includes("ConditionalCheckFailed")) {
         const failed = items.flatMap((item, index) => (codes[index] === "ConditionalCheckFailed" ? [{ index, onConflict: item.onConflict }] : []));
         return { ok: false, failed };
@@ -331,10 +327,10 @@ export async function writeAtomically(db: Db, items: readonly TransactItem[], lo
       retries: TRANSACTION_POLICY.retries,
       minTimeout: TRANSACTION_POLICY.min_ms,
       maxTimeout: TRANSACTION_POLICY.max_ms,
-      shouldRetry: ({ error }) => isTransactionConflict(error),
+      shouldRetry: ({ error }) => isRetryableCancellation(error),
       onFailedAttempt: ({ error, attemptNumber, retriesLeft }) => {
-        if (isTransactionConflict(error) && retriesLeft > 0) {
-          log?.warn("トランザクションの衝突を繰り返す", { ...summary, policy: "dynamodb-transaction", attempt: attemptNumber, class: "retryable" });
+        if (isRetryableCancellation(error) && retriesLeft > 0) {
+          log?.warn("トランザクションの取り消しを繰り返す", { ...summary, policy: "dynamodb-transaction", attempt: attemptNumber, class: "retryable" });
         }
       },
     });
