@@ -47,6 +47,9 @@ async function ruleHits(code: string, filePath: string, ruleId: string, eslint?:
   return (await lint(code, filePath, eslint)).filter((f) => f.ruleId === ruleId).length;
 }
 
+// node:crypto（crypto）の ID と冪等の鍵の生成の関数を落とす、このリポジトリの規則
+const CRYPTO_RULE = "nd-factory/no-crypto-id";
+
 // `apps/*` の実行時のコード（src の下）。画面は *.ts と *.tsx の両方
 const APP_PATHS = [
   "apps/api/src/sample.ts",
@@ -117,22 +120,22 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
     {
       name: "crypto（node: を付けない表記）の randomUUID",
       code: 'import { randomUUID } from "crypto";\nexport const id = randomUUID();\n',
-      ruleId: "@typescript-eslint/no-restricted-imports",
+      ruleId: CRYPTO_RULE,
     },
     {
       name: "crypto（node: を付けない表記）の randomBytes",
       code: 'import { randomBytes } from "crypto";\nexport const b = randomBytes(4);\n',
-      ruleId: "@typescript-eslint/no-restricted-imports",
+      ruleId: CRYPTO_RULE,
     },
     {
       name: "node:crypto の randomUUID",
       code: 'import { randomUUID } from "node:crypto";\nexport const id = randomUUID();\n',
-      ruleId: "@typescript-eslint/no-restricted-imports",
+      ruleId: CRYPTO_RULE,
     },
     {
       name: "node:crypto の randomBytes",
       code: 'import { randomBytes } from "node:crypto";\nexport const b = randomBytes(4);\n',
-      ruleId: "@typescript-eslint/no-restricted-imports",
+      ruleId: CRYPTO_RULE,
     },
     {
       name: "uuid",
@@ -177,22 +180,67 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
       {
         name: `${source} の動的な import の randomUUID の直の参照`,
         code: `export const id = (await import("${source}")).randomUUID();\n`,
-        ruleId: "no-restricted-syntax",
+        ruleId: CRYPTO_RULE,
       },
       {
         name: `${source} の動的な import の randomBytes の直の参照（計算した鍵・テンプレートの文字列）`,
         code: `export const b = (await import(\`${source}\`))["randomBytes"](4);\n`,
-        ruleId: "no-restricted-syntax",
+        ruleId: CRYPTO_RULE,
       },
       {
         name: `${source} の動的な import からの randomUUID の分割代入`,
         code: `const { randomUUID } = await import("${source}");\nexport const id = randomUUID();\n`,
-        ruleId: "no-restricted-syntax",
+        ruleId: CRYPTO_RULE,
       },
       {
         name: `${source} の動的な import からの randomBytes の分割代入（代入の式）`,
         code: `let r;\n({ randomBytes: r } = await import("${source}"));\nexport const b = r;\n`,
-        ruleId: "no-restricted-syntax",
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の既定の import からの randomUUID の参照`,
+        code: `import cryptoModule from "${source}";\nexport const id = cryptoModule.randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の名前空間の import からの randomUUID の参照`,
+        code: `import * as cryptoModule from "${source}";\nexport const id = cryptoModule.randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の名前空間の import の default からの randomBytes の参照`,
+        code: `import * as cryptoModule from "${source}";\nexport const b = cryptoModule.default.randomBytes(32);\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の既定の import を別の名前に移してからの randomBytes の分割代入`,
+        code: `import cryptoModule from "${source}";\nconst c = cryptoModule;\nconst { randomBytes } = c;\nexport const b = randomBytes(32);\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import の default からの randomBytes の参照`,
+        code: `export const b = (await import("${source}")).default.randomBytes(32);\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import を受けた変数からの randomUUID の参照`,
+        code: `const m = await import("${source}");\nexport const id = m.randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import の default からの randomUUID の分割代入`,
+        code: `const { default: { randomUUID } } = await import("${source}");\nexport const id = randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import の then からの randomUUID の参照`,
+        code: `export const id = import("${source}").then((m) => m.randomUUID());\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の randomUUID の再書き出し`,
+        code: `export { randomUUID } from "${source}";\n`,
+        ruleId: CRYPTO_RULE,
       },
     ]),
     { name: "uuid の動的な import", code: 'export const m = await import("uuid");\n', ruleId: "no-restricted-syntax" },
@@ -235,7 +283,7 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
     }
   });
 
-  it("型だけの @aws-sdk/* の import と new Date(0) と node:crypto の他の名前と、ほかの指定子の動的な import は落とさない", async () => {
+  it("型だけの @aws-sdk/* の import と new Date(0) と node:crypto の他の名前（名前空間と既定の import からの createHash を含む）と、ほかの指定子の動的な import は落とさない", async () => {
     const code = [
       'import type { DynamoDBClient } from "@aws-sdk/client-dynamodb";',
       'import { createHash } from "node:crypto";',
@@ -248,6 +296,13 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
       "export const h3 = ch;",
       'const { randomUUID: ru } = await import("zod");',
       "export const z2 = ru;",
+      'import * as cryptoModule from "crypto";',
+      'export const h4 = cryptoModule.createHash("sha256");',
+      'import cryptoDefault from "node:crypto";',
+      'export const h5 = cryptoDefault.createHash("sha256");',
+      'export const h6 = (await import("crypto")).default.createHash("sha256");',
+      'import type { randomUUID as RandomUUID } from "node:crypto";',
+      "export type R = typeof RandomUUID;",
       "",
     ].join("\n");
     for (const path of APP_PATHS) {
