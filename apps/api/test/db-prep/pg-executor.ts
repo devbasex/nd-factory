@@ -101,6 +101,7 @@ export function createPgExecutor(connect: (database: string) => Promise<Client>)
         if (tx.database !== opts.database) throw new Error("トランザクションのデータベースと違う");
         client = tx.client;
       }
+      // トランザクションの中の文が失敗しても接続は txs に残す（呼ぶ側の rollback か close() が閉じる）
       const res = await client.query<Record<string, unknown>>({ text, values });
       return res.rows.map((r): Row => toRow(r));
     },
@@ -138,6 +139,10 @@ export function createPgExecutor(connect: (database: string) => Promise<Client>)
       }
     },
 
+    // 後始末の経路: commit か rollback を呼ばれたトランザクションは、その場で接続を閉じて txs から外す。
+    // 文が失敗しても rollback を呼ばれなければ、接続は txs に残り、確定しないトランザクションが DB に残る。
+    // close() がそれらの接続も閉じ（閉じた接続のトランザクションは PostgreSQL が巻き戻す）、
+    // withTestDatabase は最後に close() を呼んでから DROP DATABASE … WITH (FORCE) で消す
     async close() {
       const clients = [...(await Promise.allSettled(shared.values()))].flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
       clients.push(...[...txs.values()].map((t) => t.client));
