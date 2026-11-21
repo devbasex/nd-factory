@@ -22,10 +22,16 @@ export type PendingShape = { kind: "pending"; owner: string; schema: z.ZodNever 
 
 export type Shape = z.ZodType | PendingShape;
 
+// 成功の要素の結果の封筒。ok を z.literal(true) で持つ strictObject（okItem・okList）で、resultSchemaOf の和を ok で分けられる。
+// z.object と z.strictObject は型の上で見分けられないため、strict かは defineOperation（checkResult）が実行の時に照らす
+export type SuccessEnvelope = z.ZodObject<{ ok: z.ZodLiteral<true> } & z.core.$ZodShape, z.core.$strict>;
+
+export type ResultShape = SuccessEnvelope | PendingShape;
+
 export type OperationExamples = { normal?: unknown[]; edge?: unknown[] };
 
 // defineOperation へ渡す値。既定を持つ項目は省ける
-export type OperationInput<N extends string, I extends Shape, R extends Shape> = {
+export type OperationInput<N extends string, I extends Shape, R extends ResultShape> = {
   name: N;
   endpoint?: Endpoint;
   features?: readonly FeatureId[];
@@ -47,7 +53,7 @@ export type OperationInput<N extends string, I extends Shape, R extends Shape> =
 };
 
 // 操作の定義。項目の並びは生成物の JSON の鍵の順でもある
-export type OperationDef<N extends string = string, I extends Shape = Shape, R extends Shape = Shape> = {
+export type OperationDef<N extends string = string, I extends Shape = Shape, R extends ResultShape = ResultShape> = {
   readonly name: N;
   readonly entity: string;
   readonly verb: string;
@@ -103,8 +109,17 @@ function checkReasons(name: string, reasons: readonly ReasonDef[]): void {
   }
 }
 
+// 成功の結果が ok: true の strict な封筒かを照らす。型の制約を as で外した定義も、ここで落とす
+function checkResult(name: string, result: ResultShape): void {
+  if (isPending(result)) return;
+  if (!(result instanceof z.ZodObject)) fail(name, "成功の結果は okItem・okList の封筒で書く");
+  const ok: unknown = result.shape["ok"];
+  if (!(ok instanceof z.ZodLiteral) || ok.values.size !== 1 || !ok.values.has(true)) fail(name, "成功の結果の封筒は ok を z.literal(true) で持つ");
+  if (!(result.def.catchall instanceof z.ZodNever)) fail(name, "成功の結果の封筒は strictObject で組む");
+}
+
 // 印を照らし、HTTP の経路と既定の値を足した定義を返す。印が食い違えば投げる（モジュールの読み込みで落ちる）
-export function defineOperation<N extends string, I extends Shape, R extends Shape>(def: OperationInput<N, I, R>): OperationDef<N, I, R> {
+export function defineOperation<N extends string, I extends Shape, R extends ResultShape>(def: OperationInput<N, I, R>): OperationDef<N, I, R> {
   const endpoint = def.endpoint ?? "user";
   const { entity, verb, route } = splitName(def.name, endpoint);
   const features = def.features ?? [];
@@ -131,6 +146,7 @@ export function defineOperation<N extends string, I extends Shape, R extends Sha
   if (!needsDelegation && delegationKind !== null) fail(def.name, "委任から呼べない操作は委任の種類を持たない");
   if (verb !== "list" && order !== null) fail(def.name, "並びは list の操作だけが持つ");
   checkReasons(def.name, reasons);
+  checkResult(def.name, def.result);
 
   return {
     name: def.name,
@@ -241,7 +257,7 @@ export function resultSchemaOf<Op extends OperationDef>(op: Op): ResultSchemaOf<
   const result = op.result;
   if (isPending(result)) throw new OperationDefinitionError(`${op.name}: 結果の形が未定（${result.owner}）`);
   const failure = itemFailure(itemReasonsOf(op));
-  // 成功の側は ok を z.literal で持つ封筒（okItem・okList）だけが来る。型の上の和は宣言の ResultSchemaOf で出す
+  // 成功の側は ok を z.literal(true) で持つ封筒だけが来る（型の SuccessEnvelope と defineOperation の checkResult が縛る）。型の上の和は宣言の ResultSchemaOf で出す
   const options = [result, failure] as unknown as readonly [z.core.$ZodTypeDiscriminable, z.core.$ZodTypeDiscriminable];
   return z.discriminatedUnion("ok", options) as unknown as ResultSchemaOf<Op>;
 }

@@ -89,7 +89,7 @@ infra/
 | `packages/contracts/src/ids.ts` | 新設 | ID の頭の集まりと ID の形 | values | ids | `ID_KINDS`・`IdKind`・`idOf` |
 | `packages/contracts/src/tokens.ts` | 新設 | 委任と登録の token の形 | ids | tokens | `delegationToken`・`machineToken` |
 | `packages/contracts/src/reasons.ts` | 新設 | 理由のコードの共通の集まりと型 | zod | reasons | `REQUEST_REASONS`・`ITEM_REASONS`・`ReasonDef` |
-| `packages/contracts/src/operation.ts` | 新設 | 操作の定義の型と組み立て | values・reasons | operation | `defineOperation`・`pendingShape`・`isPending`・`okItem`・`okList`・`itemFailure`・`itemReasonsOf`・`resultSchemaOf`・`OperationDef`・`ItemOf`・`ResultOf`・`ResultShapeOf`・`ItemFailureSchema`・`ReasonsOf` |
+| `packages/contracts/src/operation.ts` | 新設 | 操作の定義の型と組み立て | values・reasons | operation | `defineOperation`・`pendingShape`・`isPending`・`okItem`・`okList`・`itemFailure`・`itemReasonsOf`・`resultSchemaOf`・`OperationDef`・`ItemOf`・`ResultOf`・`ResultShapeOf`・`ItemFailureSchema`・`ReasonsOf`・`SuccessEnvelope`・`ResultShape` |
 | `packages/contracts/src/operations/*.ts` | 新設 | 操作の表の全行 | operation・ids・values | operations | `OPERATIONS`・`operationByName`・`operationByRoute` |
 | `packages/contracts/src/rows/*.ts` | 新設 | 表の行の形 | values・ids | rows | 行ごとの `<行>Row` の zod と `ROW_CODECS` |
 | `packages/contracts/src/tables.ts` | 新設 | 10 の表の仕様 | rows | tables | `TABLES`・`TableSpec` |
@@ -159,7 +159,7 @@ infra/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `defineOperation` | `operation.ts` | 新設 | `<N extends string, I extends ZodType, R extends ZodType>(def: OperationInput<N, I, R>) => OperationDef<N, I, R>` | 印を照らし、HTTP の経路と既定の値を足した定義を返す |
+| `defineOperation` | `operation.ts` | 新設 | `<N extends string, I extends Shape, R extends SuccessEnvelope \| PendingShape>(def: OperationInput<N, I, R>) => OperationDef<N, I, R>` | 印を照らし、HTTP の経路と既定の値を足した定義を返す |
 | `pendingShape` | `operation.ts` | 新設 | `(owner: `#${number}`) => PendingShape` | どの値も通さない形と、受け持つ子の番号 |
 | `isPending` | `operation.ts` | 新設 | `(shape: ZodType \| PendingShape) => shape is PendingShape` | 形の未定かを返す |
 | `okItem`・`okList` | `operation.ts` | 新設 | `<R extends ZodType>(item: R) => z.ZodObject<{ ok: z.ZodLiteral<true>; item: R }, z.core.$strict>`・`<R extends ZodType>(item: R) => z.ZodObject<{ ok: z.ZodLiteral<true>; items: z.ZodArray<R>; next_cursor: z.ZodNullable<z.ZodString> }, z.core.$strict>` | 成功の要素の結果の封筒（`{ok: true, item}`・`{ok: true, items, next_cursor}`）。`z.strictObject` で組み、封筒の余分なキー（`reason` など）を拒む。既定の `z.object` は余分なキーを落として通すため、`{ok: true, item: <有効な値>, reason: "not_found"}` が成功として通ってしまう。JSON Schema では `additionalProperties: false` になり、往復のテストで Ajv と合否がそろう |
@@ -197,7 +197,7 @@ infra/
 | 10 | `ownerOnly` | 真偽 | 偽 |
 | 11 | `allOrNothing` | `{ maxItems: number } \| null` | `null` |
 | 12 | `idempotencyKey` | 真偽 | 偽 |
-| 13 | `item`・`result` | zod \| `PendingShape` | — |
+| 13 | `item`・`result` | `item` は zod \| `PendingShape`。`result` は `SuccessEnvelope`（`ok` を `z.literal(true)` で持つ `strictObject`。`okItem`・`okList` が作る） \| `PendingShape` | —。`result` が `ok: true` の strict な封筒でなければ `defineOperation` が投げる（`z.object` と `z.strictObject` は型で見分けられないため、型の制約に加えて実行の時にも照らす） |
 | 14 | `reasons` | `readonly ReasonDef[]`（操作ごとのコードだけ。`when` は `always`） | `[]`（共通の `ITEM_REASONS` は書かずに `itemReasonsOf` が合わせる）。`ITEM_REASONS` と同じコードを書くと `defineOperation` が投げる |
 | 15 | `auditKeys` | 要素の鍵の名前の配列 | `[]` |
 | 16 | `order` | 文字列 \| `null` | `list` 以外は `null` |

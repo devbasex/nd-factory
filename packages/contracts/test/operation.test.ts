@@ -14,6 +14,7 @@ import {
   type OperationInput,
   pendingShape,
   type ResultOf,
+  type ResultShape,
   resultSchemaOf,
   type Shape,
 } from "../src/operation.ts";
@@ -27,7 +28,7 @@ const sprint = z.strictObject({ sprint_id: idOf("spr"), created_at: utcDateTime 
 
 const SPRINT = { sprint_id: SPRINT_ID, created_at: "2026-11-17T03:04:05.123Z" };
 
-function base(over: Partial<OperationInput<string, Shape, Shape>> = {}): OperationInput<string, Shape, Shape> {
+function base(over: Partial<OperationInput<string, Shape, ResultShape>> = {}): OperationInput<string, Shape, ResultShape> {
   return {
     name: "sprints.get",
     features: ["F8"],
@@ -108,7 +109,7 @@ describe("defineOperation", () => {
     expect(op.delegationKind).toBeNull();
   });
 
-  it.each<[string, Partial<OperationInput<string, Shape, Shape>>]>([
+  it.each<[string, Partial<OperationInput<string, Shape, ResultShape>>]>([
     ["読む操作に冪等の鍵", { idempotencyKey: true }],
     ["読む操作に全部か無か", { allOrNothing: { maxItems: 10 } }],
     ["全部か無かの上限が 0", { access: "write", allOrNothing: { maxItems: 0 } }],
@@ -138,6 +139,24 @@ describe("defineOperation", () => {
     ],
   ])("%s で投げる", (_why, over) => {
     expect(() => defineOperation(base(over))).toThrow(OperationDefinitionError);
+  });
+
+  it("成功の結果に ok: true の封筒でない形を型で拒む", () => {
+    // @ts-expect-error ok を持たない形は成功の結果にならない
+    base({ result: z.string() });
+    // @ts-expect-error ok: false の封筒は成功の結果にならない
+    base({ result: z.strictObject({ ok: z.literal(false), item: sprint }) });
+    // z.object と z.strictObject は型の上で見分けられないため、strict かは defineOperation が実行の時に照らす（下のテスト）
+  });
+
+  it.each<[string, z.ZodType]>([
+    ["ok を持たない形", z.string()],
+    ["ok を持たないオブジェクト", z.strictObject({ item: sprint })],
+    ["ok が false", z.strictObject({ ok: z.literal(false), item: sprint })],
+    ["ok が真偽値", z.strictObject({ ok: z.boolean(), item: sprint })],
+    ["余分なキーを落とす z.object", z.object({ ok: z.literal(true), item: sprint })],
+  ])("型を外して渡した成功の結果が %s なら投げる", (_why, result) => {
+    expect(() => defineOperation(base({ result: result as unknown as ResultShape }))).toThrow(OperationDefinitionError);
   });
 });
 
