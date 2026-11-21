@@ -4,7 +4,7 @@ import { Bucket } from "aws-cdk-lib/aws-s3";
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { Tags } from "aws-cdk-lib";
 import { describe, expect, it } from "vitest";
-import { TAG_KEYS, applyTags, resourceName, secretName, settingsParameterName, stackName } from "../lib/naming.ts";
+import { TAG_KEYS, appResourceNames, applyTags, resourceName, secretName, settingsParameterName, stackName } from "../lib/naming.ts";
 import { BASE_SETTINGS, TEST_ENV, untaggedResources } from "./support.ts";
 
 describe("resourceName", () => {
@@ -30,6 +30,25 @@ describe("settingsParameterName と stackName", () => {
     expect(settingsParameterName(BASE_SETTINGS)).toBe("/acme/test/settings");
     expect(stackName(BASE_SETTINGS, "app")).toBe("acme-test-app");
     expect(stackName(BASE_SETTINGS, "pipeline")).toBe("acme-test-pipeline");
+  });
+});
+
+describe("appResourceNames", () => {
+  it("インフラの資源の名前は <prefix>-<environment>-<用途>、秘密の器は <prefix>/<environment>/<用途>", () => {
+    expect(appResourceNames(BASE_SETTINGS)).toMatchObject({
+      vpc: "acme-test-vpc",
+      taskSecurityGroup: "acme-test-task-sg",
+      dbSecurityGroup: "acme-test-db-sg",
+      runnerCluster: "acme-test-runner",
+      runnerLogGroup: "acme-test-runner",
+      imageRepositories: "acme-test-*",
+      progressDb: "acme-test-progress-db",
+      progressDbAdminSecret: "acme/test/progress-db-admin",
+      dbPrepFunction: "acme-test-db-prep",
+      dbPrepLogGroup: "acme-test-db-prep",
+      opsTopic: "acme-test-ops",
+      budget: "acme-test-budget",
+    });
   });
 });
 

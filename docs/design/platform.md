@@ -84,25 +84,25 @@ C4 の Container（STD2）。ここの「コンテナ」は C4 の語で、動�
 
 ```mermaid
 graph TD
-    subgraph 利用者の端末
-        WEB[画面<br/>PWA・暗号化した控え]
+    subgraph DEV[利用者の端末]
+        WEB["画面<br/>PWA・暗号化した控え"]
     end
-    subgraph AWS の上の nd-factory
-        CDN[画面の配信<br/>CloudFront と S3]
+    subgraph AWS["AWS の上の nd-factory"]
+        CDN["画面の配信<br/>CloudFront と S3"]
         HAPI[HTTP API]
         API[API と MCP の関数]
         PAT[見回りの関数]
         NTF[知らせの送り手の関数]
         MIG[表の移しの関数]
-        IDP[利用者プール<br/>Cognito]
-        DDB[(サービスの表<br/>DynamoDB)]
+        PREP[DB の用意の関数]
+        IDP["利用者プール<br/>Cognito"]
+        DDB[("サービスの表<br/>DynamoDB")]
         ST[(状態の S3)]
-        SM[秘密の器<br/>Secrets Manager]
-        RUN[ランナー<br/>ECS のタスク]
-        PREP[DB の用意<br/>ECS のタスク]
-        PG[(進行表の DB<br/>Aurora)]
+        SM["秘密の器<br/>Secrets Manager"]
+        RUN["ランナー<br/>ECS のタスク"]
+        PG[("進行表の DB<br/>Aurora")]
     end
-    subgraph 手元のマシン
+    subgraph LOCAL[手元のマシン]
         NDR[nd ランタイムとランナー]
     end
     WEB --> CDN
@@ -113,14 +113,18 @@ graph TD
     API --> ST
     API --> SM
     API -->|RunTask| RUN
-    API -->|RunTask| PREP
+    API -->|非同期の呼び出し| PREP
     PAT --> DDB
+    PAT -->|非同期の呼び出し| PREP
     DDB -->|ストリーム| NTF
+    NTF -->|Web Push の私有鍵・Slack の宛先| SM
     MIG --> DDB
     RUN -->|レーンの token| HAPI
     RUN --> PG
     RUN -->|署名つき URL| ST
-    PREP --> PG
+    PREP -->|Data API| PG
+    PREP --> SM
+    PREP --> DDB
     NDR -->|登録の token・レーンの token| HAPI
 ```
 
@@ -135,7 +139,7 @@ graph TD
 | MCP | 操作の表から作った道具の一覧と呼び出し。API と同じ関数・同じ認可を通る（I14） | API と同じ Lambda |
 | ランナー | レーンの中で NDF を区間ごとに起動し、NDF の結果の行・承認ゲート・問いを進捗の事象・承認の依頼・問いへ翻訳する（腐敗防止層）。AWS の権限を持たない（I11） | ECS のタスクか手元のマシン |
 | nd ランタイム | 手元のマシンの登録・心拍・レーンの受け取り・コンテナでのランナーの起動 | 手元のマシン |
-| DB の用意 | プロジェクトの進行表のデータベースと役割を作る・役割のパスワードを差し替える | ECS のタスク（nd-factory のイメージ。claude と NDF を含まない） |
+| DB の用意の関数 | プロジェクトの進行表のデータベースと役割を作る・役割のパスワードを差し替える。進行表の DB へは RDS Data API で触れ、用意の ID と対象の読み出しと終わりの記録は、プロジェクトのモジュールの操作を関数の中から呼んで行う（サービスの表へ届く権限は、プロジェクトの表の読みと条件つきの書き込み・操作の記録の表の追記だけ。付けるのは口をつなぐ #6） | Lambda（VPC の外。API と見回りが非同期で呼ぶ） |
 | 見回り | 定期に起き、心拍の切れたレーンと手元のマシン・猶予を過ぎた答えの送達・やり直しの残る失効（GitHub の token・DB の資格情報）を見つけて、持ち主のモジュールの操作を呼ぶ | Lambda（スケジュールで起動） |
 | 知らせの送り手 | 知らせの表に足された行を通知先（Web Push・Slack）へ送り、通知先ごとの送達の状態を書く | Lambda（知らせの表のストリームで起動） |
 | 表の移し | サービスの表の古い形の版の項目を新しい版へ書き換える（[形の版と移し方](data.md#形の版と移し方)） | Lambda（反映の後に 1 回） |
@@ -150,7 +154,7 @@ C4 の Deployment（STD2）。VPC の中と外で何が動き、境界を何が�
 
 ```mermaid
 graph TD
-    subgraph VPC の外
+    subgraph OUT[VPC の外]
         CF[CloudFront と画面の S3]
         GW[HTTP API と Lambda]
         D[(DynamoDB)]
@@ -158,12 +162,12 @@ graph TD
         SM[Secrets Manager]
         CG[Cognito]
     end
-    subgraph 自前の VPC
-        subgraph 公開のサブネット 2 つ
-            T[ECS のタスク<br/>公開 IP・受け入れ無し]
+    subgraph VPC[自前の VPC]
+        subgraph PUB[公開のサブネット 2 つ]
+            T["ECS のタスク<br/>公開 IP・受け入れ無し"]
         end
-        subgraph 出口の無いサブネット 2 つ
-            A[(Aurora Serverless v2<br/>書き手 1 台)]
+        subgraph PRIV[出口の無いサブネット 2 つ]
+            A[("Aurora Serverless v2<br/>書き手 1 台")]
         end
         E[S3 の Gateway のエンドポイント]
     end
@@ -172,6 +176,7 @@ graph TD
     GW --> SM
     GW --> CG
     GW -->|RunTask・引き換えの token| T
+    GW -->|Data API・管理の役割| A
     T -->|443 レーンの token| GW
     T -->|5432 そのプロジェクトの役割| A
     T -->|443 署名つき URL| E
@@ -184,6 +189,7 @@ graph TD
 | タスク → API | レーンの token・進捗の事象・指示の問い合わせ | TLS。レーンの token はレーンが動く間だけ有効（I11） |
 | タスク → Aurora | そのプロジェクトの役割のパスワードを含む URL での接続 | Aurora の SG はタスクの SG からの 5432 だけを受ける。役割はそのデータベースだけに権限を持つ（I10） |
 | タスク → 状態の S3 | NDF のファイル | API が出す、そのレーンの頭だけの署名つき URL |
+| DB の用意の関数 → Aurora | RDS Data API の文。管理の役割の秘密の器を Data API に渡して打つ | 関数は VPC に入らず、Aurora の SG を通らない。Data API を呼べるのは DB の用意の関数だけ（決定 83） |
 
 ## 状態の置き場
 
@@ -207,18 +213,18 @@ graph TD
 | VPC | 自前で作る。2 つの AZ に公開のサブネットと出口の無いサブネットを 1 つずつ。AZ は `Fn::GetAZs` で反映の時に選び、合成で lookup を使わない | Value 6（相乗りしない）。合成を資格情報なしで通す（Value 8） |
 | NAT ゲートウェイ | 置かない。スタックのテストが 0 件を照らす | Value 6。1 つで時間あたり 0.045 ドル掛かる（[費用](#費用) の単価の出典） |
 | Gateway のエンドポイント | S3 だけ置く（無料）。DynamoDB の分は置かない。Interface 型は置かない | タスクは DynamoDB に触れない（権限を持たない）。Interface 型は時間で費用が掛かる |
-| API・MCP・見回り・知らせの送り手・表の移しの Lambda | VPC の外。Node 24・ARM64。束ねは esbuild | Value 6。DynamoDB・S3・Secrets Manager・Cognito・ECS の API は VPC の外から届く |
-| ECS のタスク（ランナー・DB の用意） | Fargate。公開のサブネットで公開 IP を付ける。ECS のサービスを作らず `RunTask` で起こす（決定 86）。x86_64 | 公開 IP で ECR・CloudWatch Logs・API・推論の端点へ出る。動く間だけ費用が掛かる |
+| API・MCP・見回り・知らせの送り手・表の移し・DB の用意の Lambda | VPC の外。Node 24・ARM64。束ねは esbuild。DB の用意の関数は時間切れ 5 分で、非同期の呼び出しの自動の再試行を 0 回、待ち行列の最大の年齢を 60 秒にする（決定 96） | Value 6。DynamoDB・S3・Secrets Manager・Cognito・ECS・RDS Data API の API は VPC の外から届く |
+| ECS のタスク（ランナー） | Fargate。公開のサブネットで公開 IP を付ける。ECS のサービスを作らず `RunTask` で起こす（決定 86）。x86_64 | 公開 IP で ECR・CloudWatch Logs・API・推論の端点へ出る。動く間だけ費用が掛かる |
 | タスクの役割 | AWS の権限を持たない（I11）。ECR からの取得とログの書き込みはタスクの実行の役割だけが持つ | 必要なものはすべて API から引き換えで受ける |
 | タスクの SG | 受け入れを空にする。行きは 443（任意の宛先）と 5432（Aurora の SG だけ） | 公開のサブネットに置くため、外から入る道筋を持たない |
-| Aurora Serverless v2 | PostgreSQL（自動の一時停止を持つ版、LIB80）。出口の無いサブネット。書き手 1 台・読み手なし。最小 0 ACU。最大 ACU は設定のファイルで受ける | Value 6（使わない間は計算の費用が 0） |
-| Aurora の SG | タスクの SG からの 5432 だけを受ける | DB に触れるのはタスクだけ |
+| Aurora Serverless v2 | PostgreSQL（自動の一時停止を持つ版、LIB80）。出口の無いサブネット。書き手 1 台・読み手なし。最小 0 ACU。最大 ACU は設定のファイルで受ける。Data API を有効にする（CDK の `enableDataApi: true`。使うのは DB の用意の関数だけ。決定 83） | Value 6（使わない間は計算の費用が 0） |
+| Aurora の SG | タスクの SG からの 5432 だけを受ける | DB へ接続するのはタスクだけ。DB の用意の関数は Data API で触れ、SG を通らない |
 | Cognito | 利用者プール。自分の登録を止め、Google（と GitHub）の IdP からだけ入る | Value 9（だれが入れるかをサーバーの側で決める） |
 | CloudFront と画面の S3 | 置き場は公開せず、配信は OAC で読む（LIB83）。料金は従量の課金（定額のプランに入らない）で、価格の区分は 100 | Value 3（HTTPS の配信で Service Worker が動く）・Value 6 |
 | 状態の S3 | 公開を止め、暗号化し、TLS だけ。NDF のファイルは 14 日で消す規則 | Value 7・Value 6 |
-| ECR | ランナーと DB の用意のイメージ。ライフサイクルの規則で古い版を消す（LIB85） | Value 6（保管の費用を抑える） |
+| ECR | nd-factory 専用のリポジトリ（イメージごとに 1 つ）。ランナーのイメージは、設置のコマンドと反映のパイプラインが作ってここへ push する。ライフサイクルの規則で push の新しい版を戻せる数より多めに残し、古い版を消す（決定 87・LIB85） | Value 6（保管の費用を抑える）・Value 8（ダイジェストで引き、確認の値で縛る） |
 | Secrets Manager | 器は CDK が作り、値は人か API が入れる。名前は `<prefix>/<environment>/<用途>`（決定 90） | Value 7 |
-| HTTP API | 利用者の JWT（利用者プール）と、委任・レーン・マシン・DB の用意の token を受ける。token は API の関数の中の 1 か所で確かめ、HTTP API の JWT の前段を利用者向けの HTTP の経路に置かない（[API と MCP](api.md#認証と主体)）。CORS は配信の元だけ | Value 4・Value 9 |
+| HTTP API | 利用者の JWT（利用者プール）と、委任・レーン・マシンの token を受ける。token は API の関数の中の 1 か所で確かめ、HTTP API の JWT の前段を利用者向けの HTTP の経路に置かない（[API と MCP](api.md#認証と主体)）。CORS は配信の元だけ | Value 4・Value 9 |
 | 予算 | AWS Budgets の月の予算と知らせ（[費用](#費用)） | Value 6 |
 
 ### ECS.2 と公開 IP
@@ -246,7 +252,7 @@ Security Hub の ECS.2 は、ECS のサービス（`AWS::ECS::Service`）で公�
 
 | 値 | 読む構成要素 | キーを受け持つ子の課題 |
 | --- | --- | --- |
-| 予算・最大 ACU・運用の知らせの宛先・設置全体の同時のレーンの数・差し替えの起こし直しの上限の回数（既定 3）・承認資料と操作の記録の保存期間（既定 1 年） | インフラ・見回り・表と S3 の期限 | #13 |
+| 予算・最大 ACU・運用の知らせの宛先・設置全体の同時のレーンの数・差し替えの呼び直しの上限の回数（既定 3）・承認資料と操作の記録の保存期間（既定 1 年） | インフラ・見回り・表と S3 の期限 | #13 |
 | 実行の設定の値（猶予・寿命・間隔・期限・起票の上限）・推論の手段の可否 | 実行の制御・ランナー（[実行の設定の値](execution.md#設定の値)） | #6 |
 | Web Push の公開鍵 | 知らせの送り手・画面 | #8 |
 | 料金プランの表の選びと単価 | 使える量の判定 | #29 |
@@ -261,9 +267,9 @@ Security Hub の ECS.2 は、ECS のサービス（`AWS::ECS::Service`）で公�
 | 利用者プール・ドメイン・クライアント | `acme-test-users`・`acme-test-login`・`acme-test-web` |
 | HTTP API・JWT の認可 | `acme-test-api`・`acme-test-jwt`。JWT の認可は利用者向けの HTTP の経路に置かず、token は API の関数の中で確かめる（[API の決定 48](api.md#決定の記録)） |
 | サービスの表 | `acme-test-db-users`・`acme-test-db-projects` など（[表と鍵](data.md#表と鍵)）。利用者の表を `db-users` と呼ぶのは、「アカウント」を AWS のアカウントの意味だけで使うためである |
-| Lambda | `acme-test-api-fn`・`acme-test-patrol`・`acme-test-notifier`・`acme-test-migrate` |
+| Lambda | `acme-test-api-fn`・`acme-test-patrol`・`acme-test-notifier`・`acme-test-migrate`・`acme-test-db-prep` |
 | VPC・SG | `acme-test-vpc`・`acme-test-task-sg`・`acme-test-db-sg` |
-| ECS のクラスタ・タスクの定義 | `acme-test-runner`・`acme-test-runner`（族）・`acme-test-db-prep`（族） |
+| ECS のクラスタ・タスクの定義 | `acme-test-runner`・`acme-test-runner`（族） |
 | Aurora のクラスタ | `acme-test-progress-db` |
 | 予算 | `acme-test-budget` |
 | 秘密の器 | `acme/test/google-oauth`・`acme/test/github-oauth`・`acme/test/github-app`・`acme/test/web-push`・`acme/test/progress-db-admin`・`acme/test/progress-db/<無作為>`・`acme/test/notify/<通知先>` |
@@ -289,7 +295,7 @@ Security Hub の ECS.2 は、ECS のサービス（`AWS::ECS::Service`）で公�
 | DynamoDB | 保存の量だけ | 要求の数の課金（LIB81） |
 | Cognito | 0 | 月の利用者 10,000 までは無料（下の単価の出典） |
 | CloudFront | 0 | 従量の課金。アカウントごとに毎月 1 TB・1,000 万回の要求までは無料（LIB83） |
-| 掛かり続けるもの | 秘密の器の数・Aurora のストレージ・ECR の保管・ログの保管・S3 の保管 | 量に比例する。秘密の器が最も大きい（1 つ月 0.40 ドル） |
+| 掛かり続けるもの | 秘密の器の数・Aurora のストレージ・ECR の保管（残す版の数で上限がある）・ログの保管・S3 の保管 | 量に比例する。秘密の器が最も大きい（1 つ月 0.40 ドル） |
 
 ### 見込み
 
@@ -309,12 +315,12 @@ Security Hub の ECS.2 は、ECS のサービス（`AWS::ECS::Service`）で公�
 | Aurora の計算 | 0.12 ドル/ACU 時 | 0 | 1.56 | 6.00 |
 | Aurora のストレージ（1〜3 GB） | 0.10 ドル/GB 月 | 0.10 | 0.10 | 0.30 |
 | 秘密の器（サービスの 5 つ ＋ プロジェクト ＋ 通知先） | 0.40 ドル/月 | 2.00 | 2.40 | 3.60 |
-| ECR の保管（2 GB） | 0.10 ドル/GB 月 | 0.20 | 0.20 | 0.20 |
+| ECR の保管（自前のリポジトリ。ランナーのイメージの新しい 30 版。版の間で共通のレイヤーは 1 度だけ数えると置いて 5 GB とした。ランナーのイメージの大きさは #6 で測る） | 0.10 ドル/GB 月 | 0.50 | 0.50 | 0.50 |
 | HTTP API（0・5 万・50 万回） | 1.00 ドル/百万回 | 0 | 0.05 | 0.50 |
 | DynamoDB（書き 0・10 万・100 万、読み 0・50 万・500 万） | 書き 0.625・読み 0.125 ドル/百万 | 0 | 0.13 | 1.25 |
 | ログ（0・1・8 GB。月 5 GB まで無料） | 0.50 ドル/GB | 0 | 0 | 1.50 |
 | Lambda・Cognito・CloudFront・S3・予算 | 無料の枠の中 | 0 | 0 | 0 |
-| **合計（約）** | | **2.3 ドル** | **5.0 ドル** | **17.7 ドル** |
+| **合計（約）** | | **2.6 ドル** | **5.3 ドル** | **18.0 ドル** |
 
 読み方: 使わない月は秘密の器が大半で、使う月は Aurora の起きている時間が最も効く。Aurora の起きている時間はタスクの動く時間に比例し、承認の待ちの間はタスクも接続も持たないため増えない。ACU の平均・保守で起きる時間・ログの量は実測で確かめる（[未確認のまま残ること](#未確認のまま残ること)）。
 
@@ -366,10 +372,11 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 | --- | --- | --- | --- |
 | 引数・設定のファイル | 形の正本で照らし、足りない・誤ったキーを 1 件 1 行で示す（終了コード 2・3） | 足すキー（予算の宛先など）が形に合わない | — |
 | profile | アカウントは主体から、リージョンは profile から読む（4） | 資格情報やリージョンが無い | — |
-| 合成 | 画面のビルド・Lambda の束ね・ランナーのイメージのアセットの用意（6）。lookup を使わない | Aurora の自動の一時停止を持つ版が選べないなど、合成で分かる不足 | — |
+| イメージ | ランナーのイメージを作って自前の ECR へ push し、ダイジェストを合成の入力へ渡す（決定 87）。push は承認の前に起きるが、反映されなければどのタスクの定義からも引かれない。リポジトリのまだ無いイメージは、そのタスクの定義を持たない版を合成し、反映の後の次の `diff` で push する | Docker が無い・push できない | 当たらない（自前の ECR への push は設置のコマンドとパイプラインの中だけで行う） |
+| 合成 | 画面のビルド・Lambda の束ね・イメージのダイジェストをタスクの定義へ入れる（6）。lookup を使わない | Aurora の自動の一時停止を持つ版が選べないなど、合成で分かる不足 | — |
 | bootstrap | 既定の qualifier の版を読み、足りなければ求める版と今の版と打つコマンドを示して止まる（5）。コマンドは bootstrap を打たない | 版が足りない | 当たる。運用する環境では bootstrap を打つ・上げるのはリリース承認ゲートの後だけ。自分で設置する人は自分の AWS のアカウントで打つ |
 | 差分と確認の値 | スタックごとの足し・変え・消し、作る資源の名前、戻り先の URL、確認の値を出す | — | — |
-| 反映 | 保存した合成の結果だけを、確認の値が同じときだけ反映する（7・8）。イメージのアセットはこのときに作って ECR へ置く | 合成の結果が書き換わった・アカウントかリージョンが違う | 外で打つ反映は当たる。このコマンドと反映のパイプラインの中なら当たらない |
+| 反映 | 保存した合成の結果だけを、確認の値が同じときだけ反映する（7・8） | 合成の結果が書き換わった・アカウントかリージョンが違う | 外で打つ反映は当たる。このコマンドと反映のパイプラインの中なら当たらない |
 | 秘密の待ち | 器だけができる。値が入るまで、画面は「ログインの設定を待っています」、リポジトリの登録は App の作り方、通知先の Web Push は「設定の待ち」を示す | — | — |
 | 足りない設定の一覧 | `diff` の出力に、値の入っていない器と、無いと止まる機能（GitHub の App が無ければリポジトリを登録できない、Bedrock を使えないリージョンなら `managed` を切る、など）を並べる（F21） | — | — |
 | 初めの反映の後 | 運用する環境では、接続を有効にし、承認を拒む方針を AI の主体へ付けて確かめるまで push しない（[pipeline-approval.md](../operations/pipeline-approval.md)） | — | — |
@@ -378,7 +385,7 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 
 | 項目 | 中身 |
 | --- | --- |
-| ランナーのイメージの前提 | 合成の結果がイメージのアセットを含むため、`deploy` と反映のアクションに Docker が要り、反映のアクションがイメージを ECR へ置ける必要がある。設置の前提の表（setup.md）に Docker を載せる。反映のアクションの CodeBuild は特権（`privileged`）にして Docker を持たせ、その役割が引き受けられる bootstrap の役割を `deploy`・`file-publishing`・`image-publishing` の 3 つにする（`image-publishing` が無いとイメージを ECR へ置けない）。パイプラインのスタックは設置のコマンド（`--stack pipeline`）でだけ反映され、起点のブランチへの push では変わらない。そのため、特権と `image-publishing` を持つ版のパイプラインのスタックを先に反映し、その後でイメージのアセットを持つアプリのスタックを起点のブランチへ push する（逆の順では、反映のアクションが古い役割のままイメージを置けずに止まる） |
+| ランナーのイメージの前提 | イメージを作る場所（`diff` を打つ端末と、反映のパイプラインの準備のアクション）に Docker が要る。設置の前提の表（setup.md）に Docker を載せる。準備のアクションの CodeBuild は特権（`privileged`）にして Docker を持たせ、その役割に自前の ECR への push を許す。反映のアクションは変えない。パイプラインのスタックは設置のコマンド（`--stack pipeline`）でだけ反映され、起点のブランチへの push では変わらない。そのため、特権と push の権限を持つ版のパイプラインのスタックを先に反映し、その後でイメージを引くアプリのスタックを起点のブランチへ push する（逆の順では、準備のアクションがイメージを作れずに止まる） |
 | 足りない設定の一覧 | `diff` の出力の 1 欄。終了コードは持たない（足りない設定があっても反映はできる） |
 | 設定のファイルのキー | 予算・最大 ACU・推論の手段の可否・Web Push の公開鍵など。読む構成要素と同じ変更で足す |
 
@@ -467,7 +474,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | 性能 | 初めの表示がスマートフォンで速い（Value 1・3） | 画面の初めの表示（LCP）を、スマートフォンの 75 パーセンタイルで 2.5 秒以内にする（STD80）。2 回目からは Service Worker が控えた画面の殻と、暗号化した IndexedDB の端末の控えから、1 秒以内に最後の内容を出す（[画面の文書のオフライン](screens.md#オフライン)） | e2e で端末の幅と回線を絞って測る。控えからの表示を測る |
 | 性能 | 操作の応答が速い（Value 1） | 操作への画面の応答（INP）を 200 ミリ秒以内（STD80）。API の応答は温まった Lambda で 95 パーセンタイル 1 秒以内。一覧は区切って返す | e2e と API の負荷の試験で測る |
 | 性能 | 承認の後にレーンが早く続く（Value 1） | 猶予の間の答えは同じタスクで続ける。猶予の後はタスクの起動と Aurora の再開（約 15 秒、LIB80）を足した時間で続く | 答えから次の区間の開始までを測る |
-| 運用・保守 | 障害と費用を運用する人が知る（A7） | ログは CloudWatch Logs に 30 日。運用の知らせの資源を 1 つの SNS のトピック（`<prefix>-<environment>-ops`）にし、予算の知らせ・パイプラインの失敗・見回りが見つけた止まったレーンの数・差し替えの起こし直しの上限（I22）をここへ送る。宛先のメールは設定のファイルで受け、空なら購読を作らない（LIB84。時間の課金を持たない。[決定 9](decisions.md#決定の記録)）。トピックの資源と宛先のキーは #13 | 予算の知らせを低い額で試す |
+| 運用・保守 | 障害と費用を運用する人が知る（A7） | ログは CloudWatch Logs に 30 日。運用の知らせの資源を 1 つの SNS のトピック（`<prefix>-<environment>-ops`）にし、予算の知らせ・パイプラインの失敗・見回りが見つけた止まったレーンの数・差し替えの呼び直しの上限（I22）をここへ送る。宛先のメールは設定のファイルで受け、空なら購読を作らない（LIB84。時間の課金を持たない。[決定 9](decisions.md#決定の記録)）。トピックの資源と宛先のキーは #13 | 予算の知らせを低い額で試す |
 | 運用・保守性 | 子の課題の担当が、全体の設計だけを読んで新たに決めずに詳細設計へ進める（#24） | 「詳細設計が持つ」の行き先を、受け持つ子の課題か [詳細設計](detail.md) の節に限る。受け持つ子の表を [詳細設計の受け持つ子の課題](detail.md#受け持つ子の課題) に置く | `grep -n '詳細設計' docs/design/*.md` の当たりが子の課題の番号か詳細設計の節を指す |
 | 移行 | 形を変えても読めなくならない | 項目ごとの形の版と 2 段の反映（[形の版と移し方](data.md#形の版と移し方)） | 1 つ前の版の項目を読む単体テスト |
 | 移行 | 2 段目の反映を戻せる | 書き手だけを前の版へ戻す反映を出し、1 段目は次の版の項目が 0 件のときだけ戻す（[形の版と移し方](data.md#形の版と移し方)）。読み手と表の移しは #2、切り戻しの手順を設置の手順に書くのは #14 | 切り戻しの予行（#14） |
@@ -502,7 +509,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | LIB80 | Aurora Serverless v2 の自動の一時停止（PostgreSQL） | PostgreSQL 16.3・15.7・14.12・13.15 以上 | AWS のサービス | — | 無し | 満たす。最小 0 ACU で、利用者の接続が無い状態が既定 300 秒（300〜86,400 秒）続くと止まり、止まる間の計算の費用は 0。再開は通常 約 15 秒、24 時間を超えた後は 30 秒以上。利用者の接続が 1 本でも開いていると止まらない。RDS Proxy を付けると止まらない。保守で起き、起きた後 20 分以上は止まらない | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html （2026-11-17） |
 | LIB81 | DynamoDB（要求の数の課金・TTL・条件式・ストリーム） | — | AWS のサービス | — | 無し | 満たす。要求の数の課金は使った分だけ。TTL は期限の後に数日のうちに書き込みの量を使わずに消す。条件式は鍵で指した 1 行を照らして外れたら書かない。ストリームを Lambda が 1 秒に 4 回読み、失敗は記録が切れるまでやり直す（1 つのストリームに 2 つの関数まで）。`TransactWriteItems` は 100 件までの書き込みを表をまたいで 1 つにまとめ、書かない行の条件は `ConditionCheck` で照らす。1 つのトランザクションで同じ行を 2 回指せない | https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/capacity-mode.html ・ 同 TTL.html ・ 同 Expressions.ConditionExpressions.html ・ 同 Streams.Lambda.html ・ https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html （2026-11-17・2026-11-18） |
-| LIB82 | ECS Fargate のタスク（ネットワーク・`RunTask`・`StopTask`・`DescribeTasks`・`ListTasks`・タスクのメタデータの端点） | プラットフォームの版 1.4.0 | AWS のサービス | — | 無し | 満たす。イメージを取るには外への道筋が要り、公開のサブネットで公開 IP を付けるか、NAT か、ECR の Interface 型のエンドポイント。1.4.0 からは ECR・ログ・秘密の取得もタスクのネットワークを通る。`StopTask` は SIGTERM を送り、既定 30 秒の後に SIGKILL で止める。`DescribeTasks` はタスクの `lastStatus` を返す。`RunTask` の `startedBy` に付けた値で `ListTasks` を絞れるが、ほかの絞り（`desiredStatus` を含む）と併せられず、`desiredStatus` の既定は `RUNNING` のため止まりかけ・止まったタスクは返らない。`clientToken` は起動の要求の冪等の鍵（64 字まで）。ECS の API は結果整合で、起動の直後は一覧に出ないことがある。タスクはメタデータの端点（`ECS_CONTAINER_METADATA_URI_V4` の `/task`）から自分の `TaskARN` を読める | https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-task-networking.html （2026-11-17）・ https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_StopTask.html ・ 同 API_DescribeTasks.html ・ 同 API_RunTask.html ・ 同 API_ListTasks.html ・ https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-metadata-endpoint-v4-fargate.html （2026-11-18） |
+| LIB82 | ECS Fargate のタスク（ネットワーク・`RunTask`） | プラットフォームの版 1.4.0 | AWS のサービス | — | 無し | 満たす。イメージを取るには外への道筋が要り、公開のサブネットで公開 IP を付けるか、NAT か、ECR の Interface 型のエンドポイント。1.4.0 からは ECR・ログ・秘密の取得もタスクのネットワークを通る。`clientToken` は起動の要求の冪等の鍵（64 字まで） | https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-task-networking.html （2026-11-17）・ https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RunTask.html （2026-11-18） |
 | LIB83 | CloudFront の OAC | — | AWS のサービス | — | 無し | 満たす。OAI より OAC を推す（全リージョンの S3・SSE-KMS）。従量の課金は、毎月 1 TB の転送と 1,000 万回の HTTP(S) の要求までが常に無料で、超えた分は米国・メキシコ・カナダで HTTPS の要求 1 万回 0.0100 ドル・転送 1 GB 0.085 ドル（次の 9 TB まで）。定額のプランは配信ごとの月額で、超えた分の課金を持たない。Free（0 ドル）の目安の量は月 100 万回・100 GB で、目安は固い上限ではなく、50%・80%・100% でメールが届き、初めて 3 倍までを超えた月は影響しない。何か月も大きく超え続けると、遠い拠点から配るなど配信が調整されることがあり、上の段（Pro は月 15 ドル・1,000 万回・50 TB）へ上げると戻る。AWS の無料の利用枠を使うアカウントは定額のプランに入れない | https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html ・ https://aws.amazon.com/cloudfront/pricing/ （2026-11-17）・ https://aws.amazon.com/cloudfront/pricing/pay-as-you-go/ ・ https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/flat-rate-pricing-plan.html （2026-11-21） |
 | LIB84 | AWS Budgets と Amazon SNS（運用の知らせ） | — | AWS のサービス | — | 無し | 満たす。予算の監視と知らせは無料。動作つきの予算は 2 つまで無料。SNS は時間の課金を持たず、月 100 万回の要求とメールの 1,000 通までは無料の枠 | https://aws.amazon.com/aws-cost-management/aws-budgets/pricing/ （2026-11-17）・ https://aws.amazon.com/sns/pricing/ （2026-11-18） |
 | LIB85 | ECR のライフサイクルの規則 | — | AWS のサービス | — | 無し | 満たす。押した数（`imageCountMoreThan`）か日数で古いイメージを 24 時間のうちに消す | https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html （2026-11-17） |
@@ -511,6 +518,9 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | LIB88 | `preact` | 11.2.0 | MIT | 2026-11-06 | 無し | 満たす。React と書き方が近く小さい。React の周りの部品は互換の層 `preact/compat` を通して使う。互換の層は React との 100% の互換を目指す薄い層で、Preact は React の再実装ではなく、合成のイベントを持たないなどの違いが残る。最小の画面を束ねると 11,481 バイト、gzip で 4.95 kB（[束の大きさの測り方](#束の大きさの測り方)） | https://registry.npmjs.org/preact （2026-11-18）・ https://preactjs.com/guide/v10/differences-to-react ・ https://preactjs.com/guide/v10/switching-to-preact （2026-11-21） |
 | LIB89 | `lit` | 3.3.3 | BSD-3-Clause | 2026-05-14 | 無し | 満たす。Web Components の上で JSX を使わずに書ける。宣言の書き方の多くがデコレーターに寄る。2026 年 10 月の npm の取得数は約 3,200 万回で、React の 4% ほど | https://registry.npmjs.org/lit （2026-11-18） |
 | LIB90 | `@vitejs/plugin-react` | 6.3.0 | MIT | 2026-11-09 | 無し | 満たす。Vite で TSX を変換し、開発のサーバーで部品を差し替える。開発の依存だけ | https://registry.npmjs.org/@vitejs/plugin-react （2026-11-21） |
+| LIB91 | RDS Data API（Aurora PostgreSQL） | Aurora PostgreSQL 16.1 以上（13.11・14.8・15.3・17.4・18.3 以上も） | AWS のサービス | — | 無し | 条件つきで満たす。Aurora PostgreSQL の Serverless と provisioned のクラスタで使え、米国西部（オレゴン）を含む各リージョンに版の下限つきで載る。HTTPS の端点で SQL を打ち、Lambda を VPC に入れずに届く。一時停止した書き手へ Data API の要求が来ると、Aurora が書き手を再開してから処理する。再開の間の要求は `DatabaseResumingException` で断られ、数秒待って打ち直すよう示される。呼び出しは同期で、45 秒で終わらなければ取り消して時間切れを返す（`continueAfterTimeout` の既定は偽。真にすると文は止まらずに続く）。SDK の時間切れは 45 秒より長く（1 分以上を推す）する。トランザクションは、その ID を使う呼び出しが 3 分無いと時間切れになり自動で巻き戻り、最長 1 時間で巻き戻る。`transactionId` の無い文は自動で確定する。応答は 1 MiB まで。Aurora PostgreSQL 14 以上ではパスワードの暗号化に `scram-sha-256` だけを受ける。Data API は接続の池を持って呼び出しの間で使い回し、使い回す前に PostgreSQL では `DISCARD ALL` を打つ。池の接続が一時停止を妨げるかは書かれていない（一時停止は利用者の接続が開いている間は起きず、Data API の要求が頻繁だと止まらない、とだけある） | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.Aurora_Fea_Regions_DB-eng.Feature.Data_API.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.limitations.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.session-management.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api-timeouts.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.calling.cli.html ・ https://docs.aws.amazon.com/rdsdataservice/latest/APIReference/API_ExecuteStatement.html ・ https://docs.aws.amazon.com/rdsdataservice/latest/APIReference/API_BeginTransaction.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html （2026-11-21） |
+| LIB92 | Lambda の非同期の呼び出し（待ち行列・再試行・最大の年齢） | — | AWS のサービス | — | 無し | 満たす。既定では関数が誤りを返すと 2 回まで再試行し、待ち行列に最大 6 時間置く。スロットリングとシステムの誤りでは、既定で 6 時間まで待ち行列へ戻して打ち直す。`MaximumRetryAttempts`（0〜2）と `MaximumEventAgeInSeconds`（60〜21,600 秒）で狭められる。待ち行列は結果整合で、同じ呼び出しを関数へ 2 回以上届けうるため、関数は重複を扱う必要がある | https://docs.aws.amazon.com/lambda/latest/dg/invocation-async-error-handling.html ・ https://docs.aws.amazon.com/lambda/latest/api/API_PutFunctionEventInvokeConfig.html （2026-11-21） |
+| LIB93 | Secrets Manager の版とラベル（`CreateSecret`・`PutSecretValue`・`UpdateSecretVersionStage`） | — | AWS のサービス | — | 無し | 満たす。値を持つ `CreateSecret` は最初の版を作り `AWSCURRENT` を付ける。`PutSecretValue` は `VersionStages` を渡さないと `AWSCURRENT` を新しい版へ移し、渡せばそのラベルだけを付ける（別の版に付いていたラベルは外れる）。`ClientRequestToken` が版の ID になり、同じ ID と同じ値の送り直しは何もしない（値が違えば失敗）。`UpdateSecretVersionStage` は `MoveToVersionId` と `RemoveFromVersionId` でラベルを移し、`AWSCURRENT` を移すと `AWSPREVIOUS` が自動で移る。ラベルを失った版は片付けの対象になるが、作って 24 時間の版は残る。Secrets Manager は結果整合で、ラベルを移した直後の `GetSecretValue` と `DescribeSecret` は前の版を返しうる（版の ID を指した読みはラベルの付き外しに依らない） | https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_CreateSecret.html ・ https://docs.aws.amazon.com/secretsmanager/latest/userguide/troubleshoot.html ・ https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_PutSecretValue.html ・ https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecretVersionStage.html （2026-11-21） |
 
 ### 束の大きさの測り方
 
@@ -540,7 +550,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | `ALTER ROLE … PASSWORD` を advisory lock と同じトランザクションの中で打てること | 試していない | PostgreSQL の `ALTER ROLE` の頁を取得していない。[未確認のまま残ること](#未確認のまま残ること)へ移した |
 | AWS のクォータ（Lambda の同時実行・Fargate の vCPU）の既定の値 | 試していない | 値はアカウントとリージョンで違い、設置する人が Service Quotas で読む |
 
-調べた量: 候補 9 件・取得の試み 24 回（2026-11-17）。#32 で候補 8 件・取得の試み 13 回を足し、同じサービスの行（LIB81・LIB82・LIB84）は 1 行に畳んだ（2026-11-18）。CloudFront の料金の頁 2 つの取得と、束の大きさの測りを 2 回足した（2026-11-21）。
+調べた量: 候補 9 件・取得の試み 24 回（2026-11-17）。#32 で候補 8 件・取得の試み 13 回を足し、同じサービスの行（LIB81・LIB82・LIB84）は 1 行に畳んだ（2026-11-18）。CloudFront の料金の頁 2 つの取得と、束の大きさの測りを 2 回足した（2026-11-21）。#13 の DB の用意の Data API の関数への移しで、候補 3 件（LIB91〜LIB93）・取得の試み 13 回（LIB91 の頁 8・LIB92 の頁 2・LIB93 の頁 3）を足した（2026-11-21）。決定 83・95・96 の Data API・非同期の呼び出し・秘密の器の版の事実は、この 3 行を出典にする。
 
 ## 決定の記録
 
@@ -580,16 +590,16 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 根拠: Value 4・Value 8・P2（MVV 版 1）
 
-### 決定 83: 使わない間の費用を止めつつ NDF の進行表を動かすため、進行表の DB を Aurora Serverless v2 の 0 ACU にし、触れるのを ECS のタスクだけにする
+### 決定 83: 使わない間の費用を止めつつ NDF の進行表を動かすため、進行表の DB を Aurora Serverless v2 の 0 ACU にし、接続するのをランナーのタスクだけ、DB の用意を Data API だけにする
 
-結論: 1 つのクラスタ・書き手 1 台・最小 0 ACU を出口の無いサブネットに置く。接続はホステッドのランナーと DB の用意のタスクだけで、RDS Proxy と Data API を使わない。Lambda は VPC の外に置き、DB に接続しない。
+結論: 1 つのクラスタ・書き手 1 台・最小 0 ACU を出口の無いサブネットに置く。接続するのはホステッドのランナーだけで、RDS Proxy を使わない。DB の用意の関数だけが Data API で触れ、クラスタは Data API を有効にする。Lambda は VPC の外に置き、DB に接続しない。
 
-理由: 利用者の接続が 0 本なら一時停止し、計算の費用が 0 になる（LIB80）。承認の待ちでタスクを止めると接続も 0 本になり、待ちの時間が費用にならない。Proxy は接続を開き続けて一時停止を妨げる（LIB80）。サービスが NDF の表を読まないと、NDF の形が変わっても API が壊れない。
+理由: 利用者の接続が 0 本なら一時停止し、計算の費用が 0 になる（LIB80）。承認の待ちでタスクを止めると接続も 0 本になり、待ちの時間が費用にならない。Proxy は接続を開き続けて一時停止を妨げる（LIB80）。Data API は文ごとの要求で、接続を残さない（反映した環境で確かめる。[未確認のまま残ること](#未確認のまま残ること)）。DB の用意の関数は VPC に入らずに用意と差し替えの SQL を打てるため、NAT も Interface 型のエンドポイントも要らない。Data API の要求の課金は、用意 1 回あたり数十の文で、使い方の見込みでは月 1 セントに満たない。サービスが NDF の表を読まないと、NDF の形が変わっても API が壊れない。
 
-採らなかった案: 読み手を足す形は、使わない間も止まらない読み手の費用か再開の待ちが増え、1 チームの規模で要らない。Lambda を VPC に入れて DB を読む形は、NAT か Interface 型のエンドポイントの時間の費用が要る。
+採らなかった案: 読み手を足す形は、使わない間も止まらない読み手の費用か再開の待ちが増え、1 チームの規模で要らない。Lambda を VPC に入れて DB を読む形は、NAT か Interface 型のエンドポイントの時間の費用が要る。DB の用意を ECS のタスクで動かす形は、タスク・イメージ・引き換えの token・タスクの停止を確かめる手順と、それを支える見回りの分かれが要り、動く部品が多い。Data API なら VPC の外から同じ SQL を打てる。API の関数の中で同期に打つ形は、再開の待ちが最大 30 秒以上かかり、スプリントの開始の応答を待たせる。Secrets Manager の公式のローテーションの Lambda は、VPC に入れて NAT か Interface 型のエンドポイントが要り、予定の差し替えで I17 の番号の照らしを持たない。
 
 - 作り方: ライブラリやサービスを使う
-- 比べた候補: LIB80
+- 比べた候補: LIB80 / LIB91
 
 根拠: Value 6（MVV 版 1）
 
@@ -629,13 +639,13 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 根拠: Value 6 / Value 7（MVV 版 1）
 
-### 決定 87: 人が承認したものだけを反映するため、ランナーのイメージを CDK のアセットとして合成の結果に含め、確認の値で縛る
+### 決定 87: 人が承認したものだけを反映するため、イメージを自前の ECR へ push し、テンプレートからダイジェストで引いて確認の値で縛る
 
-結論: ランナーと DB の用意のイメージは、Dockerfile とその入力を CDK のアセットにし、合成の結果の要約値（確認の値）に含める。ベースのイメージは要約値で固定し、NDF は `ndf-pin.json` の固定の値で取る。イメージは反映のときに作って自前の ECR へ置く。CPU の種類は x86_64 にする。
+結論: ランナーのイメージは、設置のコマンド（`diff` の前）と反映のパイプライン（準備のアクション）が、イメージを作って `app` のスタックの nd-factory 専用の ECR へ push し、得たダイジェストを合成の入力へ渡す。タスクの定義はイメージをダイジェスト（`<リポジトリ>@sha256:…`）で引く。イメージの中身が変わればダイジェストが変わり、テンプレートと合成の結果の要約値（確認の値）が変わる。ベースのイメージはダイジェストで固定し、NDF は `ndf-pin.json` の固定の値で取る。古い版はリポジトリのライフサイクルの規則で消し、push の新しい版を戻せる数より多めに残す（残す数の既定は #13 が決める）。残す数より古い版へ戻すときは、その版のコミットからイメージを作り直して push し直す。CPU の種類は x86_64 にする。
 
-理由: Value 8 は差分を見て承認した範囲だけを反映することを求める。イメージの入力が合成の結果に入ると、承認した要約値と違う中身は反映されない。x86_64 にすると、反映のアクション（x86 の CodeBuild）と多くの設置する人の端末で、まねをせずにイメージを作れる。ARM との差は 5 人のチームの見込みで月 1 ドルに満たない（[見込み](#見込み)）。
+理由: Value 8 は差分を見て承認した範囲だけを反映することを求める。ダイジェストは中身の要約値で、テンプレートが引く値が変われば確認の値も変わるため、承認した確認の値と違う中身は反映されない。push は承認の前に起きるが、反映されなければどのタスクの定義からも引かれない。Value 6 は保管の費用を抑えることを求め、自前のリポジトリならライフサイクルの規則（LIB85）で古い版を確実に消せる。x86_64 にすると、反映のパイプライン（x86 の CodeBuild）と多くの設置する人の端末で、まねをせずにイメージを作れる。ARM との差は 5 人のチームの見込みで月 1 ドルに満たない（[見込み](#見込み)）。
 
-採らなかった案: 公開のレジストリのイメージをタグで引く形は、タグの指す中身が承認の後に変わりうり、外部のレジストリへの依存が増える。ARM64 にする形は、x86 の環境でのまねのビルドが遅く、設置の手順が増える。
+採らなかった案: イメージを CDK のアセットにする形（この決定の直す前の結論）。アセットのイメージは bootstrap のアセットのリポジトリにしか置けず（bootstrap の `image-publishing` の役割の書き込み先がそのリポジトリだけ）、bootstrap の規則はタグの付くアセットを消さない。自前の ECR へ写しても bootstrap の側に古い版が残る。古い版を CDK の CLI のアセットの片付け（`cdk gc`）で消す形も比べたが、片付けが設置する人の手の操作に依り、その機能は安定でない（`--unstable` を付けたときだけ動く）。bootstrap はほかのアプリと共有されうるため、その片付けはほかのアプリのアセットにも及ぶ。公開のレジストリのイメージをタグで引く形は、タグの指す中身が承認の後に変わりうり、外部のレジストリへの依存が増える。ARM64 にする形は、x86 の環境でのまねのビルドが遅く、設置の手順が増える。
 
 根拠: Value 8 / Value 6（MVV 版 1）
 
@@ -662,13 +672,27 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 根拠: Value 8（MVV 版 1）
 
-### 決定 90: 秘密を受け取れる主体を絞るため、秘密の器を用途ごとに分け、API の関数だけが自分の環境の頭の器を読む
+### 決定 90: 秘密を受け取れる主体を絞るため、秘密の器を用途ごとに分け、関数ごとに実行の時に使う器だけを名前で読めるようにする
 
-結論: 秘密の器は `<prefix>/<environment>/<用途>` にする。サービスの秘密（OAuth・App・Web Push・DB の管理）・プロジェクトごとの進行表の DB の URL・通知先ごとの宛先の値（Slack）を、別の器にする。読めるのは API の関数（`<prefix>/<environment>/` の頭だけ）で、タスクの役割は読めない。値はログ・応答・合成の出力に出さない。
+結論: 秘密の器は `<prefix>/<environment>/<用途>` にする。サービスの秘密（OAuth・App・Web Push・DB の管理）・プロジェクトごとの進行表の DB の URL・通知先ごとの宛先の値（Slack）を、別の器にする。読み手は関数ごとに器の名前（か名前の形）で許し、`<prefix>/<environment>/` の頭の全体や `*` を許す関数を置かない。
 
-理由: Value 7 は秘密を秘密の器から受けることを、I10・I11 は渡し先を絞ることを求める。器を分けると、割り当てを移したときの差し替え・通知先を外したときの削除が 1 つの器で閉じる。1 つ月 0.40 ドルで、3 プロジェクトと 1 つの通知先で月 1.60 ドルの増えに留まる（[見込み](#見込み)）。
+| 器 | 読める（`GetSecretValue`）主体 | ほかに許す操作 |
+| --- | --- | --- |
+| `progress-db-admin`（管理の役割） | DB の用意の関数だけ（Data API に渡す） | 無し。値は CDK が作る |
+| `progress-db/*`（プロジェクトの役割の URL） | API の関数（引き換えでランナーへ渡す、保留の下りた行に結んだ版。ラベルでは読まない）・DB の用意の関数（結んだ版） | API の関数: `CreateSecret`・`PutSecretValue`・`DescribeSecret`。DB の用意の関数: `DescribeSecret`・`UpdateSecretVersionStage`（[パスワードの版](data.md#パスワードの版)） |
+| `github-app`（App の私有鍵） | API の関数（導入の token を作る） | 無し |
+| `web-push`（Web Push の私有鍵） | 知らせの送り手の関数だけ（VAPID の署名。STD60） | 無し |
+| `notify/*`（Slack の宛先の URL） | 知らせの送り手の関数だけ（送る） | API の関数: `CreateSecret`・`PutSecretValue`・`DeleteSecret`（通知先の登録・外し）。読まない |
+| `google-oauth`・`github-oauth`（client secret） | どの関数も読まない。利用者プールの IdP へは CloudFormation が動的参照で渡す | 無し |
+| API の関数が実行の時に使うほかの器（レーンの JWT の署名の鍵・Webhook の署名の秘密・持ち込みのキー） | API の関数だけ | 器の名前と許しは、読み手を作る子の課題が同じ変更で足す（読み手の無い器を許さない） |
 
-採らなかった案: すべてを 1 つの器の JSON にまとめる形は、1 つの値を変えるたびに全体を書き換え、プロジェクトの間の値を同じ器で持つ。表に暗号化して置く形は、鍵の管理（KMS の鍵）の費用と部品が増える。
+見回りの関数・表の移しの関数・タスクの役割は、どの器も読めない。見回りの GitHub の token の失効のやり直しは、失効を呼ぶモジュールの操作が器を読まずに済むかを #33 が決める（[GitHub の token の失効](data.md#github-の-token-の失効)）。読む器が要るなら、#33 がその器の名前を見回りの許しに足し、この表へ行を足す。`github-oauth` も、GitHub のログインを利用者プールの IdP として直に受けられないとき（[未確認のまま残ること](#未確認のまま残ること)）は、ログインを足す変更が読み手の関数と許しを同じ形で足す。
+
+値はログ・合成の出力・CI の記録に出さない。応答に載せるのは、`/v1/runner/exchanges/create` の引き換え（[API と MCP](api.md#ランナー手元のマシンの-http-の経路)・[実行](execution.md)）で、認可したホステッドのランナー（そのレーンの引き換えの token を出した 1 つのタスク）へ、そのレーンのプロジェクトの進行表の DB の URL（`progress-db/*` の、プロジェクトの行を強い整合で読んで差し替えの保留が無いことを照らした同じ読みの行に結んだ版。その版の ID（`progress_db_secret_version`）を `GetSecretValue` の `VersionId` に渡して読み、`AWSCURRENT` のラベルでは読まない。ラベルの読みは結果整合で、保留を下ろした直後に前の版を返しうるため。I10・[パスワードの版](data.md#パスワードの版)）と、`byok` ならそのチームの持ち込みのキーを返すときだけにする。ほかのプロジェクトの URL・ほかの器の値・手元のマシンへの DB の URL は、どの応答にも載せない。画面と API と MCP の応答は秘密の値を返さない（持ち込みのキーと通知先の宛先も、受け取った後は値を返さない）。
+
+理由: Value 7 は秘密を秘密の器から受けることを、I10・I11 は渡し先を絞ることを求める。関数の役割に頭の全体を許すと、その関数が使わない器（管理の役割・client secret・通知先）まで受け取れる主体が増える。API の関数は外から届く要求を受ける面で、受け取れる秘密が最も広く漏れうるため、特に管理の役割の器を外す。管理の役割の器を読めなければ、API の関数は Data API に渡す秘密を持たず、決定 83 の「Data API を呼べるのは DB の用意の関数だけ」が、`rds-data:*` を DB の用意の関数の役割だけに許すことと重なって IAM の上でも成り立つ（関数の役割を足す子の課題のスタックのテストが、その役割に `rds-data:*` と管理の役割の器の読みが無いことを照らす）。Web Push の私有鍵と Slack の宛先を使うのは送ることだけで、送るのは知らせの送り手だけのため（決定 88）、送り手だけが読み、API は宛先を書くだけにする。名前で許すと、新しい器は読み手を足す変更で許しも足すため、許しが使い道と離れて広がらない。DB の用意の関数に許す操作は #13 の詳細設計の `DbPrepFunction` にある。器を分けると、割り当てを移したときの差し替え・通知先を外したときの削除が 1 つの器で閉じる。1 つ月 0.40 ドルで、3 プロジェクトと 1 つの通知先で月 1.60 ドルの増えに留まる（[見込み](#見込み)）。
+
+採らなかった案: すべてを 1 つの器の JSON にまとめる形は、1 つの値を変えるたびに全体を書き換え、プロジェクトの間の値を同じ器で持つ。表に暗号化して置く形は、鍵の管理（KMS の鍵）の費用と部品が増える。API の関数に頭の全体を許し、管理の役割の器だけを拒む形は、器を足すたびに既定で読めるようになり、外し忘れが漏れになる。知らせの送り手へ API が宛先の値を渡す形は、知らせの表かストリームに秘密の値が載る。
 
 根拠: Value 7 / Value 9（MVV 版 1）
 
@@ -715,29 +739,29 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 根拠: Value 1 / Value 3（MVV 版 1）
 
-### 決定 95: 古い差し替えが新しいパスワードを上書きしないため、差し替えの番号を API が上げ、DB の用意のタスクが DB の側の排他の鎖の下で番号を照らしてから書く
+### 決定 95: 古い差し替えが新しいパスワードを上書きしないため、差し替えの番号を API が上げ、DB の用意の関数が DB の側の排他の鎖の下で番号を照らしてから書く
 
-結論: 差し替えのたびに API がプロジェクトの差し替えの番号を 1 上げる。DB の用意のタスクは `pg_advisory_xact_lock` を取り、進行表の DB に記した番号より大きいときだけパスワードと番号を同じトランザクションで書く。記した番号が n 以下なら役割の古い接続を切り、残りが無いと読んでから完了を報告する（I17・[差し替え](data.md#割り当てを移すときの差し替え)）。
+結論: 差し替えのたびに API がプロジェクトの差し替えの番号を 1 上げる。DB の用意の関数は 1 つの Data API のトランザクションの中で `pg_advisory_xact_lock` を取り、進行表の DB に記した番号より大きいときだけパスワードと番号を同じトランザクションで書く。記した番号が n 以下なら役割の古い接続を切り、残りが無いと読んでから終わりを記す（I17・[差し替え](data.md#割り当てを移すときの差し替え)）。
 
-理由: 保留の間は移しの作成を 409 で止めるため（I20・決定 98）、番号の違う 2 つの差し替えのタスクが同時に動くことは起きない。I17 が守るのは、同じ番号 n のタスクを起こし直す場面（I22）である。番号 n を書いた後、完了の報告の前に落ちたタスクの後で、起こし直したタスクが同じ書き込みを繰り返しても何も変えず、記した番号 = n を返せば API は保留を下ろせる。番号の照らしが完了の報告にだけ掛かると、この場面で起こし直しが書き終えたかを DB から読めない。パスワードを書いた後、古い接続を切る前に落ちると古いパスワードでの接続が残るため、記した番号 = n のときも古い接続を切ってから報告する。止めの守りが外れた場面（`STOPPED` の読み違い・同じタスクの 2 回の起動）でも、番号の小さいタスクは何も変えない。
+理由: 保留の間は移しの作成を 409 で止めるため（I20・決定 98）、番号の違う 2 つの差し替えの呼び出しが同時に動くことは起きない。I17 が守るのは、同じ番号 n で関数を呼び直す場面（I22）である。番号 n を書いた後、終わりの記録の前に落ちた呼び出しの後で、呼び直した関数が同じ書き込みを繰り返しても何も変えず、記した番号 = n を返せば API は保留を下ろせる。番号の照らしが終わりの記録にだけ掛かると、この場面で呼び直しが書き終えたかを DB から読めない。パスワードを書いた後、古い接続を切る前に落ちると古いパスワードでの接続が残るため、記した番号 = n のときも古い接続を切ってから記す。時間切れの守り（決定 96）が外れて呼び出しが重なった場面でも、番号の小さい呼び出しは何も変えない。
 
-採らなかった案: サービスの表の条件つきの書き込みだけで排他する形は、タスクが DB へ書く時点を縛れない（LIB81 は DynamoDB の中だけを照らす）。
+採らなかった案: サービスの表の条件つきの書き込みだけで排他する形は、関数が DB へ書く時点を縛れない（LIB81 は DynamoDB の中だけを照らす）。
 
 - 作り方: 標準に倣う・自前で作る
-- 比べた候補: STD83 / LIB81
+- 比べた候補: STD83 / LIB81 / LIB91 / LIB93
 
 根拠: Value 9（MVV 版 1）
 
-### 決定 96: 2 つのタスクが同じデータベースと役割を変えないため、作成の時間切れでは前のタスクを止めて停止を読んでから「無い」へ戻す
+### 決定 96: 2 つの呼び出しが同じデータベースと役割を変えないため、作成の時間切れを DB の用意の関数の時間切れより長くし、用意の ID の条件つきの書き込みで「無い」へ戻す
 
-結論: 用意のタスクは引き換えの要求に自分のタスクの ID を添え、API は管理の接続を返す前にその ID を確かめてプロジェクトの行へ記す。作成の時間切れでは、見回りが記したタスクを `StopTask` で止め、`DescribeTasks` で `STOPPED` を読んでから、用意の ID が同じことを条件に `無い` へ戻す。ID が空のままなら、ID が空であることを条件に用意の ID を外して戻す（I18）。`RunTask` の `clientToken` にも用意の ID を付ける。
+結論: DB の用意の関数の時間切れは 5 分、作成の時間切れと差し替えの期限は 15 分にする。非同期の呼び出しの自動の再試行は 0 回にし、待ち行列に残る呼び出しの最大の年齢は 60 秒（`MaximumEventAgeInSeconds` の最小）にする。関数は SQL を打つ前に、用意の ID が今の値であることをプロジェクトのモジュールの操作で読み、違えば何もせずに終える。やり直しは見回りだけが行う。作成の時間切れを過ぎても `有る` にならなければ、見回りが用意の ID が同じことを条件に `無い` へ戻し、用意の ID を外す（I18）。外した用意の ID の終わりは書かれない（条件が外れる）。次の開始で同じ名前で作り直す。差し替えの期限を過ぎたときは、用意の ID を新しい値へ替える条件つきの書き込みの後に、同じ番号 n で関数を呼び直す（I22）。
 
-理由: 時間切れの後に「無い」へ戻すと、次の開始が新しいタスクを起こし、前のタスクが動いたままなら同じデータベースと役割を 2 つのタスクが変える。`StopTask` は SIGTERM の後 既定 30 秒で SIGKILL を送り、`DescribeTasks` の `lastStatus` で止まったことを読める（LIB82）。`RunTask` がタスクの ID を返さないか、API がタスクの ID を記す前に落ちると止める先が無いため、管理の接続を得たタスクは必ず ID が記されているようにする。外した用意の ID の引き換えは受けないため、後から前の用意の ID のタスクが動いても DB へ着けない。
+理由: 時間切れの後に「無い」へ戻すと、次の開始が新しい呼び出しを起こし、前の呼び出しが動いたままなら同じデータベースと役割を 2 つの呼び出しが変える。作成の時間切れは、前の呼び出しが DB へ働きうる最も遅い時刻より長いため、見回りが期限を過ぎた行を見つけた時点で、前の用意の ID の呼び出しは待ち行列から捨てられたか、Lambda の時間切れの上限で終わり、DB にも文とトランザクションを残していない。Lambda の時間切れは関数を止めるだけで、その時点で Data API へ送っていた文は Aurora の側で続きうるが、Data API は 45 秒で終わらない呼び出しの文を取り消し（関数は `continueAfterTimeout` を偽のまま渡す）、開いたままのトランザクションは、その ID の呼び出しが 3 分無いと巻き戻して排他の鎖を外す（LIB91）。最も遅い時刻は、待ち行列の 60 秒＋関数の 5 分＋3 分（文の 45 秒より長い）で 9 分になり、期限の 15 分まで 6 分の余裕がある。この上限は値を #13 の形の正本の 1 つの定数に置いて単体テストで照らし、時間切れの後に鎖が 3 分のうちに外れることを反映した環境で確かめる（[未確認のまま残ること](#未確認のまま残ること)）。スロットリングなどで待ち行列に残った呼び出しは、既定では 6 時間まで後から動きうるため、最大の年齢を短くし、さらに関数が SQL の前に用意の ID を読み直す。止めたことを読む手順を持たずに、前の呼び出しが動いていないと言える。終わりの記録は用意の ID と差し替えの番号が今の値と合うときだけ書くため、前の用意の ID の呼び出しは保留を下ろさず、状態を `有る` にしない。
 
-採らなかった案: 時間切れの後に一定の時間を待つ形は、止まったことを確かめない。`ListTasks` を `startedBy` で絞ってタスクを探す形は、ほかの絞りと併せられず、既定の `desiredStatus` が `RUNNING` のため止まりかけのタスクを返さず、結果整合で起動の直後に出ないこともある（LIB82）。見つからないことを「タスクが無い」の根拠にできないため、片付けにだけ使う。
+採らなかった案: DB の用意を ECS のタスクで動かし、見回りがタスクを `StopTask` で止めて `DescribeTasks` で `STOPPED` を読んでから戻す形は、タスクの ID を記す手順・引き換えでの照らし・ID が空の間の分かれが要る。関数の時間切れと Data API の時間切れの上限で前の呼び出しの終わりを言えるため、これらは要らない。
 
 - 作り方: ライブラリやサービスを使う
-- 比べた候補: LIB82
+- 比べた候補: LIB91 / LIB92
 
 根拠: Value 9（MVV 版 1）
 
@@ -820,17 +844,21 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 | 項目 | 内容 | いつ・何で分かるか |
 | --- | --- | --- |
-| Aurora の一時停止と再開 | タスクの無い間に接続が 0 本になって一時停止に入ること・再開の待ちがタスクの起動に収まること・保守で起きる回数 | 反映した環境で数日の実測（`ServerlessDatabaseCapacity` の 0 の時間） |
-| カタログの分け方 | Aurora の管理の役割でカタログと統計の読み取りを外せること・A の役割から B と `postgres`・`template1` へ接続できないこと | 反映した環境で実測 |
-| DBOS と Aurora の版 | NDF の固定の版の DBOS が、一時停止を持つ PostgreSQL の版で進行表を作れること・長い待ちの後も接続が保たれること | 固定の版の NDF で実測 |
-| ACU の平均 | 見込みは起きている間の平均を 1 ACU と置いた | 実測と、反映した後の請求 |
+| Aurora の一時停止（接続なし） | タスクの無い間に接続が 0 本のまま一時停止に入り続けること・保守で起きる回数 | 反映した環境で数日の観測（`ServerlessDatabaseCapacity` の 0 の時間）。DB へ接続しない（#13） |
+| Aurora の再開（接続あり） | 再開の待ちがランナーのタスクの起動に収まること | ランナーのタスクが接続する実測（#44。引き換えの経路は #6） |
+| Data API で打つ用意と差し替え | Data API で用意の手順と差し替えの文（`CREATE DATABASE`・`REVOKE`・`pg_terminate_backend`・`pg_advisory_xact_lock`）が打てること・Data API が接続を残さず一時停止を妨げないこと・再開の間の `DatabaseResumingException` を関数が再試行で待てること（決定 83）・`DatabaseResumingException` を返した要求の文が DB で打たれていないこと（関数は `transactionId` の無い文をこの例外で打ち直す。AWS の文書は要求が取り消されたことだけを言い、文が届いていないことまでは書いていない。外れていれば `CREATE DATABASE` の打ち直しが「既にある」で落ち、その回が `sql_failed` になる） | 反映した環境の Aurora へ Data API で打つ実測（#44）。後者は一時停止させた書き手へ、打たれたかを後で読める文（目印の表への `INSERT`）を `transactionId` なしで打ち、`DatabaseResumingException` が返った要求の行が残らないことを読む |
+| カタログの分け方 | Aurora の管理の役割でカタログと統計の読み取りを外せること・A の役割から B と `postgres`・`template1` へ接続できないこと | 反映した環境で接続する実測（#44） |
+| DBOS と Aurora の版 | NDF の固定の版の DBOS が、一時停止を持つ PostgreSQL の版で進行表を作れること・長い待ちの後も接続が保たれること | 固定の版の NDF で接続する実測（#44） |
+| ACU の平均 | 見込みは起きている間の平均を 1 ACU と置いた | 接続する実測（#44）と、反映した後の請求 |
 | 1 か月の費用 | [見込み](#見込み) の額 | 反映した後の請求（タグ `app-prefix`・`app-env` で分けて読む） |
 | ルートのファイルシステムを読むだけにできるか（ECS.5） | NDF の作業場所の書き込みをボリュームへ寄せられるか | ランナーのイメージで確かめる |
 | GitHub の IdP | GitHub のログインを Cognito の IdP として直に受けられるか（外部の調査で試していない） | GitHub と Cognito の文書で確かめる |
 | `us-west-2` などの単価 | 見込みは `us-east-1` の単価で出した | 設置する人がリージョンの単価の頁で読む |
-| `ALTER ROLE` と advisory lock の同じトランザクション | パスワードの変更と差し替えの番号の書き込みを 1 つのトランザクションで確定できること（決定 95） | 反映した環境の Aurora で実測（#13 の用意の手順の試験） |
-| `StopTask` から `STOPPED` までの時間 | 見回りの 1 回の起動の中で停止を読めるか。読めなければ次の見回りで読む（決定 96） | 反映した環境で測る（#13） |
-| `ListTasks` に起動したタスクが出るまでの時間 | 片付けで拾い漏らす割合。止めの正しさには効かない（決定 96） | 反映した環境で測る（#13） |
+| パスワードを含む文の DB の側のログ | スタックがクラスタのパラメータで置く `log_parameter_max_length`・`log_parameter_max_length_on_error` の 0 が、Data API の接続の `current_setting` で 0 と読めること（`log_parameter_max_length` は SUSET で、Aurora の管理の役割（superuser でない）はセッションで変えられないため、関数は置かずに読んで照らす。0 でなければ、また pgAudit が引数の値か役割の文を書く設定なら、関数は検証子を送らずに止まり、用意と差し替えが通らない）。役割のパスワードの文が成功したときと失敗したときの両方で、`log_statement` を `all` にしても Aurora の PostgreSQL のログに平文も検証子も残らないこと（関数は平文を文にも引数にも載せず、検証子を文の本文に載せない。#13 の設計の決定 17） | 作り物のパスワードで文を成功させ、また失敗させ、ログのファイルを読む実測（#44） |
+| 時間切れの後の DB への働き | 関数が Data API のトランザクションの中で排他の鎖を持ったまま時間切れになった後、3 分のうちにトランザクションが巻き戻って鎖が外れること・送っていた文が 45 秒のうちに取り消されること（決定 96） | 予行の環境で関数の時間切れを短くして鎖を持たせ、`pg_locks` を読む実測（#44） |
+| プロジェクトの役割のパスワードの変更の禁止 | クラスタのパラメータ `rds.restrict_password_commands` = 1 の下で、プロジェクトの役割が自分の役割へ打つ `ALTER ROLE … PASSWORD` が拒まれ、管理の役割の差し替え（用意の手順の 6）が通ること（[データの用意の手順](data.md#用意の手順)・[Aurora のパスワードの管理](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Appendix.PostgreSQL.CommonDBATasks.RestrictPasswordMgmt.html)） | 反映した環境の Aurora へ両方の役割で接続する実測（#44） |
+| `ALTER ROLE` と advisory lock の同じトランザクション | パスワードの変更と差し替えの番号の書き込みを 1 つの Data API のトランザクションで確定できること（決定 95） | 反映した環境の Aurora へ接続する実測（#44） |
+| ECR のライフサイクルの規則の残し方 | push の新しい版を残す数だけ残し、それより古い版だけを消すこと | 反映した環境でライフサイクルの規則の試し（preview）を読む（#13） |
 | 画面の周りの部品の React 19 への対応 | 国際化・PWA・テストの部品のうち使うものが React 19 で動くこと（決定 140） | #12 で部品を選ぶときに、各部品の対応の版を読み、単体テストで確かめる |
 | React を入れた画面の LCP | 束の転送は計算で約 0.33 秒。解析と実行を含む LCP が 2.5 秒以内に収まること（決定 94・決定 140） | #12 の e2e で端末の幅と回線を絞って測る |
 | AWS のクォータの値 | Lambda の同時実行と Fargate の vCPU の既定の値は、アカウントとリージョンで違う | 設置する人が Service Quotas で読む（#14 の設置の予行） |

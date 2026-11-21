@@ -7,10 +7,17 @@
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "3.1170.0",
+    "@aws-sdk/client-rds-data": "3.1170.0",
+    "@aws-sdk/client-secrets-manager": "3.1170.0",
     "@aws-sdk/lib-dynamodb": "3.1170.0",
-    "@nd-factory/contracts": "*"
+    "@nd-factory/contracts": "*",
+    "p-retry": "9.0.0",
+    "pg": "8.23.1",
+    "pino": "10.4.0"
   },
   "devDependencies": {
-    "@types/aws-lambda": "8.10.164"
+    "@types/aws-lambda": "8.10.164",
+    "@types/pg": "8.23.1",
+    "pg-connection-string": "2.14.1"
   }
 }
