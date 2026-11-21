@@ -158,6 +158,8 @@ graph TD
 | `/v1/db_prep/completions/create` | 要求 | `prep_id`・`kind`・`result`（`applied`・`rotation_superseded`・`failed`）・`rotation_seq`（`rotate` だけ。タスクが受けた番号 n）・`recorded_seq`（`rotation_superseded` だけ。DB に記してあった番号）・`reason`（`failed` だけ。下の表） |
 | 同上 | 応答 | `status`（`accepted`）。用意の ID か番号が今の値と合わなければ要素の 409 `state_mismatch` |
 
+応答は [API の文書の要素の結果](../docs/design/api.md) の包みに入る。上の表の「応答」の項目は、成功の要素 `{"ok": true, "item": {…}}` の `item` の中身である。失敗の要素は HTTP 200 の中の `{"ok": false, "status": <数>, "reason": "<コード>"}` で返り、状態の不一致は `status: 409`（引き換えでは使い終えた・期限の切れた引き換えの token、終わりの報告では `state_mismatch`）になる。token が認証できないときだけは要求全体の誤りで、HTTP 401 と RFC 9457 の本文（`reason: unauthorized`）になる。タスクは HTTP の状態で 401 を、HTTP 200 の要素の `ok` と `status` で 409 を見分ける。どちらも繰り返さない（詳細設計の「DB の用意のタスク」）。
+
 | `reason` | 起きたこと |
 | --- | --- |
 | `admin_connect_failed` | 管理の接続が再試行の後も開けない（Aurora の再開の待ちを超えた） |

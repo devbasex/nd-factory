@@ -77,11 +77,13 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | --- | --- | --- | --- | --- |
 | `settingsSchema` | `packages/contracts/src/settings.ts` | 変更 | — | `network`・`progress_db`・`budget`（額と `scope`）・`ops` の任意のキーを足す（形は設計文書の「設定のファイル」の表） |
 | `infraValues` | 同上 | 新設 | `(s: Settings) => InfraValues` | キーが無ければ既定を入れた値を返す |
-| 4 つの zod の定義 | `packages/contracts/src/db-prep-api.ts` | 新設 | `dbPrepExchangeRequest`・`dbPrepExchangeResponse`・`dbPrepCompletionRequest`・`dbPrepCompletionResponse` | 設計文書の「DB の用意のタスクの HTTP の経路」の表の形。どれも要素 1 個の配列 |
+| 4 つの zod の定義 | `packages/contracts/src/db-prep-api.ts` | 新設 | `dbPrepExchangeRequest`・`dbPrepExchangeResponse`・`dbPrepCompletionRequest`・`dbPrepCompletionResponse` | 設計文書の「DB の用意のタスクの HTTP の経路」の表の形。どれも要素 1 個の配列。2 つの応答の要素は要素の結果の判別共用体（`ok: true` なら `item` に表の項目、`ok: false` なら `status`・`reason`） |
 
 - `infraValues`
   - 事後条件: `vpcCidr`・`maxAcu`・`budgetUsd`・`budgetScope`・`opsEmails` がどれも値を持つ。既定は `INFRA_DEFAULTS`（`10.80.0.0/16`・2・30・`tags`・空の配列）
-- `dbPrepExchangeResponse`
+- `dbPrepExchangeResponse`・`dbPrepCompletionResponse`
+  - 要素は `{ ok: true; item }` か `{ ok: false; status: number; reason: string }`。HTTP 401 の problem の本文はこの形に含めず、呼ぶ側が HTTP の状態で先に分ける
+- `dbPrepExchangeResponse` の `item`
   - `kind` が `rotate` のときだけ `project.rotation_seq` を必須にし、`create` で持てば誤りにする。データベースと役割の名前は `PROGRESS_DB_IDENT_SHAPE`（`^[a-z][a-z0-9_]{7,62}$`）に合う。`project.id` はプロジェクトの ID（データの文書のプロジェクトの集約の ID と同じ形）で、`create` と `rotate` のどちらも必須
 - `dbPrepCompletionRequest`
   - `result` ごとに要る項目を判別共用体で縛る（`rotation_superseded` は `recorded_seq`、`failed` は `reason`、`kind` が `rotate` なら `rotation_seq`）
@@ -100,6 +102,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `settingsSchema` | 5 つのキーを持つ・持たない設定のファイル | CIDR の接頭辞 16 と 20 は通り 15 と 21 は落ちる。ACU の 1・16 は通り 0.5・16.5・1.25 は落ちる。予算の 1 は通り 0 は落ちる。範囲は `tags`・`account` が通り `tag` は落ちる | 未知のキー・メールでない宛先 |
 | `infraValues` | キーの無い設定で既定 | — | — |
 | `dbPrepCompletionRequest` | 3 つの `result` | — | `rotation_superseded` で `recorded_seq` が無い・`create` で `rotation_seq` がある |
+| `dbPrepExchangeResponse`・`dbPrepCompletionResponse` | `ok: true` の `item` を読む。`ok: false`・`status: 409` の要素を読む | — | `item` の無い `ok: true`・`status` の無い `ok: false`・包みの無い素の項目を誤りにする |
 
 ## ネットワーク
 
@@ -337,7 +340,7 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 | --- | --- | --- | --- | --- |
 | `main` | `apps/db-prep/src/main.ts` | 新設 | `(env: NodeJS.ProcessEnv, deps: PrepDeps) => Promise<number>` | 引き換え → `kind` で用意か差し替え → 終わりの報告。終了コードは報告できたら 0 |
 | `readTaskArn` | `apps/db-prep/src/exchange.ts` | 新設 | `(metadataUri: string, fetchFn: typeof fetch) => Promise<string>` | `${ECS_CONTAINER_METADATA_URI_V4}/task` の `TaskARN` を読む |
-| `exchange` | 同上 | 新設 | `(apiUrl: string, token: string, taskArn: string, fetchFn) => Promise<ExchangeResult>` | `/v1/db_prep/exchanges/create` を 1 回だけ呼び、応答を形の正本で照らす |
+| `exchange` | 同上 | 新設 | `(apiUrl: string, token: string, taskArn: string, fetchFn) => Promise<ExchangeResult>` | `/v1/db_prep/exchanges/create` を 1 回だけ呼び、応答を形の正本で照らす。HTTP 401 なら `unauthorized`、HTTP 200 で要素が `ok: false` なら `rejected`（`status` と `reason`）、`ok: true` なら `item` を返す |
 | `complete` | 同上 | 新設 | `(apiUrl: string, completionToken: string, body: DbPrepCompletion, fetchFn) => Promise<void>` | `/v1/db_prep/completions/create` を呼ぶ。届いたか分からない失敗だけを `p-retry` で 3 回まで繰り返す（同じ本文は API で冪等） |
 | `connectAdmin` | `apps/db-prep/src/provision.ts` | 新設 | `(admin: AdminConnection, opts: { attempts: number; delayMs: number }) => Promise<pg.Client>` | Aurora の再開を待って管理の接続を開く。繰り返しは `p-retry`（既定 12 回・5 秒おき = 約 60 秒） |
 | `claimBinding` | 同上 | 新設 | `(client: pg.Client, project: ProjectIdent) => Promise<"bound" \| "retry" \| "conflict">` | 1 つのトランザクションで `pg_advisory_xact_lock(hashtext('nd-prep:bindings'))` を取り、`nd_prep.bindings`（`project_id` 主キー・`database_name` 一意・`role_name` 一意・`bound_at`）を `project_id`・`database_name`・`role_name` のどれかで引く。下の処理の手順の表で分ける。`bound` のときだけ行を足す。データベースと役割を作る前に打つ |
@@ -355,7 +358,8 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `main` | 引き換えが 401・409 | 終わりを知らせずに終了コード 1（API が見回りで扱う） |
+| `main` | 引き換えが HTTP 401、または HTTP 200 の要素が `ok: false`（`status: 409` など） | 終わりを知らせずに終了コード 1（API が見回りで扱う） |
+| `main` | 終わりの報告が HTTP 401、または HTTP 200 の要素が `ok: false`（`status: 409`・`state_mismatch` など） | 繰り返さずに終了コード 1。ログに `status` と `reason` だけを出す |
 | `main` | `create` で `claimBinding` か `checkIsolationGuard` が `conflict` | 何も書かずに `failed`・`guard_conflict` |
 | `main` | `rotate` で `superseded_greater`（`rotateRole` か `terminateRoleConnections` のどちらか） | 接続を切らずに `rotation_superseded`（記した番号） |
 | `main` | `rotate` で `applied` か `superseded_equal` | `terminateRoleConnections` の古い接続の残りが 0 なら `applied` か `rotation_superseded`、1 以上なら `failed`・`connections_remain`。境の時刻より後に始まった接続は数えない |
@@ -406,8 +410,8 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 | `checkIsolationGuard` | 新しい名前で `ok` | 作り直し（片方だけある）で `ok` | B のデータベースに A の役割を渡す・A の役割に B のデータベースを渡すと `conflict` |
 | `rotateRole` | 記した番号 < n で書く | 記した番号 = n で書かない | 記した番号 > n で何も変えない。2 つを同時に打って番号の大きい方だけが残る |
 | `terminateRoleConnections`（PostgreSQL のサービスコンテナ） | 書く前に開いた役割の接続を切り、残り 0 | 境の時刻が記されていれば記し直さない | 順序の逆転: タスク T1 が番号 n を書いて切りの前で止まり、起こし直しの T2（同じ n）が `superseded_equal`・切り・終わりまで進み、その後に新しいパスワードで接続 C を開き、T1 を再開すると C が切られずに残る（C が切られると落ちる）。T1 が `rotateRole` の前で止まり、T2 が終わって C を開いた後に T1 を最初から打っても C が残る。記した番号が n+1 に上がった後の T1（n）は何も切らずに `superseded_greater` |
-| `exchange`・`complete` | 形の正本に合う応答 | — | 形の違う応答を誤りにする・401 で再試行しない |
-| `main` | 処理の手順の表の 5 行 | — | パスワードがログに出ると落ちる |
+| `exchange`・`complete` | 形の正本に合う `ok: true` の要素 | HTTP 200 の `ok: false`・`status: 409` を、HTTP 401 と別の結果として返す | 形の違う応答を誤りにする・HTTP 401 と HTTP 200 の `status: 409` の要素のどちらでも再試行しない |
+| `main` | 処理の手順の表の 6 行 | — | パスワードがログに出ると落ちる |
 
 CI の `check` のジョブに `postgres:16`（要約値で固定）のサービスコンテナを置き、接続の値を `ND_TEST_PG_URL` で渡す。値が無いとき、`CI` が真なら DB のテストは落ち、手元では飛ばす（このリポジトリはテストを CI に寄せる）。
 
