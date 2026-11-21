@@ -562,7 +562,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | 席（`db-teams` / `SEAT#<利用者>`） | `team_id`・`user_id`・`role`・`added_at` | 上書き |
 | 招待（`db-teams` / `INVITE#<招待>`） | `invitation_id`・`team_id`・`role`・`created_by`・`created_at`・`expires_at`・`accepted_by?`・`accepted_at?`・`withdrawn_at?` | 上書き（状態は `accepted_at`・`withdrawn_at`・`expires_at` から導き、列に持たない。期限の値と招く相手の指定の仕方は #4 が決め、列を足す） |
 | 手元のマシン（`db-teams` / `MACHINE#<マシン>`） | `machine_id`・`team_id`・`name`（1〜64 字）・`token_sha256`・`token_expires_at`・`last_heartbeat_at?`・`lane_capacity?`（1〜16）・`created_at`・`revoked_at?` | 上書き（状態は導く。`last_heartbeat_at` が無ければ `pending`、600 秒以内なら `online`、それより前なら `offline`。見回りが `offline` で行う止め方は #7） |
-| 月の使った量（`db-teams` / `USAGE#<UTC の年月>`） | `team_id`・`month`（`YYYY-MM`）・`used`（`money`） | 上書き（`usageAddItem` が加算） |
+| 月の使った量（`db-teams` / `USAGE#<UTC の年月>`） | `team_id`・`month`（`YYYY-MM`）・`used_amount_minor`（最小単位の整数）・`used_currency`（`currencyCode`）。金額の地図の 1 列にしないのは、DynamoDB の 1 つの更新の式が親の地図の無い入れ子の道（`used.amount_minor`）へ書けず、行の無いときの作成と加算を 1 つの式にできないためで、2 列はどちらも必ず持たせて I15 を守る | 上書き（`usageAddItem` が加算） |
 | リポジトリ（`db-projects` / `REPO#<リポジトリ>`） | `repo_id`・`project_id`・`github_repo`（`githubRepo`）・`installation_id`（GitHub の整数）・`primary`（真偽）・`added_at` | 上書き |
 | 渡した GitHub の token の記録（`db-projects` / `GHTOKEN#<期限>#<レーン>#<連番>`） | `project_id`・`lane_id`・`generation`・`expires_at`・`expire_at`（TTL）。token の値と識別は #33 の答えで足す | 追記だけ |
 | スプリント（`db-sprints` / `SPRINT#<スプリント>`） | `sprint_id`・`project_id`・`title`（1〜200 字）・`issues`（`githubIssueRef` の配列、1〜20）・`place`・`inference`・`state`・`started_by`（利用者の ID。委任なら委任した人）・`started_at`・`ended_at?`・`end_reason?`（理由のコード） | 上書き |
