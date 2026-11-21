@@ -47,11 +47,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
 
-// TransactWriteItems の取り消しの理由のうち、code を持つものがあるか
-function hasCancellationReason(e: Record<string, unknown>, code: string): boolean {
+// TransactWriteItems の取り消しの理由のうち、一時の失敗のもの。ほかのトランザクションとの衝突（SDK はこれを繰り返さない）と、
+// 呼びすぎ・容量の不足。取り消しは HTTP の状態が 400 のため、状態へ落とす前に理由で見る
+const RETRYABLE_CANCELLATION_CODES = new Set(["TransactionConflict", "ThrottlingError", "ProvisionedThroughputExceeded"]);
+
+// TransactWriteItems の取り消しの理由のうち、codes のどれかを持つものがあるか
+function hasCancellationReason(e: Record<string, unknown>, codes: ReadonlySet<string>): boolean {
   const reasons = e["CancellationReasons"];
-  return e["name"] === "TransactionCanceledException" && Array.isArray(reasons) && reasons.some((r) => isRecord(r) && r["Code"] === code);
+  return (
+    e["name"] === "TransactionCanceledException" &&
+    Array.isArray(reasons) &&
+    reasons.some((r) => isRecord(r) && typeof r["Code"] === "string" && codes.has(r["Code"]))
+  );
 }
+
+const CONFLICT_CANCELLATION_CODES = new Set(["ConditionalCheckFailed"]);
 
 // AWS SDK の例外が持つ応答の HTTP の状態（$metadata.httpStatusCode）
 function awsStatusOf(e: Record<string, unknown>): number | undefined {
@@ -77,9 +87,9 @@ export function classifyFailure(e: unknown): FailureClass {
   if (!isRecord(e)) return "unknown";
   const name = e["name"];
   if (typeof name === "string") {
-    // ほかのトランザクションとの衝突（SDK はこれを繰り返さない）は retryable、条件の外れは ConditionalCheckFailedException と同じ conflict
-    if (RETRYABLE_NAMES.has(name) || hasCancellationReason(e, "TransactionConflict")) return "retryable";
-    if (CONFLICT_NAMES.has(name) || hasCancellationReason(e, "ConditionalCheckFailed")) return "conflict";
+    // 取り消しの理由が衝突・呼びすぎ・容量の不足なら retryable、条件の外れは ConditionalCheckFailedException と同じ conflict
+    if (RETRYABLE_NAMES.has(name) || hasCancellationReason(e, RETRYABLE_CANCELLATION_CODES)) return "retryable";
+    if (CONFLICT_NAMES.has(name) || hasCancellationReason(e, CONFLICT_CANCELLATION_CODES)) return "conflict";
     if (NOT_FOUND_NAMES.has(name)) return "not_found";
     if (REJECTED_NAMES.has(name)) return "rejected";
   }

@@ -247,7 +247,7 @@ nd-factory/
 | `judgeUsage` | 時点が「割り当てる」 | 同時に動くレーンの数がプランの数以上なら `concurrency_full`（待てば解ける）。上限なしの行は照らさない |
 | `judgeUsage` | 時点が「区間の境」 | 使った額が上限額以上なら `monthly_cap_reached`（待てば解ける: 上限額を変えるか月が替わる） |
 | `judgeUsage` | 使った額と上限額の通貨が違う | `currency_mismatch`（通さない。換算しない） |
-| `classifyFailure` | 408・429・500・502・503・504・ネットワークの誤り・時間切れ・`ThrottlingException`・`ThrottledException`・`ProvisionedThroughputExceededException`・`RequestLimitExceeded`・`TooManyRequestsException`・`TransactionConflict`（呼びすぎは状態が 400 のものがあるため名前で見る） | `retryable` |
+| `classifyFailure` | 408・429・500・502・503・504・ネットワークの誤り・時間切れ・`ThrottlingException`・`ThrottledException`・`ProvisionedThroughputExceededException`・`RequestLimitExceeded`・`TooManyRequestsException`・`TransactionConflict`、および `TransactionCanceledException` の取り消しの理由（`CancellationReasons`）の `TransactionConflict`・`ThrottlingError`・`ProvisionedThroughputExceeded`（呼びすぎと取り消しは状態が 400 のため、状態へ落とす前に名前と理由で見る） | `retryable` |
 | `classifyFailure` | 409・`ConditionalCheckFailedException`・理由に `ConditionalCheckFailed` を持つ `TransactionCanceledException` | `conflict` |
 | `classifyFailure` | 404・`ResourceNotFoundException` | `not_found` |
 | `classifyFailure` | ほかの 4xx・501・3xx（`callHttp` が転送に従わずに返した応答。304 を含む）・`ValidationException`・`AccessDeniedException` | `rejected` |

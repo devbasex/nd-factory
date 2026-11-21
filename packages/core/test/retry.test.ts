@@ -89,6 +89,11 @@ describe("classifyFailure", () => {
     expect(classifyFailure(other)).toBe("rejected");
   });
 
+  it.each(["ThrottlingError", "ProvisionedThroughputExceeded"])("トランザクションの取り消しの理由が %s なら、状態の 400 へ落とさず retryable", (code) => {
+    const throttled = awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "None" }, { Code: code }] }, 400);
+    expect(classifyFailure(throttled)).toBe("retryable");
+  });
+
   it("ky の時間切れとネットワークの誤りは retryable", async () => {
     const request = new Request("https://api.example.com/v1/x");
     expect(classifyFailure(new TimeoutError(request))).toBe("retryable");
