@@ -26,8 +26,11 @@ infra/
 ├── setup/nd-setup.ts
 ├── setup/aws-reader.ts
 ├── setup/missing-settings.ts   *
-├── setup/gc.ts                 *
-└── test/（support.ts・app-stack・stack-rules*・pipeline-stack・naming・nd-setup・missing-settings*・gc*・gc-cli*）
+├── lib/images.ts               *
+├── bin/app.ts
+├── setup/images.ts             *
+├── setup/images-cli.ts         *
+└── test/（support.ts・app-stack・stack-rules*・pipeline-stack・naming・nd-setup・missing-settings*・images*）
 apps/db-prep/                   *
 ├── package.json・tsconfig.json・Dockerfile
 ├── src/main.ts・exchange.ts・provision.ts・rotate.ts
@@ -36,7 +39,7 @@ docs/operations/settings.md・setup.md
 .github/workflows/ci.yml
 ```
 
-依存の向き: `packages/contracts` ← `infra`・`apps/db-prep` の一方向で、`infra` と `apps/db-prep` は互いを import しない。`infra/lib/tasks.ts` は `apps/db-prep/Dockerfile` をファイルの資産として指すだけで、コードを import しない（[詳細設計の依存の表](../docs/design/detail.md#クラスと関数の構造)の `infra` から `apps/*` への import の禁止に合う）。
+依存の向き: `packages/contracts` ← `infra`・`apps/db-prep` の一方向で、`infra` と `apps/db-prep` は互いを import しない。`infra/lib/images.ts` と `infra/setup/images.ts` は `apps/db-prep/Dockerfile` をビルドの入力のパスとして指すだけで、コードを import しない（[詳細設計の依存の表](../docs/design/detail.md#クラスと関数の構造)の `infra` から `apps/*` への import の禁止に合う）。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -48,12 +51,15 @@ docs/operations/settings.md・setup.md
 | `infra/lib/tasks.ts` | 新設 | ECS のクラスタ・実行の役割・DB の用意のタスクの定義 | aws-cdk-lib・`Network` | `TaskPlatform` | `constructor`・`RUNNER_TASK_SIZE`・`DB_PREP_TASK_SIZE` |
 | `infra/lib/cost-watch.ts` | 新設 | 運用の知らせのトピックと月の予算 | aws-cdk-lib | `CostWatch` | `constructor` |
 | `infra/lib/app-stack.ts` | 変更 | 4 つの部品を組み、AZ を `Fn::GetAZs` から返し、利用者の表に PITR を付ける | 上の 4 つ | `AppStack` | `availabilityZones`（新設の getter）・`constructor`（変更） |
-| `infra/lib/pipeline-stack.ts` | 変更 | 反映のアクションを特権にし、`image-publishing` を引き受けられるようにする | — | `PipelineStack` | `constructor`（変更） |
+| `infra/lib/pipeline-stack.ts` | 変更 | 準備のアクションを特権にしてイメージを作らせ、自前の ECR への push を許す。反映のアクションに印のタグ付けを許す | `images.ts` | `PipelineStack` | `constructor`・`prepareBuildSpec`・`deployBuildSpec`（変更） |
 | `infra/setup/missing-settings.ts` | 新設 | 足りない設定の一覧を集めて出す | `aws-reader` | モジュール | `MISSING_CHECKS`・`collectMissingSettings`・`printMissingSettings` |
-| `infra/setup/gc.ts` | 新設 | 古い資産の片付け | `nd-setup` の型 | モジュール | `gcConfirmValue`・`checkGcConfirmTarget`・`checkGcConfirmCounts`・`parseGcPrint`・`gcCliArgs`・`runGc` |
+| `infra/lib/images.ts` | 新設 | イメージごとの自前の ECR とライフサイクルの規則、合成の入力のダイジェストの読み方 | aws-cdk-lib | `ImageRepository` | `constructor`・`IMAGE_SPECS`・`readImageDigests`・`lifecycleRules` |
+| `infra/bin/app.ts` | 変更 | 合成の入力のダイジェストを読んで `AppStack` へ渡す | `images.ts` | モジュール | 最上位の処理（変更） |
+| `infra/setup/images.ts` | 新設 | イメージを作って push し、一覧を書く。反映の前の在りかの確かめと、反映の後の印のタグ | `images.ts`・AWS SDK（ECR） | モジュール | `buildAndPushImages`・`checkImagesExist`・`tagDeployedImages` |
+| `infra/setup/images-cli.ts` | 新設 | パイプラインの準備と反映のアクションから上の 3 つを打つ入口 | `setup/images.ts` | モジュール | `main` |
 | `packages/contracts/data/exit-codes.json` | 変更 | 終了コード 9 `GC_BUSY` を足す（`setup.md` の表は生成） | — | — | — |
 | `infra/setup/aws-reader.ts` | 変更 | コスト配分タグ・組織・AZ・スタックの更新の状態を読む | AWS SDK（Cost Explorer・Organizations・EC2・CloudFormation） | モジュール | `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount`・`readStackActivity`（新設） |
-| `infra/setup/nd-setup.ts` | 変更 | `gc` の引数と振り分け・`diff` の最後に一覧を出す | 上の 2 つ | モジュール | `parseArgs`・`runDiff`・`mainSetup`・`defaultDeps`（変更） |
+| `infra/setup/nd-setup.ts` | 変更 | `diff` の合成の前にイメージを push し、`deploy` の前後で在りかの確かめと印のタグを打つ。`diff` の最後に一覧を出す | 上の 2 つ | モジュール | `runDiff`・`synthesize`・`runDeploy`・`defaultDeps`（変更） |
 | `infra/test/support.ts` | 変更 | スタックの決まりの検査 | — | モジュール | `stackRuleViolations`（新設）・`hourlyCostResources`（変更） |
 | `apps/db-prep/src/main.ts` | 新設 | タスクの入口。引き換え → 用意か差し替え → 終わりの報告 | 下の 3 つ・contracts | モジュール | `main` |
 | `apps/db-prep/src/exchange.ts` | 新設 | タスクの ID を読み、API と話す | contracts | モジュール | `readTaskArn`・`exchange`・`complete` |
@@ -143,12 +149,12 @@ docs/operations/settings.md・setup.md
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `TaskPlatform` の `constructor` | `infra/lib/tasks.ts` | 新設 | `(scope, id, props: { network: Network; names: AppResourceNames })` | ECS のクラスタ（Container Insights なし）・タスクの実行の役割（ECR の取得とログの書き込みだけ）・DB の用意のタスクの定義（族 `<prefix>-<environment>-db-prep`・`DB_PREP_TASK_SIZE`・x86_64・非 root・イメージは `apps/db-prep/Dockerfile` の資産）・タスクの役割（文なし）・ログの群（30 日） |
+| `TaskPlatform` の `constructor` | `infra/lib/tasks.ts` | 新設 | `(scope, id, props: { network: Network; names: AppResourceNames; dbPrep?: { repository: IRepository; digest: string } })` | ECS のクラスタ（Container Insights なし）・タスクの実行の役割（ECR の取得とログの書き込みだけ）・DB の用意のタスクの定義（族 `<prefix>-<environment>-db-prep`・`DB_PREP_TASK_SIZE`・x86_64・非 root・イメージは DB の用意の自前の ECR からダイジェストで引く。下の「イメージ」）・タスクの役割（文なし）・ログの群（30 日） |
 | `RUNNER_TASK_SIZE`・`DB_PREP_TASK_SIZE` | 同上 | 新設 | `{ cpu: 1024, memoryMiB: 2048 }`・`{ cpu: 256, memoryMiB: 512 }` | 既定の大きさ。ランナーの値は #6 がタスクの定義で使う |
 | `TaskPlatform` の公開の値 | 同上 | 新設 | `cluster`・`executionRole`・`publicSubnets`・`taskSecurityGroup`・`dbPrepTaskDefinition` | #6 が API の関数へ `RunTask` の値として渡す |
 
 - 事後条件: `AWS::ECS::Service`・`AWS::ECS::TaskSet` を作らない。タスクの役割に `Policies` も `ManagedPolicyArns` も無い
-- イメージの資産のビルドの文脈はリポジトリの最上位で、`.dockerignore` の代わりに資産の `exclude` で `apps/db-prep` と `packages/contracts` と錠のファイルだけを入れる（要約値の入力を絞る）
+- DB の用意のタスクの定義は、`props.images` に DB の用意のダイジェストがあるときだけ作り、イメージを `ContainerImage.fromEcrRepository(<リポジトリ>, "sha256:…")` でダイジェストで引く。無いとき（初めての設置・CI の合成）は作らない
 
 ## 費用の見張り
 
@@ -197,9 +203,50 @@ docs/operations/settings.md・setup.md
 | `stackRuleViolations` | 今の `AppStack` で 0 件 | — | 決まりごとに違反を 1 つ足した合成の出力で、その決まりの 1 件だけを返す（8 通り） |
 | `hourlyCostResources` | 許しの条件を満たす Aurora を返さない | — | 最小 0.5・一時停止なし・読み手 1 台で返す |
 
+## イメージ
+
+満たす決定: 決定 1・2、受け入れ条件 9
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `IMAGE_SPECS` | `infra/lib/images.ts` | 新設 | `readonly { key: "db-prep"; dockerfile: string; context: string }[]` | 作るイメージの並び（今は DB の用意だけ）。#6 は `runner` の行を足す |
+| `ImageRepository` の `constructor` | 同上 | 新設 | `(scope, id, props: { name: string })` | ECR のリポジトリ（名前 `<prefix>-<environment>-<key>`・タグは書き換え不可・push の時の検査・`RemovalPolicy.RETAIN`）と `lifecycleRules()` の規則 |
+| `lifecycleRules` | 同上 | 新設 | `() => LifecycleRule[]` | 優先 1: `deployed-` の印の付いた版を 10 残す。優先 2: `build-` の版を push から 14 日で消す。優先 3: タグの無い版を 1 日で消す |
+| `readImageDigests` | 同上 | 新設 | `(env: NodeJS.ProcessEnv) => ImageDigests` | 環境の値 `ND_IMAGES` が指す一覧のファイル（`nd-setup-images.json`）を読み、キーごとのダイジェストを返す。無ければ空 |
+| `buildAndPushImages` | `infra/setup/images.ts` | 新設 | `(target: Target, s: Settings, out: string, deps: ImageDeps) => Promise<ImagesResult>` | リポジトリがあるかを読み、あれば `IMAGE_SPECS` ごとに `docker build --platform linux/amd64` → `build-<UTC の時刻>` のタグで push → ダイジェストを読み、`<out>/nd-setup-images.json` に書く。リポジトリが無ければ `{ status: "no_repository" }` を返して何も書かない |
+| `checkImagesExist` | 同上 | 新設 | `(target: Target, assembly: string, deps: ImageDeps) => Promise<string[]>` | 合成の結果の一覧のダイジェストがリポジトリにあるかを `BatchGetImage` で読み、無いダイジェストを返す |
+| `tagDeployedImages` | 同上 | 新設 | `(target: Target, assembly: string, at: Date, deps: ImageDeps) => Promise<void>` | 一覧のダイジェストの manifest を読み、`deployed-<UTC の時刻>` のタグで `PutImage` する |
+| `main` | `infra/setup/images-cli.ts` | 新設 | `(argv: string[], deps: ImageDeps) => Promise<number>` | `push --settings <file> --out <dir>`・`check --assembly <dir>`・`tag --assembly <dir>` の 3 つ。パイプラインの CodeBuild の資格情報（既定の解き方）で打つ |
+| `synthesize` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 画面のビルドの後、合成の前に `buildAndPushImages` を打ち、一覧のファイルを `ND_IMAGES` で合成へ渡す。一覧は合成の結果の置き場にあるため要約値に入る |
+| `runDeploy` | 同上 | 変更 | 変えない | 確認の値を照らした後・反映の前に `checkImagesExist` を打ち、無いダイジェストがあれば反映しない。反映が 0 で終わったら `tagDeployedImages` を打つ |
+
+- `SetupDeps` と `ImageDeps` に `docker: (args: string[]) => Promise<{ code: number; stdout: string }>`・`ecr`（`DescribeRepositories`・`GetAuthorizationToken`・`BatchGetImage`・`PutImage` の包み）を置く（テストは本物の Docker と AWS を呼ばない）
+- push の前の `docker login` は `GetAuthorizationToken` の値を標準入力で渡し、値をログ・出力に出さない
+- `AppStack` の props に `images: ImageDigests` を足し、`bin/app.ts` が `readImageDigests(process.env)` で渡す。CI の合成は `ND_IMAGES` を持たず、タスクの定義を作らない版になる。スタックのテストは作り物のダイジェスト（`sha256:` と 0 を 64 桁）を渡して、タスクの定義を持つ版を照らす
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `buildAndPushImages` | Docker が無い・作れない | 端末に Docker が無い・Dockerfile の誤り | `docker` の終了コード | 合成せずに止める | 「Docker が要る」か docker の出力、`EXIT.BUILD` | 何も合成していない。push した分は印が無く 14 日で消える。再実行できる |
+| `buildAndPushImages` | push できない | 権限・網 | `docker push` の終了コード | 合成せずに止める | docker の出力、`EXIT.BUILD` | 同上 |
+| `checkImagesExist` | 引くイメージが無い | 印の無い版が 14 日で消えた・10 を超えて古い版へ戻す | `BatchGetImage` の `failures` | 反映しない | 無いダイジェストと「前の版のコミットで `diff` から作り直す」、`EXIT.BUILD` | 何も書いていない |
+| `tagDeployedImages` | タグを付けられない | 権限・網 | SDK の例外 | 止める | 「反映は済んだ。印のタグを付けられなかった」と打ち直しのコマンド、`EXIT.BUILD` | 反映は済んでいる。同じ置き場で打ち直せば付く（同じダイジェストへの新しい時刻のタグ） |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `ImageRepository`・`lifecycleRules` | 合成の出力に、タグ書き換え不可のリポジトリと 3 つの規則（優先 1 が `deployed-` の 10）がある | — | 優先の入れ替え・`deployed-` の規則が数でなく日数で落ちる |
+| `AppStack`（ダイジェストあり） | DB の用意のタスクの定義のイメージが `<リポジトリ>@sha256:…` | ダイジェストなしでタスクの定義を作らない | ダイジェストを変えると要約値が変わる（合成の結果の要約値の比べ） |
+| `buildAndPushImages` | リポジトリがあれば作って push し、一覧を書く | リポジトリが無ければ何もしない | Docker の失敗・push の失敗で投げ、一覧を書かない。login の値が出力に出ない |
+| `checkImagesExist`・`runDeploy` | すべてあれば反映して印を付ける | — | 1 つでも無ければ反映を呼ばない。反映の失敗で印を付けない |
+
 ## 設置のコマンド
 
-満たす決定: 決定 1・2・6・12、受け入れ条件 5・9
+満たす決定: 決定 6・12、受け入れ条件 5
 
 ### 関数の仕様
 
@@ -212,49 +259,17 @@ docs/operations/settings.md・setup.md
 | `readOrganizationManager` | 同上 | 新設 | `(target: Target) => Promise<{ member: boolean; managementAccount: string \| null } \| "unknown">` | `DescribeOrganization` で組織の管理のアカウントを読む。組織に入っていなければ `member: false`。権限が無ければ `unknown` |
 | `readGetAzsCount` | 同上 | 新設 | `(target: Target) => Promise<number>` | `DescribeSubnets`（`default-for-az=true`）で既定のサブネットのある AZ を数え、0 なら `DescribeAvailabilityZones`（`state=available`・種類 `availability-zone`）の数を返す。`Fn::GetAZs` が返す数の見なし（LIB6） |
 | `runDiff` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 確認の値を出した後に `collectMissingSettings` と `printMissingSettings` を打つ。終了コードは変えない |
-| `parseArgs` | 同上 | 変更 | 戻り値に `GcArgs` を足す | `gc --profile <p> [--confirm <値>] [--rollback-buffer-days <日数>]` を読む。日数は 1〜365 の整数（既定 30） |
-| `readStackActivity` | `infra/setup/aws-reader.ts` | 新設 | `(target: Target) => Promise<{ name: string; status: string; lastUpdated: Date }[]>` | `ListStacks` で消えていないスタックの名前・状態・最後の更新の時刻を読む |
-| `mainSetup` | 同上 | 変更 | 変えない | `gc` を `runGc` へ振り分ける |
-| `gcConfirmValue` | `infra/setup/gc.ts` | 新設 | `(target: Target, days: number, isolated: { images: number; files: number }, issuedAt: Date) => string` | `<条件の要約値 8 桁>-<数の要約値 8 桁>:<発行の時刻（UTC、`yyyymmddThhmmZ`）>` を作る。条件の要約値はアカウント・リージョン・猶予の日数・発行の時刻から作り、数の要約値は条件の要約値と使われていない資産の 2 つの数から作る。2 つに分けるのは、`print` を打つ前に対象と猶予を照らし、`print` の後に数だけを照らすため |
-| `checkGcConfirmTarget` | 同上 | 新設 | `(value: string, target: Target, days: number, now: Date) => "ok" \| "mismatch" \| "expired"` | 値の形を読み、発行の時刻と今の対象・日数で条件の要約値を作り直して比べる。形が違うか条件の要約値が違えば `mismatch`。合っていて発行から 60 分を過ぎていれば `expired`。数は読まない（`print` の前に打つ） |
-| `checkGcConfirmCounts` | 同上 | 新設 | `(value: string, isolated: { images: number; files: number }) => "ok" \| "changed"` | `checkGcConfirmTarget` が `ok` を返した値について、今の数で数の要約値を作り直して比べる。違えば `changed`（対象と猶予は既に合っているため、違いは数の変化だけによる） |
-| `parseGcPrint` | 同上 | 新設 | `(output: string) => { images: number; files: number }` | `print` の出力から使われていない資産の数を読む。固定の版の CLI はファイル（S3）・イメージ（ECR）の順に、それぞれ最後に `[100.00%] … files scanned: <数> assets (…) eligible for deletion.` を出す。CLI の語は「消せる」だが数は猶予の内を含む使われていない資産で、設置のコマンドは「使われていない資産」と言い換えて示す。読めなければ投げる（CLI の版の変化。`gc-cli.test.ts` が出力の形も照らす） |
-| `gcCliArgs` | 同上 | 新設 | `(mode: "print" \| "full", target: Target, days: number) => string[]` | `cdk gc aws://<アカウント>/<リージョン> --unstable=gc --type=all --action=<mode> --rollback-buffer-days=<日数> --created-buffer-days=1 --confirm=<print なら false、full なら true> --profile <profile>` |
-| `runGc` | 同上 | 新設 | `(a: GcArgs, deps: SetupDeps) => Promise<number>` | 下の「`runGc` の手順」 |
 
-- `SetupDeps` に `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount`・`readStackActivity`・`hasDocker: () => Promise<boolean>`・`isTty: () => boolean`・`now: () => Date` を足す（テストは本物の AWS と Docker を呼ばない）
-- `MISSING_CHECKS` の 5 種類: Google のクライアントの ID が無い・`budget.scope` が `tags` でタグ `app-prefix`・`app-env` が `Active` でない（下のタグの行と、読めないときの行。`account` なら照らさない）・`ops.notify_emails` が空・`docker version` が 0 で終わらない・`readGetAzsCount` が 2 未満（「`Fn::GetAZs` が返す AZ が <数> つで、反映が網を作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --availability-zone <AZ>`）か、既定のサブネットをすべて消す」。読めなければ「確かめられない（`ec2:DescribeSubnets`・`ec2:DescribeAvailabilityZones` を許した profile で読む）」）
-
+- `SetupDeps` に `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount` を足す（テストは本物の AWS を呼ばない）
+- `MISSING_CHECKS` の 5 種類: Google のクライアントの ID が無い・`budget.scope` が `tags` でタグ `app-prefix`・`app-env` が `Active` でない（下のタグの行と、読めないときの行。`account` なら照らさない）・`ops.notify_emails` が空・`buildAndPushImages` が `no_repository` を返した（「ECR がまだ無いため、イメージを持たない版を合成した。この差分を反映した後に、もう一度 `diff` を打つ」）・`readGetAzsCount` が 2 未満（「`Fn::GetAZs` が返す AZ が <数> つで、反映が網を作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --availability-zone <AZ>`）か、既定のサブネットをすべて消す」。読めなければ「確かめられない（`ec2:DescribeSubnets`・`ec2:DescribeAvailabilityZones` を許した profile で読む）」）
 - 読めないときの行の文（設計文書の決定 12）: 「コスト配分タグ `app-prefix`・`app-env` が有効かを確かめられない。有効でなければ予算は 0 を数え続け、予算の知らせは鳴らない。次の操作: <操作>」。読めない原因は SDK の例外だけでは権限の不足と組織の制限を分けられないため、`readOrganizationManager` で分ける。<操作> は、`member: false` なら「`ce:ListCostAllocationTags` を許した profile で `diff` を打ち直す」、`member: true` なら「組織の管理のアカウント <ID> にタグの有効化を確かめて頼む（メンバーのアカウントでは権限を足しても有効にできない）。頼めなければ設定のファイルの `budget.scope` を `account` にする」、`unknown` なら両方を「組織に入っていなければ …。組織のメンバーなら …」の 2 つに分けて示す（管理のアカウントの ID は「組織の管理のアカウント」とだけ示す）
 - タグの行の文（設計文書の決定 6）: 「コスト配分タグ <有効でないタグ> が有効でない。有効になるまで予算は 0 を数え続け、予算の知らせは鳴らない。有効にする先: <先>。有効にできなければ設定のファイルの `budget.scope` を `account` にする（アカウントの全体を数える）」。<先> は `readOrganizationManager` が `member: false` なら「このアカウント（請求の画面のコスト配分タグ）」、`member: true` なら「組織の管理のアカウント <ID>（メンバーのアカウントでは有効にできない）」、`unknown` なら「組織に入っていなければこのアカウント、組織のメンバーなら組織の管理のアカウント」
-
-### `runGc` の手順
-
-更新の途中のスタックとは、`readStackActivity` の状態が `_IN_PROGRESS` で終わるもの（`REVIEW_IN_PROGRESS` を含む）である。
-
-| 段 | 確認の値なし | 確認の値あり |
-| --- | --- | --- |
-| 1 | profile を解く | profile を解く。`isTty()` が偽なら 2 で止まる（CLI の確かめが既定の答えで消すため） |
-| 2 | 更新の途中のスタックがあれば名前を示して 9 で止まる | `checkGcConfirmTarget` で対象と猶予と期限を照らす。`mismatch` か `expired` なら CLI を呼ばずに 7 で止まる（`mismatch` は「アカウント・リージョン・猶予の日数のどれかが 1 段目と違う」、`expired` は「1 段目から打ち直す」と示す）。資産の数はここでは読まない |
-| 3 | `print` を打ち、`parseGcPrint` で数を読む | 更新の途中のスタックがあれば 9 で止まる |
-| 4 | 「使われていない資産: イメージ <数>・ファイル <数>（猶予の内のものを含む。消える数ではない）」「戻しの猶予: <日数> 日・作った日の猶予: 1 日」「猶予を満了して消す資産の数は、確認の値つきで打つと CLI が一まとまりごとに示し、答えを求める」「確認の値: <値>（<時刻> まで有効）」を示して 0 で終わる | `print` を打ち、`parseGcPrint` で読んだ数を `checkGcConfirmCounts` で照らす。`changed` なら、今の数と新しい確認の値を示して 7 で止まる（何も消していない） |
-| 5 | — | `readStackActivity` を読み直し、更新の途中のスタックがあれば名前を示して `full` を呼ばずに 9 で止まる（段 3 の照らしと `print` の間に始まった更新を拾う。何も消していない） |
-| 6 | — | `gc` の開始の時刻を控え、`full` を `--confirm=true` で打つ。CLI の確かめの問いと答えは端末へそのまま通す |
-| 7 | — | `readStackActivity` を読み直し、更新の途中のスタックか、最後の更新が開始の時刻より後のスタックがあれば、名前と「その反映が終わった後に `diff` から打ち直す（消えた資産を発行し直す）」を示す。終了コードは CLI のとおり |
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `readCostAllocationTags` | 読めない | 権限が無い・組織の制限 | SDK の例外 | `readOrganizationManager` で原因を分け、「確かめられない」の 1 行に次の操作を添えて続ける | 一覧の 1 行（権限の不足なら profile の権限、組織のメンバーなら管理のアカウントへの依頼と `budget.scope: account`、分からなければ両方）。終了コードは変えない | 何も書いていない。再実行できる |
-| `runGc` | profile を解けない | 資格情報・リージョンが無い | `resolveProfile` | 止める | 今の `diff` と同じ文と終了コード | 再実行できる |
-| `runGc` | 確認の値が違う | 別のアカウント・リージョン・猶予の日数を変えた・値の形が違う | `checkGcConfirmTarget` の `mismatch`（`print` の前） | CLI を呼ばずに止める | 確認の値が違うと示し、今の `deploy` と同じ終了コード | 何も消していない |
-| `runGc` | 確認の値が古い | 発行から 60 分を過ぎた・以前に得た値の使い回し | `checkGcConfirmTarget` の `expired`（`print` の前） | CLI を呼ばずに止める | 1 段目から打ち直すと示し、7 | 何も消していない |
-| `runGc` | 使われていない資産が変わった | 1 段目の後に反映か削除があった | `checkGcConfirmCounts` の `changed`（`print` の後） | `full` を呼ばずに止める | 今の数と新しい確認の値を示し、7 | 何も消していない。新しい値で打ち直す |
-| `runGc` | 更新の途中のスタックがある | 反映・戻し・変更セットの待ち | `readStackActivity`（段 3 と、`full` の直前の段 5） | CLI か `full` を呼ばずに止める | スタックの名前を示し、9 | 何も消していない。反映が終わった後に打ち直す |
-| `runGc` | 端末でない | CI・パイプ・リダイレクト | `isTty` | 止める | 「端末から打つ」と示し、2 | 何も消していない |
-| `runGc` | 設置する人が CLI の問いに `n` を答えた | — | CLI の終了 | 止める | CLI の出力をそのまま流し、`EXIT.BUILD` | 答える前の一まとまりは消えている。打ち直しで残りを示し直す |
-| `runGc` | CLI が 0 以外で終わる | 権限・引数の変化・網 | 終了コード | 止める | CLI の出力をそのまま流し、`EXIT.BUILD` | タグを付けた分は残る。次の打ち直しで続く |
 
 ### 単体テストの観点
 
@@ -263,11 +278,6 @@ docs/operations/settings.md・setup.md
 | `collectMissingSettings` | 5 種類が当たる入力でそれぞれ 1 行。タグの行の <先> が `member: false`・`member: true`・`unknown` で 3 通りに変わる。タグを読めないときの行の <操作> も同じ 3 通りに変わり、`member: true` と `unknown` で管理のアカウントへの依頼と `budget.scope` の `account` が出る。`budget.scope` が `account` ならタグの行が出ない | 0 件で「無し」。AZ の数 2 で行が出ず 1 で出る | 照らしが投げると「確かめられない」の 1 行 |
 | `readGetAzsCount` | 既定のサブネットが 3 つの AZ にあれば 3 | 既定のサブネットが 1 つの AZ にだけあれば、使える AZ が 3 つでも 1。既定のサブネットが無ければ使える AZ の数 | — |
 | `runDiff` | 出力の最後に一覧の欄 | — | 足りない設定があっても終了コード 0 |
-| `parseArgs` | `gc` の 3 つの形 | 日数 1・365 は通り 0・366 は落ちる | `--profile` が無い |
-| `checkGcConfirmTarget`・`checkGcConfirmCounts` | 同じ対象・日数・数で `ok` | 発行から 60 分ちょうどは通り 60 分 1 秒は `expired` | 日数かアカウントが違えば数を渡さずに `mismatch`・形の壊れた値で `mismatch`・対象と日数が同じで数だけが違えば `changed` |
-| `runGc` | 確認の値なしで `print` だけを打つ・同じ確認の値で `full` を `--confirm=true` で打つ | — | 違う確認の値で CLI を（`print` も）呼ばない・同じ条件で以前に得た値（発行の時刻が古い）で `full` を呼ばない・数が変わると `full` を呼ばずに新しい値を示す・更新の途中のスタック（`UPDATE_IN_PROGRESS`・`REVIEW_IN_PROGRESS`）があると 9 で CLI を呼ばない・段 3 の照らしの後、`print` の間に更新が始まると（2 回目の `readStackActivity` が `UPDATE_IN_PROGRESS` を返す）9 で `full` を呼ばない・端末でないと 2・`full` の後に開始より後に更新したスタックがあると打ち直しを示す・CLI の失敗で `EXIT.BUILD` |
-| `parseGcPrint` | 固定の版の `print` の出力の見本から 2 つの数を読む | 0 件 | 形の違う出力で投げる |
-| `gc-cli.test.ts` | 固定の版の `cdk gc --help` に `gcCliArgs` が使う 6 つの引数がある。`parseGcPrint` が読む出力の形と、確かめの問いの文（「猶予を満了して消す数」を示す）が固定の版の CLI にある | — | 引数の名前・出力の形・問いの文が変わると落ちる |
 
 ## 反映のパイプライン
 
@@ -277,9 +287,11 @@ docs/operations/settings.md・setup.md
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `PipelineStack` の `constructor` | `infra/lib/pipeline-stack.ts` | 変更 | 変えない | 反映のアクションの CodeBuild を `privileged: true` にし、引き受けられる bootstrap の役割に `image-publishing` を足す。準備のアクションは変えない |
+| `PipelineStack` の `constructor` | `infra/lib/pipeline-stack.ts` | 変更 | 変えない | 準備のアクションの CodeBuild を `privileged: true` にし、その役割に `ecr:GetAuthorizationToken` と、自前のリポジトリ（`<prefix>-<environment>-` の頭の名前）への push と読みを許す。反映のアクションの役割に、同じリポジトリの `BatchGetImage`・`PutImage` を許す。引き受ける bootstrap の役割は今の `deploy`・`file-publishing` のままで、`image-publishing` は足さない |
+| `prepareBuildSpec` | 同上 | 変更 | 変えない | 合成の前に `node infra/setup/images-cli.ts push --settings <設定> --out cdk.out` を打ち、`ND_IMAGES` を付けて合成する |
+| `deployBuildSpec` | 同上 | 変更 | 変えない | 要約値を照らした後・反映の前に `images-cli.ts check --assembly cdk.out` を、反映の後に `images-cli.ts tag --assembly cdk.out` を打つ |
 
-`docs/operations/setup.md` の前提の表に Docker（`deploy` を打つ端末）を足し、手順に「イメージの資産を初めて入れる版は、パイプラインのスタックを先に反映する」と「`gc` を月に 1 回、反映と同時でない時に打つ」を足す。あわせて、先の反映の前に保存するもの・戻しを始める条件・前の版へ戻す 4 つの段（設計文書の決定 11）を、運用する環境の節に手順として写す。
+`docs/operations/setup.md` の前提の表に Docker（`diff` を打つ端末）を足し、手順に「パイプラインで初めてイメージを引く版は、パイプラインのスタックを先に反映する」と「初めての設置は、ECR を作る反映の後にもう一度 `diff` と `deploy` を打つ」を足す。あわせて、先の反映の前に保存するもの・戻しを始める条件・前の版へ戻す 4 つの段（設計文書の決定 11）を、運用する環境の節に手順として写す。
 
 ## DB の用意のタスク
 
@@ -366,7 +378,7 @@ CI の `check` のジョブに `postgres:16`（要約値で固定）のサービ
 
 ## 実測と戻しの予行の手順
 
-満たす決定: 決定 1・10・13、受け入れ条件 6・7・9
+満たす決定: 決定 1・2・10・13、受け入れ条件 6・7・9
 
 リリース承認ゲートの承認の後、運用する人が反映した環境で行い、結果を #13 のリリース後テストのコメントと、全体の設計の費用の見込み・未確認のまま残ることへ返す。値はリポジトリと課題に書かず、比と時間と回数だけを書く。接続する項目は #44 が受ける。
 
@@ -374,38 +386,6 @@ CI の `check` のジョブに `postgres:16`（要約値で固定）のサービ
 | --- | --- | --- | --- |
 | M1 | 接続の無い間の一時停止 | 反映の後 3 日、CloudWatch の `ServerlessDatabaseCapacity` を 5 分の粒度で読み、0 でない時間の合計と起きた回数を数える | 0 でない時間が保守の起き上がり（1 回 20 分程度）だけ |
 | M2 | 単価 | EventBridge Scheduler・DynamoDB の PITR とストリームの単価の頁を、設置したリージョンで読む | 見込みの額への効きを全体の設計の見込みに書く |
-| M3 | `gc` | 下の「M3 の手順」。段 7 のほかは運用する環境でなく専用の検証先で行う。参照中・猶予の内・猶予を満了した資産をそろえ、満了した分だけが消えることを読む | 下の表の合格の条件をすべて満たす。削除が 1 件も起きなければ不合格 |
+| M3 | ECR のライフサイクルの規則 | 反映の後に、DB の用意のリポジトリで `deployed-` の印が付いたことを読み、ライフサイクルの規則の試し（`StartLifecyclePolicyPreview`）を打って、消える予定の版を読む。戻しの予行（M4）の後にもう一度試しを打つ。あわせて、同じダイジェストへタグを足した前後で、イメージの push の時刻（`imagePushedAt`）が変わらないことを読む | 使用中の版と M4 の戻し先の版が消える予定に入らない。印の無い版だけが日数で消える予定に入る |
 | M4 | 戻しの予行 | 決定 10 の手順。戻す前に、Aurora のクラスタの識別子とリソースの ID（`DescribeDBClusters` の `DbClusterResourceId`）・利用者の表の項目の数と作り物の目印の項目 1 件を控える。前の合成の結果を `deploy` し、同じ値を読み直し、確認の値の照らしを読む | クラスタの識別子とリソースの ID が前後で同じ・利用者の表の項目の数と目印の項目が残る・確認の値の違う `deploy` が止まる。プロジェクトのデータベースの残りは確かめない（#44 が受ける） |
 | M5 | 予算と運用の知らせ | 予算を 1 ドルにした設定で `diff`・`deploy` し、知らせのメールが届くことを読んだ後に戻す | 宛先に届く |
-
-### M3 の手順
-
-戻しの猶予の既定 30 日を待たずに満了を作るため、予行では `--rollback-buffer-days 1` を使う（作った日の猶予は固定の 1 日）。
-
-**検証先**: `cdk gc` はアカウント・リージョンの全体の資産を見るため、1 日の猶予は A・B・C 以外の資産（運用する環境の戻し用の古い版・同じ bootstrap を使うほかのアプリの資産）も消しうる。そのため段 0〜6 と 60 分・`UPDATE_IN_PROGRESS` の照らしは、運用する環境ではなく、M3 のためだけに用意した検証先で行う。検証先は、nd-factory もほかのアプリも置いていないアカウント（無ければ、どのアプリも置いていないリージョン）を、運用する環境と同じ固定の版の CLI で新しく bootstrap したものとし、設定のファイルは検証先の profile と検証先の名前の接頭辞で作る。`--rollback-buffer-days 1` を運用する環境の profile で打たない。段 7 だけは運用する環境で既定の 30 日で打つ。M3 を終えたら検証先の `app` のスタックと、削除の保護を外したうえで残す設定の資源（Aurora のクラスタ・表・バケット）を消す。
-
-**版の作り方**: 資産は DB の用意のイメージの資産と、API の関数のファイルの資産を使う。タスクの定義の環境の値はテンプレートにしか入らず、資産の要約値を変えないため使わない。版 A・B・C は、取り込まない予行の枝の上で、2 つの資産のビルドの入力をどちらも版ごとに変えて作る。
-
-- イメージ: ビルドの文脈に入る `apps/db-prep` の下の目印のファイル（例 `apps/db-prep/rehearsal-mark.txt`。中身を `A`・`B`・`C` にする）。資産の `exclude` で外れない場所に置く
-- ファイル: API の関数が束ねた出力に残る値（例 `apps/api/src/users-handler.ts` の応答のヘッダーに載せる目印の文字列 `A`・`B`・`C`）。コメントや使われない定数は束ねる時の minify で消え、ファイルの資産の要約値が変わらないため使わない
-
-各版で `diff --out <版の置き場>` を打ったら、置き場の `*.assets.json` から app のスタックのイメージの資産の識別子（`dockerImages` のキー）とファイルの資産の識別子（`files` のうち API の関数の zip のキー）を控え、どちらも前の版と違うことを読む。違わなければ反映せずに目印の置き場を直す。反映の後に `GetTemplate` で反映したテンプレートを読み、タスクの定義のイメージの URI のタグと関数の `Code.S3Key` が、控えたその版の識別子と同じであることを読む。版 X の分とは、版 X の `*.assets.json` にあって次の版の `*.assets.json` に無い資産（2 つの識別子に加え、変わったテンプレートのファイルなど）の集まりとし、段 5 の数はこの集まりと比べる。
-
-| 段 | 行うこと | 読むこと |
-| --- | --- | --- |
-| 0 | 検証先を bootstrap した直後に `gc --rollback-buffer-days 1` の 1 段目を打つ | 使われていない資産がイメージ 0・ファイル 0。0 でなければ検証先に他の資産があるため、その検証先を使わない |
-| 1 | 版 A を反映し、2 日待つ（A の資産が作った日の猶予を過ぎる） | 上の「版の作り方」の識別子 |
-| 2 | 版 B を反映する（A の資産が使われなくなる）。`gc --rollback-buffer-days 1` の 1 段目と 2 段目を打つ | B の識別子。A の資産に日付のタグが付き、消えない（使われなくなった印を付けたばかりで猶予の内）。CLI の問いの「消す数」が 0 |
-| 3 | 2 日待つ（A の印が 1 日の猶予を満了し、B の資産が作った日の猶予を過ぎる）。版 C を反映する（B の資産が使われなくなる） | C の識別子 |
-| 4 | `gc --rollback-buffer-days 1` の 1 段目を打つ | 使われていない資産の数が A の分と B の分の和と同じ |
-| 5 | 2 段目を打ち、CLI の問いに答える | CLI の問いの「消す数」が A の分の数と同じ |
-| 6 | 資産のリポジトリとバケットを読む | 下の合格の条件 |
-| 7 | 運用する環境で、戻しの予行（M4）の後に、既定の 30 日で `gc` の 1 段目と 2 段目を打つ | M4 で使われなくなった版の資産が消えない（猶予の内） |
-
-| 資産 | 段 6 の時点の扱い | 合格の条件 |
-| --- | --- | --- |
-| 版 C の資産（控えた 2 つの識別子） | 参照中 | 残る・印が無い |
-| 版 B の分 | 猶予の内（段 5 で初めて印が付く） | 残る・印が付く |
-| 版 A の分 | 猶予を満了 | 消える |
-
-あわせて、検証先で、段 2 の後に `gc` の 1 段目で得た確認の値を 60 分の後に使うと 7 で止まること、反映の途中（`UPDATE_IN_PROGRESS`）に 2 段目を打つと 9 で止まることを読む。
