@@ -138,7 +138,7 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 
 各コマンドには、`deploy` に渡した profile と、そのリージョンを `--profile <profile> --region <region>` で必ず渡す。省くと既定の profile とリージョン（環境変数 `AWS_PROFILE`・`AWS_REGION` を含む）が先になり、同じ接頭辞と環境の名前を持つ別のアカウントかリージョンの DB・秘密の器・表を消しうる。初めに接続先を確かめる。
 
-0. 接続先を確かめる: `aws configure get region --profile <profile>` の値を `<region>` とし、`aws sts get-caller-identity --profile <profile> --region <region> --query Account` が反映した先のアカウントであることを見る
+0. 接続先を確かめる: 反映したときに `diff` が出し `deploy` へ渡した確認の値（`<要約値>:<アカウント>:<リージョン>:<スタックの一覧>`）の 3 つ目を `<region>`、2 つ目を反映した先のアカウントとする。profile の `region`（`aws configure get region`）は使わない。反映のときに環境変数 `AWS_REGION` が先になっていると、実際の反映先と食い違う。`aws sts get-caller-identity --profile <profile> --region <region> --query Account` が確認の値のアカウントと同じであることを見る
 
 以下の 1〜6 の AWS CLI のコマンドは、どれも末尾に `--profile <profile> --region <region>` を付けて打つ（例では「…」と略す）。
 
