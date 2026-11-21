@@ -125,7 +125,7 @@ graph TD
 - **壊れうる箇所**:
   - 対応の行が無い・結んでいない主体の扱いを誤ると、人の要求がすべて 401 になるか、外したログインで人として通る。認証の単体テストで、`auth_time` が `bound_auth_time` の前と同じ時刻・失効の待ちの間・`revoked_before` の前後を縛る（[詳細設計のテスト](../docs/design/detail.md)）
   - `SIGNOUT_SETTLE_MS`（15 分）は、Cognito が受けた要求を処理し終えるか捨てるまでの時間の上限として置いた値で、Cognito がその上限を文書で示しているかは未確認である。越えたときに起きるのは結び直した後のサインインし直しだけ（決定 3 の代償）
-  - `/me/logins/return` を直に開いて `index.html` が返ることは、配信の試しで確かめる。CloudFront Function と Cognito の設定（managed login・2 つの戻り先）を作る子は、この差分では決めていない
+  - `/me/logins/return` と `/signed-out` を直に開いて `index.html` が返ることは、配信の試しで確かめる。CloudFront Function と Cognito の設定（managed login・サインインの 2 つの戻り先・サインアウトの専用の戻り先）を作る子は、この差分では決めていない
   - 失効の「行う予定」の行は、確定の後の 1 回の起動と見回りが実行する。見回りの間隔だけ失効が遅れうるが、その間は `signing_out` のまま 401 で、外したログインで人として通ることは無い
 
 ## 同じ PR に載せた行の版の詳細設計の直し（#79）
