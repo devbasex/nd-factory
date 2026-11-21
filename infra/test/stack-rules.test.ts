@@ -1,4 +1,4 @@
-import { App, type CfnElement, type CfnResource, RemovalPolicy } from "aws-cdk-lib";
+import { App, type CfnElement, CfnResource, RemovalPolicy } from "aws-cdk-lib";
 import { Template } from "aws-cdk-lib/assertions";
 import { AttributeType, TableV2 } from "aws-cdk-lib/aws-dynamodb";
 import { CfnNatGateway, CfnSecurityGroupIngress, Peer, Port } from "aws-cdk-lib/aws-ec2";
@@ -7,6 +7,7 @@ import { ManagedPolicy, Policy, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { CfnFunction } from "aws-cdk-lib/aws-lambda";
 import { CfnDBInstance } from "aws-cdk-lib/aws-rds";
 import { describe, expect, it } from "vitest";
+import type { Construct } from "constructs";
 import { AppStack } from "../lib/app-stack.ts";
 import { BASE_SETTINGS, TEST_ENV, type StackRule, hourlyCostResources, stackRuleViolations, tempWebDist } from "./support.ts";
 
@@ -24,6 +25,13 @@ function idOf(stack: AppStack, el: CfnElement): string {
 
 function clusterOf(stack: AppStack): CfnResource {
   return stack.progressDb.cluster.node.defaultChild as CfnResource;
+}
+
+// 構成の下にある、その種類の L1 の資源（ただ 1 つ）
+function cfnOf(scope: Construct, type: string): CfnResource {
+  const found = scope.node.findAll().filter((c): c is CfnResource => CfnResource.isCfnResource(c) && c.cfnResourceType === type);
+  expect(found).toHaveLength(1);
+  return found[0]!;
 }
 
 // 違反を 1 つ足し、当たるべき論理 ID を返す
@@ -75,6 +83,55 @@ describe("stackRuleViolations", () => {
     const stack = newStack();
     const id = BREAKS[rule](stack);
     expect(stackRuleViolations(Template.fromStack(stack))).toEqual([{ rule, id }]);
+  });
+
+  // 残す資源が参照する資源も、消しと置き換えの両方で残す
+  const DELETABLE_BREAKS: [string, (stack: AppStack) => CfnResource][] = [
+    ["クラスタの置き換えの方針を Delete にする", (stack) => {
+      clusterOf(stack).addOverride("UpdateReplacePolicy", "Delete");
+      return clusterOf(stack);
+    }],
+    ["書き手を消す", (stack) => {
+      const writer = cfnOf(stack.progressDb, "AWS::RDS::DBInstance");
+      writer.applyRemovalPolicy(RemovalPolicy.DESTROY);
+      return writer;
+    }],
+    ["管理の役割の秘密の器を消す", (stack) => {
+      const secret = cfnOf(stack.progressDb, "AWS::SecretsManager::Secret");
+      secret.applyRemovalPolicy(RemovalPolicy.DESTROY);
+      return secret;
+    }],
+    ["パラメーターのグループを消す", (stack) => {
+      const group = cfnOf(stack.progressDb, "AWS::RDS::DBClusterParameterGroup");
+      group.applyRemovalPolicy(RemovalPolicy.DESTROY);
+      return group;
+    }],
+    ["サブネットのグループを消す", (stack) => {
+      const group = cfnOf(stack.progressDb, "AWS::RDS::DBSubnetGroup");
+      group.applyRemovalPolicy(RemovalPolicy.DESTROY);
+      return group;
+    }],
+    ["DB の SG を消す", (stack) => {
+      const sg = stack.network.dbSecurityGroup.node.defaultChild as CfnResource;
+      sg.applyRemovalPolicy(RemovalPolicy.DESTROY);
+      return sg;
+    }],
+    ["出口の無いサブネットを消す", (stack) => {
+      const subnet = stack.network.vpc.isolatedSubnets[0]!.node.defaultChild as CfnResource;
+      subnet.applyRemovalPolicy(RemovalPolicy.DESTROY);
+      return subnet;
+    }],
+    ["VPC を消す", (stack) => {
+      const vpc = stack.network.vpc.node.defaultChild as CfnResource;
+      vpc.applyRemovalPolicy(RemovalPolicy.DESTROY);
+      return vpc;
+    }],
+  ];
+
+  it.each(DELETABLE_BREAKS)("deletable: %s と、その 1 件だけを返す", (_, breakIt) => {
+    const stack = newStack();
+    const id = idOf(stack, breakIt(stack));
+    expect(stackRuleViolations(Template.fromStack(stack))).toEqual([{ rule: "deletable", id }]);
   });
 
   it("タスクの SG を指す別の受け入れの資源も task_ingress に当たる", () => {

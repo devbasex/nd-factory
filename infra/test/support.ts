@@ -47,6 +47,7 @@ type Resource = {
   Type: string;
   Properties?: Record<string, unknown>;
   DeletionPolicy?: string;
+  UpdateReplacePolicy?: string;
   DependsOn?: string | string[];
 };
 type Resources = Record<string, Resource>;
@@ -120,7 +121,33 @@ export type StackRule = (typeof STACK_RULES)[number];
 export type StackRuleViolation = { rule: StackRule; id: string };
 
 const TABLE_TYPES = ["AWS::DynamoDB::Table", "AWS::DynamoDB::GlobalTable"];
-const RETAINED_TYPES = [...TABLE_TYPES, "AWS::S3::Bucket", "AWS::RDS::DBCluster"];
+// スタックを消しても、置き換えが起きても残す資源の種類。決まりはこれらと、これらが参照する資源（DB のグループ・
+// サブネット・SG・VPC・管理の役割の秘密の器など）のすべてに当てる。参照先を消そうとすると使用中として拒まれるか、
+// 残した資源が読めなくなるため
+const RETAINED_ROOT_TYPES = [...TABLE_TYPES, "AWS::S3::Bucket", "AWS::RDS::DBCluster", "AWS::RDS::DBInstance"];
+
+// 値の中の参照（Ref か Fn::GetAtt）が指す論理 ID をすべて集める
+function refsIn(value: unknown, out: Set<string>): void {
+  if (value === null || typeof value !== "object") return;
+  const target = refTarget(value);
+  if (target) out.add(target);
+  for (const v of Array.isArray(value) ? value : Object.values(value)) refsIn(v, out);
+}
+
+// 残す資源と、それらが参照で辿れる資源
+function retainedIds(all: Resources): Set<string> {
+  const ids = new Set<string>();
+  const queue = Object.keys(all).filter((id) => RETAINED_ROOT_TYPES.includes(all[id]!.Type));
+  while (queue.length > 0) {
+    const id = queue.pop()!;
+    if (ids.has(id) || !all[id]) continue;
+    ids.add(id);
+    const refs = new Set<string>();
+    refsIn(all[id]!.Properties, refs);
+    queue.push(...refs);
+  }
+  return ids;
+}
 
 function nonEmpty(value: unknown): boolean {
   return Array.isArray(value) ? value.length > 0 : value !== undefined;
@@ -161,6 +188,7 @@ export function stackRuleViolations(template: Template): StackRuleViolation[] {
   const all = resources(template);
   const taskRoles = taskRoleIds(all);
   const taskSgs = taskSecurityGroupIds(all);
+  const retained = retainedIds(all);
   const out: StackRuleViolation[] = [];
   for (const [id, r] of Object.entries(all)) {
     const p = r.Properties ?? {};
@@ -184,7 +212,9 @@ export function stackRuleViolations(template: Template): StackRuleViolation[] {
       const scaling = p.ServerlessV2ScalingConfiguration as { MinCapacity?: unknown } | undefined;
       if (scaling?.MinCapacity !== 0) out.push({ rule: "aurora_min", id });
     }
-    if (RETAINED_TYPES.includes(r.Type) && r.DeletionPolicy !== "Retain") out.push({ rule: "deletable", id });
+    if (retained.has(id) && (r.DeletionPolicy !== "Retain" || r.UpdateReplacePolicy !== "Retain")) {
+      out.push({ rule: "deletable", id });
+    }
     if (TABLE_TYPES.includes(r.Type) && !pitrEnabled(r)) out.push({ rule: "pitr", id });
   }
   return out;
