@@ -122,7 +122,7 @@ flowchart LR
 ### 決定 108: 区間の報告を契約に載るものだけで読むため、決まりの出所を契約の `C/hooks/unattended-report.json` にし、読む項目を契約の項目と照らす
 
 - **質問**: v11.0.12 の契約に区間の報告の決まり（`C/hooks/unattended-report.json`）が入った。全体の設計は「最後の行で読む」を契約の外（`asking.md`）とし、区分・承認ゲート・問い・Pull Request・材料・人に頼むこと・理由・`次のコマンド:` の行を報告から読む。決まりの出所と読む項目をどうそろえるか
-- **選んだ案**: 「区間と結果の行」の決まりの表の出所を `C/hooks/unattended-report.json` にする（最後の `- 結果:` の行は `rule`、値の 3 つは `shape.values`、項目は `shape.items`、値ごとに要る項目は `shape.required`、材料の形は `shape.material`）。`report-unattended` の口は「`C/hooks/unattended-report.json` の形で区間の報告を読む」と書く。報告から読む項目は契約の項目の名前で書き（問いは項目「質問」）、報告の項目「承認ゲート」の値と、承認ゲートの正規の名前を分ける。契約の例ではこの項目に「設計 Pull Request のマージ」「設計承認ゲートの委任の承認」「本番系へ届く操作」など止まった操作の文言が入り、全体の設計が API・画面・事象に許す正規の名前「設計承認ゲート」「リリース承認ゲート」とは値が違う。そこで正規の名前は報告の項目から読まず、区分から決める（`ndf-gate:1` は設計承認ゲート、`ndf-gate:2` はリリース承認ゲート、`ndf-ask:redline:<番号>` は承認ゲートの名前を持たない）。報告の項目「承認ゲート」の文言は題にだけ使う。契約に無い 2 つは次のとおり扱う。承認資料の「題」は報告から読まず、ランナーが作る。承認ゲートの項目は区分が `ndf-gate:` で始まるときだけ要る（`shape.required`）ので、題は次の規則で作る。承認ゲートの項目があり値が「無し」でなければ、その文言と問い（項目「質問」）から作る。承認ゲートの項目が無いか値が「無し」なら（区分が `ndf-ask:redline:<番号>` の承認の依頼など）、問い（項目「質問」）だけから作る。`ndf-ask:human-action` の後の `次のコマンド:` の行は、v11.0.12 の手順書 `plugins/ndf/skills/development-workflow/references/asking.md` の「人のいない実行」が「区分が `ndf-ask:human-action`（人の操作待ち）なら、再開用に `次のコマンド:` を残して終えてよい」と書き、守り（`src/ndf/domains/hooks/guards/unattended.py` の `unattended`）も同じ区分のときは変更を要求しないので、報告に残すことはできる。ただし手順書の文は「残してよい」で、行は任意である。行は `shape.items` に無く、契約は続きの区間を起こすのに使える項目としてこの行を定めていない（守りの例外も契約の `hooks/guards.json` には無い）。上流へ確かめるのは、この任意の行を再開に使える項目として契約に定めるかの 1 点で、これを「未確認のまま残ること」に置き、決定 106 の依頼に含める
+- **選んだ案**: 「区間と結果の行」の決まりの表の出所を `C/hooks/unattended-report.json` にする（最後の `- 結果:` の行は `rule`、値の 3 つは `shape.values`、項目は `shape.items`、値ごとに要る項目は `shape.required`、材料の形は `shape.material`）。`report-unattended` の口は「`C/hooks/unattended-report.json` の形で区間の報告を読む」と書く。報告から読む項目は契約の項目の名前で書き（問いは項目「質問」）、報告の項目「承認ゲート」の値と、承認ゲートの正規の名前を分ける。契約の例ではこの項目に「設計 Pull Request のマージ」「設計承認ゲートの委任の承認」「本番系へ届く操作」など止まった操作の文言が入り、全体の設計が API・画面・事象に許す正規の名前「設計承認ゲート」「リリース承認ゲート」とは値が違う。そこで正規の名前は報告の項目から読まず、区分から決める（`ndf-gate:1` は設計承認ゲート、`ndf-gate:2` はリリース承認ゲート、`ndf-ask:redline:<番号>` は承認ゲートの名前を持たない）。報告の項目「承認ゲート」の文言は題にだけ使う。契約に無い 2 つは次のとおり扱う。承認資料の「題」は報告から読まず、ランナーが作る。承認ゲートの項目は区分が `ndf-gate:` で始まるときだけ要る（`shape.required`）ので、題は次の規則で作る。承認ゲートの項目があり値が「無し」でなければ、その文言と問い（項目「質問」）から作る。承認ゲートの項目が無いか値が「無し」なら（区分が `ndf-ask:redline:<番号>` の承認の依頼など）、問い（項目「質問」）だけから作る。`ndf-ask:human-action` の後の `次のコマンド:` の行は、v11.0.12 の手順書 `plugins/ndf/skills/development-workflow/references/asking.md` の「人のいない実行」が「区分が `ndf-ask:human-action`（人の操作待ち）なら、再開用に `次のコマンド:` を残して終えてよい」と書き、守り（`src/ndf/domains/hooks/guards/unattended.py` の `unattended`）も同じ区分のときは変更を要求しないので、報告に残すことはできる。ただし手順書の文は「残してよい」で、行は任意である。行は `shape.items` に無く、契約は続きの区間を起こすのに使える項目としてこの行を定めていない（守りの例外も契約の `hooks/guards.json` には無い）。上流へ確かめるのは、この任意の行を再開に使える項目として契約に定めるかの 1 点で、これを「未確認のまま残ること」に置き、決定 106 の依頼に含める。定まるまでは行を使わず、人が「済んだ」と答えたらレーンを「失敗」（理由のコード `human_action_resume_undefined`）にして始めた人へ知らせ、人は新しいスプリントで続ける（行の無い報告も契約では有効なため、行に頼ると続けられないレーンが出る）。承認資料の Pull Request の情報は、報告の項目「Pull Request」が URL のときだけ読み、無いか「無し」（設計承認ゲートの委任の承認・リリース承認ゲートの例）なら持たず、`ndf answer` に `--head` を付けない（`--head` は契約の必須の引数でない）。F23 の照らす項目に `C/hooks/unattended-report.json` の `shape` と `cases` の見本を足し、`shape.items` の差分を落ちたときの要約に並べる
 - 採らなかった案: 出所を `asking.md` のまま残す（契約に入った決まりを契約の外で読むことになり、F23 が食い違いを拾えない）
 - 採らなかった案: 契約の `source` の注（「Factory のランナーが読むのは結果の行だけで、ほかの項目は人が読む」）に合わせ、ランナーは結果の値だけを読み、承認の依頼の中身を人に読ませる（承認の依頼の区分と承認ゲートを選べず、E10 が成り立たない。項目の名前と要る項目は `shape` に契約として載っているので、読むのは契約の内である）
 - **代償**: 上流の注はランナーが結果の行だけを読む前提で書かれており、項目の名前を上流が手順書の語に合わせて変えると、nd-factory の読み方も変わる（F23 が `shape.items` の差分として知らせる）。`report-unattended` の行の `source` が無い置き場を指すため、#1 の照合の検査は置き場を `source` からでなく `C/hooks/unattended-report.json` として読む
@@ -147,7 +147,7 @@ flowchart LR
 | 受け入れ条件・決定 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 受け入れ条件 1（`ndf_ref` の付け替え） | 参照の検査（CI の `ref-check`）が、`ndf_ref` のキーが `ndf-pin.json` の 1 か所だけにあることを照らす。値は `gh api repos/devbasex/ai-plugins/git/ref/tags/ndf--v11.0.12` の `object.sha` と照らす（マージ前の手動確認） | `ndf_ref` を他の JSON にも書くと `ref-check` が落ちる。値が v11.0.12 のタグのコミットと違えば手動確認で見つかる |
-| 受け入れ条件 2（古い名前が残らない） | `git grep -nE 'plugins/ndf-next/contracts\|spec-declarations\|table_id' -- docs/design` が 0 件（マージ前の手動確認と cross-review） | 直し漏れの 1 か所があれば 1 件以上になる |
+| 受け入れ条件 2（古い名前が残らない） | `git grep -nF -e 'plugins/ndf-next/contracts' -e 'spec-declarations' -e 'table_id' -- docs/design` が 0 件（マージ前の手動確認と cross-review） | 直し漏れの 1 か所があれば 1 件以上になる |
 | 受け入れ条件 3（版と sha256） | 全体の設計の「契約の版の照らし」の行の版と 64 桁の sha256 が、固定の点の `plugins/ndf/contracts/version.json` の `history` の最後の行と一致する（マージ前の手動確認。`gh api -H 'Accept: application/vnd.github.raw+json' 'repos/devbasex/ai-plugins/contents/plugins/ndf/contracts/version.json?ref=752a9cf48a6d36c00ffb3197c8668d1c898c32e2' \| jq -c '.history[-1]'` の値と照らす） | 版 6・7 や sha256 の写し間違いで一致しない |
 | 受け入れ条件 4（STD62・STD63） | STD62・STD63 の出典の列が `plugins/ndf/contracts/` と 2026-11-21 を持つ | 置き場か日付の片方だけを直すと読み手が見つける（cross-review） |
 | 受け入れ条件 5・決定 106 | 「未確認のまま残ること」の「問いと承認ゲートの ID の得方」の行が、上流への依頼と、足されるまで #6 が前提にしないことを書く | 行が `table_id` のままか、扱いが無いと cross-review が落とす |
@@ -159,6 +159,8 @@ flowchart LR
 
 ## どこを変えるか
 
+実装計画は省く（機能追加・課題 1・公開インタフェースに触れない・触るファイル 3・設計書を省いていない・準備のリファクタリングをしない）。レビューの単位はこの課題 1 つ、リファクタリングの時機は TDD のステップだけである。
+
 詳細設計はこのセクションに畳む。新設する関数 0・シグネチャを変える関数 0 のため（文書と固定の値だけの変更）。
 
 | ファイル | 変える中身 | 決定 |
@@ -169,10 +171,10 @@ flowchart LR
 | `docs/design/execution.md` | 「NDF との契約」の「契約の版の照らし」の行: 置き場の列を「`C/version.json`（固定の点で版 8・sha256 `ed8b036584bec284dfc93a2bb5b988e2385b4f8f297d659399f5d3cb91b520c4`。受ける組はこの 1 つ）」にする。sha256 は略さず 64 桁で書き、#2 が受ける組をこの行からそのまま写せるようにする | 104 |
 | `docs/design/execution.md` | 「使う口」の「使わない口」: `spec-declarations` を `spec-ndf_settings` にする | 104 |
 | `docs/design/execution.md` | 「使う口」の `report-unattended` の行: 「`C/hooks/unattended-report.json` の形（`rule`・`shape`）で区間の報告を読む」にする | 108 |
-| `docs/design/execution.md` | 「区間と結果の行」: 決まりの表を、最後の行の読み方は `rule`、値の 3 つは `shape.values`、項目と値ごとに要る項目は `shape.items`・`shape.required`、材料の形は `shape.material`（すべて `C/hooks/unattended-report.json`）にし、「契約のファイルには無い」を消す。結果の表の「問い」を「問い（項目「質問」）」にし、`ndf-ask:human-action` の行の `次のコマンド:` は未確認を指す | 108 |
-| `docs/design/execution.md` | 「承認資料」: 「題・区分・承認ゲート・問い」の出所を次のように分けて書く。区分と問い（項目「質問」）は区間の報告から読む。承認ゲートの正規の名前は報告の項目から読まず、区分から決める（`ndf-gate:1` は「設計承認ゲート」、`ndf-gate:2` は「リリース承認ゲート」、`ndf-ask:redline:<番号>` は承認ゲートの名前を持たず「無し」と表に書く）。報告の項目「承認ゲート」の文言（「設計 Pull Request のマージ」「本番系へ届く操作」など）は正規の名前ではなく、題にだけ使う。題はランナーがその文言と問いから作り、項目が無いか「無し」なら（`ndf-ask:redline:<番号>` など）問いだけから作る | 108 |
-| `docs/design/execution.md` | 「契約の照合の定期の検査」: 読む先を「ai-plugins の既定の枝（`default_branch`）の先端の契約」、落ちたときの「develop の先端」を「既定の枝の先端」にする | 107 |
-| `docs/design/execution.md` | 「ランナーの責務」の照らす・「確定から NDF まで」の図・「問いの答え」の本文: 「表の ID」を「進行表の ID（`machine_id`）」にする。「問いの答え」の未確認の文は決定 106 の依頼を指し、`次のコマンド:` の行の文は未確認（決定 108）を指す | 105・106・108 |
+| `docs/design/execution.md` | 「区間と結果の行」: 決まりの表を、最後の行の読み方は `rule`、値の 3 つは `shape.values`、項目と値ごとに要る項目は `shape.items`・`shape.required`、材料の形は `shape.material`（すべて `C/hooks/unattended-report.json`）にし、「契約のファイルには無い」を消す。結果の表の「問い」を「問い（項目「質問」）」にし、`ndf-ask:human-action` の行は、続きの起こし方が契約に定まるまで「済んだ」でレーンを失敗（`human_action_resume_undefined`）にすると書き、未確認を指す。「レーンの終わり方」のやり直しの行とレーンの状態の図（人を待つ・休止から失敗）も合わせる。全体の概要の E13 も合わせる | 108 |
+| `docs/design/execution.md` | 「承認資料」: 「題・区分・承認ゲート・問い」の出所を次のように分けて書く。区分と問い（項目「質問」）は区間の報告から読む。承認ゲートの正規の名前は報告の項目から読まず、区分から決める（`ndf-gate:1` は「設計承認ゲート」、`ndf-gate:2` は「リリース承認ゲート」、`ndf-ask:redline:<番号>` は承認ゲートの名前を持たず「無し」と表に書く）。報告の項目「承認ゲート」の文言（「設計 Pull Request のマージ」「本番系へ届く操作」など）は正規の名前ではなく、題にだけ使う。題はランナーがその文言と問いから作り、項目が無いか「無し」なら（`ndf-ask:redline:<番号>` など）問いだけから作る。Pull Request の URL・head の SHA などは報告の項目「Pull Request」が URL のときだけ読み、要約値はそのときだけ head の SHA を含む | 108 |
+| `docs/design/execution.md` | 「契約の照合の定期の検査」: 読む先を「ai-plugins の既定の枝（`default_branch`）の先端の契約」、落ちたときの「develop の先端」を「既定の枝の先端」にする。照らす項目に `C/hooks/unattended-report.json` の `shape` と `cases` の見本を足し、落ちたときの要約に `shape.items` などの差分を並べる | 107・108 |
+| `docs/design/execution.md` | 「ランナーの責務」の照らす・「確定から NDF まで」の図・「問いの答え」の本文: 「表の ID」を「進行表の ID（`machine_id`）」にする。「問いの答え」の未確認の文は決定 106 の依頼を指し、`ndf-ask:human-action` の「済んだ」は契約に定まるまでレーンを失敗にする（決定 108）と書く。「確定から NDF まで」の図と `--head` の行は、Pull Request があるときだけ `--head` を付けると書く | 105・106・108 |
 | `docs/design/execution.md` | 「決定の記録」: 決定 79 の見出しと本文の「develop の先端」を「既定の枝の先端」にし、移した理由を 1 行足す。決定 104〜108 を足す | 104〜108 |
 | `docs/design/execution.md` | 「外部の調査」: STD62・STD63 を `plugins/ndf/contracts/`・`machine_id`（引数と結果の `metrics.machine_id`）・2026-11-21 に直し、STD64（ai-plugins の枝とタグ）と STD65（区間の報告の契約）を足す | 104・107・108 |
 | `docs/design/execution.md` | 「未確認のまま残ること」: 「問いと承認ゲートの ID の得方」の行を `machine_id` と上流への依頼（決定 106）に直す。この行の「いつ・何で分かるか」が実測でなくなるため、直後の「防ぐ守りの下での承認ゲート」の行の「同上」を「固定の版の NDF の試しの進行表で承認ゲートを 1 回通して確かめる」と書き下し、続く行の「同上」がこの行を指すようにする。「答えの事象の項目」の「表の ID」を「進行表の ID」にする。`ndf-ask:human-action` の後の続きの区間の起こし方（`次のコマンド:` の行が `shape.items` に無い）と、`report-unattended` の `source` が無い置き場を指す件の 2 行を足す | 105・106・108 |
@@ -196,7 +198,7 @@ flowchart LR
 | --- | --- |
 | 上流が `ask-journal` の `fields` を足すか | 依頼の課題への上流の答えで分かる。足されたら、その配布の点へ付け替える Pull Request で「未確認のまま残ること」の行を消す |
 | 契約の `report-unattended` の出所のファイル | v11.0.12 の `entrypoints.json` の `report-unattended` の行は出所を `plugins/ndf/contracts/forms/unattended-report.json` とするが、`forms/` は無く、同じ名前の契約は `C/hooks/unattended-report.json` にある（`hooks/guards.json` の `unattended` もこの置き場を引く）。全体の設計はこの置き場を読む（決定 108）。`source` の直しは決定 106 の依頼に含め、上流の答えで分かる |
-| `ndf-ask:human-action` の後の続きの区間の起こし方 | 全体の設計は人が「済んだ」と答えたら区間の報告の `次のコマンド:` の行で続きを起こす。v11.0.12 の手順書 `asking.md` の「人のいない実行」は、区分 `ndf-ask:human-action` なら再開用に `次のコマンド:` を残して終えてよいと書き、守り（`guards/unattended.py`）もそれを通すので、行は報告に残せる。未確認なのは、この行が手順書でも任意（「残してよい」）で、`shape.items` に無く、再開に使える項目として契約に定められていないことである。上流へはこの 1 点を確かめる。決定 106 の依頼の答えで分かり、#6 の詳細設計はこの行を前提にしない |
+| `ndf-ask:human-action` の後の続きの区間の起こし方 | 人が「済んだ」と答えた後に同じレーンの続きを起こす方法が契約に無い。全体の設計は、定まるまで行を使わず「済んだ」でレーンを失敗にする。v11.0.12 の手順書 `asking.md` の「人のいない実行」は、区分 `ndf-ask:human-action` なら再開用に `次のコマンド:` を残して終えてよいと書き、守り（`guards/unattended.py`）もそれを通すので、行は報告に残せる。未確認なのは、この行が手順書でも任意（「残してよい」）で、`shape.items` に無く、再開に使える項目として契約に定められていないことである。上流へはこの 1 点を確かめる。決定 106 の依頼の答えで分かり、#6 の詳細設計はこの行を前提にしない |
 
 ## 外部の調査
 
