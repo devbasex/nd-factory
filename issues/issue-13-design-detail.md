@@ -158,6 +158,9 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `TaskPlatform` の `constructor` | `infra/lib/tasks.ts` | 新設 | `(scope, id, props: { network: Network; names: AppResourceNames; images: ImageDigests; repositories: Record<ImageKey, IRepository> })` | ECS のクラスタ（Container Insights なし）・タスクの実行の役割（ECR の取得とログの書き込みだけ）・DB の用意のタスクの定義（族 `<prefix>-<environment>-db-prep`・`DB_PREP_TASK_SIZE`・x86_64・非 root・イメージは DB の用意の自前の ECR からダイジェストで引く。下の「イメージ」）・タスクの役割（文なし）・ログの群（30 日） |
 | `RUNNER_TASK_SIZE`・`DB_PREP_TASK_SIZE` | 同上 | 新設 | `{ cpu: 1024, memoryMiB: 2048 }`・`{ cpu: 256, memoryMiB: 512 }` | 既定の大きさ。ランナーの値は #6 がタスクの定義で使う |
 | `TaskPlatform` の公開の値 | 同上 | 新設 | `cluster`・`executionRole`・`publicSubnets`・`taskSecurityGroup`・`dbPrepTaskDefinition` | #6 が API の関数へ `RunTask` の値として渡す |
+| `RUN_TASK_PROPAGATE_TAGS` | 同上 | 新設 | 定数 `"TASK_DEFINITION"` | #6 が `RunTask` の `propagateTags` に必ず渡す値。`RunTask` は既定でタスクの定義のタグを実行するタスクへ写さないため、渡さなければ Fargate の実行の費用がタグ `app-prefix`・`app-env` を持たず、既定の `budget.scope: tags` の予算に数えられない（LIB19） |
+
+- タスクの定義はスタックのタグ（`app-prefix`・`app-env`）を持つ。#6 は `RunTask` に `propagateTags: RUN_TASK_PROPAGATE_TAGS` を渡し、API の関数の役割に `ecs:TagResource`（`ecs:CreateAction` が `RunTask` の条件つき）を許す。#6 の API の関数のテストは、`RunTask` の入力に `propagateTags: "TASK_DEFINITION"` があることを照らす
 
 - 事後条件: `AWS::ECS::Service`・`AWS::ECS::TaskSet` を作らない。タスクの役割に `Policies` も `ManagedPolicyArns` も無い
 - DB の用意のタスクの定義は、`props.images` に DB の用意（キー `db-prep`）のダイジェストがあるときだけ作り、イメージを `ContainerImage.fromEcrRepository(<リポジトリ>, "sha256:…")` でダイジェストで引く。無いとき（初めての設置・CI の合成）は作らない。ほかのキー（#6 の `runner`）の有無に依らない

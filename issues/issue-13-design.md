@@ -293,7 +293,7 @@ sequenceDiagram
 ### 決定 6: 費用の増えに気づけるよう、月の予算の既定を 30 ドルにし、タグで絞って運用の知らせのトピックへ送り、タグの有効化を足りない設定に出す
 
 - **質問**: 予算の既定の額と、何を数えるか
-- **選んだ案**: 既定は 30 ドル（全体の設計の見込みの 5 人のチームの月 18.0 ドルに、見込みの外れの余裕を足した額）。予算はタグ `app-prefix`・`app-env` で絞り（`budget.scope` の既定 `tags`）、実績 80%・100%・見込み 100% で運用の知らせのトピックへ送る。ユーザーの付けたタグで絞るにはコスト配分タグの有効化が要り（LIB1）、CloudFormation では作れないため、`diff` がタグの状態を読み、有効でなければ足りない設定に出す
+- **選んだ案**: 既定は 30 ドル（全体の設計の見込みの 5 人のチームの月 18.0 ドルに、見込みの外れの余裕を足した額）。予算はタグ `app-prefix`・`app-env` で絞り（`budget.scope` の既定 `tags`）、実績 80%・100%・見込み 100% で運用の知らせのトピックへ送る。ユーザーの付けたタグで絞るにはコスト配分タグの有効化が要り（LIB1）、CloudFormation では作れないため、`diff` がタグの状態を読み、有効でなければ足りない設定に出す。タグで絞る予算に Fargate の実行の費用を載せるため、#6 は `RunTask` に `propagateTags: TASK_DEFINITION` を渡す（LIB19。詳細設計の「ECS のクラスタ」）。
 - **組織のメンバーのアカウント**: コスト配分タグを有効にできるのは、組織の管理のアカウントと組織に入っていないアカウントだけで、メンバーのアカウントは権限を足した profile に替えても有効にできない（LIB1）。そのため足りない設定の行は、権限の不足と区別して次を 1 行で示す
   - タグが有効でない間、予算は 0 を数え続け、知らせが鳴らないこと
   - 有効にする先: 組織に入っていなければこのアカウント（請求の画面の「コスト配分タグ」で `app-prefix`・`app-env` を有効にする）。組織のメンバーなら組織の管理のアカウント（`organizations:DescribeOrganization` で読めればその ID を示し、読めなければ「組織の管理のアカウント」とだけ示す）へ有効化を頼む
@@ -501,6 +501,7 @@ sequenceDiagram
 | LIB16 | `cdk-docker-image-deployment` | 0.0.1042 | Apache-2.0 | 2026-11-16 | 無し | 満たさない。手元のイメージをアセットの仕組みで中継の ECR に置き、CodeBuild がタグを付けて送り先へ push する。版が 0.0 のままで、送り先をダイジェストで引く形は書かれていない | https://github.com/cdklabs/cdk-docker-image-deployment ・ `npm view cdk-docker-image-deployment version license time.modified`（2026-11-21） |
 | LIB17 | `cdk-nag` | — | Apache-2.0 | — | 無し | 条件つきで満たす。CDK のスタックを規則の集まりで照らす広く使われる道具で、独自の規則も書ける | 試していない（下の「確かめられなかったこと」） |
 | LIB18 | Aurora PostgreSQL の TLS（`rds.force_ssl`） | — | AWS のサービス | — | 無し | 満たす。`rds.force_ssl` を 1 にすると TLS でない接続を断る。既定は Aurora PostgreSQL 17 以上で 1、16 以下で 0 | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.Security.html （2026-11-21） |
+| LIB19 | ECS の `RunTask` のタグの伝播（`propagateTags`） | — | AWS のサービス | — | 無し | 満たす。`propagateTags` に `TASK_DEFINITION` を渡すと、タスクの定義のタグを作る時に実行するタスクへ写す。値を渡さなければ写さず、作った後には `TagResource` でしか付けられない | https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RunTask.html （2026-11-21） |
 
 ### 確かめられなかったこと
 
