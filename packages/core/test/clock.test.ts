@@ -21,6 +21,15 @@ describe("createClock", () => {
     expect([clock.epochMs(), clock.epochMs(), clock.epochMs()]).toEqual([2_000, 2_000, 3_000]);
   });
 
+  it("now・iso・epochMs を混ぜて呼んでも、元が戻った値を返さない", () => {
+    const times = [5_000, 1_000, 2_000, 6_000];
+    const clock = createClock(() => times.shift() ?? 0);
+    expect(clock.iso()).toBe("1970-01-01T00:00:05.000Z");
+    expect(clock.epochMs()).toBe(5_000);
+    expect(clock.now().getTime()).toBe(5_000);
+    expect(clock.epochMs()).toBe(6_000);
+  });
+
   it("元を渡さなければ今の時刻を返す", () => {
     const before = Date.now();
     const ms = createClock().epochMs();

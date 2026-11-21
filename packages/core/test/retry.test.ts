@@ -16,7 +16,8 @@ async function kyFailure(fetch: (input: Request) => Promise<Response>): Promise<
   throw new Error("ky が投げなかった");
 }
 
-const answer = (status: number) => () => Promise.resolve(new Response("{}", { status, headers: { "content-type": "application/json" } }));
+// 304 は本文を持てない
+const answer = (status: number) => () => Promise.resolve(new Response(status === 304 ? null : "{}", { status, headers: { "content-type": "application/json" } }));
 
 describe("classifyFailure", () => {
   it.each([
@@ -26,6 +27,10 @@ describe("classifyFailure", () => {
     [502, "retryable"],
     [503, "retryable"],
     [504, "retryable"],
+    [301, "rejected"],
+    [304, "rejected"],
+    [307, "rejected"],
+    [308, "rejected"],
     [409, "conflict"],
     [404, "not_found"],
     [400, "rejected"],
@@ -38,7 +43,7 @@ describe("classifyFailure", () => {
   ])("HTTP の状態 %i は %s", async (status, expected) => {
     expect(classifyFailure(status)).toBe(expected);
     expect(classifyFailure({ status })).toBe(expected);
-    if (status >= 400) {
+    if (status >= 300) {
       const error = await kyFailure(answer(status));
       expect(error).toBeInstanceOf(HTTPError);
       expect(classifyFailure(error)).toBe(expected);
@@ -48,12 +53,23 @@ describe("classifyFailure", () => {
   it.each([
     ["ThrottlingException", "retryable"],
     ["ProvisionedThroughputExceededException", "retryable"],
+    ["RequestLimitExceeded", "retryable"],
+    ["InternalServerError", "retryable"],
+    ["ServiceUnavailable", "retryable"],
     ["TransactionConflict", "retryable"],
+    ["TransactionInProgressException", "retryable"],
+    ["RequestTimeout", "retryable"],
+    ["RequestTimeoutException", "retryable"],
+    ["ServiceUnavailableException", "retryable"],
+    ["InternalServerErrorException", "retryable"],
     ["ConditionalCheckFailedException", "conflict"],
     ["ResourceNotFoundException", "not_found"],
     ["ValidationException", "rejected"],
     ["AccessDeniedException", "rejected"],
-    ["InternalServerError", "unknown"],
+    ["SerializationException", "rejected"],
+    ["ItemCollectionSizeLimitExceededException", "rejected"],
+    ["UnrecognizedClientException", "rejected"],
+    ["SomethingUnexpected", "unknown"],
   ])("AWS SDK の例外 %s は %s", (name, expected) => {
     expect(classifyFailure(awsError(name))).toBe(expected);
   });
@@ -63,6 +79,30 @@ describe("classifyFailure", () => {
     const condition = awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ConditionalCheckFailed" }] });
     expect(classifyFailure(conflict)).toBe("retryable");
     expect(classifyFailure(condition)).toBe("unknown");
+  });
+
+  it.each(["ThrottlingError", "ProvisionedThroughputExceeded", "RequestLimitExceeded"])("トランザクションの取り消しの理由 %s は retryable", (code) => {
+    expect(classifyFailure(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "None" }, { Code: code }] }))).toBe("retryable");
+  });
+
+  it.each(["ValidationError", "ItemCollectionSizeLimitExceeded"])("トランザクションの取り消しの理由 %s は rejected", (code) => {
+    expect(classifyFailure(awsError("TransactionCanceledException", { $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: "None" }, { Code: code }] }))).toBe("rejected");
+  });
+
+  it("取り消しの理由に一時の失敗と断った理由が並ぶときは retryable", () => {
+    expect(classifyFailure(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ValidationError" }, { Code: "TransactionConflict" }] }))).toBe("retryable");
+  });
+
+  it.each([
+    [500, "retryable"],
+    [503, "retryable"],
+    [501, "rejected"],
+    [505, "unknown"],
+    [429, "retryable"],
+    [403, "rejected"],
+    [400, "unknown"],
+  ])("名前の分からない AWS SDK の例外は $metadata の状態 %i で %s", (status, expected) => {
+    expect(classifyFailure(Object.assign(new Error("x"), { name: "SomethingUnexpected", $metadata: { httpStatusCode: status } }))).toBe(expected);
   });
 
   it("ky の時間切れとネットワークの誤りは retryable", async () => {
