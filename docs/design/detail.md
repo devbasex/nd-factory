@@ -110,10 +110,10 @@ nd-factory/
 | `packages/core/` | `idempotency` | `claimIdempotency`・`settleIdempotency`（新設） |
 | `packages/core/` | `redact` | `redact`（新設） |
 | `packages/core/` | `log` | `createLogger`（新設） |
-| `packages/core/` | `retry` | `withRetry`・`classifyFailure`（新設） |
+| `packages/core/` | `retry` | `classifyFailure`（新設） |
 | `packages/core/` | `outbound` | `callHttp`・`awsClient`（新設） |
 | `packages/core/` | `conditional-write` | `putIfAbsent`・`updateIfVersion`・`writeAtomically`（新設） |
-| `packages/core/` | `auth` | `authenticate`・`createJwksCache`（新設） |
+| `packages/core/` | `auth` | `authenticate`（新設） |
 | `packages/core/` | `authorize` | `visibleProjectIds`・`authorize`（新設） |
 | `packages/core/` | `usage-limit` | `judgeUsage`・`usageAddItem`（新設） |
 | `packages/core/` | `audit` | `auditItem`・`appendAudit`（新設） |
@@ -141,16 +141,14 @@ nd-factory/
 | `claimIdempotency` | `packages/core`（`idempotency`） | 新設 | `(db: Db, claim: IdempotencyClaimInput, clock: Clock) => Promise<IdempotencyClaim>` | 主体・操作・鍵の組の 1 回目を押さえ、2 回目以降に前の結果か状態を返す | `claim.fingerprint` は要素の正規化した JSON の SHA-256 | 戻り値は `fresh`（押さえた）・`replay`（前の要素の結果）・`in_progress`（他が処理中）・`reused`（中身が違う）のどれか。`fresh` のとき冪等の表に借りの行がある | DynamoDB の `db-idempotency` への条件つきの書き込みと強い整合の読み |
 | `settleIdempotency` | `packages/core`（`idempotency`） | 新設 | `(claim: IdempotencyClaimInput, result: ItemResult, clock: Clock) => TransactItem` | 借りの行を「済み」と要素の結果へ書き換える書き込みを組む | `claimIdempotency` が `fresh` を返した組 | 戻り値は借りの行の持ち主を条件にした更新の 1 件。1 回だけ返す値（token など）は結果から `null` に替えて控える | 無し |
 | `redact` | `packages/core`（`redact`） | 新設 | `(value: unknown) => unknown` | 値の木を写し、秘密の鍵の名前と秘密の形の値を伏せる | 無し | 戻り値に、秘密の形のデータに当たる鍵の値と、秘密の形に当たる文字列が残らない。元の値は変えない。循環は `"[cycle]"` に替える | 無し |
-| `createLogger` | `packages/core`（`log`） | 新設 | `(context: LogContext, sink?: (line: string) => void) => Logger` | 要求の ID などの文脈を持った、JSON の 1 行を出すログの書き手を作る | `context.request_id` がある | `Logger.info`・`warn`・`error` は、文脈と項目を `redact` に通して 1 行の JSON にし、`sink` へ渡す | 標準出力へ 1 行を書く（Lambda では CloudWatch Logs へ届く） |
-| `withRetry` | `packages/core`（`retry`） | 新設 | `<T>(op: (attempt: number) => Promise<T>, policy: RetryPolicy, opts: { classify: (e: unknown) => FailureClass; deadline?: number; sleep?: (ms: number) => Promise<void> }) => Promise<T>` | 方針のデータに従って、再試行してよい失敗だけを待って繰り返す | `op` は同じ引数で繰り返してよい処理（冪等か、届かなかったと分かる失敗だけを繰り返す方針） | 成功の値を返すか、最後の失敗を `RetryExhausted`（回数と分類を持つ）で投げる。`deadline` を越えて待たない | 渡した処理の副作用を最大 `policy.max_attempts` 回起こし、間で待つ |
-| `classifyFailure` | `packages/core`（`retry`） | 新設 | `(e: unknown) => FailureClass` | HTTP の状態・AWS SDK の例外の名前・ネットワークの誤りを 5 つの分類に分ける | 無し | 戻り値は `retryable`・`conflict`・`not_found`・`rejected`・`unknown` のどれか | 無し |
-| `callHttp` | `packages/core`（`outbound`） | 新設 | `(req: OutboundRequest, policyName: RetryPolicyName, deps: OutboundDeps) => Promise<OutboundResult>` | 外への HTTP の呼び出しを時間切れ・再試行・分類つきで行う | `req.url` は `https:`。`req.idempotent` を呼び手が決めている | 戻り値は状態・頭書きの一部・本文と分類。冪等でない要求は、届かなかったと分かる失敗（接続の拒否・429）だけを繰り返す | 外部への HTTPS の要求（GitHub・IdP の鍵・Web Push・Slack・ランナーから API） |
-| `awsClient` | `packages/core`（`outbound`） | 新設 | `<C>(make: (config: AwsClientConfig) => C, policyName: RetryPolicyName) => C` | AWS SDK のクライアントを、方針のデータの回数と時間切れで作る | `make` は SDK のクライアントの構築子を包む関数 | 戻り値のクライアントは `maxAttempts` と要求ごとの時間切れが方針のデータの値。同じ方針の名前の 2 回目は同じクライアントを返す | 無し |
+| `createLogger` | `packages/core`（`log`） | 新設 | `(context: LogContext, sink?: (line: string) => void) => Logger` | 要求の ID などの文脈を持った、JSON の 1 行を出すログの書き手を `pino`（LIB93）で作る | `context.request_id` がある | `Logger.info`・`warn`・`error` は、`pino` の `formatters.log` と `hooks.logMethod` で文脈と項目と文を `redact` に通して 1 行の JSON にし、`sink` へ渡す | 標準出力へ 1 行を書く（Lambda では CloudWatch Logs へ届く） |
+| `classifyFailure` | `packages/core`（`retry`） | 新設 | `(e: unknown) => FailureClass` | HTTP の状態・`ky` の誤り・AWS SDK の例外の名前・ネットワークの誤りを 5 つの分類に分け、呼び手が結果の扱い（409・404・503 など）を決められるようにする。再試行の判断には使わない（再試行は `ky`・AWS SDK・`p-retry` の設定が持つ） | 無し | 戻り値は `retryable`（ライブラリの再試行を使い切った一時の失敗）・`conflict`・`not_found`・`rejected`・`unknown` のどれか | 無し |
+| `callHttp` | `packages/core`（`outbound`） | 新設 | `(req: OutboundRequest, policyName: RetryPolicyName, deps: OutboundDeps) => Promise<OutboundResult>` | 外への HTTP の呼び出しを `ky`（LIB91）で、時間切れ・再試行・分類つきで行う | `req.url` は `https:`。`req.idempotent` を呼び手が決めている | 戻り値は状態・頭書きの一部・本文と分類。再試行の回数・`Retry-After` の上限・待ちの上限・要求ごとの時間切れ・全体の期限は、方針のデータの値を `ky` の設定（`retry`・`timeout`・`totalTimeout`）へ渡す。冪等でない要求は `ky` の `shouldRetry` で、届かなかったと分かる失敗（接続の拒否・429）だけを繰り返す。`throwHttpErrors` は偽にし、状態から分類する | 外部への HTTPS の要求（GitHub・IdP の鍵・Web Push・Slack・ランナーから API） |
+| `awsClient` | `packages/core`（`outbound`） | 新設 | `<C>(make: (config: AwsClientConfig) => C, policyName: RetryPolicyName) => C` | AWS SDK のクライアントを、方針のデータの再試行の設定と時間切れで作る | `make` は SDK のクライアントの構築子を包む関数 | 戻り値のクライアントは `retryMode`（`standard`）・`maxAttempts`・要求ごとの時間切れ（`requestHandler` の `requestTimeout`）が方針のデータの値。再試行は SDK の組み込み（待ちの上限と全幅のゆらぎ・呼びすぎの扱いを含む）に任せる。同じ方針の名前の 2 回目は同じクライアントを返す | 無し |
 | `putIfAbsent` | `packages/core`（`conditional-write`） | 新設 | `(spec: { table: TableName; item: Row; onConflict: ConflictRule }) => TransactItem` | 行が無いときだけ足す書き込みを組む | `item` は `pk`・`sk`・`schema_version` を持つ | 戻り値は `attribute_not_exists(pk)` を条件にした 1 件で、外れたときの扱い（`state_mismatch`・`return_existing` など）を持つ | 無し |
 | `updateIfVersion` | `packages/core`（`conditional-write`） | 新設 | `(spec: { table: TableName; key: RowKey; version: number; set: Record<string, unknown>; extra?: Condition; onConflict: ConflictRule }) => TransactItem` | 読んだときの版と同じときだけ書き、版を 1 つ上げる書き込みを組む | `version` は 1 以上の整数。`set` に `pk`・`sk`・`version` を含まない | 戻り値は `version = :expected`（と `extra`）を条件にし、`version` を 1 上げる 1 件 | 無し |
 | `writeAtomically` | `packages/core`（`conditional-write`） | 新設 | `(db: Db, items: readonly TransactItem[]) => Promise<WriteOutcome>` | 組んだ書き込みを 1 つのトランザクションで確定し、外れた条件を件ごとの扱いへ訳す | `items` は 1〜100 件で、同じ行を 2 回指さない | `ok` のとき全件が書かれている。`conflict` のときどれも書かれておらず、外れた件の番号と扱いを返す | DynamoDB の `TransactWriteItems`（表をまたいでよい） |
-| `authenticate` | `packages/core`（`auth`） | 新設 | `(req: InboundRequest, deps: AuthDeps) => Promise<AuthResult>` | 受け口の種類と token の種類から、要求の主体を 1 つに決める | `req.endpoint` は受け口（`user`・`mcp`・`runner`・`machine`・`github`・`db_prep`。受けた HTTP の経路の頭で決まる）。`deps` は鍵と読み手を持つ | 戻り値は主体（人・委任・ランナー・手元のマシン・GitHub・DB の用意のタスク）か、`unauthorized`・`unavailable`。受け口に合わない token は `unauthorized` | IdP の公開鍵の取得（`aws-jwt-verify` の JWKS の控えが HTTPS で取り、関数の中で控える）・DynamoDB の強い整合の読み・委任の最後に使った時刻の条件つきの更新 |
-| `createJwksCache` | `packages/core`（`auth`） | 新設 | `(fetchJwks: (uri: string) => Promise<Jwks>, clock: Clock) => JwksCache` | `aws-jwt-verify` の Cognito の検証へ渡す公開鍵の控えを作り、控えの保持期限と `kid` が無いときの取り直しの間隔を持たせる | `fetchJwks` は `callHttp`（方針 `http-idp-keys`）で JWKS を取る関数 | 戻り値は採用版（5.2.1）の `JwksCache` の口（`getJwk`・`getCachedJwk`・`addJwks`・`getJwks`）を満たす。鍵の集まりは取得の時刻とともに控え、`JWKS_MAX_AGE_MS` を過ぎた控えは次の要求で取り直してから使う。`kid` が控えに無いときは、前の取得から `JWKS_REFETCH_MS` 以上たっていれば 1 回だけ取り直し、たっていなければ取り直さずに鍵が無いと答える。同じ時に要る取り直しは 1 つの約束を共有する。`SimpleJwksCache` と `SimplePenaltyBox` は使わない（控えに期限が無く、待ちを登録するのは取り直した JWKS にも `kid` が無いときだけのため、この 2 つの値を守れない） | IdP の公開鍵の取得（HTTPS）。控えは実行環境のメモリだけ |
+| `authenticate` | `packages/core`（`auth`） | 新設 | `(req: InboundRequest, deps: AuthDeps) => Promise<AuthResult>` | 受け口の種類と token の種類から、要求の主体を 1 つに決める | `req.endpoint` は受け口（`user`・`mcp`・`runner`・`machine`・`github`・`db_prep`。受けた HTTP の経路の頭で決まる）。`deps` は鍵と読み手を持つ | 戻り値は主体（人・委任・ランナー・手元のマシン・GitHub・DB の用意のタスク）か、`unauthorized`・`unavailable`。受け口に合わない token は `unauthorized` | IdP の公開鍵の取得（`aws-jwt-verify` の組み込みの控え `SimpleJwksCache` が HTTPS で取り、実行環境の中で控える）・DynamoDB の強い整合の読み・委任の最後に使った時刻の条件つきの更新 |
 | `visibleProjectIds` | `packages/core`（`authorize`） | 新設 | `(principal: Principal, scope: ScopeReader) => Promise<readonly ProjectId[]>` | 主体が今見られるプロジェクトの ID の集まりを求める | `principal` は `authenticate` が返したもの | 人は席を持つチームに今割り当てたプロジェクト、委任は委任した人の範囲と委任の範囲の重なり、ランナーと手元のマシンは自分のレーンのプロジェクトだけ、DB の用意のタスクは token に結んだ用意するプロジェクトだけを返す | 読み手を通した DynamoDB の読み（席・割り当て・レーン） |
 | `authorize` | `packages/core`（`authorize`） | 新設 | `(principal: Principal, op: OperationDef, items: readonly unknown[], scope: ScopeReader) => Promise<AuthzDecision>` | 操作の表の印と主体から、要求全体と要素ごとに通すかを 1 か所で決める | `items` は形の正本の検証を通った要素の配列 | 戻り値は要求全体の拒み（`human_only`・`scope_insufficient`）か、要素ごとの `allow`（対象のプロジェクトの ID と席の役割つき）・`404 not_found`・`403 role_insufficient`・`403 human_only` | 読み手を通した DynamoDB の読み |
 | `judgeUsage` | `packages/core`（`usage-limit`） | 新設 | `(input: UsageInput, plan: PlanRow) => UsageVerdict` | 料金プランの値と使った量から、始めてよいか・割り当ててよいか・次の区間を起こしてよいかと理由を返す | `input.used` と `input.cap` は同じ形の金額（I15） | 戻り値は `allowed: true` か、`allowed: false` と理由のコード（`monthly_cap_reached`・`place_not_allowed`・`inference_not_allowed`・`concurrency_full`・`currency_mismatch`）と待てば解けるか。プランの名前で分けない | 無し |
@@ -174,23 +172,18 @@ nd-factory/
 | --- | --- | --- | --- | --- | --- | --- |
 | `claimIdempotency` | 同じ組が処理中 | 並んだ 2 つの要求か、前の要求の途中 | 借りの行の条件の外れと、借りの期限の前 | 呼び出し元へ返す | 要素の 409 `in_progress` | 後始末なし。呼び手は待って同じ要素を送り直せる |
 | `claimIdempotency` | 中身が違う | 同じ鍵を別の要素に使い回した | 借りの行の `fingerprint` と比べた所 | 呼び出し元へ返す | 要素の 422 `idempotency_key_reused` | 再実行しても同じ。呼び手が新しい鍵を作る |
-| `claimIdempotency` | 表に届かない | DynamoDB の失敗・時間切れ | `writeAtomically` と読みの例外 | 再試行（方針 `dynamodb`）の後に呼び出し元へ返す | 要求全体の 503 `unavailable` | 借りの行は書けていないか、書けても期限で取り直せる。再実行できる |
+| `claimIdempotency` | 表に届かない | DynamoDB の失敗・時間切れ | `writeAtomically` と読みの例外 | AWS SDK の再試行（方針 `dynamodb`）の後に呼び出し元へ返す | 要求全体の 503 `unavailable` | 借りの行は書けていないか、書けても期限で取り直せる。再実行できる |
 | `createLogger` | 書けない | 標準出力の誤り・値を JSON にできない | `sink` の呼び出しと `JSON.stringify` | 既定値で続ける（JSON にできない値は `"[unserializable]"` に替える。`sink` の例外は捨てる） | 無し（ログの欠けは操作の結果を変えない） | 後始末なし |
-| `withRetry` | 回数を使い切った | 再試行してよい失敗が続いた | 回数の数え | 呼び出し元へ返す（`RetryExhausted`） | 呼び手が決める。API では 503 `unavailable` | 後始末なし。後から再実行できる |
-| `withRetry` | 再試行してはいけない失敗 | 分類が `conflict`・`not_found`・`rejected` | `classify` の戻り値 | 呼び出し元へ返す（最初の失敗のまま） | 呼び手が決める | 繰り返さない |
-| `withRetry` | 期限に届く | 次の待ちが `deadline` を越える | 待つ前の残り時間の照らし | 呼び出し元へ返す（`RetryExhausted`、理由は期限） | 呼び手が決める。API では 503 `unavailable` | 後から再実行できる |
-| `callHttp` | 時間切れ | 相手が遅い・ネットワークの不調 | `AbortSignal` の時間切れ | 冪等な要求は再試行、冪等でない要求は呼び出し元へ返す（届いたか分からない） | 呼び手が決める。届いたか分からない外への作成は「行う予定」の行に印を残し、作り直さない（[起票の依頼](execution.md#起票の依頼)） | 冪等なら再実行できる |
-| `createJwksCache` | 公開鍵を取れない | IdP の遅れ・ネットワークの不調・JWKS の形の誤り | `fetchJwks`（`callHttp` の時間切れと失敗） | 控えを変えずに取得の失敗を投げる。同じ時に待っていた取り直しも同じ失敗で終わる | `authenticate` が `unavailable` にし、API は 503 `unavailable` | 控えは前のまま残る。次の要求で取り直せる |
-| `createJwksCache` | 取り直した JWKS にも `kid` が無い | 知らない鍵か偽の token | 取り直した後の控えの引き当て | 控えを新しい集まりに置き換え、鍵が無いと答える。次の取り直しは `JWKS_REFETCH_MS` の後まで起こさない | `authenticate` が `unauthorized` にし、API は 401 | 再実行しても同じ。鍵が回った後なら次の取り直しで通る |
-| `callHttp` | 相手の 429・5xx | 呼びすぎ・相手の障害 | 応答の状態 | 再試行（`Retry-After` を方針の上限まで守る） | 使い切れば呼び手へ `retryable` の結果 | 再実行できる |
+| `callHttp` | 時間切れ | 相手が遅い・ネットワークの不調 | `AbortSignal` の時間切れ | 冪等な要求は `ky` が再試行し、冪等でない要求は呼び出し元へ返す（届いたか分からない） | 呼び手が決める。届いたか分からない外への作成は「行う予定」の行に印を残し、作り直さない（[起票の依頼](execution.md#起票の依頼)） | 冪等なら再実行できる |
+| `callHttp` | 相手の 429・5xx | 呼びすぎ・相手の障害 | 応答の状態 | `ky` が再試行する（`Retry-After` を方針の上限まで守る） | 使い切れば呼び手へ `retryable` の結果 | 再実行できる |
 | `callHttp` | 相手の 4xx（429 を除く） | 要求の誤り・権限の無さ | 応答の状態 | 呼び出し元へ返す（`rejected`・`not_found`・`conflict`） | 呼び手が決める | 同じ要求の再実行は同じ結果 |
 | `callHttp` | `https:` でない URL | 呼び手の誤り | 送る前の照らし | 止める（例外） | API では 503 `unavailable` とログの error | 直すまで再実行しない |
 | `writeAtomically` | 条件の外れ | 版の違い・状態の違い・既にある行 | `TransactionCanceledException` の件ごとの理由が `ConditionalCheckFailed` | 呼び出し元へ返す（件の番号と `onConflict` の扱い） | 呼び手が要素の 409 `version_mismatch`・`state_mismatch` か、`return_existing` なら前の 1 件の結果にする | 何も書かれていない。読み直して送り直せる |
-| `writeAtomically` | トランザクションどうしの衝突 | 同じ行を同時に書く別の要求 | 件ごとの理由が `TransactionConflict` | 再試行（方針 `dynamodb`） | 使い切れば要求全体の 503 `unavailable` | 何も書かれていない。再実行できる |
+| `writeAtomically` | トランザクションどうしの衝突 | 同じ行を同時に書く別の要求 | 件ごとの理由が `TransactionConflict` | `p-retry` で再試行（方針 `dynamodb-transaction`） | 使い切れば要求全体の 503 `unavailable` | 何も書かれていない。再実行できる |
 | `writeAtomically` | 表に届かない | 呼びすぎ・障害・時間切れ | SDK の例外 | 再試行の後に呼び出し元へ返す | 要求全体の 503（記録の行を含むなら `audit_unavailable`、含まなければ `unavailable`） | 何も書かれていない。冪等の鍵で再実行できる |
 | `writeAtomically` | 件の数が上限を越える | ハンドラーが組んだ書き込みが多すぎる | 送る前の数え | 止める（例外） | 要求全体の 503 `unavailable` とログの error | 設計の誤りで、テストが先に落とす |
 | `authenticate` | token が無い・形が違う・署名が違う・期限切れ・取り消し済み・受け口に合わない | 呼び手の誤りか古い token | 種類ごとの照らし | 呼び出し元へ返す（`unauthorized`） | 要求全体の 401 `unauthorized`（理由によらず同じ本文） | 後始末なし。新しい token で再実行できる |
-| `authenticate` | IdP の公開鍵を取れない・表に届かない | ネットワーク・依存先の障害 | `aws-jwt-verify` の鍵の取得の失敗（取得は `callHttp` を渡した取り手で行う）と読みの失敗 | 再試行の後に呼び出し元へ返す（`unavailable`） | 要求全体の 503 `unavailable`（401 にしない） | 再実行できる |
+| `authenticate` | IdP の公開鍵を取れない・表に届かない | ネットワーク・依存先の障害 | `aws-jwt-verify` の鍵の取得の失敗（組み込みの取り手 `SimpleFetcher` が `responseTimeout` で時間を切り、失敗を 1 回すぐに打ち直す）と読みの失敗 | 呼び出し元へ返す（`unavailable`） | 要求全体の 503 `unavailable`（401 にしない） | 再実行できる |
 | `authenticate` | 委任の最後に使った時刻を書けない | 表の失敗・条件の外れ | 条件つきの更新の失敗 | 既定値で続ける（主体は決めたまま） | 無し。ログの warn | 次の要求で書き直す |
 | `visibleProjectIds` | 読み手が失敗する | 表に届かない | 読み手の例外 | 呼び出し元へ返す | 要求全体の 503 `unavailable` | 再実行できる |
 | `authorize` | 対象が見えない・無い | 割り当ての外・ID の種類の違い・消えた対象 | 対象のプロジェクトの引きと見える集まりの照らし | 呼び出し元へ返す（要素の拒み） | 要素の 404 `not_found`（無い対象と同じ本文） | 後始末なし |
@@ -226,15 +219,14 @@ nd-factory/
 | `dispatch` | 書く操作の要素で、ハンドラーが書き込みを返した | 書き込み・`auditItem` の要素の行・`settleIdempotency` を 1 つの `writeAtomically` で確定する |
 | `dispatch` | 読む操作 | ハンドラーの値を集め、`appendAudit` が成功してから返す |
 | `dispatch` | 全部か無かの印のある操作 | すべての要素の書き込みを 1 つの `writeAtomically` に集め、要素の失敗が 1 つでもあれば確定しない |
-| `authenticate` | 受け口 `user` で、token が 3 つの部分の JWT | Cognito の access token として、`aws-jwt-verify` の Cognito の検証（決定 48・LIB41）で署名（`kid` の公開鍵、RS256）・発行元・`client_id`・`token_use` が `access`・期限を照らす。鍵の取得は `callHttp`（方針 `http-idp-keys`）を取り手として渡す。通れば人 |
+| `authenticate` | 受け口 `user` で、token が 3 つの部分の JWT | Cognito の access token として、`aws-jwt-verify` の Cognito の検証（決定 48・LIB41）で署名（`kid` の公開鍵、RS256）・発行元・`client_id`・`token_use` が `access`・期限を照らす。公開鍵の控えは組み込みの `SimpleJwksCache` と `SimplePenaltyBox` を既定のまま使い、取り手 `SimpleFetcher` に方針 `http-idp-keys` の `responseTimeout` だけを渡す。通れば人 |
 | `authenticate` | 受け口 `user` か `mcp` で、token が `ndfd_` で始まる | 委任として、中の利用者と委任の ID で行を強い整合で読み、秘密の部分の SHA-256 を一定時間で比べ、期限と取り消しを照らす。入口は受け口で `API` か `MCP` |
 | `authenticate` | 受け口 `mcp` で、token が JWT | `unauthorized` |
 | `authenticate` | 受け口 `runner` | Ed25519 の JWT で宛先「レーン」。引き換えの HTTP の経路だけ引き換えの token、ほかはレーンの token。レーンの行が終わっていないことと世代の番号を照らす |
 | `authenticate` | 受け口 `machine` で、token が `ndfm_` で始まる | 中のチームとマシンの ID で行を強い整合で読み、要約を一定時間で比べ、取り消しと期限を照らす |
 | `authenticate` | 受け口 `github` | `Authorization` を読まず、本文の HMAC-SHA256 を秘密の器の値と一定時間で比べる |
 | `authenticate` | 受け口 `db_prep` | Ed25519 の JWT で宛先「DB の用意」。引き換えの HTTP の経路だけ引き換えの token、終わりの報告の HTTP の経路だけ終わりの報告の token。どちらも 1 回だけで、そのプロジェクトの進行表の DB が作成中か差し替えの途中であることを照らす |
-| `authenticate` | Cognito の JWT の `kid` が控えに無い | `createJwksCache` の控えが、前の取得から `JWKS_REFETCH_MS` 以上たっていれば公開鍵を 1 回だけ取り直す。たっていないか、取り直しても無ければ `unauthorized` |
-| `authenticate` | Cognito の公開鍵の控えが `JWKS_MAX_AGE_MS` を過ぎた | 控えを使わずに取り直してから照らす。取り直せなければ `unavailable` |
+| `authenticate` | Cognito の JWT の `kid` が控えに無い | 組み込みの控えが公開鍵を取り直す（同じ時の取り直しは 1 つにまとまる）。取り直しても無ければ `unauthorized` で、その後は `SimplePenaltyBox` の待ち（既定 10 秒）が過ぎるまで同じ IdP の取り直しを待たせる |
 | `authenticate` | ランナーと DB の用意のタスクの JWT（Ed25519） | `aws-jwt-verify` を通さない。`node:crypto` の `verify` で、秘密の器から起動のときに 1 回読んだ nd-factory 自身の検証の鍵と照らす。IdP の鍵の取得は起きない |
 | `authorize` | 主体が人 | 見える集まり = 席を持つチームの今の割り当て。役割は席の役割 |
 | `authorize` | 主体が委任 | 見える集まり = 委任した人の今の集まり ∩ 委任の範囲のプロジェクト。役割は委任した人の席の役割 |
@@ -266,7 +258,7 @@ nd-factory/
 | `createMcpServer` | 方法が知らせ（`notifications/` で始まる） | SDK が 202 で本文なしを返す。`serveMcp` が要約の行を 1 件 |
 | `createMcpServer` | 方法が `tools/call` で、名前が道具の一覧にある | `dispatch` が要素ごとに形を照らし、HTTP と同じ要素の結果と記録を返す。`serveMcp` は行を足さない |
 
-- 繰り返しの終わる条件: `withRetry` は `policy.max_attempts` 回か `deadline` で終わる。`dispatch` の要素の繰り返しは要素の数（1〜100）で終わる。各要素の前に関数の残り時間が `DISPATCH_RESERVE_MS` を下回れば打ち切る。`claimIdempotency` の取り直しは 1 回だけ。
+- 繰り返しの終わる条件: 外への呼び出しの再試行は `ky`・AWS SDK・`p-retry` が方針のデータの回数と全体の期限で終える。`dispatch` の要素の繰り返しは要素の数（1〜100）で終わる。各要素の前に関数の残り時間が `DISPATCH_RESERVE_MS` を下回れば打ち切る。`claimIdempotency` の取り直しは 1 回だけ。
 - 計算量の注意: `dispatch` は書く要素ごとに 1 つのトランザクションを順に確定する（100 要素で 100 回）。`visibleProjectIds` は要求ごとに 1 回だけ求め、要素ごとに求め直さない。委任の照らしと見える集まりは要求をまたいで控えない（取り消しと席の変化を次の要求から効かせるため）。
 
 ## 内部のデータと定数
@@ -281,8 +273,8 @@ nd-factory/
 | `IDEMPOTENCY_LEASE_MS` | 定数 | `packages/core`（`idempotency`） | API の関数の時間切れの 2 倍。時間切れの値は形の正本の設定から読み、ここで数を重ねて持たない |
 | `LogContext`・`Logger` | 型 | `packages/core`（`log`） | 文脈は `request_id`・`fn`・`endpoint`（受け口）。項目は `level`・`msg`・`time` と任意の ID と数 |
 | 秘密の形のデータ | 設定値（データ） | `packages/contracts/data/`（秘密の形） | 鍵の名前（`authorization`・`token`・`secret`・`password`・`credentials`・`private_key`・`dsn` を含む名前）と値の形（`ndfd_`・`ndfm_`・JWT の形・`ghs_` などの GitHub の token・私有鍵の頭・利用者と合言葉を含む接続の URL・AWS の一時の鍵の形）。漏れの検査も同じデータを読み、2 か所に持たない |
-| `RetryPolicy` | 型 | `packages/contracts`（形） | `{ max_attempts, base_ms, cap_ms, timeout_ms, honor_retry_after }`。待ちは上限つきの指数と全幅のゆらぎ |
-| 再試行の方針の表 | 設定値（データ） | `packages/contracts/data/`（再試行の方針） | `dynamodb` 3 回・50〜1000 ミリ秒・2 秒、`aws-control`（ECS・Secrets Manager・STS）3 回・200〜2000 ミリ秒・5 秒、`http-github` 3 回・500〜5000 ミリ秒・10 秒、`http-idp-keys` 2 回・200〜1000 ミリ秒・3 秒、`http-notify`（Web Push・Slack）3 回・500〜5000 ミリ秒・5 秒、`runner-to-api` 5 回・1000〜30000 ミリ秒・10 秒 |
+| `RetryPolicy` | 型 | `packages/contracts`（形） | 呼び出しの種類ごとの判別の和。`{ kind: "aws", retry_mode, max_attempts, request_timeout_ms }`（AWS SDK へ）・`{ kind: "http", limit, timeout_ms, total_timeout_ms, backoff_limit_ms, max_retry_after_ms }`（`ky` へ）・`{ kind: "jwks", response_timeout_ms }`（`aws-jwt-verify` の取り手へ）・`{ kind: "transaction", retries, min_ms, max_ms }`（`p-retry` へ）。待ちの計算はどれもライブラリの組み込みに任せる |
+| 再試行の方針の表 | 設定値（データ） | `packages/contracts/data/`（再試行の方針） | `dynamodb`（aws・`standard`・3 回・要求 2 秒）、`aws-control`（aws・ECS・Secrets Manager・STS・`standard`・3 回・要求 5 秒）、`dynamodb-transaction`（transaction・トランザクションの衝突を 2 回まで・50〜1000 ミリ秒）、`http-github`（http・3 回・要求 10 秒・全体 30 秒・待ち 5 秒まで・`Retry-After` 5 秒まで）、`http-notify`（http・Web Push・Slack・3 回・要求 5 秒・全体 15 秒・待ち 5 秒まで・`Retry-After` 5 秒まで）、`runner-to-api`（http・5 回・要求 10 秒・全体 60 秒・待ち 30 秒まで・`Retry-After` 30 秒まで）、`http-idp-keys`（jwks・応答 3 秒） |
 | `FailureClass` | 型 | `packages/core`（`retry`） | `retryable`・`conflict`・`not_found`・`rejected`・`unknown` |
 | `OutboundRequest`・`OutboundResult` | 型 | `packages/core`（`outbound`） | 要求は `{ method, url, headers, body, idempotent }`、結果は `{ status, headers, body, class }` |
 | `TransactItem` | 型 | `packages/core`（`conditional-write`） | SDK の 1 件と、外れたときの扱い `onConflict`（`version_mismatch`・`state_mismatch`・`return_existing`・`fail`） |
@@ -292,8 +284,6 @@ nd-factory/
 | `AuthDeps` | 型 | `packages/core`（`auth`） | IdP の発行元とクライアント ID（設定）・レーンの検証の鍵（秘密の器から起動のときに 1 回読む）・Webhook の秘密・委任とマシンとレーンの行の読み手・時計 |
 | 委任の token の形 | 定数（形） | `packages/contracts`（token の形） | `ndfd_<利用者の ID>.<委任の ID>.<秘密の部分 32 バイトの base64url>`（行を区切りの鍵で強い整合で読むため） |
 | 登録の token の形 | 定数（形） | `packages/contracts`（token の形） | `ndfm_<チームの ID>.<マシンの ID>.<秘密の部分 32 バイトの base64url>`（委任の token と同じ理由） |
-| `JWKS_REFETCH_MS` | 定数 | `packages/core`（`auth`） | 60000。Cognito の `kid` が控えに無いときの取り直しの間隔の下限。`createJwksCache` が前の取得の時刻と比べて守る |
-| `JWKS_MAX_AGE_MS` | 定数 | `packages/core`（`auth`） | 3600000。Cognito の公開鍵の控えを使う期限。過ぎたら次の要求で取り直す（IdP が外した鍵を 1 時間より長く受けない） |
 | `DELEGATION_TOUCH_MS` | 定数 | `packages/core`（`auth`） | 3600000（最後に使った時刻を、前の値から 1 時間以上たったときだけ書く） |
 | `ScopeReader` | 型（ポート） | `packages/core`（`authorize`） | `seatsOf`・`projectsOfTeams`・`projectOfTarget`・`laneOf`・`transferTargetOf`・`isHumanOnlyItem`。中身は `apps/api/src/modules/` |
 | `AuthzDecision` | 型 | `packages/core`（`authorize`） | `{ reject: "human_only" \| "scope_insufficient" }` か `{ items: ItemAuthz[] }` |
@@ -314,7 +304,7 @@ nd-factory/
 | --- | --- | --- | --- |
 | 同じ主体・操作・冪等の鍵の 2 つの要求（Lambda の別の実行環境） | `db-idempotency` の 1 行 | `claimIdempotency` の条件つきの書き込みで 1 つだけが借りる | 負けた側は 409 `in_progress`。借りた側が落ちても、借りの期限の後に取り直せる。状態と済みの行は同じトランザクションのため、半端に書いた状態は残らない |
 | 同じエンティティを書く 2 つの要求（画面と委任など） | エンティティの行と `version` | `updateIfVersion` の版の条件 | 後の側は 409 `version_mismatch`。読み直して送り直す |
-| 同じ行に触る 2 つのトランザクション | 複数の表の行 | DynamoDB のトランザクションの衝突の検出 | `TransactionConflict` は `withRetry` の方針 `dynamodb` で繰り返す。どちらも書かれないか片方だけが書かれる |
+| 同じ行に触る 2 つのトランザクション | 複数の表の行 | DynamoDB のトランザクションの衝突の検出 | `TransactionConflict` は `writeAtomically` が `p-retry`（LIB92。方針 `dynamodb-transaction`）で繰り返す（AWS SDK はトランザクションの取り消しを繰り返さないため）。どちらも書かれないか片方だけが書かれる |
 | 同じレーンの同じ連番の事象の再送（ランナーの再試行） | `db-events` の 1 行 | `putIfAbsent` と `onConflict: return_existing` | 2 回目は前の 1 件を返して足さない（I13） |
 | 承認の確定の 2 つの要求（2 つの端末） | 承認の依頼の行 | `updateIfVersion` に `extra`（状態が待っている・要約値が同じ）を足す | 1 つだけが確定し、他は 409（I4）。答えの ID が冪等の鍵のため、同じ端末の送り直しは同じ結果（I5） |
 | 1 つのレーンへの 2 つ目のコンテナの割り当て | レーンの行の割り当て | `updateIfVersion` の `extra`（割り当てが空か同じ世代） | 2 つ目を拒む（I7） |
@@ -329,7 +319,7 @@ nd-factory/
 | --- | --- | --- | --- |
 | `createLogger` | 1 行の JSON（`time`・`level`・`msg`・`request_id`・`fn`・`endpoint` と呼び手の項目）。すべて `redact` を通す | 標準出力（CloudWatch Logs、30 日） | 秘密の形の値・秘密の鍵の名前の下の値（どの深さでも） |
 | `redact` | 伏せた所を `"[redacted]"` に替えた写し | 戻り値だけ | 伏せる前の値の一部（頭や長さも残さない） |
-| `withRetry` | 繰り返すたびに方針の名前・何回目・分類・待つミリ秒 | warn | 失敗の文言の中の値（例外の名前と分類だけ） |
+| `callHttp`・`writeAtomically` の再試行 | 繰り返すたびに方針の名前・何回目・分類（`ky` の `beforeRetry` と `p-retry` の `onFailedAttempt` から） | warn | 失敗の文言の中の値（例外の名前と分類だけ） |
 | `callHttp` | 相手の種類（`github`・`idp`・`push`・`slack`・`api`）・方法・状態・時間・分類 | info（成功）・warn（再試行）・error（使い切り） | URL の問い合わせの部分・頭書き・本文・token |
 | `writeAtomically` | 表の名前・件の数・結果（`ok`・`conflict`・`unavailable`）・外れた件の扱い | info・warn（衝突の再試行）・error（届かない） | 行の値 |
 | `authenticate` | 主体の種類・結果（`ok`・`unauthorized`・`unavailable`）。`unauthorized` の内訳（形・署名・期限・取り消し・受け口）はログにだけ出す | info・warn（依存先の失敗） | token とその要約値・秘密の部分・JWT の中の項目（`sub` 以外の利用者の値） |
@@ -352,16 +342,15 @@ nd-factory/
 | `claimIdempotency` | `@aws-sdk/lib-dynamodb` の条件つきの書き込みと強い整合の読み | `apps/api/package.json` の依存 | 使う（`attribute_not_exists` の条件と強い整合の読みで組む）。冪等の鍵の表と期限は作る |
 | `settleIdempotency` | 同上 | 同上 | 使う（`updateIfVersion` と同じ組み方で、持ち主を条件にした更新の 1 件を組む） |
 | `redact` | 伏せ字のライブラリ | 依存のライブラリの一覧 | 使えない（無い）。秘密の形は漏れの検査と共有するデータから読む |
-| `createLogger` | ログのライブラリ（`pino`・Powertools） | 依存のライブラリの一覧 | 使えない（依存に無く、1 行の JSON は `JSON.stringify` で足りるため足さない）。作る |
-| `withRetry` | AWS SDK の既定の再試行（`@smithy/core`）・`@humanwhocodes/retry` | 依存のライブラリの一覧 | SDK の呼び出しは SDK の再試行を使う（`awsClient` が回数を方針から渡す）。`@humanwhocodes/retry` は ESLint の開発の依存で実行の時に入らないため使えない。HTTP の呼び出しの繰り返しは作る |
-| `classifyFailure` | AWS SDK の例外の型と名前 | `@aws-sdk/client-dynamodb` の例外の型 | 使う（例外の型と名前の両方で見る）。分類は作る |
-| `callHttp` | Node 24 の組み込みの `fetch` と `AbortSignal.timeout`・HTTP のライブラリ | Node 24 の組み込みと依存のライブラリの一覧 | 使う（組み込みの `fetch` と `AbortSignal.timeout` を包む）。HTTP のライブラリは足さない。包む部品は作る |
-| `awsClient` | AWS SDK のクライアントの構築子 | `apps/api/package.json` の依存 | 使う（実行環境ごとに 1 回作って使い回す）。方針の回数と時間切れを渡す包みは作る |
+| `createLogger` | ログのライブラリ（`pino`（LIB93）・Powertools の Logger） | 依存のライブラリの一覧と採用版の型の宣言 | 使う（`pino` を書き手にし、ブラウザーでは `pino` のブラウザー版を使う）。値の形での伏せ字はどのライブラリも持たないため、`pino` の `formatters.log` と `hooks.logMethod` から自前の `redact` を通す。Powertools の Logger は `node:` の組み込みを読み、画面で動かないため使えない。直す前の結論は「使えない（1 行の JSON は `JSON.stringify` で足りるため足さない）。作る」で、構造化ログの書き手（レベル・子の文脈・書き先）を自前で持ち続けることになるため改めた（Value 15） |
+| 再試行（共通の `withRetry` を持たない） | AWS SDK の組み込みの再試行（`@smithy/core`）・`ky`（LIB91）・`p-retry`（LIB92）・`cockatiel`（LIB94）・`@humanwhocodes/retry` | 依存のライブラリの一覧と採用版の型の宣言 | 共通の再試行の部品を作らない。AWS SDK の呼び出しは SDK の再試行の設定（`awsClient`）、HTTP は `ky` の設定（`callHttp`）、どちらにも当たらないトランザクションの衝突は `p-retry`（`writeAtomically`）で繰り返す。`cockatiel` は利用が狭く、SDK と `ky` が持つ再試行と二重になるため使わない。直す前の結論は「HTTP の呼び出しの繰り返しは作る（`withRetry`。全幅のゆらぎと待ちの差し込みを持つ）」で、2 つの値は設計が自分で置いた要件のため外した（Value 15） |
+| `classifyFailure` | AWS SDK の例外の型と名前 | `@aws-sdk/client-dynamodb` の例外の型 | 使う（例外の型と名前の両方で見る。`ky` の `HTTPError`・`TimeoutError` も見る）。分類は作る |
+| `callHttp` | Node 24 の組み込みの `fetch` と `AbortSignal.timeout`・HTTP のライブラリ | Node 24 の組み込みと依存のライブラリの一覧 | `ky`（LIB91）を使う。再試行・`Retry-After`・時間切れ・全体の期限は `ky` の設定で持ち、方針のデータを設定へ写す包みと分類だけを作る。直す前の結論は「組み込みの `fetch` と `AbortSignal.timeout` を包み、HTTP のライブラリは足さない」で、再試行と待ちを自前で持つことになるため改めた（Value 15） |
+| `awsClient` | AWS SDK のクライアントの構築子 | `apps/api/package.json` の依存 | 使う（実行環境ごとに 1 回作って使い回す）。方針の `retryMode`・回数・時間切れを渡す包みは作る |
 | `putIfAbsent` | `@aws-sdk/lib-dynamodb` の条件式 `attribute_not_exists(pk)` | `apps/api/package.json` の依存 | 使う（条件式で `TransactItem` を組む） |
 | `updateIfVersion` | エンティティの版の条件の部品 | 依存のライブラリの一覧 | 使えない（無い）。作る |
 | `writeAtomically` | `@aws-sdk/lib-dynamodb` の `TransactWriteCommand` | `apps/api/package.json` の依存（`@aws-sdk/lib-dynamodb` 3.1170.0） | 使う（ライブラリのコマンドで送る）。外れた件の訳しは作る |
-| `authenticate` | API Gateway の JWT の前段（`HttpJwtAuthorizer`）・`jwt-decode`・`aws-jwt-verify`（LIB41）・`jose`・`node:crypto` | 依存のライブラリの一覧・決定 48・Node 24 の組み込み | JWT の前段は使えない（委任の token を読めない。[認証と主体](api.md#認証と主体)）。`jwt-decode` は署名を確かめないため使えない（画面の依存だけにある）。Cognito の access token は `aws-jwt-verify` を足して確かめる（決定 48）。公開鍵の控えは `createJwksCache` を渡す。`jose` は足さない。ランナーと DB の用意のタスクの Ed25519 の JWT は `node:crypto` の `verify` で確かめる。委任とマシンの token の比べは `node:crypto` の `timingSafeEqual`・`createHash` を使う |
-| `createJwksCache` | `aws-jwt-verify` 5.2.1 の `SimpleJwksCache`・`SimplePenaltyBox` | 採用版の `jwk.ts` の実装 | 使えない。控えた鍵に期限が無く、待ちを登録するのは取り直した JWKS にも `kid` が無いときだけで、`JWKS_MAX_AGE_MS` と `JWKS_REFETCH_MS` を守れない。同じライブラリの `JwksCache` の口を満たす控えを作る |
+| `authenticate` | API Gateway の JWT の前段（`HttpJwtAuthorizer`）・`jwt-decode`・`aws-jwt-verify`（LIB41）・`jose`・`node:crypto` | 依存のライブラリの一覧・決定 48・Node 24 の組み込み | JWT の前段は使えない（委任の token を読めない。[認証と主体](api.md#認証と主体)）。`jwt-decode` は署名を確かめないため使えない（画面の依存だけにある）。Cognito の access token は `aws-jwt-verify` を足して確かめる（決定 48）。公開鍵の控えは組み込みの `SimpleJwksCache` と `SimplePenaltyBox` を既定のまま使う。`jose`（LIB95）は Cognito に固有の照らしを自前で書くことになるため足さない。ランナーと DB の用意のタスクの Ed25519 の JWT は `node:crypto` の `verify` で確かめる。委任とマシンの token の比べは `node:crypto` の `timingSafeEqual`・`createHash` を使う |
 | `visibleProjectIds` | 席・割り当ての判定の部品 | 依存のライブラリの一覧 | 使えない（無い）。作る |
 | `authorize` | 認可のライブラリ | 依存のライブラリの一覧 | 使えない（無い）。見えないものを無いものと同じに返す判定を作る |
 | `judgeUsage` | 料金プラン・上限の比べの部品 | 依存のライブラリの一覧 | 使えない（無い）。作る |
@@ -388,15 +377,13 @@ nd-factory/
 | `settleIdempotency` | 済みの行と要素の結果を書く 1 件を返す | 1 回だけ返す値は `null` に替わる | 持ち主が違うと条件で外れる |
 | `redact` | `authorization`・`token` の下の値が伏せられる | 入れ子の深い所・配列の中・鍵の名前の大文字と小文字・文字列の中に埋まった `ndfd_` | 循環する値で止まらない。元の値を変えない |
 | `createLogger` | 1 行の JSON に文脈が付く | 項目が空・数だけ | JSON にできない値は替えて出す。`sink` の例外で呼び手が落ちない（「書けない」の行） |
-| `withRetry` | 2 回目で成功した値を返す | `max_attempts` 回ちょうどで止まる。`Retry-After` が上限を越えると上限で待つ | 使い切りで `RetryExhausted`、`conflict` は 1 回で返す、`deadline` を越える待ちをしない |
 | `classifyFailure` | 表の各行の入力が決まった分類になる | 501 は `rejected`、504 は `retryable` | 形の分からない値は `unknown` |
-| `callHttp` | 200 の本文と分類 `ok` を返す | 時間切れの直前に届いた応答を受ける | 時間切れ（冪等なら繰り返す・冪等でなければ繰り返さない）、429・5xx の再試行、4xx をそのまま返す、`http:` の URL で止まる |
-| `awsClient` | 方針の回数と時間切れを持つクライアント | 同じ方針の 2 回目は同じインスタンス | 知らない方針の名前は型で弾く |
+| `callHttp` | 200 の本文と分類 `ok` を返す。方針のデータが `ky` の `retry`・`timeout`・`totalTimeout` の設定に写る | `Retry-After` が方針の上限を越える応答は待たずに返す | 時間切れ（冪等なら繰り返す・冪等でなければ繰り返さない）、429・5xx の再試行（偽のタイマーと偽の `fetch` で確かめる）、4xx をそのまま返す、`http:` の URL で止まる |
+| `awsClient` | 方針の `retryMode`・回数・時間切れを持つクライアント（クライアントの設定を読んで照らす） | 同じ方針の 2 回目は同じインスタンス | 知らない方針の名前は型で弾く |
 | `putIfAbsent` | 条件 `attribute_not_exists(pk)` と扱いを持つ 1 件 | `schema_version` の無い行を型で弾く | 無し |
 | `updateIfVersion` | 版の条件と `version + 1` を持つ 1 件 | `version` が 1・`extra` あり | `set` に `version` を含むと型で弾く |
 | `writeAtomically` | 全件が書かれ `ok` | 1 件と 100 件 | 条件の外れの件の番号と扱いを返す、衝突は再試行、届かないは再試行の後に投げる、101 件で止まる |
 | `authenticate` | 人・委任・ランナー・手元のマシン・GitHub・DB の用意のタスクの 6 つが決まる（見回りは HTTP の経路を持たず、認証を通らない） | 期限の 1 秒前と 1 秒後 | 形・署名・期限・取り消し・受け口の違いはすべて同じ `unauthorized`、鍵と表に届かないは `unavailable`、最後に使った時刻を書けなくても続く |
-| `createJwksCache` | 控えた鍵で 2 回目は取りに行かない | 知らない `kid` の取り直しが前の取得から 59 秒では起きず 60 秒で起きる・控えが 1 時間ちょうどの前後で使う側と取り直す側に分かれる・同じ時の取り直しが 1 回 | 取り直しても `kid` が無い、取得の失敗を投げる |
 | `visibleProjectIds` | 人・委任・ランナーの集まり | 委任した人がチームを外れた次の要求で集まりから消える | 読み手の失敗を投げる |
 | `authorize` | 見える要素を `allow` | 見える要素と見えない要素の混ざり・移す途中の名前だけの読み | 見えないは 404、委任の人だけは要求全体の 403、種類の不足は 403、メンバーの持ち主だけの操作は要素の 403、読み手の失敗は投げる |
 | `judgeUsage` | 上限の内で `allowed` | 使った額が上限額ちょうど・同時の数がちょうど・上限なしの行 | 上限額に当たる、場所と推論の手段が許されない、同時の数が満ちる、通貨の違い |

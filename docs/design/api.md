@@ -566,7 +566,7 @@ classDiagram
 | --- | --- | --- |
 | 型 | `z.infer` | API のハンドラー・画面の API の呼び出し |
 | JSON Schema | `z.toJSONSchema`（draft 2020-12） | 要素の検証・MCP の道具の入力と出力の形 |
-| OpenAPI 3.1 の文書 | 操作の表と上の JSON Schema から、自前の生成のスクリプトで組む（決定 55） | 連携するシステム（A5）の呼び手の生成・公開の文書 |
+| OpenAPI 3.1 の文書 | 操作の表と上の zod の形から `zod-openapi`（LIB42）で組む（決定 55）。中で `z.toJSONSchema` を呼ぶため、上の JSON Schema と生成元が同じ | 連携するシステム（A5）の呼び手の生成・公開の文書 |
 | MCP の道具の一覧 | 操作の表のうち人だけでない操作 | `/mcp` の `tools/list` |
 | HTTP の経路の登録 | 操作の表の HTTP の経路 | CDK が API Gateway の HTTP の経路を操作ごとに作る。Lambda の振り分けの表 |
 | 画面のダミーデータ | 操作ごとの見本（`examples`。作り物の値だけ） | 画面先行の段で、API の中身の前に画面を作り切る偽の API（Value 2） |
@@ -617,11 +617,16 @@ classDiagram
 | # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | LIB40 | `@modelcontextprotocol/server` | 2.4.0 | Apache-2.0 | 2026-10-23 | 無し | 満たす。2026-07-28 版を実装する v2 の安定の系列。依存は zod 4。v1 の系列 `@modelcontextprotocol/sdk` 1.32.2（2026-10-23、MIT）は 2026-07-28 版の前の系列で、LIB40 が置き換える | https://registry.npmjs.org/@modelcontextprotocol/server （2026-11-17） |
-| LIB41 | `aws-jwt-verify` | 5.2.1 | Apache-2.0 | 2026-06-05 | 無し | 満たす。Cognito の access token の署名・発行元・クライアント・`token_use` を確かめる | https://registry.npmjs.org/aws-jwt-verify （2026-11-17） |
+| LIB41 | `aws-jwt-verify` | 5.2.1 | Apache-2.0 | 2026-06-05 | 無し | 満たす。Cognito の access token の署名・発行元・クライアント・`token_use` を確かめる。公開鍵の控え（`SimpleJwksCache`）は知らない `kid` で取り直し、失敗した取り直しの後は `SimplePenaltyBox`（既定 10 秒）が待たせる。取り手（`SimpleFetcher`）は `responseTimeout` を設定でき、失敗を 1 回だけすぐに打ち直す | https://registry.npmjs.org/aws-jwt-verify （2026-11-17） |
 | LIB42 | `zod-openapi` | 6.0.2 | MIT | 2026-08-31 | 無し | 満たす。zod 4 から OpenAPI を作る。依存が 1 つ増える | https://registry.npmjs.org/zod-openapi （2026-11-17） |
 | LIB43 | `@asteasolutions/zod-to-openapi` | 9.1.0 | MIT | 2026-07-19 | 無し | 満たす。zod から OpenAPI を作る。依存が 1 つ増える | https://registry.npmjs.org/@asteasolutions/zod-to-openapi （2026-11-17） |
 | LIB44 | Amazon Cognito の利用者プール（認可の端点） | —（サービス） | —（AWS のサービス） | — | 無し | 一部。PKCE（S256）と RFC 8707 の `resource` で宛先を縛れる。クライアントの動的な登録とクライアント ID の資料は第三者の資料が持たないとする（公式の文書では確かめていない） | https://docs.aws.amazon.com/cognito/latest/developerguide/authorization-endpoint.html （2026-11-17） |
 | LIB46 | `uuid`（`v7`） | 14.0.3 | MIT | 2026-10-10 | 無し | 満たす。RFC 9562 の UUIDv7 を組む。`msecs` と `seq` を渡すと内側の状態を使わずにバイト列だけを組むため、注入した時計で作れる。実行の時の依存は無い | https://registry.npmjs.org/uuid ・ https://github.com/uuidjs/uuid/blob/main/src/v7.ts （2026-11-18） |
+| LIB91 | `ky` | 2.2.0 | MIT | 2026-10-09 | 無し | 満たす。組み込みの `fetch` の上で、再試行（回数・方法・状態のコード・`Retry-After` の上限・待ちの上限）・要求ごとの時間切れ・全体の期限・`fetch` の差し替えを設定で持つ。依存 0 | https://registry.npmjs.org/ky （2026-11-21） |
+| LIB92 | `p-retry` | 9.0.0 | MIT | 2026-11-02 | 無し | 満たす。非同期の処理を回数・待ちの下限と上限・`shouldRetry` で繰り返す。HTTP と AWS SDK の再試行に当たらない所（トランザクションの衝突）に使う | https://registry.npmjs.org/p-retry （2026-11-21） |
+| LIB93 | `pino` | 10.4.0 | MIT | 2026-10-02 | 無し | 満たす。1 行の JSON の構造化ログで、ブラウザー版を持つ。伏せ字は鍵のパスだけで、値の形での伏せ字は持たない | https://registry.npmjs.org/pino （2026-11-21） |
+| LIB94 | `cockatiel` | 4.0.0 | MIT | 2026-05-26 | 無し | 満たす。全幅のゆらぎ・`Retry-After` を返す待ちの関数・時間切れの方針を持つ。採らない（利用が `ky` と AWS SDK より狭く、両方が持つ再試行と二重になる） | https://registry.npmjs.org/cockatiel （2026-11-21） |
+| LIB95 | `jose` | 6.2.18 | MIT | 2026-11-18 | 無し | 満たす。`createRemoteJWKSet` が控えの保持・取り直しの間隔・同じ時の取り直しのまとめを設定で持つ。採らない（Cognito に固有の照らしを自前で書くことになる。決定 48） | https://registry.npmjs.org/jose （2026-11-21） |
 
 ### 確かめられなかったこと
 
@@ -735,7 +740,7 @@ UUIDv7 のバイト列は `uuid` の `v7`（LIB46）で組み、単調性の状�
 
 ### 決定 48: 人の token と委任の token を同じ操作で受けるよう、認証を API の Lambda の中の 1 か所に置く
 
-同じ HTTP の経路が、Cognito の access token と委任の token の両方を受ける。そのため API Gateway の JWT の前段を、利用者向けの HTTP の経路に置かない。Lambda の中で token の種類を見分けて確かめる。Cognito の token は `aws-jwt-verify` で確かめる。委任の token は毎回、表を強い整合で読み、取り消しを次の要求から効かせる。
+同じ HTTP の経路が、Cognito の access token と委任の token の両方を受ける。そのため API Gateway の JWT の前段を、利用者向けの HTTP の経路に置かない。Lambda の中で token の種類を見分けて確かめる。Cognito の token は `aws-jwt-verify`（LIB41）の Cognito の検証で確かめ、公開鍵の控えは組み込みの `SimpleJwksCache` と `SimplePenaltyBox` を既定のまま使う。知らない `kid` の token を受けると控えを取り直すため、IdP の鍵の差し替えに付いていける。鍵の取得の時間切れだけを組み込みの取り手（`SimpleFetcher`）の `responseTimeout` で設定する。委任の token は毎回、表を強い整合で読み、取り消しを次の要求から効かせる。
 
 採らなかった案:
 
@@ -743,11 +748,13 @@ UUIDv7 のバイト列は `uuid` の `v7`（LIB46）で組み、単調性の状�
 | --- | --- |
 | Lambda の前段（authorizer） | 呼び出しが 1 段増え、結果のキャッシュが取り消しを遅らせる |
 | 人と委任で HTTP の経路を分ける | 同じ操作が 2 つの HTTP の経路に分かれる（Value 4） |
+| 公開鍵の控えを自前で作り（`createJwksCache`）、控えを 1 時間で捨て、知らない `kid` の取り直しを 60 秒あける（この決定の直す前の結論） | 2 つの値は設計が自分で置いた要件で、組み込みの控えは知らない `kid` で取り直すため鍵の差し替えに付いていける。自前の控えは AWS の公式の部品が持つ機能を作り直すことになる（Value 15） |
+| `jose`（LIB95）の `createRemoteJWKSet` で鍵を控える | 控えの設定は揃うが、Cognito に固有の照らし（`client_id`・`token_use`）を自前の層で書くことになる |
 
 - 作り方: ライブラリやサービスを使う・自前で作る
-- 比べた候補: LIB41 / LIB44
+- 比べた候補: LIB41 / LIB44 / LIB95
 
-根拠: Value 4 / Value 9（MVV 版 1）
+根拠: Value 4 / Value 9 / Value 15（MVV 版 2）
 
 ### 決定 49: 任せる範囲を人が読めて狭められるよう、委任の範囲をプロジェクトと 3 つの操作の種類にし、期限を 1 時間〜30 日にする
 
@@ -806,16 +813,21 @@ Cognito はクライアントの動的な登録とクライアント ID の資�
 
 根拠: Value 4（MVV 版 1）
 
-### 決定 55: 依存を増やさずに OpenAPI を出せるよう、OpenAPI の文書を zod の JSON Schema から自前の生成のスクリプトで組む
+### 決定 55: 自前の組み立てを持たずに OpenAPI を出せるよう、OpenAPI の文書を操作の表の zod の形から `zod-openapi` で組む
 
-HTTP の経路はすべて `POST` と配列の本文の 1 つの形で、OpenAPI の文書は操作の表と `z.toJSONSchema` の結果を並べるだけで組める。同じ生成のスクリプト（`packages/contracts/scripts/generate.ts`）が設定のファイルの JSON Schema も作り、差の検査は CI の `check` の生成物の差が担う。
+HTTP の経路はすべて `POST` と配列の本文の 1 つの形で、操作の表の要素と結果の zod の形を `zod-openapi`（LIB42）の `createDocument` に渡せば OpenAPI 3.1 の文書になる。`zod-openapi` は中で `z.toJSONSchema` を呼ぶため、要素の検証と MCP の道具が使う JSON Schema と生成元が同じになる。生成は形の正本の生成のスクリプト（`packages/contracts/scripts/generate.ts`）が行い、差の検査は CI の `check` の生成物の差が担う。
 
-採らなかった案: `zod-openapi` と `@asteasolutions/zod-to-openapi` はどちらも要件を満たす。ただ HTTP の経路の形が 1 つしか無いこの API では、依存を 1 つ増やす分の得が無い。
+採らなかった案:
 
-- 作り方: 自前で作る
+| 形 | 理由 |
+| --- | --- |
+| 操作の表と `z.toJSONSchema` の結果を並べて、自前の生成のスクリプトで文書を組む（この決定の直す前の結論） | 依存を 1 つ増やさないことを得と見たが、文書の外枠（`paths`・`components`・`securitySchemes`）の組み立てと OpenAPI の版の追随を自前で持ち続けることになる（Value 15） |
+| `@asteasolutions/zod-to-openapi`（LIB43） | 要件は満たすが、JSON Schema を独自の生成器で作り、要素の検証の JSON Schema と生成元が分かれる。zod のプロトタイプを拡張する |
+
+- 作り方: ライブラリを使う
 - 比べた候補: LIB42 / LIB43
 
-根拠: Value 6 / Value 2（MVV 版 1）
+根拠: Value 2 / Value 13 / Value 15（MVV 版 2）
 
 ### 決定 56: 要素の形と理由のコードを 2 か所に持たないため、形の正本の操作の定義だけに置き、全体の設計には決まりと受け持つ子を書く
 

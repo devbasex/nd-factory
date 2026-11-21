@@ -64,7 +64,7 @@ packages/core/                  *
 │   ├── clock.ts · ids.ts · idempotency.ts · redact.ts · log.ts · retry.ts · outbound.ts
 │   ├── db.ts                       Db のポートと DynamoDB の実装
 │   ├── conditional-write.ts · authorize.ts · usage-limit.ts · audit.ts
-│   ├── auth/  authenticate.ts · jwks.ts · tokens.ts
+│   ├── auth/  authenticate.ts · tokens.ts
 │   └── dispatch/  types.ts · http.ts · dispatch.ts
 └── test/                           モジュールごとに 1 つと fakes/（偽の表・偽の ScopeReader）
 apps/api/
@@ -81,7 +81,7 @@ infra/
 └── test/service-table.test.ts · api-routes.test.ts  *
 ```
 
-依存の向き: `packages/contracts`（zod だけ）← `packages/core`（contracts・AWS SDK・`uuid`・`aws-jwt-verify`）← `apps/api`。`infra` は `packages/contracts` の `tables.ts` と `generated/routes.json` だけを読む。`packages/core` と `apps/*` は import しない。`apps/web` が使ってよい `core` のモジュールは `clock`・`ids`・`redact`・`log` の 4 つである。この 4 つは `node:` の組み込みと AWS SDK を import しない（`ids` の乱数は `uuid` を通す）。型の関係は [detail.md のクラス図](../docs/design/detail.md#クラスと関数の構造) のまま変えない。
+依存の向き: `packages/contracts`（zod だけ）← `packages/core`（contracts・AWS SDK・`uuid`・`aws-jwt-verify`・`ky`・`p-retry`・`pino`）← `apps/api`。`infra` は `packages/contracts` の `tables.ts` と `generated/routes.json` だけを読む。`packages/core` と `apps/*` は import しない。`apps/web` が使ってよい `core` のモジュールは `clock`・`ids`・`redact`・`log` の 4 つである。この 4 つは `node:` の組み込みと AWS SDK を import しない（`ids` の乱数は `uuid` を通す）。型の関係は [detail.md のクラス図](../docs/design/detail.md#クラスと関数の構造) のまま変えない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | モジュール | 最上位の関数と定数（新設 / 変更） |
 | --- | --- | --- | --- | --- | --- |
@@ -259,7 +259,7 @@ infra/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `data/ndf-contracts.json` | 設定値 | `packages/contracts/data/` | `{"accepted": [{"version": 8, "sha256": "ed8b036584bec284dfc93a2bb5b988e2385b4f8f297d659399f5d3cb91b520c4"}]}` |
-| `data/retry-policies.json` | 設定値 | 同上 | detail.md の 6 つの方針の値のまま（`dynamodb`・`aws-control`・`http-github`・`http-idp-keys`・`http-notify`・`runner-to-api`）。鍵は `max_attempts`・`base_ms`・`cap_ms`・`timeout_ms`・`honor_retry_after` |
+| `data/retry-policies.json` | 設定値 | 同上 | 全体の設計の detail.md の「再試行の方針の表」の 7 つの方針（`dynamodb`・`aws-control`・`dynamodb-transaction`・`http-github`・`http-notify`・`runner-to-api`・`http-idp-keys`）。形は `RetryPolicy` の 4 つの種類（`aws`・`http`・`jwks`・`transaction`） |
 | `data/secret-shapes.json` | 設定値 | 同上 | 鍵の名前に含む語 `authorization`・`token`・`secret`・`password`・`credentials`・`private_key`・`dsn`。値の形 `ndfd_`・`ndfm_` の頭・JWT（`eyJ` で始まる 3 つの部分）・`ghs_`・`ghp_`・`gho_`・`github_pat_`・`-----BEGIN .*PRIVATE KEY-----`・利用者と合言葉を含む接続の URL（`://[^/:]+:[^@]+@`）・AWS の一時の鍵（`ASIA[0-9A-Z]{16}`） |
 | `data/plans.json` | 設定値 | 同上 | `[{"name": "unlimited", "places": ["hosted","machine"], "inference": ["managed","byok"], "concurrency": null, "monthly_cap": null}]`（値の集合と量は #29） |
 
@@ -268,7 +268,7 @@ infra/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `ndfContractSet` | 今のデータが通る | 組が 1 つ | 空・63 桁・大文字の 16 進・版 0・同じ版の重なり |
-| `RETRY_POLICIES` | 6 つの方針が detail.md の値 | — | 鍵の欠け・負の数で読み込みが投げる |
+| `RETRY_POLICIES` | 7 つの方針が detail.md の値で、種類ごとの形に合う | — | 鍵の欠け・負の数・種類に無い鍵で読み込みが投げる |
 | `SECRET_SHAPES` | 値の形の各行に当たる作り物の値と当たらない値の組 | — | 正規表現として読めない行で投げる |
 
 ## 形の正本: 生成
@@ -281,7 +281,7 @@ infra/
 | --- | --- | --- | --- | --- |
 | `checkExamples` | `scripts/artifacts.ts` | 新設 | `(ops: readonly OperationDef[]) => ExampleProblem[]` | 見本を結果の形・秘密の形・作り物の値の決まりで照らす |
 | `buildOperationSchemas` | 同上 | 新設 | `(ops) => JsonSchemaDoc` | 操作ごとの要素と結果の JSON Schema を `$defs` に並べる |
-| `buildOpenApi` | 同上 | 新設 | `(ops, schemas) => OpenApiDoc` | OpenAPI 3.1 の文書を組む |
+| `buildOpenApi` | 同上 | 新設 | `(ops) => OpenApiDoc` | `zod-openapi`（LIB42。開発の依存）の `createDocument` に、操作の表の要素と結果の zod の形（`.meta({ id: "<操作>.item" })` で名前を付ける）を渡して OpenAPI 3.1.1 の文書を組む（全体の設計の決定 55） |
 | `buildMcpTools` | 同上 | 新設 | `(ops, schemas) => McpToolDoc[]` | 人だけでない利用者向けの操作の道具の定義 |
 | `buildRoutes` | 同上 | 新設 | `(ops) => RouteDoc[]` | 経路の登録 |
 | `buildReasons` | 同上 | 新設 | `(ops) => ReasonsDoc` | 理由のコードの一覧 |
@@ -316,7 +316,7 @@ infra/
 | 生成物 | 形（鍵の順） |
 | --- | --- |
 | `generated/operations.schema.json` | `{"$schema": "https://json-schema.org/draft/2020-12/schema", "$defs": {"<操作>.item": …, "<操作>.result": …}}`。形の未定は `{"not": {}}` |
-| `generated/openapi.json` | `openapi: "3.1.1"`・`info`（題 `nd-factory API`・版 `1`）・`paths`（受け口 `user` の操作だけ。`post` の `operationId` は操作の名前、要求は `itemsArray(item)`、応答 200 は結果の配列、`default` は problem）・`components.schemas`（`operations.schema.json` の `$defs` の写し）・`components.securitySchemes.bearer` |
+| `generated/openapi.json` | `openapi: "3.1.1"`・`info`（題 `nd-factory API`・版 `1`）・`paths`（受け口 `user` の操作だけ。`post` の `operationId` は操作の名前、要求は `itemsArray(item)`、応答 200 は結果の配列、`default` は problem）・`components.schemas`（`zod-openapi` が `.meta({ id })` の名前で出す。生成元は `z.toJSONSchema` で、`operations.schema.json` の `$defs` と同じ値になることを生成のテストが照らす）・`components.securitySchemes.bearer` |
 | `generated/mcp-tools.json` | `[{name, description, inputSchema, outputSchema, annotations}]`（操作の表の順） |
 | `generated/routes.json` | `[{method: "POST", path, operation, endpoint}]`（操作の表の順。GitHub の Webhook は I12 の外のため載せず、受け持つ #5 が足す） |
 | `generated/reasons.json` | `{"request": [{code, status}…], "item": [{code, status}…], "operations": {"<操作>": [{code, status}…]}}`。`operations` の値は `itemReasonsOf(op)` の `code` と `status` |
@@ -332,6 +332,7 @@ infra/
 | 往復（`operations-roundtrip.test.ts`） | 比べる操作は、`OPERATIONS` のうち形のある操作と、テスト用の操作（下の段落）の和。操作ごとに、要素（見本と反例: 時刻帯の無い日時・通貨の無い金額・頭の違う ID・配列でない本文）・成功の結果（`examples` の `normal` と `edge`）・失敗の結果（`buildDummy` の `failures` と、`ReasonDef` に無い `status` と `reason` の組の反例）を、zod（`ItemOf`・`resultSchemaOf`）と、`buildOperationSchemas` が出した `<操作>.item`・`<操作>.result` を Ajv（`Ajv2020`、`strict: true`、`validateFormats: false`）で検証した結果とで同じ合否 | 要素 1 個と上限ちょうどの配列 | `refine` を使う形をテストの中で足すと食い違いを検出する（検出の仕組みのテスト）。比べた操作・要素・成功・失敗のどれかの件の数が 0 なら落ちる |
 | `checkExamples` | 作り物の値だけの見本は問題 0 | — | 通貨の無い金額・`ghs_` の値・`ops@corp.test`・12 桁の別の数で問題が出る |
 | `buildMcpTools` | 人だけの操作と受け口 `user` でない操作が無い。道具の順が操作の表の順 | 全部か無かの操作の `maxItems` | — |
+| `buildOpenApi` | 文書が OpenAPI 3.1.1 で、`components.schemas` の各値が `operations.schema.json` の同じ名前の `$defs` と一致する | 形の未定の操作の `not` の形 | 一致しないと落ちる（`zod-openapi` と `z.toJSONSchema` の出力の差を拾う） |
 | `buildDummy` | `list` の空・`get` の 404・`itemReasonsOf(op)` のコードごとの失敗で、`status` が `ReasonDef` と同じ。どの失敗も `resultSchemaOf` の zod を通る | 形の未定は `null` | — |
 | `itemReasonsOf` | 書く操作は `version_mismatch` を含み、操作ごとのコードが後ろに続く | 冪等の鍵の無い操作は `in_progress` を含まない | 操作ごとのコードに `not_found` を書くと `defineOperation` が投げる |
 | `generateArtifacts` | `write` の後の `check` が空 | 消えた操作のダミーのファイルが `check` で差になる | 見本の誤りで書かずに投げる |
@@ -394,11 +395,11 @@ infra/
 | idempotency | `src/idempotency.ts` | `./idempotency` | `claimIdempotency`・`settleIdempotency` |
 | redact | `src/redact.ts` | `./redact` | `redact` |
 | log | `src/log.ts` | `./log` | `createLogger` |
-| retry | `src/retry.ts` | `./retry` | `withRetry`・`classifyFailure` |
+| retry | `src/retry.ts` | `./retry` | `classifyFailure`（共通の再試行の関数は持たない。全体の設計の detail.md の「既存の部品の再利用」の再試行の行） |
 | outbound | `src/outbound.ts` | `./outbound` | `callHttp`・`awsClient` |
 | db | `src/db.ts` | `./db` | `createDb`（新設） |
 | conditional-write | `src/conditional-write.ts` | `./conditional-write` | `putIfAbsent`・`updateIfVersion`・`writeAtomically`・`updateIfSchemaVersion`（新設。[表の移し](#表の移し)） |
-| auth | `src/auth/authenticate.ts`・`jwks.ts`・`tokens.ts` | `./auth` | `authenticate`・`createJwksCache` |
+| auth | `src/auth/authenticate.ts`・`tokens.ts` | `./auth` | `authenticate`（公開鍵の控えは `aws-jwt-verify` の組み込み。全体の設計の決定 48） |
 | authorize | `src/authorize.ts` | `./authorize` | `visibleProjectIds`・`authorize` |
 | usage-limit | `src/usage-limit.ts` | `./usage-limit` | `judgeUsage`・`usageAddItem` |
 | audit | `src/audit.ts` | `./audit` | `auditItem`・`appendAudit` |
@@ -411,9 +412,12 @@ infra/
 | `@nd-factory/contracts` | — |
 | `uuid` | 14.0.3（LIB46） |
 | `aws-jwt-verify` | 5.2.1（LIB41） |
+| `ky` | 2.2.0（LIB91）。`callHttp` |
+| `p-retry` | 9.0.0（LIB92）。`writeAtomically` のトランザクションの衝突だけ |
+| `pino` | 10.4.0（LIB93）。`createLogger`。画面では `pino` のブラウザー版（`browser.write` に書き先を渡す） |
 | `@aws-sdk/client-dynamodb`・`@aws-sdk/lib-dynamodb` | `apps/api` と同じ 3.1170.0 |
 
-`log` の既定の書き先は `process.stdout.write` で、`console.log` を使わない。
+`log` の既定の書き先は `pino` の既定（Node では標準出力、ブラウザーでは渡した `write`）で、`console.log` を直に使わない。`pino` の鍵のパスの伏せ字（`redact`）の設定は使わず、鍵の名前と値の形の伏せ字は自前の `redact` だけが持つ（同じ規則を 2 か所に置かない）。
 
 ### 関数の仕様（この課題で足すもの）
 
@@ -443,7 +447,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | `Clock` | `clock.ts` | `now(): Date`・`iso(): string`・`epochMs(): number`（`epochMs` を足す。`newId` と TTL の計算が使う） |
 | `Logger` | `log.ts` | `info(msg, fields?)`・`warn(msg, fields?)`・`error(msg, fields?)`・`child(fields)` |
 | `LogContext` | `log.ts` | `request_id`・`fn`・`endpoint?` |
-| `RetryPolicy` | contracts `data.ts` | `max_attempts`・`base_ms`・`cap_ms`・`timeout_ms`・`honor_retry_after` |
+| `RetryPolicy` | contracts `data.ts` | 判別の鍵 `kind` を先頭に。`aws`: `retry_mode`・`max_attempts`・`request_timeout_ms`。`http`: `limit`・`timeout_ms`・`total_timeout_ms`・`backoff_limit_ms`・`max_retry_after_ms`。`jwks`: `response_timeout_ms`。`transaction`: `retries`・`min_ms`・`max_ms` |
 | `OutboundRequest` | `outbound.ts` | `method`・`url`・`headers`・`body`・`idempotent`・`peer`（ログの相手の種類 `github`・`idp`・`push`・`slack`・`api`） |
 | `OutboundResult` | `outbound.ts` | `status`・`headers`・`body`・`class` |
 | `TransactItem` | `conditional-write.ts` | `table`・`op`（`put`・`update`・`delete`・`check`）・`key`・`item?`・`update?`・`condition`・`onConflict` |

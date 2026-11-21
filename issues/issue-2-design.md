@@ -35,11 +35,11 @@ graph LR
 - 全体の設計で決めた次のものは決め直さない
   - 呼び出しの規約と値の形（[API の文書](../docs/design/api.md#呼び出しの規約)）
   - 操作の一覧の名前と印
-  - 横断の部品の最上位の関数のシグネチャと異常系（[detail.md](../docs/design/detail.md)）
+  - 横断の部品の最上位の関数のシグネチャと異常系（[detail.md](../docs/design/detail.md)）。例外は MVV 版 2 の Value 15 に照らして直した 4 つの作り方で、全体の設計（api.md の決定 48・55・detail.md の関数の表と再利用の表）をこの Pull Request で直した（決定 17）
   - 表と鍵と共通の列（[データの文書](../docs/design/data.md#表と鍵)）
   - 依存の向き
 - 操作ごとの要素の項目・型・理由のコードは受け持つ子が書く（[api.md の決定 56](../docs/design/api.md#決定-56-要素の形と理由のコードを-2-か所に持たないため形の正本の操作の定義だけに置き全体の設計には決まりと受け持つ子を書く)）。この課題は枠と印を持ち、形を代わりに決めない
-- NDF との契約は #41 の設計（PR #42、決定 104〜108）を正とする。`docs/design/execution.md` の本体はまだ旧い記述で、#41 の実装で直る
+- NDF との契約は #41 の設計（PR #42、決定 104〜108。承認されマージ済み）を正とする
 - 並行する #1（検査）と #13（インフラ）と、触るファイルを分ける。#1 とは「形の往復」の検査で、#13 とは `packages/contracts/` と `infra/lib/` で重なりうる
 - 1 子 1 スプリント（plan.md の決まり）。CI は AWS の資格情報を持たない
 
@@ -343,13 +343,13 @@ flowchart LR
 - **代償**: 受け入れ条件 11（詳細設計）はこの設計 Pull Request で満たす
 - 根拠: Value 2（MVV 版 2）
 
-### 決定 13: 測った値の無いまま方針を変えないため、再試行の方針の値は detail.md の値をデータのファイルへそのまま移す
+### 決定 13: 待ちの計算を自前で持たないため、再試行の方針のデータを呼び出しの種類ごとのライブラリの設定の形にし、値は直す前の方針の回数と時間をそのまま移す
 
-- **質問**: この課題が持つ「再試行の方針の値の調整」で、detail.md の 6 つの方針の値を変えるか
-- **選んだ案**: 変えない。`data/retry-policies.json` に detail.md の値をそのまま置き、`awsClient` と `callHttp` はこのデータだけを読む。値を変えるのは、反映した環境のログ（`withRetry` の warn の行）で使い切りか待ちすぎが見えた後で、変えるのはデータの 1 か所だけにする
-- **採らなかった案**: 今の段で回数と待ちを詰める案は、根拠にする測定が無い
-- **代償**: 無し
-- 根拠: Value 6（MVV 版 2）
+- **質問**: この課題が持つ「再試行の方針の値の調整」で、方針のデータをどの形にし、値を変えるか
+- **選んだ案**: 全体の設計の直し（detail.md の「再試行の方針の表」と `RetryPolicy`）のとおり、`data/retry-policies.json` を種類ごとの形にする。AWS SDK へ渡す `aws`（`retry_mode`・回数・要求の時間切れ）、`ky` へ渡す `http`（回数・要求の時間切れ・全体の期限・待ちの上限・`Retry-After` の上限）、`aws-jwt-verify` の取り手へ渡す `jwks`（応答の時間切れ）、`p-retry` へ渡す `transaction`（回数・待ちの下限と上限）の 4 つである。回数と時間は直す前の 6 つの方針の値を移し、`dynamodb-transaction` は前の `dynamodb` の待ちの値を使う。`retry_mode` は `standard` にする（`adaptive` は実行環境ごとに送る速さを絞り、短く生きる Lambda では絞りの学びが残らない）。`awsClient`・`callHttp`・`authenticate`・`writeAtomically` はこのデータだけを読み、待ちの計算はライブラリの組み込みに任せる。値を変えるのは、反映した環境のログ（再試行の warn の行）で使い切りか待ちすぎが見えた後で、変えるのはデータの 1 か所だけにする
+- **採らなかった案**: 共通の方針の形（`max_attempts`・`base_ms`・`cap_ms`・`timeout_ms`・`honor_retry_after`）のまま残す案は、待ちの計算を持たないライブラリへ渡せない値（`base_ms` など）を持ち、どの値が効くかがデータから読めない
+- **代償**: 種類ごとに鍵が違うため、方針を足すときは種類を選ぶ
+- 根拠: Value 13 / Value 15（MVV 版 2）
 
 ### 決定 14: 索引の遅れで見えてはいけないものを見せないため、3 つの索引は候補を出すだけにし、認可と確定の照らしは表の本体を強い整合で読む
 
@@ -377,30 +377,30 @@ flowchart LR
 - **比べた候補**: LIB-A20 / LIB-A21 / LIB-A22 / LIB-A23 / LIB-A24 / LIB-A25
 - 根拠: Value 2 / Value 13 / Value 15（MVV 版 2）
 
-### 決定 17: 自前の実装を減らすため、横断の部品ごとに既存のライブラリを調べ、乗り換えると全体の設計の決定を変える 4 つは全体の設計の直しに回し、ほかは使える部品を使う
+### 決定 17: 自前の実装を減らすため、横断の部品ごとに既存のライブラリを調べ、OpenAPI・公開鍵の控え・外への呼び出しと再試行・ログを既存の部品へ乗り換え、全体の設計を同じ Pull Request で直す（全体の設計を直した）
 
 - **質問**: MVV 版 2 の Value 15 に照らし、詳細設計で「作る」とした横断の部品を既存のライブラリへ乗り換えるか
-- **選んだ案**: 部品ごとの調べた結果と扱いは次のとおりである（外部の調査の LIB-A10〜A19・A26〜A31）
+- **選んだ案**: 部品ごとの調べた結果と扱いは次のとおりである（外部の調査の LIB-A10〜A19・A26〜A31）。乗り換える 4 つは全体の設計の決定を変えるため、利用者の方針（2026-11-21「より堅牢で長期的に良いほうを選ぶ。今の実装からの切り替えの手間は考慮しない」）のもとで conductor が決め、全体の設計（api.md の決定 48・55・LIB41〜43 と LIB91〜95・detail.md の関数の表と既存の部品の再利用の表）をこの Pull Request で直した。直した決定の採らなかった案に、前の結論を理由つきで移してある
 
 | 部品 | 調べた候補 | 扱い |
 | --- | --- | --- |
-| OpenAPI の文書（`buildOpenApi`） | `zod-openapi` 6.0.2・`@asteasolutions/zod-to-openapi` 9.1.0 | `zod-openapi` が要件を満たし、内部で `z.toJSONSchema` を呼ぶため往復のテストと生成元が同じ。全体の設計の api.md の決定 55（自前の生成のスクリプトで組む）を変えるため、全体の設計の直しに回す |
-| JWKS の控え（`createJwksCache`） | `jose` 6.2.18・`aws-jwt-verify` 5.2.1 | `jose` の `createRemoteJWKSet` は `cacheMaxAge`・`cooldownDuration`・同じ時の取り直しのまとめ・`customFetch` を設定だけで持つ。全体の設計の決定 48（`aws-jwt-verify`）と detail.md の「`jose` は足さない」を変えるため、全体の設計の直しに回す |
-| 外への HTTP と再試行（`callHttp`・`withRetry`） | `ky` 2.2.0・`ofetch` 1.5.1・`cockatiel` 4.0.0・`p-retry` 9.0.0・`exponential-backoff` 3.1.3 | `ky` は全幅のゆらぎ・`Retry-After` の上限・全体の期限・`fetch` の差し替えを持つ。`cockatiel` は全幅のゆらぎと `Retry-After` を持つ。どちらも待ちの差し込み（`sleep`）を持たず、detail.md の `withRetry` のシグネチャと「HTTP のライブラリは足さない」を変えるため、全体の設計の直しに回す |
-| ログ（`createLogger`） | `pino`・`@aws-lambda-powertools/logger`・`winston`・`consola` | 値の形での伏せ字を持つ候補は無い。ブラウザーでも動くのは `pino` だけで、伏せ字は自前の `redact` を通す形になる。detail.md の「ログのライブラリは使えない」を変えるため、全体の設計の直しに回す |
+| OpenAPI の文書（`buildOpenApi`） | `zod-openapi` 6.0.2・`@asteasolutions/zod-to-openapi` 9.1.0 | `zod-openapi` で組む（api.md の決定 55 を改めた）。内部で `z.toJSONSchema` を呼ぶため往復のテストと生成元が同じ |
+| 公開鍵の控え（直す前の `createJwksCache`） | `aws-jwt-verify` 5.2.1・`jose` 6.2.18 | `aws-jwt-verify` の組み込みの `SimpleJwksCache` と `SimplePenaltyBox` を既定のまま使い、`createJwksCache` をやめる（決定 48 を改めた）。控えを 1 時間で捨てる・取り直しを 60 秒あける、は設計が自分で置いた要件で外した。知らない `kid` で取り直すため鍵の差し替えに付いていける。鍵の取得の時間切れは組み込みの取り手 `SimpleFetcher` の `responseTimeout` で持たせ、取り手は差し替えない。`jose` は Cognito に固有の照らしを自前で書くことになるため採らない |
+| 外への呼び出しと再試行（`callHttp`・直す前の `withRetry`） | `ky` 2.2.0・`ofetch` 1.5.1・`cockatiel` 4.0.0・`p-retry` 9.0.0・`exponential-backoff` 3.1.3・AWS SDK の組み込み | 共通の `withRetry` を持たない。HTTP は `ky` で `callHttp` を作り、AWS の呼び出しは SDK の再試行の設定（`standard`・回数・時間切れ）で持たせる。どちらにも当たらない所はトランザクションの衝突（`TransactionCanceledException` の `TransactionConflict`。SDK はトランザクションの取り消しを繰り返さない）だけで、`writeAtomically` が `p-retry` で繰り返す。全幅のゆらぎと待ちの差し込みは設計が自分で置いた要件で外し、テストは偽のタイマーとライブラリの設定の照らしで行う。`cockatiel` は利用が狭く、SDK と `ky` が持つ再試行と二重になるため採らない。`classifyFailure` は再試行の判断に使わず、呼び手が結果の扱い（409・404・503）を決めるための分類として残す |
+| ログ（`createLogger`） | `pino` 10.4.0・`@aws-lambda-powertools/logger`・`winston`・`consola` | `pino` を書き手にし（ブラウザーでは `pino` のブラウザー版）、値の形での伏せ字だけを自前の `redact` で通す（detail.md の再利用の表を改めた）。値の形での伏せ字を持つ候補は無い。Powertools の Logger は `node:` の組み込みを読み、画面で動かない |
 | 冪等の鍵（`claimIdempotency`・`settleIdempotency`） | `@aws-lambda-powertools/idempotency` | 使えない。記録を単独の `PutItem`・`UpdateItem` で書き、状態の書き込みと同じ `TransactWriteItems` に入れる口と要素ごとの鍵を持たない（I9 と全部か無かを守れない）。自前のまま |
 | 条件つきの書き込み | `electrodb`・`dynamodb-toolbox`・`@aws-sdk/lib-dynamodb` | `@aws-sdk/lib-dynamodb` の `TransactWriteCommand` を使い、条件式の組み立てと失敗の訳しだけを書く（detail.md のまま）。`electrodb`・`dynamodb-toolbox` は独自のスキーマの言葉を持ち込み、形の正本の zod と 2 つ目の正本になる |
 | 伏せ字（`redact`） | 上のログの候補 | 鍵の名前と値の形の両方で伏せる候補は無い。自前のまま |
 | UUIDv7（`newId`） | `uuid` 14.0.3・`uuidv7` 1.2.1 | `uuid` を使う（detail.md のまま）。`uuidv7` は時計の戻りが 10 秒を超えると生成器を初め直し、注入した時計での単調性の扱いが合わない |
 | MCP の道具（#11 が作る受け口） | `@modelcontextprotocol/server` 2.4.0・`@modelcontextprotocol/sdk` 1.32.2 | v2 を使う（全体の設計の LIB40 のまま）。zod 4 から draft 2020-12 の `tools/list` を作るため、`mcp-tools.json` は同じ zod の形から作り、SDK と別の形を持たない |
 
-- **採らなかった案**: 全体の設計の決定を変える 4 つ（OpenAPI・JWKS・HTTP と再試行・ログ）を、この設計の中で乗り換える案は、全体の設計の決定と詳細設計が食い違ったまま承認を求めることになる（plan.md の決まり「決め直す必要が出たら全体の設計を直す PR を先に出す」）
-- **代償**: 4 つの扱いは全体の設計の直しの答えを待つ。それまで、この設計の 4 つの部品の作り方は detail.md のまま（自前）で書いてある
+- **採らなかった案**: 4 つを全体の設計のまま自前で作る案（直す前のこの決定の結論。全体の設計の直しを待っていた）は、AWS の公式の部品と広く使われるライブラリが持つ機能を作り直し、自前の層を保ち続けることになる（Value 15）。乗り換えた後の全体の設計を別の Pull Request にする案は、#13 と同じく設計承認ゲートで全体の設計の直しと詳細設計を一緒に見てもらうために採らなかった
+- **代償**: 実行の時の依存が 3 つ（`ky`・`p-retry`・`pino`）、開発の依存が 1 つ（`zod-openapi`）増える。組み込みの公開鍵の控えは期限を持たないため、IdP が外した鍵を、実行環境が生きている間は受けうる
 - 根拠: Value 13 / Value 15（MVV 版 2）
 
 ## 影響と危険
 
-- **働く範囲**: このリポジトリの形の正本・新しい横断の部品・API の起点・骨組みの API の関数・CDK の部品（スタックへは入れない）。利用先のリポジトリは無い
+- **働く範囲**: このリポジトリの形の正本・新しい横断の部品・API の起点・骨組みの API の関数・CDK の部品（スタックへは入れない）と、全体の設計の 2 本（`docs/design/api.md` の決定 48・55 と LIB の行、`docs/design/detail.md` の関数の表と再利用の表ほか。決定 17）。利用先のリポジトリは無い
 - **プロジェクトごとに違うもの**: 無し（環境の値は読まない。表の名前の接頭辞と環境は、表を入れる子が設定のファイルから渡す）
 - **当たるモード**: standard
 - **同じファイルを触る別の変更**:
@@ -444,7 +444,7 @@ flowchart LR
 
 | 課題 | 結果 | 依存 | 触るファイル |
 | --- | --- | --- | --- |
-| #2 | 実装する | — | `packages/contracts/`（`package.json`・`src/values.ts`・`src/ids.ts`・`src/tokens.ts`・`src/reasons.ts`・`src/operation.ts`・`src/operations/*.ts`・`src/rows/*.ts`・`src/tables.ts`・`src/ndf.ts`・`src/data.ts`・`src/client.ts`・`data/retry-policies.json`・`data/secret-shapes.json`・`data/ndf-contracts.json`・`data/plans.json`・`scripts/generate.ts`・`generated/*`・`test/*`）、`packages/core/`（新設。`package.json`・`tsconfig.json`・`src/*.ts`・`src/auth/*.ts`・`src/dispatch/*.ts`・`test/*`）、`apps/api/`（`package.json`・`src/entries/api-fn.ts`・`src/entries/migrate.ts`・`src/users-handler.ts`・`src/user-store.ts`・`test/*`）、`infra/lib/service-table.ts`・`infra/lib/api-routes.ts`・`infra/test/service-table.test.ts`・`infra/test/api-routes.test.ts`（新設）、`package-lock.json` |
+| #2 | 実装する | — | `packages/contracts/`（`package.json`・`src/values.ts`・`src/ids.ts`・`src/tokens.ts`・`src/reasons.ts`・`src/operation.ts`・`src/operations/*.ts`・`src/rows/*.ts`・`src/tables.ts`・`src/ndf.ts`・`src/data.ts`・`src/client.ts`・`data/retry-policies.json`・`data/secret-shapes.json`・`data/ndf-contracts.json`・`data/plans.json`・`scripts/generate.ts`・`generated/*`・`test/*`）、`packages/core/`（新設。`package.json`・`tsconfig.json`・`src/*.ts`・`src/auth/*.ts`・`src/dispatch/*.ts`・`test/*`）、`apps/api/`（`package.json`・`src/entries/api-fn.ts`・`src/entries/migrate.ts`・`src/users-handler.ts`・`src/user-store.ts`・`test/*`）、`infra/lib/service-table.ts`・`infra/lib/api-routes.ts`・`infra/test/service-table.test.ts`・`infra/test/api-routes.test.ts`（新設）、`package-lock.json`、全体の設計の `docs/design/api.md`・`docs/design/detail.md`（この Pull Request で直した） |
 
 後に続く課題: #11 は決定 7 の 5 つの関数を受ける。#4・#5・#6・#8・#29 は決定 8 の表を入れ、#4・#5 は決定 14 の約束で `ScopeReader` の中身を書く。#28 の順序は #48 が受ける。#1 は詳細設計の「#1 へ渡す欠け」を受ける。
 
@@ -486,16 +486,16 @@ flowchart LR
 | LIB-A7 | `zod-schema-faker` | 3.0.1・MIT・週 9.7 万・最終 2026-10-29 | zod 4 の形から値（`zod-schema-faker/v4` の `fake`・`seed`） | 採る（決定 3）。開発の依存だけ。作り物の値の生成器を上書きする |
 | LIB-A8 | `zocker` | 3.0.0・MIT・週 10.8 万・最終 2025-08-27 | zod 4 の形から値（`setSeed`） | 採らない。更新が 1 年以上無く、tarball に README が無い |
 | LIB-A9 | `zod-fixture` | 2.5.2・MIT・最終 2024-03-09 | zod から見本（`seed`） | 使えない。zod 3 の内部の形（`_def.typeName`）を読む |
-| LIB-A10 | `zod-openapi` | 6.0.2・MIT・週 230 万・依存 0 | zod 4 から OpenAPI 3.1.1（`createDocument`） | 要件を満たす。内部で `z.toJSONSchema` を呼ぶ。全体の設計の決定 55 を変えるため直しに回す（決定 17） |
+| LIB-A10 | `zod-openapi` | 6.0.2・MIT・週 230 万・依存 0 | zod 4 から OpenAPI 3.1.1（`createDocument`） | 採る（決定 17。全体の設計の決定 55 を改めた）。内部で `z.toJSONSchema` を呼ぶ |
 | LIB-A11 | `@asteasolutions/zod-to-openapi` | 9.1.0・MIT・週 886 万 | zod 4 から OpenAPI 3.1 | 一部。JSON Schema を独自の生成器で作り、往復のテストの生成元と分かれる。zod のプロトタイプを拡張する |
-| LIB-A12 | `jose` | 6.2.18・MIT・週 2.5 億・依存 0 | `createRemoteJWKSet`（`cacheMaxAge`・`cooldownDuration`・同じ時の取り直しのまとめ・`customFetch`） | 要件を満たす（Cognito の `client_id`・`token_use` は薄い層で照らす）。全体の設計の決定 48 を変えるため直しに回す（決定 17） |
-| LIB-A13 | `aws-jwt-verify` | 5.2.1・Apache-2.0・週 306 万 | Cognito の照らしと差し替えられる鍵の控えの口 | 一部。控えの保持の期限と 60 秒の最短の間隔を持たない（detail.md の記述のとおり） |
-| LIB-A14 | `ky` | 2.2.0・MIT・週 1,075 万・依存 0 | `fetch` の上の再試行（全幅のゆらぎ・`maxRetryAfter`）・`timeout`・`totalTimeout`・`fetch` の差し替え | 一部（待ちの差し込みが無い）。detail.md の「HTTP のライブラリは足さない」を変えるため直しに回す（決定 17） |
+| LIB-A12 | `jose` | 6.2.18・MIT・週 2.5 億・依存 0 | `createRemoteJWKSet`（`cacheMaxAge`・`cooldownDuration`・同じ時の取り直しのまとめ・`customFetch`） | 採らない。Cognito に固有の照らし（`client_id`・`token_use`）を自前で書くことになる（決定 17） |
+| LIB-A13 | `aws-jwt-verify` | 5.2.1・Apache-2.0・週 306 万 | Cognito の照らしと組み込みの鍵の控え（`SimpleJwksCache`・`SimplePenaltyBox`・`SimpleFetcher` の `responseTimeout`） | 採る（決定 17。全体の設計の決定 48 を改めた） |
+| LIB-A14 | `ky` | 2.2.0・MIT・週 1,075 万・依存 0 | `fetch` の上の再試行（全幅のゆらぎ・`maxRetryAfter`）・`timeout`・`totalTimeout`・`fetch` の差し替え | 採る（決定 17）。待ちの差し込みは外した要件で、テストは偽のタイマーで行う |
 | LIB-A15 | `ofetch` | 1.5.1・MIT・週 2,901 万・最終 2025-11-01 | `fetch` の上の再試行と時間切れ | 一部。全体の期限と `Retry-After` が無い |
-| LIB-A16 | `cockatiel` | 4.0.0・MIT・週 293 万・依存 0 | 全幅のゆらぎ（`fullJitterGenerator`）・`DelegateBackoff`・`handleWhen`・時間切れ | 一部（待ちの差し込みが無い）。detail.md の `withRetry` を変えるため直しに回す（決定 17） |
-| LIB-A17 | `p-retry` | 9.0.0・MIT・週 7,634 万 | 指数の待ちの再試行 | 一部。ゆらぎが 1〜2 倍で全幅でなく、`Retry-After` と待ちを外から決める口が無い |
+| LIB-A16 | `cockatiel` | 4.0.0・MIT・週 293 万・依存 0 | 全幅のゆらぎ（`fullJitterGenerator`）・`DelegateBackoff`・`handleWhen`・時間切れ | 採らない。利用が狭く、AWS SDK と `ky` が持つ再試行と二重になる（決定 17） |
+| LIB-A17 | `p-retry` | 9.0.0・MIT・週 7,634 万 | 指数の待ちの再試行（回数・待ちの下限と上限・`shouldRetry`） | 採る。HTTP と AWS SDK に当たらないトランザクションの衝突だけ（決定 17） |
 | LIB-A18 | `exponential-backoff` | 3.1.3・Apache-2.0・週 5,948 万 | 全幅のゆらぎの再試行 | 一部。`Retry-After`・期限が無い |
-| LIB-A19 | `pino` | 10.4.0・MIT・週 8,186 万 | 構造化ログ（ブラウザー版あり）・鍵のパスでの伏せ字 | 一部。値の形での伏せ字は無い。detail.md の「ログのライブラリは使えない」を変えるため直しに回す（決定 17） |
+| LIB-A19 | `pino` | 10.4.0・MIT・週 8,186 万 | 構造化ログ（ブラウザー版あり）・鍵のパスでの伏せ字 | 採る（決定 17）。値の形での伏せ字は自前の `redact` を通す |
 | LIB-A20 | `@tanstack/react-query` | 5.108.2・MIT・週 9,180 万 | React の取得・控え・更新の状態の層 | 採るかは画面の基盤（#12）が決める（決定 16） |
 | LIB-A21 | `msw` | 3.0.7・MIT・週 3,607 万 | Service Worker でダミーの応答を返す | 採るかは #12 が決める。ハンドラーは生成したダミーの JSON から作れる（決定 16） |
 | LIB-A22 | `@hey-api/openapi-ts` | 0.99.0・MIT・週 829 万 | OpenAPI から口・型・react-query の包み | 採らない。`z.infer` と別の型ができる。版が 0.x（決定 16） |
@@ -513,4 +513,4 @@ flowchart LR
 
 - Ajv 8 の `Ajv2020` が zod 4.6.7 の `z.toJSONSchema` の出力（`$schema` と `format` の扱い）をそのまま受けるか。U1 の往復のテストで確かめる（未確認のまま残ることの表に同じ行がある）
 - `zod-schema-faker` 3.0.1 で、メール・アカウント ID の形の生成器を作り物の値だけを返すものへ上書きできるか、同じ種で 2 回の生成が同じ値になるか（README と型の宣言は読んだが、落としたコードは実行していない）。U1 の生成のテストで確かめ、上書きできなければ決定 3 の「`examples` で上書きできる」の経路だけで作り物の値に収める
-- `ky`・`cockatiel`・`jose`・`zod-openapi` が要件を満たすことは README と型の宣言と実装の読みまでで、実行していない（全体の設計の直しの答えの後に、使う部品の単体テストで確かめる）
+- `ky`・`p-retry`・`pino`・`zod-openapi` と `aws-jwt-verify` の組み込みの控えが要件を満たすことは README と型の宣言と実装の読みまでで、実行していない（U1・U2・U4 の単体テストで確かめる）
