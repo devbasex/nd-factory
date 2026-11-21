@@ -394,6 +394,18 @@ flowchart TD
 - 作り方: 自前で作る（PostgreSQL の主キーの一意に乗る）
 - 根拠: Value 9 / Value 16（MVV 版 2）。[全体の設計の LIB91](../docs/design/platform.md#ライブラリとサービス)
 
+### 決定 17: 役割のパスワードを DB の側のログに残さないため、関数が SCRAM-SHA-256 の検証子を作り、平文を SQL の文に載せない
+
+- **質問**: `CREATE ROLE … PASSWORD`・`ALTER ROLE … PASSWORD` は引数を束縛できず、パスワードは文の中の文字列になる。PostgreSQL は既定で失敗した文をサーバーのログに書くため（LIB24）、関数のログを伏せても Aurora の側に資格情報が残りうる。どう防ぐか
+- **選んだ案**: 関数は秘密の器から読んだ平文を、SQL に載せる前に SCRAM-SHA-256 の検証子（RFC 7677。塩 16 バイト・回数 4096）へ変え、検証子を文字列として渡す。PostgreSQL は SCRAM の形の文字列をそのまま保存し（LIB23）、平文での接続はそのまま通る。Data API も Aurora PostgreSQL 14 以上では `scram-sha-256` だけを受けるため、方式は変わらない（[全体の設計の LIB90](../docs/design/platform.md#ライブラリとサービス)）。検証子は `node:crypto` の `pbkdf2Sync`・`createHmac`・`createHash`・`randomBytes` で組み、PostgreSQL が平文から作った検証子と同じになることを CI の PostgreSQL で照らす。文がログに残っても検証子だけで、32 バイトの乱数のパスワードは検証子から求められない
+- 採らなかった案: パスワードを含む文の前に `SET LOCAL log_min_error_statement = PANIC`・`log_statement = none` を打つ（どちらも superuser か SET の権限が要り、Aurora の管理の役割で打てるかが分からない。打てても、クラスタのパラメータで `log_statement` を上げた設置先や、文の前の失敗では効かない）
+- 採らなかった案: クラスタのパラメータの群で `log_min_error_statement` を `PANIC` にする（ランナーの NDF の失敗した文もログに残らなくなり、調べる手がかりを失う。平文を送らなければ要らない）
+- 採らなかった案: 検証子の部品に `scram_sha_256`（LIB25）を使う（版が 0.0 のまま 2024 年から更新が無い。`node:crypto` の標準の関数だけで 20 行ほどで組め、正しさは CI で PostgreSQL と照らせる）
+- **代償**: 自前の暗号の計算が 1 つ増える（Value 15）。パスワードに印字できない文字を受けない（PostgreSQL の SASLprep を持たないため。API が作るパスワードは base64url の文字だけ）。Aurora のログに検証子が残ることは許す
+- 作り方: 標準に倣う・自前で作る（RFC 7677・PostgreSQL の SCRAM の形を `node:crypto` で組む）
+- 比べた候補: LIB23 / LIB24 / LIB25
+- 根拠: Value 7 / Value 9（MVV 版 1）
+
 ## 影響と危険
 
 - **働く範囲**: このリポジトリの `app` のスタック・設置のコマンド・形の正本・`apps/api` の DB の用意の関数・CI の `check` のジョブ。全体の設計は `platform.md`・`data.md`・`api.md`・`overview.md`・`detail.md` と、`execution.md` のリンクの 1 か所を直した
@@ -470,7 +482,7 @@ flowchart TD
 | --- | --- |
 | Aurora の一時停止 | 接続の無い間に一時停止に入り続けること・保守で起きる回数（骨組みの環境で数日。この課題） |
 | 単価 | EventBridge のスケジュール（無料の枠の外の単価）・DynamoDB の PITR とストリーム（この課題） |
-| 接続して確かめる項目 | 戻しの後もプロジェクトのデータベースが残ること（決定 10）・再開の待ち・カタログの分け方（Aurora の管理の役割は superuser でなく、CI の PostgreSQL の結果と違いうる）・`ALTER ROLE` と排他の鎖を 1 つの Data API のトランザクションで打てること・Data API で用意の手順の文が打てて接続を残さないこと・DBOS と PostgreSQL 16.13・ACU の平均と既定 2 ACU。関数を呼ぶ API の側と終わりの記録の口が #6 までできないため、#44 へ分けた（決定 13） |
+| 接続して確かめる項目 | パスワードを含む文の DB の側のログ（作り物のパスワードで `CREATE ROLE` を既にある役割へ打って失敗させ、Aurora の PostgreSQL のログのファイルを `DownloadDBLogFilePortion` で読み、平文が現れず検証子だけであること。決定 17）・戻しの後もプロジェクトのデータベースが残ること（決定 10）・再開の待ち・カタログの分け方（Aurora の管理の役割は superuser でなく、CI の PostgreSQL の結果と違いうる）・`ALTER ROLE` と排他の鎖を 1 つの Data API のトランザクションで打てること・Data API で用意の手順の文が打てて接続を残さないこと・DBOS と PostgreSQL 16.13・ACU の平均と既定 2 ACU。関数を呼ぶ API の側と終わりの記録の口が #6 までできないため、#44 へ分けた（決定 13） |
 
 ## 外部の調査
 
@@ -506,6 +518,9 @@ flowchart TD
 | LIB20 | AWS Budgets の SNS の知らせ | — | AWS のサービス | — | 無し | 満たす。トピックの資源の方針で `budgets.amazonaws.com` に `SNS:Publish` を許す。許していないトピックは「Invalid SNS topic」として受けない。暗号化したトピックは追加の許しが要る | https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-sns-policy.html （2026-11-21） |
 | LIB21 | PostgreSQL 16 の統計の写し（`pg_stat_activity`・`pg_stat_clear_snapshot()`） | 16 | PostgreSQL License | — | 無し | 満たす。すべてのセッションの今の問い合わせの情報は、トランザクションの中で最初に求めた時点で集め、そのトランザクションの間は同じものを見せる。`pg_stat_clear_snapshot()` で今のトランザクションの写しを捨て、次の読みで集め直す | https://www.postgresql.org/docs/16/monitoring-stats.html （2026-11-21） |
 | LIB22 | PostgreSQL 16 の `pg_terminate_backend(pid, timeout)` | 16 | PostgreSQL License | — | 無し | 満たす。`timeout` が無いか 0 ならシグナルを送るだけで、送れたら真を返す。0 より大きければ、実際に終わるか時間が過ぎるまで待ち、時間切れでは警告を出して偽を返す。待ちは呼び出しごとに掛かるため、接続ごとに呼ぶと待ちが積み重なる | https://www.postgresql.org/docs/16/functions-admin.html#FUNCTIONS-ADMIN-SIGNAL （2026-11-21） |
+| LIB23 | PostgreSQL 16 の `CREATE ROLE`・`ALTER ROLE` のパスワード | 16 | PostgreSQL License | — | 無し | 満たす。パスワードは常に暗号化して保存し、渡した文字列が既に MD5 か SCRAM の形なら、`password_encryption` に依らずそのまま保存する | https://www.postgresql.org/docs/16/sql-createrole.html ・ https://www.postgresql.org/docs/16/sql-alterrole.html （2026-11-21） |
+| LIB24 | PostgreSQL 16 のサーバーのログ（`log_min_error_statement`・`log_statement`） | 16 | PostgreSQL License | — | 無し | 満たす。`log_min_error_statement` の既定は `ERROR` で、誤りになった文をログに書く（`PANIC` で止まる）。`log_statement` の既定は `none` で、`ddl` 以上なら `CREATE`・`ALTER` を書く。どちらも superuser か SET の権限が要る。書いた文は機密の値や平文のパスワードを含みうる、と文書が注意する | https://www.postgresql.org/docs/16/runtime-config-logging.html （2026-11-21） |
+| LIB25 | `scram_sha_256` | 0.0.2 | Beerware | 2024-09-22 | 無し | 満たさない。SCRAM-SHA-256 の計算の小さい部品だが、版が 0.0 のままで 2 年更新が無い。npm に保守の続く検証子の部品は見つからなかった（`npm search scram-sha-256`） | `npm search scram-sha-256`・`npm view scram_sha_256 license time.modified`（2026-11-21） |
 
 ### 確かめられなかったこと
 
@@ -513,4 +528,4 @@ flowchart TD
 | --- | --- | --- |
 | DynamoDB の PITR とストリームの単価 | 試していない | 見込みの額への効きが小さいため、実測の段で単価の頁を読む |
 
-調べた量: 候補 22 件・取得の試み 32 回（2026-11-21）。内訳は次のとおりで、合計は 10 + 12 + 7 + 3 = 32 回である。LIB1〜LIB7 と表から外した候補の 10 回: 表の LIB1〜LIB7 の 9 回（LIB1 の頁 2・LIB2〜LIB6 の各 1・LIB7 の頁 2）と、反映のアクションの確かめのために調べ、その確かめを外したため表から外した AWS CLI の出力の絞りの 1 回。MVV 版 2 の Value 15 に照らして足した LIB8〜LIB16 の 12 回: `npm view` が LIB8・9・10・11・15・16 の 6 回、頁が LIB12 の 2・LIB13 の 1・LIB14 の 2・LIB16 の GitHub の 1 の 6 回。cross-review の 1 巡目の指摘で足した 7 回: LIB17 の `npm view` と npm の取得の数の 2 回、LIB8 の readme の 2 回、LIB18・LIB19・LIB20 の頁の 3 回。cross-review の 2 巡目の指摘で足した 3 回: LIB8 の v9.0.0 の実装・LIB21・LIB22 の頁。旧版の 19 回は、Value 15 に照らして足した候補の取得を 9 回と数え違えた値で（数え直すと LIB8〜LIB16 で 12 回）、LIB1〜LIB7 と外した候補の 10 回は旧版から変わらない。
+調べた量: 候補 25 件・取得の試み 37 回（2026-11-21）。内訳は次のとおりで、合計は 10 + 12 + 7 + 3 + 5 = 37 回である。LIB1〜LIB7 と表から外した候補の 10 回: 表の LIB1〜LIB7 の 9 回（LIB1 の頁 2・LIB2〜LIB6 の各 1・LIB7 の頁 2）と、反映のアクションの確かめのために調べ、その確かめを外したため表から外した AWS CLI の出力の絞りの 1 回。MVV 版 2 の Value 15 に照らして足した LIB8〜LIB16 の 12 回: `npm view` が LIB8・9・10・11・15・16 の 6 回、頁が LIB12 の 2・LIB13 の 1・LIB14 の 2・LIB16 の GitHub の 1 の 6 回。cross-review の 1 巡目の指摘で足した 7 回: LIB17 の `npm view` と npm の取得の数の 2 回、LIB8 の readme の 2 回、LIB18・LIB19・LIB20 の頁の 3 回。cross-review の 2 巡目の指摘で足した 3 回: LIB8 の v9.0.0 の実装・LIB21・LIB22 の頁。PR #45 の cross-review の指摘で足した 5 回: LIB23 の頁 2・LIB24 の頁 1・LIB25 の `npm search` と `npm view` の 2。同じ指摘で全体の設計の LIB90〜LIB92 にも足した（取得の数は全体の設計の調べた量にある）。旧版の 19 回は、Value 15 に照らして足した候補の取得を 9 回と数え違えた値で（数え直すと LIB8〜LIB16 で 12 回）、LIB1〜LIB7 と外した候補の 10 回は旧版から変わらない。

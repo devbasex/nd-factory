@@ -30,9 +30,9 @@ apps/api/
 ├── package.json
 ├── src/entries/db-prep.ts      *
 ├── src/db-prep/                *
-│   └── handler.ts・sql-executor.ts・secret-version.ts・prep-run.ts・provision.ts・rotate.ts
+│   └── handler.ts・sql-executor.ts・secret-version.ts・prep-run.ts・scram.ts・provision.ts・rotate.ts
 └── test/db-prep/               *
-    └── pg-executor.ts・sql-executor.test.ts・secret-version.test.ts・prep-run.test.ts・handler.test.ts・provision.test.ts・rotate.test.ts
+    └── pg-executor.ts・sql-executor.test.ts・secret-version.test.ts・prep-run.test.ts・scram.test.ts・handler.test.ts・provision.test.ts・rotate.test.ts
 docs/operations/settings.md
 .github/workflows/ci.yml
 package-lock.json
@@ -61,6 +61,7 @@ package-lock.json
 | `apps/api/src/db-prep/sql-executor.ts` | 新設 | SQL を打つ口と、その Data API の実装 | `@aws-sdk/client-rds-data`・`p-retry` | モジュール | `SqlExecutor`（型）・`createDataApiExecutor`・`RESUME_WAIT_ERRORS`・`DataApiUnavailableError` |
 | `apps/api/src/db-prep/secret-version.ts` | 新設 | プロジェクトの秘密の器の、行に結んだ版からパスワードを読み、SQL を終えた版へ `AWSCURRENT` を移して確かめる | `@aws-sdk/client-secrets-manager` | モジュール | `readVersionPassword`・`promoteVersion` |
 | `apps/api/src/db-prep/prep-run.ts` | 新設 | 同じ用意の ID の重複の配信のうち 1 つだけに SQL と終わりの記録を許す | `SqlExecutor` | モジュール | `claimPrepRun` |
+| `apps/api/src/db-prep/scram.ts` | 新設 | パスワードを SQL に載せる前に SCRAM-SHA-256 の検証子へ変える | `node:crypto` | モジュール | `scramVerifier` |
 | `apps/api/src/db-prep/provision.ts` | 新設 | I10 の守り・用意の手順の 1〜6 | `SqlExecutor`・`pg`（`escapeIdentifier`・`escapeLiteral`） | モジュール | `claimBinding`・`checkIsolationGuard`・`provisionProject` |
 | `apps/api/src/db-prep/rotate.ts` | 新設 | 差し替えと古い接続の切り | `SqlExecutor`・`pg`（`escapeIdentifier`・`escapeLiteral`） | モジュール | `rotateRole`・`terminateRoleConnections` |
 | `apps/api/test/db-prep/pg-executor.ts` | 新設 | テストで使う `SqlExecutor` の `pg` の実装 | `pg` | モジュール | `createPgExecutor` |
@@ -284,6 +285,7 @@ package-lock.json
 | `readVersionPassword` | `apps/api/src/db-prep/secret-version.ts` | 新設 | `(client: SecretsManagerClient, secret: string, versionId: string) => Promise<string>` | `GetSecretValue` に `VersionId` を渡してその版の URL を読み、パスワードを返す。ラベル（`AWSPENDING`・`AWSCURRENT`）では読まない |
 | `promoteVersion` | 同上 | 新設 | `(client: SecretsManagerClient, secret: string, versionId: string) => Promise<void>` | `DescribeSecret` の `VersionIdsToStages` で、版に `AWSCURRENT` が付いていれば何もしない。付いていなければ `UpdateSecretVersionStage`（`VersionStage: AWSCURRENT`・`MoveToVersionId`・今 `AWSCURRENT` の付く版の `RemoveFromVersionId`）を打ち、`DescribeSecret` を読み直して付いていなければ投げる |
 | `createPgExecutor` | `apps/api/test/db-prep/pg-executor.ts` | 新設 | `(connect: (database: string) => Promise<pg.Client>) => SqlExecutor` | テスト用。データベースごとに接続を開き、`begin` は専用の接続に `BEGIN` を打ってその接続を `transactionId` に結ぶ |
+| `scramVerifier` | `apps/api/src/db-prep/scram.ts` | 新設 | `(password: string, opts?: { salt?: Uint8Array; iterations?: number }) => string` | RFC 7677 の SCRAM-SHA-256 の検証子 `SCRAM-SHA-256$<回数>:<塩>$<StoredKey>:<ServerKey>`（どれも base64）を返す。塩は既定で `randomBytes(16)`、回数は既定 4096（PostgreSQL の既定と同じ）。`pbkdf2Sync`（HMAC-SHA-256）で塩つきのパスワードを作り、`createHmac` で `Client Key`・`Server Key`、`createHash` で StoredKey を求める。パスワードが印字できる ASCII でなければ投げる（PostgreSQL が掛ける SASLprep を自前で持たないため。API が作るパスワードは base64url の文字だけ） |
 | `claimPrepRun` | `apps/api/src/db-prep/prep-run.ts` | 新設 | `(sql: SqlExecutor, prepId: string) => Promise<"first" \| "duplicate">` | 管理のデータベースの 1 つのトランザクション（`begin`〜`commit`）で、`nd_prep.prep_runs`（`prep_id` 主キー・`claimed_at`）へ `INSERT … ON CONFLICT (prep_id) DO NOTHING RETURNING prep_id` を打ち、行を返せば `first`、返さなければ `duplicate`。同じ ID の 2 つの挿入は主キーの一意の索引で後の方が前の確定を待ち、前が確定すれば衝突で何も足さない。同じトランザクションで `claimed_at` が 7 日より古い行を消す（待ち行列の最大の年齢 60 秒より十分長い）。表が無ければ `pg_advisory_xact_lock(hashtext('nd-prep:schema'))` の下で作る |
 | `claimBinding` | `apps/api/src/db-prep/provision.ts` | 新設 | `(sql: SqlExecutor, project: ProjectIdent) => Promise<"bound" \| "retry" \| "conflict">` | 1 つのトランザクション（`begin`〜`commit`）で `pg_advisory_xact_lock(hashtext('nd-prep:bindings'))` を取り、`nd_prep.bindings`（`project_id` 主キー・`database_name` 一意・`role_name` 一意・`bound_at`）を `project_id`・`database_name`・`role_name` のどれかで引く。下の処理の手順の表で分ける。`bound` のときだけ行を足す。データベースと役割を作る前に打つ |
 | `checkIsolationGuard` | 同上 | 新設 | `(sql: SqlExecutor, project: ProjectIdent) => Promise<"ok" \| "conflict">` | データベースか役割が、渡されたもの以外へ `CONNECT` で結ばれていれば `conflict`（`claimBinding` の後に打つ二重の守り） |
@@ -298,7 +300,7 @@ package-lock.json
   - `p-retry` に `{ retries: attempts - 1, factor: 1, minTimeout: delayMs, maxTimeout: delayMs, randomize: false, maxRetryTime: deadlineMs }`（既定で `attempts` 12・`retries: 11`・`delayMs` 5,000・`deadlineMs` 60,000）を渡す。期限は呼び出しごとの最初の試行の開始から測り、`now`（既定 `performance.now`。`p-retry` が `maxRetryTime` を測るのと同じ時計）で測る
   - `p-retry` の `maxRetryTime` は待ちを残り時間に切り詰めるだけで、待った直後に期限を照らさずに次の試行を呼ぶ（設計文書の LIB8）。そのため、試行の関数の始めで期限を照らし、残りが 0 以下なら打たずに `AbortError` を投げる
   - `RESUME_WAIT_ERRORS` に無い例外は試行の中で `AbortError` に包み、繰り返さない（`shouldRetry` は使わない）。トランザクションの中の文（`transactionId` を持つ `execute`）と `commit`・`rollback` は繰り返さずに投げ、呼ぶ側が `rollback` して失敗にする。`begin` が通った時点で書き手は起きている
-- 識別子は `pg` の `escapeIdentifier`、パスワードは `escapeLiteral` で組む（`CREATE ROLE … PASSWORD` は引数の束縛を受けないため）。名前と番号を照らす値は `SqlExecutor` の引数で渡す
+- 識別子は `pg` の `escapeIdentifier` で組む。`CREATE ROLE … PASSWORD`・`ALTER ROLE … PASSWORD` は引数の束縛を受けないため、パスワードは SQL の文の中の文字列になる。その文が失敗すると PostgreSQL は既定（`log_min_error_statement` が `ERROR`）で文をサーバーのログに書き、`log_statement` を `ddl` 以上にすれば成功した文も書く（設計文書の LIB24）。そのため平文を文に載せず、`scramVerifier` の検証子を `escapeLiteral` で文字列にして渡す。PostgreSQL は SCRAM の形の文字列をそのまま保存し（LIB23）、Data API も Aurora PostgreSQL 14 以上では `scram-sha-256` だけを受ける（全体の設計の LIB90）。ログに残りうるのは検証子だけで、検証子から接続に要るパスワードは求められない（32 バイトの乱数のパスワードの総当たりは成り立たない）。名前と番号を照らす値は `SqlExecutor` の引数で渡す
 - `PROGRESS_DB_IDENT_SHAPE` に合わない名前を口が返したら、SQL を打たずに投げる
 
 ### 処理の手順
@@ -348,6 +350,7 @@ package-lock.json
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
+| Aurora のサーバーのログ（PostgreSQL が書く。関数は書き先を持たない） | 失敗した文（既定の `log_min_error_statement`）。役割のパスワードの文では検証子だけ | Aurora のログのファイル（`ProgressDb` は `cloudwatchLogsExports` を付けず、CloudWatch Logs へ出さない） | パスワードの平文（文に載せないため、どの設定でも現れない） |
 | `createDbPrepHandler` | 用意の ID・種類・結果・理由のコード・所要時間・口の結果（`recorded`・`mismatch`）・失敗のときの例外の名前と、取れるときの SQLSTATE（`pg` の実装の `err.code`。Data API の実装は持たない） | `pino` の 1 行の JSON を標準出力へ（関数のログの群へ） | パスワード・URL・秘密の器の値・データベースと役割の名前・SQL の文 |
 
 値を出さない決まりは 2 つで、`redact` は 2 つ目の守りとする。
@@ -379,6 +382,8 @@ package-lock.json
 | `promoteVersion` | `AWSCURRENT` の付かない版で `UpdateSecretVersionStage` に `MoveToVersionId` とそれまでの版の `RemoveFromVersionId` を渡し、読み直す | 既に付いていれば `UpdateSecretVersionStage` を呼ばない（中断からの再開） | 読み直しで付いていなければ投げる |
 | `createDbPrepHandler` | 処理の手順の表の各行（作り物の口と `SqlExecutor`）。`isCurrent` が偽なら、`SqlExecutor`・`readTarget`・`readPassword`・`promote`・`record` のどれも呼ばれない。中断からの再開: 1 回目の差し替えの呼び出しを `promote` の後・`record` の前で投げさせ、同じ番号 n・同じ版の ID・新しい用意の ID の呼び直しが、`rotation_superseded`（記した番号 = n）で `promote` を打ち（作り物の秘密の器は既に `AWSCURRENT` を版に持つため移さない）、その後に `record` を呼んで保留が下りる。どの呼び出しでも `record` は `promote` の後にだけ呼ばれる | `promote` が投げると `record` が呼ばれない（呼ばれると落ちる）。`failed` で `promote` が呼ばれると落ちる | ログの出力（作り物の書き先に集めた全行）に、作り物のパスワード・URL・データベースと役割の名前のどれかが部分の文字列として現れると落ちる。作り物の `SqlExecutor` と `readPassword` が、それらの値を `message` に含む例外を投げる場合（再開の待ちの尽き・SQL の失敗・秘密の器の失敗）でも同じに照らす |
 | ロガーの設定 | — | — | `paths` の各キーに値を入れた物を渡すと、出力にそのキーが無い |
+| `scramVerifier` | PostgreSQL のサービスコンテナで平文から作った役割の `pg_authid.rolpassword`（テストの準備だけで読む）の塩と回数を渡すと、同じ検証子を返す。`provisionProject` が検証子で作った役割へ、平文のパスワードで `pg` の接続が通る（PostgreSQL のサービスコンテナ）。`rotateRole` の後も新しい平文で通り、古い平文で落ちる | 呼ぶたびに塩が変わり、同じパスワードでも違う検証子になる | 印字できない文字を含むパスワードで投げる |
+| パスワードを含む文 | — | — | `provisionProject`・`rotateRole` を作り物の `SqlExecutor` で打ち、渡された SQL の文と引数のすべてに作り物のパスワードの平文が部分の文字列として現れると落ちる（作り直しの `ALTER ROLE` を含む）。PostgreSQL のサービスコンテナを `log_statement=all`・`log_min_error_statement=error` で起こし、既にある役割へ `CREATE ROLE` を打って失敗させた後、コンテナのログに平文が現れると落ちる |
 
 CI の `check` のジョブに `postgres:16`（要約値で固定）のサービスコンテナを置き、接続の値を `ND_TEST_PG_URL` で渡す。値が無いとき、`CI` が真なら DB のテストは落ち、手元では飛ばす（このリポジトリはテストを CI に寄せる）。
 
