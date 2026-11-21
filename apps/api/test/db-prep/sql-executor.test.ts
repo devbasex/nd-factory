@@ -1,0 +1,408 @@
+import {
+  BadRequestException,
+  BeginTransactionCommand,
+  CommitTransactionCommand,
+  DatabaseResumingException,
+  ExecuteStatementCommand,
+  type RDSDataClient,
+  RollbackTransactionCommand,
+} from "@aws-sdk/client-rds-data";
+import pRetry from "p-retry";
+import type * as PRetryModule from "p-retry";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { claimPrepRun } from "../../src/db-prep/prep-run.ts";
+import {
+  ADMIN_DATABASE,
+  DataApiUnavailableError,
+  RESUME_WAIT_ERRORS,
+  createDataApiExecutor,
+  toRow,
+} from "../../src/db-prep/sql-executor.ts";
+import { FakeSqlExecutor } from "./fake-sql-executor.ts";
+import { describePg, toPositional, withTestDatabase } from "./pg-executor.ts";
+
+// p-retry に渡した値を読むため、本物の関数を包んで呼ばれ方を残す
+vi.mock("p-retry", async (importOriginal) => {
+  const actual = await importOriginal<typeof PRetryModule>();
+  return { ...actual, default: vi.fn(actual.default) };
+});
+
+const RESOURCE_ARN = "arn:aws:rds:us-west-2:123456789012:cluster:acme-test-progress";
+const SECRET_ARN = "arn:aws:secretsmanager:us-west-2:123456789012:secret:acme/test/progress-db-admin-AbCdEf";
+
+// 2 つの実装が同じ行を同じ値で返すことを照らす文と行
+const SAME_ROW_SQL = "SELECT 7::int AS n, 'acme'::text AS s, true AS b, NULL::text AS z";
+const SAME_ROW = { n: 7, s: "acme", b: true, z: null };
+
+type Command = ExecuteStatementCommand | BeginTransactionCommand | CommitTransactionCommand | RollbackTransactionCommand;
+
+// RDS Data API のクライアントの代わり。命令と、送られた時の時計の値を残す
+class FakeRdsData {
+  calls: Command[] = [];
+  sentAt: number[] = [];
+  handle: (cmd: Command, n: number) => unknown = () => ({});
+
+  asClient(): RDSDataClient {
+    return { send: (cmd: Command) => this.send(cmd) } as unknown as RDSDataClient;
+  }
+
+  async send(cmd: Command): Promise<unknown> {
+    this.calls.push(cmd);
+    this.sentAt.push(performance.now());
+    return this.handle(cmd, this.calls.length);
+  }
+}
+
+function resuming(): DatabaseResumingException {
+  return new DatabaseResumingException({ message: "The database is resuming", $metadata: {} });
+}
+
+function executor(fake: FakeRdsData, retry?: Parameters<typeof createDataApiExecutor>[0]["retry"]) {
+  return createDataApiExecutor({ client: fake.asClient(), resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN, retry });
+}
+
+// 時計を進めきってから約束の結果を読む。先に catch を付け、未処理の拒否にしない
+async function settle<T>(p: Promise<T>): Promise<{ ok: T } | { err: unknown }> {
+  const out = p.then(
+    (ok) => ({ ok }),
+    (err: unknown) => ({ err }),
+  );
+  await vi.runAllTimersAsync();
+  return out;
+}
+
+describe("createDataApiExecutor", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    vi.mocked(pRetry).mockClear();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("execute は database と transactionId をそのまま渡し、JSON の形と打ち切りの無効を明示する", async () => {
+    const fake = new FakeRdsData();
+    const sql = executor(fake);
+    await sql.execute("SELECT 1", undefined, { database: "acme_db", transactionId: "tx-1" });
+    const cmd = fake.calls[0] as ExecuteStatementCommand;
+    expect(cmd).toBeInstanceOf(ExecuteStatementCommand);
+    expect(cmd.input).toEqual({
+      resourceArn: RESOURCE_ARN,
+      secretArn: SECRET_ARN,
+      database: "acme_db",
+      sql: "SELECT 1",
+      transactionId: "tx-1",
+      formatRecordsAs: "JSON",
+      continueAfterTimeout: false,
+    });
+  });
+
+  it("transactionId の無い execute は transactionId の項目を持たない", async () => {
+    const fake = new FakeRdsData();
+    await executor(fake).execute("CREATE DATABASE x", undefined, { database: ADMIN_DATABASE });
+    const cmd = fake.calls[0] as ExecuteStatementCommand;
+    expect(cmd.input.database).toBe(ADMIN_DATABASE);
+    expect("transactionId" in cmd.input).toBe(false);
+  });
+
+  it("引数を名前つきの値の型へ変えて渡す", async () => {
+    const fake = new FakeRdsData();
+    await executor(fake).execute(
+      "SELECT :s, :i, :d, :b, :n",
+      [
+        { name: "s", value: "acme" },
+        { name: "i", value: 7 },
+        { name: "d", value: 1.5 },
+        { name: "b", value: true },
+        { name: "n", value: null },
+      ],
+      { database: ADMIN_DATABASE },
+    );
+    expect((fake.calls[0] as ExecuteStatementCommand).input.parameters).toEqual([
+      { name: "s", value: { stringValue: "acme" } },
+      { name: "i", value: { longValue: 7 } },
+      { name: "d", value: { doubleValue: 1.5 } },
+      { name: "b", value: { booleanValue: true } },
+      { name: "n", value: { isNull: true } },
+    ]);
+  });
+
+  it("JSON の行を Row にして返し、行の無い文は空を返す", async () => {
+    const fake = new FakeRdsData();
+    fake.handle = (_cmd, n) => (n === 1 ? { formattedRecords: JSON.stringify([SAME_ROW]) } : {});
+    const sql = executor(fake);
+    expect(await sql.execute(SAME_ROW_SQL, undefined, { database: ADMIN_DATABASE })).toEqual([SAME_ROW]);
+    expect(await sql.execute("CREATE SCHEMA x", undefined, { database: ADMIN_DATABASE })).toEqual([]);
+  });
+
+  it("型の決まらない列（入れ子の値）を受けない", async () => {
+    const fake = new FakeRdsData();
+    fake.handle = () => ({ formattedRecords: JSON.stringify([{ a: [1, 2] }]) });
+    await expect(executor(fake).execute("SELECT", undefined, { database: ADMIN_DATABASE })).rejects.toThrow();
+  });
+
+  it("begin の返す ID を commit と rollback へ渡す", async () => {
+    const fake = new FakeRdsData();
+    fake.handle = (cmd) => (cmd instanceof BeginTransactionCommand ? { transactionId: "tx-abc" } : {});
+    const sql = executor(fake);
+    const id = await sql.begin({ database: ADMIN_DATABASE });
+    expect(id).toBe("tx-abc");
+    await sql.commit(id);
+    await sql.rollback(id);
+    expect((fake.calls[0] as BeginTransactionCommand).input).toEqual({
+      resourceArn: RESOURCE_ARN,
+      secretArn: SECRET_ARN,
+      database: ADMIN_DATABASE,
+    });
+    expect(fake.calls[1]).toBeInstanceOf(CommitTransactionCommand);
+    expect((fake.calls[1] as CommitTransactionCommand).input).toEqual({
+      resourceArn: RESOURCE_ARN,
+      secretArn: SECRET_ARN,
+      transactionId: "tx-abc",
+    });
+    expect(fake.calls[2]).toBeInstanceOf(RollbackTransactionCommand);
+    expect((fake.calls[2] as RollbackTransactionCommand).input.transactionId).toBe("tx-abc");
+  });
+
+  it("begin が ID を返さなければ投げる", async () => {
+    const fake = new FakeRdsData();
+    await expect(executor(fake).begin({ database: ADMIN_DATABASE })).rejects.toThrow();
+  });
+
+  it("繰り返すのは DatabaseResumingException だけ", () => {
+    expect(RESUME_WAIT_ERRORS).toEqual(["DatabaseResumingException"]);
+  });
+
+  it("既定の値で p-retry に回数・間隔・期限を渡す", async () => {
+    const fake = new FakeRdsData();
+    await executor(fake).execute("SELECT 1", undefined, { database: ADMIN_DATABASE });
+    const opts = vi.mocked(pRetry).mock.calls[0]?.[1];
+    expect(opts).toMatchObject({
+      retries: 11,
+      factor: 1,
+      minTimeout: 5000,
+      maxTimeout: 5000,
+      randomize: false,
+      maxRetryTime: 60000,
+    });
+    expect(opts).not.toHaveProperty("shouldRetry");
+  });
+
+  it("2 回目の試行で再開の待ちが止めば返す", async () => {
+    const fake = new FakeRdsData();
+    fake.handle = (_cmd, n) => {
+      if (n === 1) throw resuming();
+      return { formattedRecords: JSON.stringify([{ n: 1 }]) };
+    };
+    const out = await settle(executor(fake).execute("SELECT 1 AS n", undefined, { database: ADMIN_DATABASE }));
+    expect(out).toEqual({ ok: [{ n: 1 }] });
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.sentAt[1]! - fake.sentAt[0]!).toBe(5000);
+  });
+
+  it("begin も再開の待ちを繰り返す", async () => {
+    const fake = new FakeRdsData();
+    fake.handle = (_cmd, n) => {
+      if (n < 3) throw resuming();
+      return { transactionId: "tx-1" };
+    };
+    expect(await settle(executor(fake).begin({ database: ADMIN_DATABASE }))).toEqual({ ok: "tx-1" });
+    expect(fake.calls).toHaveLength(3);
+  });
+
+  it("再開の待ちが続くと 12 回試して DataApiUnavailableError を投げ、13 回目を打たない", async () => {
+    const fake = new FakeRdsData();
+    fake.handle = () => {
+      throw resuming();
+    };
+    const out = await settle(executor(fake).execute("SELECT 1", undefined, { database: ADMIN_DATABASE }));
+    expect(fake.calls).toHaveLength(12);
+    expect(fake.sentAt[11]! - fake.sentAt[0]!).toBe(55_000);
+    expect("err" in out && out.err).toBeInstanceOf(DataApiUnavailableError);
+    const err = (out as { err: DataApiUnavailableError }).err;
+    expect(err.attempts).toBe(12);
+    expect((err.cause as Error).name).toBe("DatabaseResumingException");
+  });
+
+  it("切り詰めた待ちが期限ちょうどで明けたら、試行の関数は打たずに投げる", async () => {
+    const fake = new FakeRdsData();
+    fake.handle = () => {
+      throw resuming();
+    };
+    // 0・5,000・10,000 の 3 回の後、p-retry は待ちを残りの 2,000 に切り詰め、12,000 で次の試行を呼ぶ
+    const sql = executor(fake, { attempts: 12, delayMs: 5000, deadlineMs: 12_000, now: () => performance.now() });
+    const out = await settle(sql.begin({ database: ADMIN_DATABASE }));
+    expect(fake.calls).toHaveLength(3);
+    expect("err" in out && out.err).toBeInstanceOf(DataApiUnavailableError);
+    expect((out as { err: DataApiUnavailableError }).err.attempts).toBe(3);
+  });
+
+  it("期限は差し替えた時計で、呼び出しごとの最初の試行から測る", async () => {
+    const fake = new FakeRdsData();
+    let clock = 0;
+    fake.handle = () => {
+      // 1 回の試行が 30 秒かかったことにする
+      clock += 30_000;
+      throw resuming();
+    };
+    const sql = executor(fake, { attempts: 12, delayMs: 5000, deadlineMs: 60_000, now: () => clock });
+    const out = await settle(sql.execute("SELECT 1", undefined, { database: ADMIN_DATABASE }));
+    // 試行の始めの時計は 0・30,000 で、3 回目の始めは 60,000（期限ちょうど）で打たない
+    expect(fake.calls).toHaveLength(2);
+    expect("err" in out && out.err).toBeInstanceOf(DataApiUnavailableError);
+
+    // 次の呼び出しは、その呼び出しの最初の試行から測り直す
+    fake.handle = () => ({});
+    expect(await settle(sql.execute("SELECT 1", undefined, { database: ADMIN_DATABASE }))).toEqual({ ok: [] });
+  });
+
+  it("transactionId を持つ execute は再開の待ちでも繰り返さない", async () => {
+    const fake = new FakeRdsData();
+    fake.handle = () => {
+      throw resuming();
+    };
+    const out = await settle(executor(fake).execute("SELECT 1", undefined, { database: ADMIN_DATABASE, transactionId: "tx-1" }));
+    expect(fake.calls).toHaveLength(1);
+    expect((out as { err: Error }).err.name).toBe("DatabaseResumingException");
+  });
+
+  it("commit と rollback は再開の待ちでも繰り返さない", async () => {
+    const fake = new FakeRdsData();
+    fake.handle = () => {
+      throw resuming();
+    };
+    const sql = executor(fake);
+    expect(((await settle(sql.commit("tx-1"))) as { err: Error }).err.name).toBe("DatabaseResumingException");
+    expect(((await settle(sql.rollback("tx-1"))) as { err: Error }).err.name).toBe("DatabaseResumingException");
+    expect(fake.calls).toHaveLength(2);
+  });
+
+  it("RESUME_WAIT_ERRORS に無い例外は 1 回で、そのまま投げる", async () => {
+    const fake = new FakeRdsData();
+    const bad = new BadRequestException({ message: "syntax error", $metadata: {} });
+    fake.handle = () => {
+      throw bad;
+    };
+    const sql = executor(fake);
+    expect(await settle(sql.execute("SELEC 1", undefined, { database: ADMIN_DATABASE }))).toEqual({ err: bad });
+    expect(await settle(sql.begin({ database: ADMIN_DATABASE }))).toEqual({ err: bad });
+    expect(fake.calls).toHaveLength(2);
+  });
+
+  it("試す回数が 1 未満の設定を受けない", () => {
+    expect(() => executor(new FakeRdsData(), { attempts: 0, delayMs: 5000, deadlineMs: 60_000, now: () => 0 })).toThrow();
+  });
+});
+
+describe("toRow", () => {
+  it("文字列・数・真偽・空だけを受ける", () => {
+    expect(toRow(SAME_ROW)).toEqual(SAME_ROW);
+    expect(() => toRow({ t: new Date(0) })).toThrow();
+    expect(() => toRow({ o: { a: 1 } })).toThrow();
+    expect(() => toRow([1])).toThrow();
+  });
+});
+
+describe("toPositional", () => {
+  it("名前つきの引数を番号へ変え、同じ名前は同じ番号にする", () => {
+    expect(
+      toPositional("SELECT :a, :b, :a", [
+        { name: "a", value: 1 },
+        { name: "b", value: "x" },
+      ]),
+    ).toEqual({ text: "SELECT $1, $2, $1", values: [1, "x"] });
+  });
+
+  it("型の決め・文字列・識別子・注釈の中の : を引数にしない", () => {
+    const sql = `SELECT :a::int, 'SCRAM-SHA-256$4096:abc$x:y', E'it''s :b', "col:c" -- :d\n, /* :e */ 1`;
+    expect(toPositional(sql, [{ name: "a", value: 1 }])).toEqual({
+      text: `SELECT $1::int, 'SCRAM-SHA-256$4096:abc$x:y', E'it''s :b', "col:c" -- :d\n, /* :e */ 1`,
+      values: [1],
+    });
+  });
+
+  it("渡されていない名前・重なる名前・閉じない文字列で投げる", () => {
+    expect(() => toPositional("SELECT :a", [])).toThrow();
+    expect(() =>
+      toPositional("SELECT :a", [
+        { name: "a", value: 1 },
+        { name: "a", value: 2 },
+      ]),
+    ).toThrow();
+    expect(() => toPositional("SELECT 'a", undefined)).toThrow();
+  });
+});
+
+describe("手順の文の長さ", () => {
+  it("claimPrepRun が渡す文はどれも 4 KiB 未満", async () => {
+    // 表が無いとき（作る文を含む）と、あるときの両方の分かれを打つ
+    for (const present of [false, true]) {
+      const fake = new FakeSqlExecutor();
+      fake.respond = (sql) => {
+        if (sql.includes("to_regclass")) return [{ present }];
+        if (sql.includes("RETURNING")) return [{ prep_id: "prep-1" }];
+        return [];
+      };
+      await claimPrepRun(fake, "prep-1");
+      expect(fake.statements().length).toBeGreaterThan(0);
+      for (const s of fake.statements()) expect(Buffer.byteLength(s, "utf8")).toBeLessThan(4096);
+    }
+  });
+});
+
+describePg("createPgExecutor", () => {
+  it("Data API の実装と同じ行を同じ値の型で返す", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      expect(await sql.execute(SAME_ROW_SQL, undefined, { database: ADMIN_DATABASE })).toEqual([SAME_ROW]);
+    });
+  });
+
+  it("名前つきの引数を束ねて打つ", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      const rows = await sql.execute(
+        "SELECT :i::int AS i, :s::text AS s, :b::boolean AS b",
+        [
+          { name: "i", value: 3 },
+          { name: "s", value: "x:y" },
+          { name: "b", value: false },
+        ],
+        { database: ADMIN_DATABASE },
+      );
+      expect(rows).toEqual([{ i: 3, s: "x:y", b: false }]);
+    });
+  });
+
+  it("型を決めない時刻の列を受けない", async () => {
+    await withTestDatabase(async (db) => {
+      await expect(db.executor().execute("SELECT now() AS t", undefined, { database: ADMIN_DATABASE })).rejects.toThrow();
+    });
+  });
+
+  it("begin の接続に結んだ文は commit まで外から見えず、rollback で消える", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      await sql.execute("CREATE TABLE t (v int)", undefined, { database: ADMIN_DATABASE });
+      const tx = await sql.begin({ database: ADMIN_DATABASE });
+      await sql.execute("INSERT INTO t VALUES (1)", undefined, { database: ADMIN_DATABASE, transactionId: tx });
+      expect(await sql.execute("SELECT count(*)::int AS c FROM t", undefined, { database: ADMIN_DATABASE })).toEqual([{ c: 0 }]);
+      await sql.commit(tx);
+      expect(await sql.execute("SELECT count(*)::int AS c FROM t", undefined, { database: ADMIN_DATABASE })).toEqual([{ c: 1 }]);
+
+      const tx2 = await sql.begin({ database: ADMIN_DATABASE });
+      await sql.execute("INSERT INTO t VALUES (2)", undefined, { database: ADMIN_DATABASE, transactionId: tx2 });
+      await sql.rollback(tx2);
+      expect(await sql.execute("SELECT count(*)::int AS c FROM t", undefined, { database: ADMIN_DATABASE })).toEqual([{ c: 1 }]);
+    });
+  });
+
+  it("失敗した文の後の commit は確定せずに投げる", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      const tx = await sql.begin({ database: ADMIN_DATABASE });
+      await expect(sql.execute("SELEC 1", undefined, { database: ADMIN_DATABASE, transactionId: tx })).rejects.toThrow();
+      await expect(sql.commit(tx)).rejects.toThrow();
+    });
+  });
+});
