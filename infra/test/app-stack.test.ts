@@ -1,5 +1,5 @@
 import type { Settings } from "@nd-factory/contracts/settings";
-import { App } from "aws-cdk-lib";
+import { App, type CfnElement } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { beforeAll, describe, expect, it } from "vitest";
 import { AppStack } from "../lib/app-stack.ts";
@@ -8,20 +8,34 @@ import {
   GOOGLE_CLIENT_ID,
   PIPELINE_SETTINGS,
   TEST_ENV,
+  INFRA_SETTINGS,
   hourlyCostResources,
   nameViolations,
   resources,
+  stackRuleViolations,
   tempWebDist,
   untaggedResources,
   withClientId,
 } from "./support.ts";
 
-type Built = { stack: AppStack; template: Template };
+type Built = { stack: AppStack; template: Template; missing: unknown[] };
 
 function build(s: Settings): Built {
   const app = new App();
   const stack = new AppStack(app, "acme-test-app", { env: TEST_ENV, settings: s, webDistPath: tempWebDist() });
-  return { stack, template: Template.fromStack(stack) };
+  const template = Template.fromStack(stack);
+  // 合成が求めた context の値（lookup）。1 つでもあれば CLI が cdk.context.json を作る
+  const missing = app.synth().manifest.missing ?? [];
+  return { stack, template, missing };
+}
+
+function secretNamed(template: Template, name: string): { id: string; props: Record<string, unknown> } {
+  const found = Object.entries(resources(template)).filter(
+    ([, r]) => r.Type === "AWS::SecretsManager::Secret" && r.Properties?.Name === name,
+  );
+  expect(found, name).toHaveLength(1);
+  const [id, r] = found[0]!;
+  return { id, props: r.Properties ?? {} };
 }
 
 function onlyResource(template: Template, type: string): { id: string; props: Record<string, unknown> } {
@@ -146,10 +160,54 @@ describe("AppStack（client_id なし）", () => {
   });
 
   it("合成の出力に秘密の値が無い（器は自動で作る値の設定だけを持つ）", () => {
-    const secret = onlyResource(built.template, "AWS::SecretsManager::Secret");
-    expect(secret.props.SecretString).toBeUndefined();
-    expect(secret.props.GenerateSecretString).toBeDefined();
+    const secrets = Object.values(resources(built.template)).filter((r) => r.Type === "AWS::SecretsManager::Secret");
+    expect(secrets.map((r) => r.Properties?.Name).sort()).toEqual(["acme/test/google-oauth", "acme/test/progress-db-admin"]);
+    for (const secret of secrets) {
+      expect(secret.Properties?.SecretString).toBeUndefined();
+      expect(secret.Properties?.GenerateSecretString).toBeDefined();
+    }
     expect(JSON.stringify(built.template.toJSON())).not.toContain('"SecretString"');
+  });
+
+  it("ネットワーク・進行表の DB・ECS のクラスタ・予算が app のスタックにある（受け入れ条件 4）", () => {
+    built.template.resourceCountIs("AWS::EC2::VPC", 1);
+    built.template.resourceCountIs("AWS::RDS::DBCluster", 1);
+    built.template.resourceCountIs("AWS::ECS::Cluster", 1);
+    built.template.resourceCountIs("AWS::Budgets::Budget", 1);
+    built.template.resourceCountIs("AWS::SNS::Topic", 1);
+    built.template.hasResourceProperties("AWS::EC2::VPC", { CidrBlock: "10.80.0.0/16" });
+  });
+
+  it("サブネットの AZ は Fn::GetAZs の先頭の 2 つで、合成は AZ の lookup を求めない（cdk.context.json を作らない）", () => {
+    const subnets = Object.values(resources(built.template)).filter((r) => r.Type === "AWS::EC2::Subnet");
+    const azs = subnets.map((r) => JSON.stringify(r.Properties?.AvailabilityZone)).sort();
+    const select = (i: number) => JSON.stringify({ "Fn::Select": [i, { "Fn::GetAZs": "" }] });
+    expect(azs).toEqual([select(0), select(0), select(1), select(1)]);
+    expect(built.missing).toEqual([]);
+  });
+
+  it("スタックの決まりの 8 つをどれも破らない", () => {
+    expect(stackRuleViolations(built.template)).toEqual([]);
+  });
+
+  it("タスクの役割にインラインとマネージドのどちらの許可の文も無い（I11）", () => {
+    const roleId = built.stack.getLogicalId(built.stack.tasks.taskRole.node.defaultChild as CfnElement);
+    const role = resources(built.template)[roleId]!;
+    expect(role.Properties?.Policies).toBeUndefined();
+    expect(role.Properties?.ManagedPolicyArns).toBeUndefined();
+    const attached = Object.values(resources(built.template)).filter(
+      (r) => (r.Type === "AWS::IAM::Policy" || r.Type === "AWS::IAM::ManagedPolicy") && JSON.stringify(r.Properties?.Roles ?? []).includes(roleId),
+    );
+    expect(attached).toEqual([]);
+  });
+
+  it("利用者の表は PITR を持ち、表と画面の置き場はスタックを消しても残る", () => {
+    const table = onlyResource(built.template, "AWS::DynamoDB::GlobalTable");
+    expect(table.props.Replicas).toEqual([
+      expect.objectContaining({ PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true } }),
+    ]);
+    built.template.hasResource("AWS::DynamoDB::GlobalTable", { DeletionPolicy: "Retain", UpdateReplacePolicy: "Retain" });
+    built.template.hasResource("AWS::S3::Bucket", { DeletionPolicy: "Retain", UpdateReplacePolicy: "Retain" });
   });
 });
 
@@ -184,6 +242,30 @@ describe("AppStack（client_id あり）", () => {
     expect(nameViolations(built.template, BASE_SETTINGS)).toEqual([]);
     expect(untaggedResources(built.stack, BASE_SETTINGS)).toEqual([]);
     expect(hourlyCostResources(built.template)).toEqual([]);
+    expect(stackRuleViolations(built.template)).toEqual([]);
+  });
+});
+
+describe("AppStack（インフラのキーあり）", () => {
+  let built: Built;
+  beforeAll(() => {
+    built = build(INFRA_SETTINGS);
+  });
+
+  it("設定のファイルの値で VPC の範囲・最大 ACU・予算の額と範囲・宛先が変わる", () => {
+    built.template.hasResourceProperties("AWS::EC2::VPC", { CidrBlock: "10.20.0.0/20" });
+    built.template.hasResourceProperties("AWS::RDS::DBCluster", {
+      ServerlessV2ScalingConfiguration: Match.objectLike({ MaxCapacity: 16 }),
+    });
+    const budget = onlyResource(built.template, "AWS::Budgets::Budget").props.Budget as Record<string, unknown>;
+    expect(budget.BudgetLimit).toEqual({ Amount: 100, Unit: "USD" });
+    expect(budget.FilterExpression).toBeUndefined();
+    built.template.resourceCountIs("AWS::SNS::Subscription", 2);
+    // 名前・タグ・費用・スタックの決まりは同じ
+    expect(nameViolations(built.template, INFRA_SETTINGS)).toEqual([]);
+    expect(untaggedResources(built.stack, INFRA_SETTINGS)).toEqual([]);
+    expect(hourlyCostResources(built.template)).toEqual([]);
+    expect(stackRuleViolations(built.template)).toEqual([]);
   });
 });
 
@@ -194,11 +276,14 @@ describe("AppStack の秘密の器", () => {
       withClientId(BASE_SETTINGS),
       PIPELINE_SETTINGS,
       { ...PIPELINE_SETTINGS, pipeline: { repository: "example-org/other-app", branch: "release" } },
+      INFRA_SETTINGS,
     ];
-    const seen = variants.map((s) => {
-      const secret = onlyResource(build(s).template, "AWS::SecretsManager::Secret");
-      return JSON.stringify({ id: secret.id, props: secret.props });
-    });
-    expect(new Set(seen).size).toBe(1);
+    for (const name of ["acme/test/google-oauth", "acme/test/progress-db-admin"]) {
+      const seen = variants.map((s) => {
+        const secret = secretNamed(build(s).template, name);
+        return JSON.stringify({ id: secret.id, props: secret.props });
+      });
+      expect(new Set(seen).size, name).toBe(1);
+    }
   });
 });

@@ -47,6 +47,8 @@ export function applyTags(scope: IConstruct, s: Naming): void {
 }
 
 // アプリのスタックが名前を付ける資源。設置のコマンドもここから名前を出す
+export type AppResourceNames = ReturnType<typeof appResourceNames>;
+
 export function appResourceNames(s: Naming) {
   return {
     userPool: resourceName(s, "users"),
@@ -59,6 +61,18 @@ export function appResourceNames(s: Naming) {
     api: resourceName(s, "api"),
     jwtAuthorizer: resourceName(s, "jwt"),
     googleSecret: secretName(s, "google-oauth"),
+    vpc: resourceName(s, "vpc"),
+    taskSecurityGroup: resourceName(s, "task-sg"),
+    dbSecurityGroup: resourceName(s, "db-sg"),
+    runnerCluster: resourceName(s, "runner"),
+    runnerLogGroup: resourceName(s, "runner"),
+    // #6 が作るランナーのイメージのリポジトリの名前の形。タスクの実行の役割はこの形のリポジトリだけを引ける
+    imageRepositories: `${s.prefix}-${s.environment}-*`,
+    progressDb: resourceName(s, "progress-db"),
+    progressDbAdminSecret: secretName(s, "progress-db-admin"),
+    dbPrepFunction: resourceName(s, "db-prep"),
+    opsTopic: resourceName(s, "ops"),
+    budget: resourceName(s, "budget"),
   };
 }
 
