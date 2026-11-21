@@ -162,17 +162,33 @@ erDiagram
 
 ### 人の書き込みの要求元の照らし
 
-認証は要求の始めに対応の行を読むだけのため、その後に要求元のログインが外される（別のセッションからの `logins.delete`）か、要求元のセッションがサインアウトしても、読んだ結果のまま確定できてしまう。そこで主体が人の、人だけの書く操作（[API の文書の人だけにした理由](api.md#人だけにした理由) の操作。`delegations.create`・`login_links.create`・`logins.create`・`logins.delete`・`machines.create` など。主体が結ぶ前の `sessions.create` と、取り消しの行を書く側の `sessions.delete` は除く）は、`dispatch` が要素の書き込みと同じ `writeAtomically` に、要求元の対応の行（`COGNITO#<主体の sub>` / `COGNITO`）を「`state` が `bound`、`user_id` が主体の利用者、`binding_epoch` が主体の `binding_epoch`」で照らす件と、要求元のセッションの取り消しの行（`COGNITO#<主体の sub>` / `REVOKED#<主体の sessionId>`）が無いことを照らす件を入れる（書かない条件の照らし）。ハンドラーが同じ行を書くか照らすとき（`logins.delete` が要求元のログインそのものを外す・`logins.create` の開始元の照らし）は、1 つのトランザクションで同じ行を 2 回指せないため件を分けず、その件の条件に統合する。外れた要素は書かず、要素の 409 `state_mismatch` にする（次の要求は認証で 401 になる）。照らしの 2 件はトランザクションごとに 1 回入るため、全部か無かの操作の件の上限は 2 件を残して決める。
+認証は要求の始めに対応の行を読むだけのため、その後に要求元のログインが外される（別のセッションからの `logins.delete`）か、要求元のセッションがサインアウトしても、読んだ結果のまま確定できてしまう。そこで主体が人のすべての書く操作は、`dispatch` が要素の書き込みと同じ `writeAtomically` に、要求元の対応の行（`COGNITO#<主体の sub>` / `COGNITO`）を「`state` が `bound`、`user_id` が主体の利用者、`binding_epoch` が主体の `binding_epoch`」で照らす件と、要求元のセッションの取り消しの行（`COGNITO#<主体の sub>` / `REVOKED#<主体の sessionId>`）が無いことを照らす件を入れる（書かない条件の照らし）。人だけの操作（[API の文書の人だけにした理由](api.md#人だけにした理由)）に限らず、委任からも呼べる操作を人が呼んだとき（`sprints.create`・`sprints.cancel`・`questions.answer`・`users.update` など）も入れる。除くのは、主体が結ぶ前の `sessions.create` と、取り消しの行を書く側の `sessions.delete` だけである。ハンドラーが同じ行を書くか照らすとき（`logins.delete` が要求元のログインそのものを外す・`logins.create` の開始元の照らし）は、1 つのトランザクションで同じ行を 2 回指せないため件を分けず、その件の条件に統合する。外れた要素は書かず、要素の 409 `state_mismatch` にする（次の要求は認証で 401 になる）。
+
+| 決まり | 中身 |
+| --- | --- |
+| 要素ごとの操作 | 要素ごとに確定する操作は、要素ごとのトランザクションのそれぞれに 2 件を入れる。要素ごとに扱いの変わる操作でも、主体が人ならどの要素にも入れる（`questions.answer` は「人だけか」が真の要素にも偽の要素にも入れる。偽の要素だけを照らさずに通すと、サインアウトの後に委任と同じ範囲の答えを人として確定できる）。同じ要求の中で、照らしの前に確定した要素は確定のまま残り、照らしが外れた要素から後は 409 `state_mismatch` になる |
+| 全部か無かの操作 | 1 つのトランザクションに 1 回だけ入れる。全部か無かの操作の要素の上限は、主体が人のときに入る 2 件を残して決める（委任からも呼べる `repositories.add` も含む） |
+| 外への処理の確定点 | タスクの起動・止める指示・GitHub への書き込み・Cognito の呼び出しなど外への処理は、この照らしを含むトランザクションで書いた「行う予定」の行（[API の文書の操作の記録](api.md#操作の記録) の「書くとき」）か状態の書き込みを受けてだけ起こす。照らしが外れれば予定の行も状態も書かれず、外への処理は起きない。確定点はそのトランザクションの確定で、確定の後に要求元がサインアウトするかログインを外されても、確定した操作の外への処理は止めない（`sprints.create` の起動・`sprints.cancel` の停止は確定した判断として続ける） |
+| 要求の中で同期に外へ働きかける操作 | 確定の前に外へ働きかける操作（`notification_targets.test` の送信など、応答の前に外の結果を要るもの）は、働きかける直前に、同じ 2 件だけを条件にしたトランザクション（条件の照らしだけ）を打ち、外れたら働きかけずに要素の 409 `state_mismatch` にする。その照らしの確定を確定点とする。`logins.create` が認可コードを交換するのは外への書き込みでなく、結ぶトランザクションが照らすため、この扱いに入れない |
+
+読むだけの操作には入れない（認証の時点の判定で返す）。
 
 ### セッションの取り消しの行
 
-`sessions.delete` は Cognito で refresh token を取り消すが、取り消した refresh token から出した access token も、API が行う署名と期限の検証を通る（[Cognito の token の取り消し](https://docs.aws.amazon.com/cognito/latest/developerguide/token-revocation.html) を照らすのは Cognito の端点だけ）。そこで取り消したセッションを API の側でも見分ける行を置く。
+サインアウトは、API の側でそのセッションを断つ `sessions.delete` と、画面が Cognito で refresh token を取り消す呼び出し（[Cognito の RevokeToken](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_RevokeToken.html)）の 2 つからなる。取り消した refresh token から出した access token も、API が行う署名と期限の検証を通る（[Cognito の token の取り消し](https://docs.aws.amazon.com/cognito/latest/developerguide/token-revocation.html) を照らすのは Cognito の端点だけ）。逆に Cognito の取り消しは失敗しうる。そこで、取り消したセッションを API の側で見分ける行を置き、その行だけで、そのセッションの refresh token が新しい access token を出せる間ずっと断つ。Cognito の取り消しは、端末の外へ漏れた refresh token を Cognito の端点でも使えなくするための重ねであり、API の拒否はその成否に頼らない。
 
 | 表 | 区切りの鍵 / 並びの鍵 | 持つ列 | 書き方 |
 | --- | --- | --- | --- |
-| `db-users` | `COGNITO#<Cognito の sub>` / `REVOKED#<origin_jti>` | `cognito_sub`・`session_id`（取り消したセッションの `origin_jti`）・`revoked_at`・`expire_at`（TTL。`revoked_at` に `SESSION_REVOKED_KEEP_MS` を足した時刻）・`schema_version` | `sessions.delete` が、要求の主体の `sub` と `sessionId` で無いときだけ書く（既にあれば済んだとして成功）。Cognito の取り消しを呼ぶ前に確定する |
+| `db-users` | `COGNITO#<Cognito の sub>` / `REVOKED#<origin_jti>` | `cognito_sub`・`session_id`（取り消したセッションの `origin_jti`）・`revoked_at`・`expire_at`（TTL。`revoked_at` に `SESSION_REVOKED_KEEP_MS` を足した時刻）・`schema_version` | `sessions.delete` が、要求の主体の `sub` と `sessionId` で無いときだけ書く（既にあれば済んだとして成功。行はどちらでも同じ長さ残るため、成功で省く処理は無い）。`sessions.delete` は Cognito を呼ばず、refresh token を受けない |
 
-認証（上）と連携の確定（`logins.create` の開始元の照らし）と人の書き込みの要求元の照らしは、この行があれば断つ。TTL の削除は遅れるため、行があれば `expire_at` によらず断つ。`SESSION_REVOKED_KEEP_MS` は access token の寿命（15 分）より長くする（取り消した後は新しい access token が出ないため、それより後には断つ token が残らない）。
+| 決まり | 中身 |
+| --- | --- |
+| 残す長さ | `SESSION_REVOKED_KEEP_MS` は、refresh token の寿命（30 日）と access token の寿命（15 分）の和より長くする。アプリのクライアントは refresh token の回し（rotation）を使わず、refresh token の寿命はサインインから数えて延びないため、行が消える時点ではそのセッションから出た token はどれも期限を過ぎている。Cognito の取り消しが一度も成功しなくても、API はそのセッションを最後まで断つ |
+| Cognito の取り消しの主体と照合 | 画面が、`sessions.delete` の成功（か、401。下）を受けた後に、端末のログインの控えに持つ refresh token とアプリのクライアントの ID で Cognito の取り消しを呼ぶ。画面が持つ refresh token は 1 つで、`sessions.delete` に使った access token はその refresh token から出したものなので、取り消す token と API で断ったセッションは同じものに当たる。サーバーは refresh token を受けず、持たない |
+| 取り消しの再試行 | 取り消しは API の認証を通らないため、`sessions.delete` の後に 401 になる心配が無い。画面は一時の失敗（通信の失敗・5xx・呼びすぎ）を間を空けて 3 回まで試し直し、それでも成功しなければ、取り消しを済ませずにサインアウトの残りへ進む（API の拒否は上の行が受け持つ。端末の refresh token はサインアウトで消す）。`unsupported_token_type` などの恒久の応答では試し直さない |
+| `sessions.delete` の再送 | `sessions.delete` の確定の後に応答を失って送り直すと、認証が取り消しの行で 401 にする。画面は `sessions.delete` の 401 を「このセッションは API で断たれた」として済んだ扱いにし、上の取り消しへ進む（取り消しの行が無い 401 であっても、そのセッションの token は API で通らないため、サインアウトの目的は満たす） |
+
+認証（上）と連携の確定（`logins.create` の開始元の照らし）と人の書き込みの要求元の照らしは、この行があれば断つ。TTL の削除は遅れるため、行があれば `expire_at` によらず断つ。
 
 ### ログインをつなぐ流れの行
 
