@@ -598,13 +598,14 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | `MIGRATE_RESERVE_MS` | 定数 | `migrate.ts` | 10000 |
 | `MIGRATE_PAGE_SIZE` | 定数 | `migrate.ts` | 100 |
 | `RowCodec<L>` | 型 | `row-codec.ts` | `{ latest; previous: … \| null; writeVersion }`（`rowCodec` の引数のまま） |
-| 版を上げる子の手順 | 手順 | この節 | 1. 次の版の zod を `latest` に、今の版を `previous` に移し、`upgrade` と `downgrade` を足す。`writeVersion` は今の版のまま（1 段目の反映。読み手は両方の版を読み、書き手は前の版だけを書く。1 段目のコードは次の版だけの列を使う機能を出さない）2. `writeVersion` を次の版へ上げ、`migrate` の Lambda（`createMigrateHandler`、権限はその表の読みと更新だけ）と起こし方を足す（2 段目の反映）3. 2 段目を戻すときは `writeVersion` だけを前の版へ戻す。読み手は両方を読むため、書き換えた行は次の版のまま読め、書き手が次に書き換えるときに `downgrade` で前の版になる。戻した状態では `migrateTable` は何も書き換えない |
+| 版を上げる子の手順 | 手順 | この節 | 1. 次の版の zod を `latest` に、今の版を `previous` に移し、`upgrade` と `downgrade` を足す。`writeVersion` は今の版のまま（1 段目の反映。読み手は両方の版を読み、書き手は前の版だけを書く。1 段目のコードは次の版だけの列を使う機能を出さない）2. `writeVersion` を次の版へ上げ、`migrate` の Lambda（`createMigrateHandler`、権限はその表の読みと更新だけ。非同期の起動の設定は `MaximumEventAgeInSeconds` 60・`MaximumRetryAttempts` 0）を足す（2 段目の反映）。移しを起こすのは、この反映が終わってから API の Lambda の時間切れ（今の `app-stack.ts` で 10 秒）より長く待った後で、反映とは別の手順で 1 回起こす（前の版で書く古い書き手が走り終えてから読む）3. 2 段目を戻すときは、[並行と排他](#並行と排他) の「表の移しと、前の版で書く書き手」の行のとおり、次の 2 回の反映で戻す。3a. 移しの止め: `migrate` の Lambda の予約の同時実行を 0 にする反映を出す（新しい起動も、自分を起こし直す非同期の起動も走らない。止められた非同期の起動は 60 秒で捨てられる）。続けて `migrate` の Lambda の時間切れと 60 秒の長いほうを待ち、その Lambda の同時実行の数が 0 であることを CloudWatch の `ConcurrentExecutions` で確かめる 3b. 書き手の戻し: `writeVersion` だけを前の版へ戻す反映を出す。読み手は両方を読むため、書き換えた行は次の版のまま読め、書き手が次に書き換えるときに `downgrade` で前の版になる。戻した状態では `migrateTable` は何も書き換えず、予約の同時実行は 0 のまま置く。3a と 3b を 1 回の反映にまとめない |
 
 ### 並行と排他
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | 表の移しと、同じ行を書く API の要求 | 行の `schema_version` と `version` | 移しは `updateIfSchemaVersion` で、`schema_version = <前の版>` と（行が持てば）読んだ `version` を条件に書く。書き手はどの書き込みでも `schema_version` を書く | 外れたら飛ばす（書き手が `latest` で書いたか行が消えた）。2 回走らせても書き換えは 1 回 |
+| 表の移しと、前の版で書く書き手（2 段目の反映の直後に残る古い書き手と、2 段目を戻した後の書き手） | `version` を持たない行（ログインの組・IdP の主体の一意の行・冪等の鍵） | 同時に走らせない。移しの条件は `schema_version = <前の版>` だけのため、移しが前の版の行を読んだ後に書き手が前の版のままその行を書き換えると、条件が外れず古い中身で上書きする。そこで、移しを起こすのは前の版で書く書き手が走り終えた後（2 段目の反映から API の Lambda の時間切れより後）に限り、書き手を前の版へ戻すのは移しの起動と起こし直しを止め、走っている移しが終わった後（版を上げる子の手順の 3a）に限る。書き込みのときに見つける条件（行のすべての列の一致）は、冪等の鍵の行が持つ要素の結果が大きく条件の式の上限を超えうるため採らない | 止めた後に移しを再び許すのは、次に 2 段目を反映するとき（上の起こし方の待ちを守る）。3a の待ちの途中で止めた移しは、続きの位置を持った非同期の起動ごと捨てられるが、次に起こすときに最初から走らせても結果は同じ |
 | 2 つの移しの起動 | 同じ表 | 取らない（条件つきの更新で同じ行を 2 回書き換えない） | 最後に処理を終えた行の鍵から再開できる。最初からやり直しても結果は同じ |
 
 ### 単体テストの観点
@@ -613,6 +614,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | --- | --- | --- | --- |
 | `rowCodec` | 版 1 と 2 の組で作れる | `previous` の無い行の種類 | `writeVersion` が 3・`previous.version` が `latest.version - 1` でない・`previous` があって `downgrade` が無い組で投げる |
 | `readRow`・`writeRow` | 1 段目（`latest` 2・`previous` 1・`writeVersion` 1）で、版 1 の行と版 2 の行をどちらも版 2 の形で読み、`writeRow` は版 1 の行を出す。2 段目（`writeVersion` 2）で、同じ 2 つの行を同じに読み、`writeRow` は版 2 の行を出す。書き手を戻した状態（1 段目と同じ値に戻した `RowCodec`）で、2 段目に書いた版 2 の行と版 1 の行をどちらも読み、`writeRow` は版 1 の行を出す。版 1 → `upgrade` → `downgrade` で元の行に戻る | `previous` の無い行の種類（版 1 だけを読む） | 版 0・版 3（`latest` より新しい）・形の違いを拒む。`writeRow` に版の形を外れた値を渡すと投げる |
+| 移しの止め（`infra/test/app-stack.test.ts`） | `migrate` の Lambda の非同期の起動の設定が `MaximumEventAgeInSeconds` 60・`MaximumRetryAttempts` 0。止める設定で合成すると予約の同時実行が 0 | — | — |
 | `migrateTable` | 前の版の行が `latest` の版になり、`version` は変わらない。ログインの組（`version` を持たない行）も書き換わる。`latest` の版で消した列が行から消え、その列を鍵にした索引の引き（偽の `Db` の `queryIndex`）でその行が出なくなる | 残り時間がちょうど予備の時間で、取りかかる前に止まる。ページの途中（100 行のうち 3 行目を終えたところ）で残り時間が尽き、返した `cursor` が 3 行目の鍵で、その `cursor` で再び呼ぶと 4 行目から読み、2 回の呼び出しの後に前の版の行が 1 行も残らない。ページの 1 行目の前で尽きると受け取った `cursor` を返す | 2 回走らせても行が同じ。読んだ後に書き手が `latest` で書いた行と、消えた行を飛ばし、消えた行を作り直さない。`writeVersion` が前の版の行の種類は書き換えない |
 | `updateIfSchemaVersion` | `schema_version` の条件と `attribute_exists(pk)` を持つ 1 件。`remove` の列が `REMOVE` 句に並ぶ | `version: null`・`version` あり・`remove` が空（`REMOVE` 句を持たない） | `remove` が `set` の鍵か `pk`・`sk`・`version`・`schema_version` を含むと投げる。`set` に `version` を含むと型で弾く |
 | `Db.scan`（`createDb`） | 偽のクライアントへ `Limit`・`ExclusiveStartKey`・`ConsistentRead` が渡る | `startKey` が `null` | — |
