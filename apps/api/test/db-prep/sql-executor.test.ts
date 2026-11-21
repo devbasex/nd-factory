@@ -437,6 +437,40 @@ describe("createRdsDataClient（SDK の再試行）", () => {
     await expect(sql.commit("tx-1")).rejects.toThrow();
     expect(h.count()).toBe(1);
   });
+
+  // configure から setRetryStrategy を呼んで、maxAttempts を 1 のまま戦略を差し替える拡張
+  function retryingExtension(): NonNullable<RDSDataClientConfig["extensions"]>[number] {
+    const strategy = retryingStrategy();
+    return { configure: (c) => c.setRetryStrategy(async () => strategy) };
+  }
+
+  it("createRdsDataClient は型の外から渡された extensions を捨て、拡張で戦略を指定しても 1 回だけ送る", async () => {
+    // この拡張が maxAttempts を 1 のまま戦略で打ち直すことの確かめ
+    const probe = unavailableHandler();
+    const raw = new RDSDataClient({ ...base, maxAttempts: 1, extensions: [retryingExtension()], requestHandler: probe });
+    await expect(raw.send(new CommitTransactionCommand({ resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN, transactionId: "tx-1" }))).rejects.toThrow();
+    expect(probe.count()).toBeGreaterThan(1);
+    expect(await raw.config.maxAttempts()).toBe(1);
+
+    const h = unavailableHandler();
+    const config = { ...base, extensions: [retryingExtension()], requestHandler: h };
+    const client = createRdsDataClient(config as Parameters<typeof createRdsDataClient>[0]);
+    const sql = createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN });
+    await expect(sql.commit("tx-1")).rejects.toThrow();
+    expect(h.count()).toBe(1);
+    await expect(sql.execute("SELECT 1", undefined, { database: ADMIN_DATABASE })).rejects.toThrow();
+    expect(h.count()).toBe(2);
+  });
+
+  it("createRdsDataClient で作った後に config の戦略を差し替えると、送る前に投げる", async () => {
+    const h = unavailableHandler();
+    const client = createRdsDataClient({ ...base, requestHandler: h });
+    const strategy = retryingStrategy();
+    (client.config as { retryStrategy: unknown }).retryStrategy = async () => strategy;
+    const sql = createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN });
+    await expect(sql.commit("tx-1")).rejects.toThrow(/差し替えられた/);
+    expect(h.count()).toBe(0);
+  });
 });
 
 describe("toRow", () => {

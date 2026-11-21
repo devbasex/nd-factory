@@ -168,25 +168,39 @@ async function withResumeWait<T>(op: () => Promise<T>, retry: DataApiRetry): Pro
   }
 }
 
-// createRdsDataClient が作ったクライアント。createDataApiExecutor はこれに含まれるクライアントだけを受ける
-const SINGLE_ATTEMPT_CLIENTS = new WeakSet<RDSDataClient>();
+// createRdsDataClient が作ったクライアントと、作った時の再試行の戦略。createDataApiExecutor はここに有るクライアントだけを受ける
+const SINGLE_ATTEMPT_CLIENTS = new WeakMap<RDSDataClient, RDSDataClient["config"]["retryStrategy"]>();
+
+// createRdsDataClient が SDK へ渡す設定の項目。これ以外は型の外から渡されても捨てる。除く項目を数える作りでは、
+// extensions（configure から setRetryStrategy を呼べる）のように再試行の戦略を差し替える経路を漏らしうるため、渡す項目を数える
+export type RdsDataClientOptions = Pick<RDSDataClientConfig, "region" | "credentials" | "endpoint" | "requestHandler">;
 
 // Data API のクライアント。SDK の自動の再試行を止める（maxAttempts: 1・SDK の既定の再試行の戦略）。SDK は通信の障害や
 // 絞りで文や commit を打ち直し、初回が確定して応答だけが失われると、打ち直しの失敗が返って確定したかが分からなくなる。
-// 再試行は再開の待ちだけをこの実装が受け持つ。型の外から渡された retryStrategy・retryMode・maxAttempts も捨てる
-export function createRdsDataClient(config: Omit<RDSDataClientConfig, "maxAttempts" | "retryStrategy" | "retryMode"> = {}): RDSDataClient {
-  const { maxAttempts: _m, retryStrategy: _s, retryMode: _r, ...rest } = config as RDSDataClientConfig;
-  const client = new RDSDataClient({ ...rest, maxAttempts: 1 });
-  SINGLE_ATTEMPT_CLIENTS.add(client);
+// 再試行は再開の待ちだけをこの実装が受け持つ。retryStrategy・retryMode・maxAttempts・extensions などは SDK へ渡さない
+export function createRdsDataClient(options: RdsDataClientOptions = {}): RDSDataClient {
+  const { region, credentials, endpoint, requestHandler } = options;
+  const client = new RDSDataClient({
+    ...(region === undefined ? {} : { region }),
+    ...(credentials === undefined ? {} : { credentials }),
+    ...(endpoint === undefined ? {} : { endpoint }),
+    ...(requestHandler === undefined ? {} : { requestHandler }),
+    maxAttempts: 1,
+  });
+  SINGLE_ATTEMPT_CLIENTS.set(client, client.config.retryStrategy);
   return client;
 }
 
 // 渡されたクライアントが SDK の再試行を止めているかを、最初の要求の前に確かめる。maxAttempts だけを読むと、
 // maxAttempts: 1 と独自の retryStrategy を持つクライアントが通り、その戦略が文や commit を打ち直せる。
-// そのため作る経路を createRdsDataClient に限り、そこで作っていないクライアントは受けない
+// そのため作る経路を createRdsDataClient に限り、そこで作っていないクライアントは受けない。作った後に config の
+// 戦略を差し替えたクライアントも受けない（再試行の層は要求のたびに config から戦略を読む）
 async function assertSingleAttempt(client: RDSDataClient): Promise<void> {
   if (!SINGLE_ATTEMPT_CLIENTS.has(client)) {
     throw new Error("Data API のクライアントは createRdsDataClient で作る（SDK の再試行を止める）");
+  }
+  if (client.config.retryStrategy !== SINGLE_ATTEMPT_CLIENTS.get(client)) {
+    throw new Error("createRdsDataClient で作った後に再試行の戦略が差し替えられた（SDK の再試行を止める）");
   }
   const max = await client.config.maxAttempts();
   if (max !== 1) throw new Error(`Data API のクライアントは SDK の再試行を止める（maxAttempts が ${max}）`);
