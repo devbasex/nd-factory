@@ -50,7 +50,7 @@ export type RowCase = {
 };
 
 export const ROW_CASES: Readonly<Record<string, RowCase>> = {
-  user: { schema: userRow, keyOf: userKey, overwrite: true, sample: { schema_version: 1, version: 1, user_id: USR, display_name: "acme の人", created_at: AT } },
+  user: { schema: userRow, keyOf: userKey, overwrite: true, sample: { schema_version: 1, version: 1, user_id: USR, login_count: 1, display_name: "acme の人", created_at: AT } },
   login: {
     schema: loginRow,
     keyOf: loginKey,

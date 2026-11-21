@@ -175,6 +175,18 @@ describe("行の形（受け入れ条件 8）", () => {
     }
   });
 
+  it("利用者の行は結んだログインの数を 1 以上の整数で必須にし、読み戻しで落とさない", () => {
+    const c = ROW_CASES["user"];
+    if (c === undefined) throw new Error("user が無い");
+    const validate = ajv.compile(z.toJSONSchema(c.schema));
+    expect((c.schema.parse({ ...c.sample, login_count: 2 }) as Record<string, unknown>)["login_count"]).toBe(2);
+    const rejected = [without(c.sample, "login_count"), { ...c.sample, login_count: 0 }, { ...c.sample, login_count: 1.5 }, { ...c.sample, login_count: "1" }];
+    for (const row of rejected) {
+      expect(c.schema.safeParse(row).success).toBe(false);
+      expect(validate(row)).toBe(false);
+    }
+  });
+
   it("セッションの取り消しの行は sub と origin_jti から鍵を組み、取り消した時刻と TTL を必須にする", () => {
     const c = ROW_CASES["session_revocation"];
     if (c === undefined) throw new Error("session_revocation が無い");

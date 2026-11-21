@@ -7,9 +7,12 @@ import { expireAt, overwriteRow, type RowKey, sha256Hex, uuid, versionlessRow } 
 
 export const idp = z.enum(["google", "github"]);
 
-// 利用者（USER#<利用者> / USER）。上書き
+// 利用者（USER#<利用者> / USER）。上書き。
+// login_count は結んだログインの数（1 以上）。初めてのサインインの sessions.create が 1 で書き、logins.create が 1 足し、
+// logins.delete が「2 以上」を条件に 1 引く（docs/design/data.md の「Cognito の主体の対応の行」の書き方の表）
 export const userRow = overwriteRow(1, {
   user_id: idOf("usr"),
+  login_count: z.int().min(1),
   display_name: z.string().max(32),
   language: languageTag.optional(),
   time_zone: timeZone.optional(),
