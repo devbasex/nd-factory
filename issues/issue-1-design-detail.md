@@ -224,12 +224,12 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | 2 | `version.json` の `history` の最後の行（版と sha256）が受ける組にある | `C/version.json` | 受ける組 |
 | 3 | 使う口と実行の場（ホステッド・手元のマシン）の組ごとに、`set_by: service` の名前とその口の `env` 列の名前が、使い方のその組の渡す環境変数の名前を含む | `C/domains/env.json`・`C/domains/entrypoints.json` | 口と実行の場の組ごとの渡す環境変数の名前 |
 | 4 | `reader: service` の読むファイルの `fields` が、翻訳が読む項目を含む。読むファイルの行が契約にある | `C/domains/ndf-files.json` | 読むファイルと項目 |
-| 5 | 区間の報告の `shape.values`・`shape.items`・`shape.required`・`shape.material` が、ランナーが読む値と項目を含み、同じファイルの `cases` の見本を区間の報告の読み取りへ通して `result` と `errors` の有無が同じ判定になる | `C/hooks/unattended-report.json` | 区間の報告から読む値と項目・区間の報告の読み取り |
+| 5 | 区間の報告の `shape.values`・`shape.items`・`shape.required`・`shape.material` が、ランナーが読む値と項目を含み、同じファイルの `cases` の見本を区間の報告の読み取りへ通して `result` と `errors` の有無が同じ判定になる | `C/hooks/unattended-report.json` | 区間の報告から読む値と項目・区間の報告の読み取りの関数（形の正本の区間の報告の形から作り、ランナーも同じ関数で読む。K2-6） |
 | 6 | 使う口がすべて契約の口の表にある | `C/domains/entrypoints.json` | 使う口 |
 
 - 先端では、通っても `C/hooks/unattended-report.json` の `shape` を固定の点と比べ、差分を要約に並べる（実行の文書の「通ったときの差分」）
 - `ask-journal` の行が `fields` を持つようになったら、要約の知らせの行へ出す（失敗にしない。#41 の決定 106 の答えを知るため）
-- ランナー（#6）が実際に組み立てた呼び出しを判定に通すことと、判定が拒む呼び出しで NDF を起こさないことは、`apps/runner` のテストが照らす（#6 へ渡す欠け）
+- ランナー（#6）が実際に組み立てた呼び出しを判定に通すことと、判定が拒む呼び出しで NDF を起こさないことと、区間の報告を形の正本の読み取りの関数だけで読むことは、`apps/runner` のテストが照らす（#6 へ渡す欠け）
 
 ### 内部のデータと定数
 
