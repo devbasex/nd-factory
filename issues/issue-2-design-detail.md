@@ -286,7 +286,7 @@ infra/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `checkExamples` | `scripts/artifacts.ts` | 新設 | `(ops: readonly OperationDef[]) => ExampleProblem[]` | 見本（`normal`・`edge`・`empty`。`empty` は動詞によらず `null` でなければ照らす）を結果の形・秘密の形・作り物の値の決まりで照らす。秘密の形と作り物の値は、文字列と数の値に加えてオブジェクトのキー（`z.record` の見本のキーなど）も照らす。`list` の封筒が `ok`・`items`・`next_cursor` のほかに必須の項目を持つのに `examples.empty` を書いていなければ問題にする（下の生成物の表の `empty`）。診断は操作の名前・見本の場面と位置・違反の種類（形に合わないときは Zod の issue の code）だけを持ち、当たった値を含めない（生成のコマンドが標準エラーに出し、CI のログに残るため） |
-| `buildOperationSchemas` | 同上 | 新設 | `(ops) => JsonSchemaDoc` | 操作ごとの要素と結果の JSON Schema を `$defs` に並べる。要素は入力のモード（`io: "input"`）、結果は出力のモードで出し、`zod-openapi` が要求と応答に使うモードとそろえる（`z.object` の要素は追加の項目を受け、`strictObject` だけが拒む） |
+| `buildOperationSchemas` | 同上 | 新設 | `(ops) => JsonSchemaDoc` | 操作ごとの要素と結果の JSON Schema を `$defs` に並べる。要素は入力のモード（`io: "input"`）、結果は出力のモードで出し、`zod-openapi` が要求と応答に使うモードとそろえる（`z.object` の要素は追加の項目を受け、`strictObject` だけが拒む）。各形の `$ref` は生成物の中のその形の場所を根に付け替え、再帰する形（自分へ戻る `"#"` と共有した `"#/$defs/…"`）も生成物の中で解ける |
 | `buildOpenApi` | 同上 | 新設 | `(ops) => OpenApiDoc` | `zod-openapi`（LIB42。開発の依存）の `createDocument` に、操作の表の要素と結果の zod の形（`.meta({ id: "<操作>.item" })` で名前を付ける）を渡して OpenAPI 3.1.1 の文書を組む（全体の設計の決定 55） |
 | `buildMcpTools` | 同上 | 新設 | `(ops, schemas) => McpToolDoc[]` | 人だけでない利用者向けの操作の道具の定義 |
 | `buildRoutes` | 同上 | 新設 | `(ops) => RouteDoc[]` | 経路の登録 |
@@ -321,9 +321,9 @@ infra/
 
 | 生成物 | 形（鍵の順） |
 | --- | --- |
-| `generated/operations.schema.json` | `{"$schema": "https://json-schema.org/draft/2020-12/schema", "$defs": {"<操作>.item": …, "<操作>.result": …}}`。形の未定は `{"not": {}}` |
+| `generated/operations.schema.json` | `{"$schema": "https://json-schema.org/draft/2020-12/schema", "$defs": {"<操作>.item": …, "<操作>.result": …}}`。形の未定は `{"not": {}}`。`z.toJSONSchema` は自分へ戻る形を `"#"`、共有した形を `"#/$defs/__schema0"` のように形の根から指すため、各形の `$ref` を、生成物の中でその形を置いた `#/$defs/<操作>.item`（または `.result`）を根にした参照へ付け替える（形の中の `$defs` はその形の下に残す） |
 | `generated/openapi.json` | `openapi: "3.1.1"`・`info`（題 `nd-factory API`・版 `1`）・`paths`（受け口 `user` の操作だけ。`post` の `operationId` は操作の名前、要求は `itemsArray(item)`、応答 200 は結果の配列、`default` は problem）・`components.schemas`（`zod-openapi` が `.meta({ id })` の名前で出す。生成元は `z.toJSONSchema` で、`operations.schema.json` の `$defs` と同じ値になることを生成のテストが照らす）・`components.securitySchemes.bearer` |
-| `generated/mcp-tools.json` | `[{name, description, inputSchema, outputSchema, annotations}]`（操作の表の順） |
+| `generated/mcp-tools.json` | `[{name, description, inputSchema, outputSchema, annotations}]`（操作の表の順）。`outputSchema` は単独の文書のため、`operations.schema.json` の結果の形の `$ref` を `#/items` を根にした参照へ付け替える |
 | `generated/routes.json` | `[{method: "POST", path, operation, endpoint}]`（操作の表の順。GitHub の Webhook は I12 の外のため載せず、受け持つ #5 が足す） |
 | `generated/reasons.json` | `{"request": [{code, status}…], "item": [{code, status}…], "operations": {"<操作>": [{code, status}…]}}`。`operations` の値は `itemReasonsOf(op)` の `code` と `status` |
 | `generated/dummy/<操作>.json` | `{"operation", "normal": [...], "empty": <結果 1 件> | null, "edge": [...], "failures": [{"ok": false, "status", "reason"}…]}`。`normal` と `failures` は送り手が要素ごとに 1 件を選ぶ元の並びで、要求の件数の写しではない。`empty` は要素 1 個に返す結果 1 件である。`examples.empty` を書いた操作は、動詞によらずその値を使う（`null` なら空の場面を持たない。`null` でない値は `checkExamples` が結果の形と作り物の値の決まりで照らし、ダミーの送り手は `create` などでもその値を `empty` の場面に返す）。`examples.empty` が無ければ、`list` で `{"ok": true, "items": [], "next_cursor": null}`（その要素の空の一覧）、`get` で `{"ok": false, "status": 404, "reason": "not_found"}`、それ以外は `null`（空の場面が無く、`normal` と同じに返す）。封筒が `ok`・`items`・`next_cursor` のほかに必須の項目を持つ `list`（たとえば `runner.answers.list` の `delivered_seqs`）は、`examples.empty` を必須にする。その項目の空の一覧での値は件数などで `items` と結びつきうる。正常の見本から写すと `items: []` と食い違う値（`total: 3` など）が結果の形を通って入るため、生成で決めずに書き手が書く（書かなければ `checkExamples` が問題にする）。`failures` は `itemReasonsOf(op)` の要素ごとに 1 つで、`status` と `reason` はその `ReasonDef` の値（読む操作は `when` が `write` の `version_mismatch` などを含めない）。どの失敗のダミーも、同じ `itemReasonsOf(op)` から作った `resultSchemaOf` の zod を通る |
@@ -337,7 +337,7 @@ infra/
 | --- | --- | --- | --- |
 | 往復（`operations-roundtrip.test.ts`） | 比べる操作は、`OPERATIONS` のうち形のある操作と、テスト用の操作（下の段落）の和。操作ごとに、要素（見本と反例: 時刻帯の無い日時・通貨の無い金額・頭の違う ID・配列でない本文・追加の項目。追加の項目は `z.object` の要素で受け、`strictObject` で拒む。受け口 `user` の操作では、要素の見本と反例のすべての合否を、`buildOpenApi` が出した `components.schemas` の `<操作>.item` を Ajv（`strict: false`）で検証した結果とも比べる）・成功の結果（`examples` の `normal` と `edge`）・失敗の結果（`buildDummy` の `failures` と、`ReasonDef` に無い `status` と `reason` の組の反例）を、zod（`ItemOf`・`resultSchemaOf`）と、`buildOperationSchemas` が出した `<操作>.item`・`<操作>.result` を Ajv（`Ajv2020`、`strict: true`、`validateFormats: false`）で検証した結果とで同じ合否 | 要素 1 個と上限ちょうどの配列 | `refine` を使う形をテストの中で足すと食い違いを検出する（検出の仕組みのテスト）。比べた操作・要素・OpenAPI で照らした要素・成功・失敗のどれかの件の数が 0 なら落ちる |
 | `checkExamples` | 作り物の値だけの見本は問題 0。メール・アカウント ID・接頭辞を持つ結果の形は見本を書かずに問題 0 | 1024 字を超える上限の文字列の上の端が上限の長さ。下限と倍数だけの数の下の端が形を通る。`min(0.1).max(0.3).multipleOf(0.1)` の上の端が `0.3`、下の端が `0.1`。再帰する形（`z.lazy`・getter の object）の深い層のメールとアカウント ID が作り物の値 | 通貨の無い金額・`ghs_` の値・`ops@corp.test`・12 桁の別の数・形に合わない空の結果（`create` に書いた `empty` も）・見本のレコードのキーの `ops@corp.test` や 12 桁の別の数・`examples.empty` の無い、必須の項目を足した `list` の封筒で問題が出る。診断に当たった値とキーが入らない |
-| `buildMcpTools` | 人だけの操作と受け口 `user` でない操作が無い。道具の順が操作の表の順 | 全部か無かの操作の `maxItems` | — |
+| `buildMcpTools` | 人だけの操作と受け口 `user` でない操作が無い。道具の順が操作の表の順 | 全部か無かの操作の `maxItems`。再帰する結果の形の `outputSchema` が単独で解け、深い層の誤りを拒む | — |
 | `buildOpenApi` | 文書が OpenAPI 3.1.1 で、`components.schemas` の各値が `operations.schema.json` の同じ名前の `$defs` と一致する | 形の未定の操作の `not` の形 | 一致しないと落ちる（`zod-openapi` と `z.toJSONSchema` の出力の差を拾う） |
 | `buildDummy` | `list` の空・`get` の 404・`itemReasonsOf(op)` のコードごとの失敗で、`status` が `ReasonDef` と同じ。どの失敗も `resultSchemaOf` の zod を通る | 形の未定は `null` | — |
 | `itemReasonsOf` | 書く操作は `version_mismatch` を含み、操作ごとのコードが後ろに続く | 冪等の鍵の無い操作は `in_progress` を含まない | 操作ごとのコードに `not_found` を書くと `defineOperation` が投げる |

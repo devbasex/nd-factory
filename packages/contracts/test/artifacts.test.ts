@@ -316,6 +316,48 @@ describe("buildMcpTools", () => {
   });
 });
 
+describe("自分へ戻る形の $ref", () => {
+  type Node = { name: string; children: Node[] };
+  const node: z.ZodType<Node> = z.strictObject({
+    name: z.string(),
+    get children() {
+      return z.array(node);
+    },
+  });
+  // 要素は自分へ戻る形（"#"）、結果は共有した形（"#/$defs/__schema0"）を参照する
+  const tree = z.strictObject({ root: node, again: node.optional() });
+  const op = defineOperation({
+    ...FIXTURE_CREATE,
+    name: "fixture_trees.create",
+    item: node as unknown as z.ZodObject,
+    result: okItem(tree),
+    examples: null,
+    owner: "#2",
+  });
+  const doc = buildOperationSchemas([op]);
+  const good = { name: "a", children: [{ name: "b", children: [] }] };
+  const bad = { name: "a", children: [{ name: "b", children: [{ name: 1, children: [] }] }] };
+
+  it("operations.schema.json の要素と結果が自分の $defs の場所を根に参照し、深い層まで照らす", () => {
+    const ajv = new Ajv2020({ strict: true, validateFormats: false });
+    ajv.addSchema(doc, "ops");
+    const item = ajv.getSchema("ops#/$defs/fixture_trees.create.item");
+    const result = ajv.getSchema("ops#/$defs/fixture_trees.create.result");
+    expect(item?.(good)).toBe(true);
+    expect(item?.(bad)).toBe(false);
+    expect(result?.({ ok: true, item: { root: good, again: good } })).toBe(true);
+    expect(result?.({ ok: true, item: { root: good, again: bad } })).toBe(false);
+    expect(JSON.stringify(doc)).not.toContain('"$ref":"#"');
+  });
+
+  it("MCP の道具の outputSchema は単独の文書として参照が解ける", () => {
+    const [tool] = buildMcpTools([op], doc);
+    const validate = new Ajv2020({ strict: true, validateFormats: false }).compile(tool!.outputSchema);
+    expect(validate([{ ok: true, item: { root: good } }])).toBe(true);
+    expect(validate([{ ok: true, item: { root: bad } }])).toBe(false);
+  });
+});
+
 describe("buildOpenApi", () => {
   const doc = buildOpenApi(ALL);
   const defs = buildOperationSchemas(ALL).$defs;

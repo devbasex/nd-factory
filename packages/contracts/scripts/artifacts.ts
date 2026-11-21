@@ -72,12 +72,40 @@ function pair(r: ReasonDef): ReasonPair {
   return { code: r.code, status: r.status };
 }
 
-// 操作ごとの要素と結果の JSON Schema。形の未定は z.never() の {"not": {}}
+// JSON Pointer の 1 つの段の書き方（RFC 6901。`~` を `~0`、`/` を `~1` にする）
+function pointerToken(key: string): string {
+  return key.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+function defPointer(name: string): string {
+  return `#/$defs/${pointerToken(name)}`;
+}
+
+// 別の文書の中へ埋め込む形の $ref の付け替え。from（"#" なら文書の根）を指す参照とその下を指す参照を、to の下へ移す。
+// z.toJSONSchema は自分へ戻る形を "#"、共有した形を "#/$defs/__schema0" のように根から指すため、
+// 生成物の $defs の 1 つへ埋め込むと、付け替えなければ生成物全体や無い定義を指す
+function rebaseRefs(value: unknown, from: string, to: string): unknown {
+  if (Array.isArray(value)) return value.map((v) => rebaseRefs(v, from, to));
+  if (value === null || typeof value !== "object") return value;
+  const prefix = from === "#" ? "#/" : `${from}/`;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (k === "$ref" && typeof v === "string" && (v === from || v.startsWith(prefix))) out[k] = `${to}${v.slice(from.length)}`;
+    else out[k] = rebaseRefs(v, from, to);
+  }
+  return out;
+}
+
+// 操作ごとの要素と結果の JSON Schema。形の未定は z.never() の {"not": {}}。
+// 各形の中の $ref は、生成物の中でその形が置かれた $defs の場所を根に付け替える（形の中の $defs はその形の下に残す）
 export function buildOperationSchemas(ops: readonly OperationDef[]): JsonSchemaDoc {
   const defs: Record<string, JsonSchema> = {};
+  const put = (name: string, schema: JsonSchema) => {
+    defs[name] = rebaseRefs(schema, "#", defPointer(name)) as JsonSchema;
+  };
   for (const op of ops) {
-    defs[`${op.name}.item`] = toSchema(shapeSchema(op.item), "input");
-    defs[`${op.name}.result`] = toSchema(resultShapeSchema(op), "output");
+    put(`${op.name}.item`, toSchema(shapeSchema(op.item), "input"));
+    put(`${op.name}.result`, toSchema(resultShapeSchema(op), "output"));
   }
   return { $schema: JSON_SCHEMA_DRAFT, $defs: defs };
 }
@@ -135,7 +163,11 @@ export function buildMcpTools(ops: readonly OperationDef[], schemas: JsonSchemaD
         properties: { items: { type: "array", minItems: 1, maxItems: maxItemsOf(op) } },
         required: ["items"],
       },
-      outputSchema: { type: "array", items: schemas.$defs[`${op.name}.result`] ?? { not: {} } },
+      // 道具の出力は単独の文書のため、結果の形の $ref を生成物の $defs の場所から outputSchema の items の場所へ付け替える
+      outputSchema: {
+        type: "array",
+        items: rebaseRefs(schemas.$defs[`${op.name}.result`] ?? { not: {} }, defPointer(`${op.name}.result`), "#/items") as JsonSchema,
+      },
       annotations: {
         readOnlyHint: op.access === "read",
         idempotentHint: op.idempotencyKey,
