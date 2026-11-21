@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { Client, escapeIdentifier } from "pg";
+import { Client, escapeIdentifier, escapeLiteral } from "pg";
 import { describe, it } from "vitest";
 import { ADMIN_DATABASE, type Row, type SqlExecutor, type SqlParam, type SqlValue, toRow } from "../../src/db-prep/sql-executor.ts";
 
@@ -156,10 +156,18 @@ export function createPgExecutor(connect: (database: string) => Promise<Client>)
 // --- テストの接続の共通の道具 ---
 
 const PG_URL = process.env.ND_TEST_PG_URL;
+// 接続先が使い捨てのクラスタだと示す印。クラスタ全体の権限（postgres・template1 の PUBLIC など）を変えるテストは、
+// これが CI の渡す "1" と完全に一致するときだけ打つ（off・no・打ち間違いでは打たない）。
+// 手元の既存のクラスタを ND_TEST_PG_URL で指しても、その利用者の権限を変えない
+const PG_DISPOSABLE = process.env.ND_TEST_PG_DISPOSABLE_CLUSTER === "1";
+
+function truthy(raw: string | undefined): boolean {
+  const v = raw?.trim().toLowerCase();
+  return v !== undefined && v !== "" && v !== "0" && v !== "false";
+}
 
 function isCi(): boolean {
-  const v = process.env.CI?.trim().toLowerCase();
-  return v !== undefined && v !== "" && v !== "0" && v !== "false";
+  return truthy(process.env.CI);
 }
 
 // PostgreSQL を使うテストの組。接続の値が無ければ、CI では落とし、手元では飛ばす
@@ -177,6 +185,22 @@ export function describePg(name: string, fn: () => void): void {
   }
 }
 
+// クラスタ全体の権限を変える、PostgreSQL を使うテストの組。接続の値に加えて ND_TEST_PG_DISPOSABLE_CLUSTER が要る。
+// 無ければ CI では落とし、手元では飛ばす
+export function describePgDisposable(name: string, fn: () => void): void {
+  if (PG_URL && PG_DISPOSABLE) {
+    describe(name, { timeout: 60_000 }, fn);
+  } else if (isCi()) {
+    describe(name, () => {
+      it("ND_TEST_PG_URL と ND_TEST_PG_DISPOSABLE_CLUSTER が要る", () => {
+        throw new Error("CI では使い捨てのサービスコンテナを指し、ND_TEST_PG_DISPOSABLE_CLUSTER を 1 にする");
+      });
+    });
+  } else {
+    describe.skip(name, fn);
+  }
+}
+
 export type Credentials = { user: string; password: string };
 
 export type TestDatabase = {
@@ -186,8 +210,14 @@ export type TestDatabase = {
   connect(database?: string, credentials?: Credentials): Promise<Client>;
   // 管理のデータベース（postgres）を使い捨てのデータベースへ読み替える SqlExecutor
   executor(): PgExecutor;
+  // superuser でない管理の役割（CREATEDB・CREATEROLE・pg_signal_backend。Aurora の管理の役割に似せる）で打つ SqlExecutor。
+  // 手順の 1 と 4 で外す権限の持ち主（接続の値の役割）の権限を受け継ぐ所属だけを持ち、superuser の属性は持たない。
+  // inheritOwner が偽なら、その所属も持たない（取り消す権限の無い管理の役割）
+  nonSuperuserExecutor(opts?: { inheritOwner?: boolean }): Promise<PgExecutor>;
   // 後始末で消す役割（役割はデータベースの外に残るため）
   dropRoleLater(role: string): void;
+  // 後始末で消すデータベース（用意の手順が作るもの）。役割より先に消す（役割の持つスキーマと権限が中にあるため）
+  dropDatabaseLater(database: string): void;
 };
 
 function urlFor(database: string, credentials?: Credentials): string {
@@ -214,15 +244,23 @@ async function open(database: string, credentials?: Credentials): Promise<Client
   return client;
 }
 
-// テストごとに使い捨てのデータベースを作り、終えたら接続ごと消す
+// テストごとに使い捨てのデータベースを作り、終えたら接続ごと消す。PUBLIC は接続できない（接続の値の役割と、
+// 明示して CONNECT を与えた役割だけが繋げる）
 export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>): Promise<T> {
   const name = `nd_test_${randomBytes(6).toString("hex")}`;
   const admin = await open(adminDatabaseOfUrl());
   const clients: Client[] = [];
   const executors: PgExecutor[] = [];
   const roles: string[] = [];
+  const databases: string[] = [];
+  // 管理の役割は、作った役割より後に消す
+  const admins: string[] = [];
   try {
-    await admin.query(`CREATE DATABASE ${escapeIdentifier(name)}`);
+    // 用意の手順は、接続を許すほかのデータベースで PUBLIC が CONNECT を持つと止まる。並んで走るほかのテストの
+    // 使い捨てのデータベースも PUBLIC へ接続を開かないように、接続を許さずに作って外してから許す
+    await admin.query(`CREATE DATABASE ${escapeIdentifier(name)} WITH ALLOW_CONNECTIONS false`);
+    await admin.query(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier(name)} FROM PUBLIC`);
+    await admin.query(`ALTER DATABASE ${escapeIdentifier(name)} WITH ALLOW_CONNECTIONS true`);
     const connect = async (database: string = name, credentials?: Credentials): Promise<Client> => {
       const c = await open(database, credentials);
       clients.push(c);
@@ -236,8 +274,28 @@ export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>):
         executors.push(ex);
         return ex;
       },
+      async nonSuperuserExecutor(opts = {}) {
+        const user = `nd_test_admin_${randomBytes(6).toString("hex")}`;
+        const password = randomBytes(24).toString("base64url");
+        admins.push(user);
+        await admin.query(`CREATE ROLE ${escapeIdentifier(user)} LOGIN CREATEDB CREATEROLE PASSWORD ${escapeLiteral(password)}`);
+        await admin.query(`GRANT pg_signal_backend TO ${escapeIdentifier(user)}`);
+        // 管理のデータベースに読み替える使い捨てのデータベースで、nd_prep を作れるようにする
+        await admin.query(`GRANT ALL ON DATABASE ${escapeIdentifier(name)} TO ${escapeIdentifier(user)}`);
+        if (opts.inheritOwner !== false) {
+          const owner = (await admin.query<{ u: string }>("SELECT current_user::text AS u")).rows[0]?.u;
+          if (owner === undefined) throw new Error("接続の値の役割を読めない");
+          await admin.query(`GRANT ${escapeIdentifier(owner)} TO ${escapeIdentifier(user)} WITH INHERIT TRUE, SET FALSE`);
+        }
+        const ex = createPgExecutor((database) => connect(database === ADMIN_DATABASE ? name : database, { user, password }));
+        executors.push(ex);
+        return ex;
+      },
       dropRoleLater(role) {
         roles.push(role);
+      },
+      dropDatabaseLater(database) {
+        databases.push(database);
       },
     };
     return await fn(db);
@@ -246,7 +304,8 @@ export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>):
     await Promise.allSettled(clients.map((c) => c.end()));
     try {
       await admin.query(`DROP DATABASE IF EXISTS ${escapeIdentifier(name)} WITH (FORCE)`);
-      for (const role of roles) await admin.query(`DROP ROLE IF EXISTS ${escapeIdentifier(role)}`);
+      for (const database of databases) await admin.query(`DROP DATABASE IF EXISTS ${escapeIdentifier(database)} WITH (FORCE)`);
+      for (const role of [...roles, ...admins]) await admin.query(`DROP ROLE IF EXISTS ${escapeIdentifier(role)}`);
     } finally {
       await admin.end();
     }
