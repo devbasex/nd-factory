@@ -297,6 +297,7 @@ describe("resultSchemaOf", () => {
   it("ResultOf の成功の側は okItem に渡した要素の型で、形の未定が和に入らない", () => {
     type Result = ResultOf<typeof op>;
     expectTypeOf<Extract<Result, { ok: true }>>().toEqualTypeOf<{ ok: true; item: z.infer<typeof sprint> }>();
+    // ReasonsOf が要素を ReasonDef に広げる意図した妥協を固定する。リテラルに絞るときはこの行を直す
     expectTypeOf<Extract<Result, { ok: false }>["reason"]>().toEqualTypeOf<string>();
     expectTypeOf<Extract<Result, { kind: "pending" }>>().toBeNever();
   });
