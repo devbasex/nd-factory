@@ -84,4 +84,19 @@ describe("redact", () => {
     expect(copied).toEqual(at);
     expect(copied).not.toBe(at);
   });
+
+  it("秘密の形の鍵の名前が 2 つ以上あっても、前の項目を消さずに番号を付けて残す", () => {
+    const a = SECRET_SAMPLES["github_app_token"] ?? "";
+    const b = SECRET_SAMPLES["jwt"] ?? "";
+    const out = redact({ [a]: 1, [b]: 2, ok: 3 });
+    expect(out).toEqual({ [R]: 1, [`${R}#2`]: 2, ok: 3 });
+    expect(leakedSecrets(JSON.stringify(out))).toEqual([]);
+  });
+
+  it("Set は配列、Map は [鍵, 値] の組の配列に写し、中の秘密も伏せる", () => {
+    const secret = SECRET_SAMPLES["machine_token"] ?? "";
+    const out = redact({ set: new Set(["a", secret]), map: new Map<unknown, unknown>([["user_id", "usr_1"], ["token", "x"], [1, { password: "p" }]]) });
+    expect(out).toEqual({ set: ["a", R], map: [["user_id", "usr_1"], ["token", R], [1, { password: R }]] });
+    expect(leakedSecrets(JSON.stringify(out))).toEqual([]);
+  });
 });

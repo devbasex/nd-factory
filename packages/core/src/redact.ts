@@ -20,6 +20,18 @@ function isSecretText(text: string): boolean {
   return VALUE_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+function isSecretKeyValue(key: unknown): boolean {
+  return typeof key === "string" && isSecretKey(key);
+}
+
+// 伏せた鍵の名前が重なっても前の項目を消さない。2 つ目からは "[redacted]#2" のように番号を付ける
+function freeKey(out: Record<string, unknown>, key: string): string {
+  if (!Object.hasOwn(out, key)) return key;
+  let n = 2;
+  while (Object.hasOwn(out, `${key}#${n}`)) n += 1;
+  return `${key}#${n}`;
+}
+
 export function redact(value: unknown): unknown {
   return copy(value, new Set());
 }
@@ -35,9 +47,12 @@ function copy(value: unknown, ancestors: Set<object>): unknown {
     if (Array.isArray(value)) return value.map((item) => copy(item, ancestors));
     // 例外は名前と文だけを写す（頭書きや応答を持つ項目を運ばない）
     if (value instanceof Error) return { name: copy(value.name, ancestors), message: copy(value.message, ancestors) };
+    // Set は配列、Map は [鍵, 値] の組の配列に写す（Object.entries が空になり、{} として中身が黙って落ちるのを防ぐ）
+    if (value instanceof Set) return [...value].map((item) => copy(item, ancestors));
+    if (value instanceof Map) return [...value].map(([key, item]) => [copy(key, ancestors), isSecretKeyValue(key) ? REDACTED : copy(item, ancestors)]);
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-      out[isSecretText(key) ? REDACTED : key] = isSecretKey(key) ? REDACTED : copy(item, ancestors);
+      out[freeKey(out, isSecretText(key) ? REDACTED : key)] = isSecretKey(key) ? REDACTED : copy(item, ancestors);
     }
     return out;
   } finally {

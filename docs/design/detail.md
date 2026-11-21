@@ -318,7 +318,7 @@ nd-factory/
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
 | `createLogger` | 1 行の JSON（`time`・`level`・`msg`・`request_id`・`fn`・`endpoint` と呼び手の項目）。すべて `redact` を通す。前の 6 つは必須の項目で、呼び手の項目と `child` の文脈の同じ名前は `field.` を頭に付けて残し、上書きさせない | 標準出力（CloudWatch Logs、30 日）。画面ではレベルに合う `console` の口へ JSON の 1 行を渡す | 秘密の形の値・秘密の鍵の名前の下の値（どの深さでも） |
-| `redact` | 伏せた所を `"[redacted]"` に替えた写し | 戻り値だけ | 伏せる前の値の一部（頭や長さも残さない） |
+| `redact` | 伏せた所を `"[redacted]"` に替えた写し。伏せた鍵の名前が重なれば 2 つ目から `"[redacted]#2"` のように番号を付け、`Set` は配列、`Map` は `[鍵, 値]` の組の配列に写す（項目を黙って落とさない） | 戻り値だけ | 伏せる前の値の一部（頭や長さも残さない） |
 | `callHttp`・`writeAtomically` の再試行 | 繰り返すたびに方針の名前・何回目・分類（`ky` の `beforeRetry` と `p-retry` の `onFailedAttempt` から） | warn | 失敗の文言の中の値（例外の名前と分類だけ） |
 | `callHttp` | 相手の種類（`github`・`idp`・`push`・`slack`・`api`）・方法・状態・時間・分類 | info（成功）・warn（再試行）・error（使い切り） | URL の問い合わせの部分・頭書き・本文・token |
 | `writeAtomically` | 表の名前・件の数・結果（`ok`・`conflict`・`unavailable`）・外れた件の扱い | info・warn（衝突の再試行）・error（届かない） | 行の値 |
