@@ -168,13 +168,20 @@ function reportShape(contract: Record<string, Json>): Shape {
   return (contract["hooks/unattended-report.json"] as { shape: Shape }).shape;
 }
 
-/** 固定の点（752a9cf）の `env.json` と `entrypoints.json` の写し */
+/**
+ * 固定の点（752a9cf）の `env.json` と `entrypoints.json` から、ランナーが渡す名前の行と `skill-workflow` の口の行だけを
+ * 必要な列で写したもの（説明の文の列は写さない。参照の検査に当たる語を持ち込まないため）
+ */
 const PINNED_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ndf-contract-752a9cf");
 function pinnedContract(): Record<string, Json> {
   const contract = fakeContract();
-  for (const name of ["env", "entrypoints"]) {
-    contract[`domains/${name}.json`] = JSON.parse(readFileSync(join(PINNED_DIR, `${name}.json`), "utf8")) as Json;
-  }
+  const read = (name: string) => JSON.parse(readFileSync(join(PINNED_DIR, `${name}.json`), "utf8")) as Rows;
+  contract["domains/env.json"] = read("env");
+  // 口の表は作り物の行（見本と使い方が指す口）を保ち、skill-workflow の行だけを固定の点の行に替える
+  const pinned = read("entrypoints").rows;
+  const fake = contract["domains/entrypoints.json"] as Rows;
+  const ids = new Set(pinned.map((row) => row.id));
+  contract["domains/entrypoints.json"] = { ...fake, rows: [...fake.rows.filter((row) => !ids.has(row.id)), ...pinned] };
   return contract;
 }
 
