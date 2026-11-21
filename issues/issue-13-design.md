@@ -491,7 +491,7 @@ sequenceDiagram
 | LIB5 | EventBridge Scheduler | — | AWS のサービス | — | 無し | 満たす。月 1,400 万回の呼び出しまでは無料の枠。例の計算では枠の外は 100 万回あたり 1.00 ドル | https://aws.amazon.com/eventbridge/pricing/ （2026-11-21） |
 | LIB6 | CloudFormation の `Fn::GetAZs` | — | AWS のサービス | — | 無し | 条件つきで満たす。既定の VPC の既定のサブネットがある AZ だけを返し、既定のサブネットが無ければ使える AZ をすべて返す。既定のサブネットが 1 つの AZ にだけあると 1 つしか返さない | https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/intrinsic-function-reference-getavailabilityzones.html （2026-11-21） |
 | LIB7 | ECR のライフサイクルの規則の評価 | — | AWS のサービス | — | 無し | 満たす。規則はすべて同時に評価し、優先の順に当てる。1 つのイメージを消すのは 0 か 1 つの規則で、ある規則のタグの条件に当たるイメージは、それより優先の低い規則では消えない。`imageCountMoreThan` は push の時刻の新しい順に並べて数を超えたものを消す。`tagPrefixList` は `tagStatus` が `tagged` のときだけ使える。消すのは条件に当たってから 24 時間のうち | https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html ・ https://docs.aws.amazon.com/AmazonECR/latest/userguide/lifecycle_policy_parameters.html （2026-11-21） |
-| LIB8 | `p-retry` | 9.0.0 | MIT | 2026-11-02 | 無し | 満たす。Promise を返す処理を回数と間隔で繰り返す。既定は `retries: 10`（初回を除いた回数）・`factor: 2` の指数の待ちで、`factor: 1` と同じ `minTimeout`・`maxTimeout` で固定の間隔にできる。`maxRetryTime` で全体の期限を、`AbortError` と `shouldRetry` で繰り返さない失敗を決められる。広く使われ、保守が続く | `npm view p-retry version license time.modified`（2026-11-21） |
+| LIB8 | `p-retry` | 9.0.0 | MIT | 2026-11-02 | 無し | 満たす。Promise を返す処理を回数と間隔で繰り返す。既定は `retries: 10`（初回を除いた回数）・`factor: 2` の指数の待ちで、`factor: 1` と同じ `minTimeout`・`maxTimeout` で固定の間隔にできる。`maxRetryTime` で全体の期限を、`AbortError` と `shouldRetry` で繰り返さない失敗を決められる。広く使われ、保守が続く | `npm view p-retry version license time.modified`・`npm view p-retry readme`・`npm view p-retry@9.0.0 readme`（2026-11-21） |
 | LIB9 | `pg-format` | 1.0.4 | MIT | 2022-06-23 | 無し | 満たさない。識別子と文字列の組み立てを書式で行えるが、最後のリリースが 2022 年で保守が止まっている。`pg` の `escapeIdentifier`・`escapeLiteral` で足りる | `npm view pg-format version license time.modified`（2026-11-21） |
 | LIB10 | `pino` | 10.4.0 | MIT | 2026-10-02 | 無し | 満たす。1 行の JSON のログを速く出し、項目を `redact` で伏せられる。広く使われ、保守が続く | `npm view pino version license time.modified`（2026-11-21） |
 | LIB11 | AWS Lambda Powertools の Logger（`@aws-lambda-powertools/logger`） | 2.36.0 | MIT-0 | 2026-10-06 | 無し | 条件つきで満たす。構造化したログを出すが、Lambda の文脈の項目を前提にしている | `npm view @aws-lambda-powertools/logger version license time.modified`（2026-11-21） |
@@ -511,4 +511,4 @@ sequenceDiagram
 | --- | --- | --- |
 | DynamoDB の PITR とストリームの単価 | 試していない | 見込みの額への効きが小さいため、実測の段で単価の頁を読む |
 
-調べた量: 候補 17 件・取得の試み 19 回（2026-11-21。レビューの指摘で LIB6 とコスト配分タグの頁を、イメージの置き場の作り直しで LIB7 を、MVV 版 2 の Value 15 に照らして LIB8〜LIB17 を足した）。
+調べた量: 候補 20 件・取得の試み 29 回（2026-11-21）。内訳は、LIB1〜LIB7 の 10 回（レビューの指摘で LIB6 とコスト配分タグの頁を、イメージの置き場の作り直しで LIB7 を足した分を含む）、MVV 版 2 の Value 15 に照らして足した LIB8〜LIB16 の 12 回（`npm view` が LIB8・9・10・11・15・16 の 6 回、頁が LIB12 の 2・LIB13 の 1・LIB14 の 2・LIB16 の GitHub の 1 の 6 回）、cross-review の指摘で足した 7 回（LIB17 の `npm view` と npm の取得の数の 2 回、LIB8 の readme の 2 回、LIB18・LIB19・LIB20 の頁の 3 回）である。
