@@ -484,6 +484,170 @@ describe("compareContract", () => {
   });
 });
 
+describe("compareContract の 5: 区間の報告の見本の照合", () => {
+  const REPORT_PATH = `${CONTRACT_DIR}/hooks/unattended-report.json`;
+  type Case = { text: string; result: string; errors: string[] };
+
+  function casesOf(contract: Record<string, Json>): Case[] {
+    return (contract["hooks/unattended-report.json"] as { cases: Case[] }).cases;
+  }
+
+  function withReadReport(readReport: NdfContractUse["readReport"]): NdfContractUse {
+    return { ...fakeUse(), readReport };
+  }
+
+  it("見本の text を配列の順に 1 回ずつ読み取りへ渡す", () => {
+    const contract = fakeContract();
+    const texts: string[] = [];
+    const base = fakeUse();
+    const use = withReadReport((text) => {
+      texts.push(text);
+      return base.readReport(text);
+    });
+    expect(compareContract(asFiles(contract), use)).toEqual([]);
+    expect(texts).toEqual(casesOf(contract).map((c) => c.text));
+  });
+
+  it("見本が 0 件なら読み取りを呼ばず、食い違いも出さない", () => {
+    const contract = fakeContract();
+    (contract["hooks/unattended-report.json"] as { cases: Case[] }).cases = [];
+    const readReport = vi.fn(() => ({ result: "x", errors: [] }));
+    expect(compareContract(asFiles(contract), withReadReport(readReport))).toEqual([]);
+    expect(readReport).not.toHaveBeenCalled();
+  });
+
+  it("result が違うと、配列の位置の id と両方の result・errors の件数を書いた食い違い", () => {
+    const contract = fakeContract();
+    const first = casesOf(contract)[0];
+    if (first === undefined) throw new Error("見本が無い");
+    first.result = "判断が要る";
+    expect(compareContract(asFiles(contract), fakeUse())).toEqual([
+      {
+        check: 5,
+        path: REPORT_PATH,
+        id: "0",
+        detail: '読み取りが result "完了"・errors 0 件で、見本の result "判断が要る"・errors 0 件と違う',
+      },
+    ]);
+  });
+
+  it("errors は件数でなく有無だけを比べる（件数が違っても有無が同じなら通す）", () => {
+    const contract = fakeContract();
+    const base = fakeUse();
+    const use = withReadReport((text) => {
+      const got = base.readReport(text);
+      return got.errors.length > 0 ? { ...got, errors: ["一", "二", "三"] } : got;
+    });
+    expect(compareContract(asFiles(contract), use)).toEqual([]);
+  });
+
+  it("result が同じでも errors の有無が違うと食い違い（見本は errors 無し・読み取りは有り）", () => {
+    const contract = fakeContract();
+    const base = fakeUse();
+    const use = withReadReport((text) => {
+      const got = base.readReport(text);
+      return got.result === "完了" ? { result: "完了", errors: ["余計な誤り"] } : got;
+    });
+    expect(compareContract(asFiles(contract), use)).toEqual([
+      {
+        check: 5,
+        path: REPORT_PATH,
+        id: "0",
+        detail: '読み取りが result "完了"・errors 1 件で、見本の result "完了"・errors 0 件と違う',
+      },
+    ]);
+  });
+
+  it("result が同じでも errors の有無が違うと食い違い（見本は errors 有り・読み取りは無し）", () => {
+    const contract = fakeContract();
+    const base = fakeUse();
+    const use = withReadReport((text) => {
+      const got = base.readReport(text);
+      return got.result === "保留" ? { result: "保留", errors: [] } : got;
+    });
+    expect(compareContract(asFiles(contract), use)).toEqual([
+      {
+        check: 5,
+        path: REPORT_PATH,
+        id: "1",
+        detail: '読み取りが result "保留"・errors 0 件で、見本の result "保留"・errors 1 件と違う',
+      },
+    ]);
+  });
+
+  it("読み取りが例外を投げると、その見本の位置の食い違いにして残りの見本も照らす", () => {
+    const contract = fakeContract();
+    const base = fakeUse();
+    const use = withReadReport((text) => {
+      if (text.includes("保留")) throw new Error("読めない");
+      const got = base.readReport(text);
+      return got.result === "" ? { result: "違う", errors: got.errors } : got;
+    });
+    expect(compareContract(asFiles(contract), use)).toEqual([
+      { check: 5, path: REPORT_PATH, id: "1", detail: "区間の報告の読み取りが例外を投げた: 読めない" },
+      {
+        check: 5,
+        path: REPORT_PATH,
+        id: "2",
+        detail: '読み取りが result "違う"・errors 1 件で、見本の result ""・errors 1 件と違う',
+      },
+    ]);
+  });
+
+  it("読み取りが Error でない値を投げると、message を undefined として書く", () => {
+    const contract = fakeContract();
+    (contract["hooks/unattended-report.json"] as { cases: Case[] }).cases = casesOf(contract).slice(0, 1);
+    const use = withReadReport(() => {
+      throw "文字列";
+    });
+    expect(compareContract(asFiles(contract), use)).toEqual([
+      { check: 5, path: REPORT_PATH, id: "0", detail: "区間の報告の読み取りが例外を投げた: undefined" },
+    ]);
+  });
+
+  it("見本ごとに 1 件ずつ、配列の順に食い違いを出す", () => {
+    const contract = fakeContract();
+    for (const sample of casesOf(contract)) sample.result = "ずれ";
+    const findings = compareContract(asFiles(contract), fakeUse());
+    expect(findings.map((f) => [f.check, f.id])).toEqual([
+      [5, "0"],
+      [5, "1"],
+      [5, "2"],
+    ]);
+  });
+
+  it("shape の食い違いは見本の食い違いより前に並び、shape の食い違いは id を持たない", () => {
+    const contract = fakeContract();
+    const shape = reportShape(contract);
+    shape.items = shape.items.filter((item) => item !== "理由");
+    const first = casesOf(contract)[0];
+    if (first === undefined) throw new Error("見本が無い");
+    first.result = "ずれ";
+    const findings = compareContract(asFiles(contract), fakeUse());
+    expect(findings).toEqual([
+      { check: 5, path: REPORT_PATH, detail: "shape.items に無い項目: 理由" },
+      {
+        check: 5,
+        path: REPORT_PATH,
+        id: "0",
+        detail: '読み取りが result "完了"・errors 0 件で、見本の result "ずれ"・errors 0 件と違う',
+      },
+    ]);
+    expect(Object.hasOwn(findings[0] ?? {}, "id")).toBe(false);
+  });
+
+  it("区間の報告のファイルの形が読めないと 5 の食い違い 1 件だけで、読み取りを呼ばない", () => {
+    const contract = fakeContract();
+    contract["hooks/unattended-report.json"] = { shape: "x", cases: [] };
+    const readReport = vi.fn(() => ({ result: "", errors: [] }));
+    const findings = compareContract(asFiles(contract), withReadReport(readReport));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ check: 5, path: REPORT_PATH });
+    expect(findings[0]?.detail).toMatch(/^契約のファイルの形が読めない/);
+    expect(readReport).not.toHaveBeenCalled();
+  });
+});
+
 describe("reportShapeDiff", () => {
   it("要る項目の条件だけが変わっても、条件を含めた差分を出す", () => {
     const tip = fakeContract();
