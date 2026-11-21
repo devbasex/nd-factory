@@ -25,16 +25,14 @@ export function readDbPrepConfig(env: Record<string, string | undefined>): DbPre
 
 // 終わりの記録の口の本番の実装は #6 がこのファイルで渡す。それまでは呼ばれたら投げる（関数を呼ぶ側も #6 が作り、
 // それまで誰も呼ばない）。isCurrent が投げるため、SQL の前に止まり、終わりは記さない
+function throwUnwired(): never {
+  throw new Error("終わりの記録の口がまだつながっていない（#6）");
+}
+
 export const UNWIRED_COMPLETION: PrepCompletionPort = Object.freeze({
-  isCurrent: async () => {
-    throw new Error("終わりの記録の口がまだつながっていない（#6）");
-  },
-  readTarget: async () => {
-    throw new Error("終わりの記録の口がまだつながっていない（#6）");
-  },
-  record: async () => {
-    throw new Error("終わりの記録の口がまだつながっていない（#6）");
-  },
+  isCurrent: async () => throwUnwired(),
+  readTarget: async () => throwUnwired(),
+  record: async () => throwUnwired(),
 });
 
 function build(): (event: unknown) => Promise<void> {
