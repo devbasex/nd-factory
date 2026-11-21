@@ -16,6 +16,13 @@ export const PROGRESS_DB_ADMIN_USER = "nd_admin";
 // 接続 0 本でこの秒数が経つと一時停止する。スタックのテストの Aurora の許しもこの値で照らす
 export const PROGRESS_DB_AUTO_PAUSE_SECONDS = 300;
 
+// クラスタのパラメータ。スタックのテストもこの値で照らす
+export const PROGRESS_DB_PARAMETERS = {
+  "rds.force_ssl": "1",
+  log_parameter_max_length: "0",
+  log_parameter_max_length_on_error: "0",
+};
+
 export type ProgressDbProps = { network: Network; maxAcu: number; names: AppResourceNames };
 
 export class ProgressDb extends Construct {
@@ -30,11 +37,14 @@ export class ProgressDb extends Construct {
     // クラスタはスタックを消しても残す。残したクラスタが使う間は RDS がパラメーターのグループとサブネットのグループの削除を拒み、
     // スタックの削除が DELETE_FAILED になるため、2 つのグループも残す（サブネット・SG・VPC は Network が残す）
 
-    // Aurora PostgreSQL 16 は rds.force_ssl の既定が 0 で、TLS でない接続を受けてしまう
+    // Aurora PostgreSQL 16 は rds.force_ssl の既定が 0 で、TLS でない接続を受けてしまう。
+    // 文のログに引数の値を書かない（既定 -1 は全部書く）。DB の用意の関数は役割のパスワードの検証子を引数で渡し、
+    // 0 であることを読んで照らしてから送る。log_parameter_max_length は SUSET で管理の役割はセッションで変えられないため、
+    // クラスタの側で置く（apps/api/src/db-prep/role-password.ts）
     const parameterGroup = new ParameterGroup(this, "Parameters", {
       engine,
       description: "nd-factory progress DB",
-      parameters: { "rds.force_ssl": "1" },
+      parameters: PROGRESS_DB_PARAMETERS,
       removalPolicy: RemovalPolicy.RETAIN,
     });
 

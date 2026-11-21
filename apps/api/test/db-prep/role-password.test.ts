@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { escapeIdentifier } from "pg";
 import { describe, expect, it } from "vitest";
-import { prepareRolePassword, rolePasswordStatement } from "../../src/db-prep/role-password.ts";
+import { auditClasses, paramLogProblem, prepareRolePassword, rolePasswordStatement } from "../../src/db-prep/role-password.ts";
 import { ADMIN_DATABASE, type Row, type SqlExecutor } from "../../src/db-prep/sql-executor.ts";
 import { FakeSqlExecutor } from "./fake-sql-executor.ts";
 import { type PgExecutor, type TestDatabase, createPgExecutor, describePg, withTestDatabase } from "./pg-executor.ts";
@@ -31,6 +31,28 @@ describe("rolePasswordStatement", () => {
   });
 });
 
+describe("pgAudit の設定の読み", () => {
+  it("分類の並びを左から読み、all と none と引き算を受ける", () => {
+    expect([...auditClasses("ddl, role")].sort()).toEqual(["ddl", "role"]);
+    expect(auditClasses("all, -role").has("role")).toBe(false);
+    expect(auditClasses("ALL").has("role")).toBe(true);
+    expect(auditClasses("role, none").size).toBe(0);
+    expect(auditClasses("").size).toBe(0);
+  });
+
+  it("pgAudit が無いか、引数の値も役割の文も書かない設定なら通す", () => {
+    const safe = { normal: "0", on_error: "0" };
+    for (const audit of [
+      { audit_log: null, audit_parameter: null },
+      { audit_log: "none", audit_parameter: "off" },
+      { audit_log: "ddl, write", audit_parameter: "off" },
+      { audit_log: "all, -role", audit_parameter: "off" },
+    ]) {
+      expect(paramLogProblem({ ...safe, ...audit })).toBeUndefined();
+    }
+  });
+});
+
 describe("prepareRolePassword（作り物の SqlExecutor）", () => {
   it("検証子を引数で渡し、同じトランザクションで DO を打つ。平文と検証子はどの文の本文にも無い", async () => {
     const fake = new FakeSqlExecutor();
@@ -38,9 +60,12 @@ describe("prepareRolePassword（作り物の SqlExecutor）", () => {
     await prepareRolePassword(ROLE, PASSWORD, "alter")(fake, opts);
     const ex = fake.calls.flatMap((c) => (c.kind === "execute" ? [c] : []));
     expect(ex).toHaveLength(3);
-    // 検証子を送る前に、通常の文と失敗の文の両方で引数の値を記録しない設定を置く
-    expect(ex[0]!.sql).toContain("set_config('log_parameter_max_length', '0', true)");
+    // 検証子を送る前に、通常の文の設定と pgAudit の設定を読み、失敗の文の設定を置く
+    expect(ex[0]!.sql).toContain("current_setting('log_parameter_max_length')");
+    expect(ex[0]!.sql).not.toContain("set_config('log_parameter_max_length'");
     expect(ex[0]!.sql).toContain("set_config('log_parameter_max_length_on_error', '0', true)");
+    expect(ex[0]!.sql).toContain("current_setting('pgaudit.log', true)");
+    expect(ex[0]!.sql).toContain("current_setting('pgaudit.log_parameter', true)");
     expect(ex[0]!.params).toBeUndefined();
     expect(ex[1]!.sql).toContain("set_config('nd_prep.role_verifier', CAST(:verifier AS text), true)");
     expect(ex[1]!.params).toEqual([{ name: "verifier", value: expect.stringMatching(/^SCRAM-SHA-256\$4096:/) }]);
@@ -52,19 +77,28 @@ describe("prepareRolePassword（作り物の SqlExecutor）", () => {
     }
   });
 
-  it("引数の値を記録しない設定を置けたと読めなければ、検証子を送らずに投げる", async () => {
-    const rows: Row[] = [{ normal: "-1", on_error: "0" }, { normal: "0", on_error: "64" }, {}];
+  it("引数の値を記録しない設定か pgAudit の設定が安全と読めなければ、検証子を送らずに投げる", async () => {
+    const safe = { normal: "0", on_error: "0", audit_log: null, audit_parameter: null };
+    const rows: Row[] = [
+      { ...safe, normal: "-1" },
+      { ...safe, normal: "64B" },
+      { ...safe, on_error: "64B" },
+      { ...safe, audit_parameter: "on" },
+      { ...safe, audit_log: "ddl, role" },
+      { ...safe, audit_log: "all, -misc" },
+      {},
+    ];
     for (const row of rows) {
       const fake = new FakeSqlExecutor();
-      fake.respond = (sql) => (sql.includes("log_parameter_max_length") ? [row] : []);
+      fake.respond = (sql) => (sql.includes("current_setting('log_parameter_max_length')") ? [row] : []);
       const opts = { database: ADMIN_DATABASE, transactionId: "tx-1" };
-      await expect(prepareRolePassword(ROLE, PASSWORD, "alter")(fake, opts)).rejects.toThrow("引数の値を記録しない設定を置けなかった");
+      await expect(prepareRolePassword(ROLE, PASSWORD, "alter")(fake, opts)).rejects.toThrow("検証子を送らずに止めた");
       expect(fake.statements()).toHaveLength(1);
       expect(JSON.stringify(fake.calls)).not.toContain("SCRAM-SHA-256");
     }
   });
 
-  it("引数の値を記録しない設定の文が失敗したら、検証子を送らずにその失敗を投げる", async () => {
+  it("確かめの文が失敗したら、検証子を送らずにその失敗を投げる", async () => {
     const fake = new FakeSqlExecutor();
     fake.failOn = (c) => (c.kind === "execute" && c.sql.includes("log_parameter_max_length") ? new Error("permission denied") : undefined);
     const opts = { database: ADMIN_DATABASE, transactionId: "tx-1" };
@@ -122,10 +156,16 @@ function expectNoVerifierIn(e: unknown): void {
   expect(fields.where ?? "").not.toContain("SQL statement");
 }
 
-// 文のログを全部出し（log_statement・log_min_duration_statement）、引数の値を全部書く設定（-1）にした接続で打つ SqlExecutor。
+// 文のログを全部出し（log_statement・log_min_duration_statement）、失敗のログは引数の値を全部書く設定（-1）にした接続で打つ
+// SqlExecutor。通常の文のログの引数の長さはクラスタのパラメータと同じ 0 のまま。extra の文を続けて打つ。
 // LOG の知らせをクライアントへも送らせ（client_min_messages）、サーバーのログに書く行と同じ文と詳細を集める
 // by は通常の文のログの出し方（文のログか、時間のログか）
-function loggingExecutor(db: TestDatabase, notices: string[], by: "statement" | "duration" = "statement"): PgExecutor {
+function loggingExecutor(
+  db: TestDatabase,
+  notices: string[],
+  by: "statement" | "duration" = "statement",
+  extra: string[] = [],
+): PgExecutor {
   return createPgExecutor(async (database) => {
     const c = await db.connect(database === ADMIN_DATABASE ? db.name : database);
     c.on("notice", (n) => notices.push(JSON.stringify(n, Object.getOwnPropertyNames(n))));
@@ -134,8 +174,8 @@ function loggingExecutor(db: TestDatabase, notices: string[], by: "statement" | 
       by === "statement" ? "SET log_statement = 'all'" : "SET log_statement = 'none'",
       by === "duration" ? "SET log_min_duration_statement = 0" : "SET log_min_duration_statement = -1",
       "SET log_min_error_statement = error",
-      "SET log_parameter_max_length = -1",
       "SET log_parameter_max_length_on_error = -1",
+      ...extra,
     ]) {
       await c.query(stmt);
     }
@@ -201,16 +241,38 @@ describePg("prepareRolePassword のログ（PostgreSQL）", () => {
     });
   });
 
-  it("引数の値を記録しない設定を置けない管理の役割では、検証子を送らずに止まり、パスワードを書かない", async () => {
+  it.each([
+    ["通常の文のログが引数の値を書く設定", "SET log_parameter_max_length = -1"],
+    ["pgAudit が引数の値を書く設定", "SET pgaudit.log_parameter = 'on'"],
+    ["pgAudit が役割の文を書く設定", "SET pgaudit.log = 'ddl, role'"],
+  ])("%sでは、検証子を送らずに止まり、パスワードを書かない", async (_, stmt) => {
     await withTestDatabase(async (db) => {
-      const sql = await db.nonSuperuserExecutor({ paramLog: false });
+      const notices: string[] = [];
+      const sql = loggingExecutor(db, notices, "statement", [stmt]);
       const role = newRole(db);
-      const e = await inTx(sql, (opts) => prepareRolePassword(role, newPassword(), "create_login")(sql, opts)).catch((err: unknown) => err);
-      expect((e as { code?: string }).code).toBe("42501");
+      const password = newPassword();
+      const e = await inTx(sql, (opts) => prepareRolePassword(role, password, "create_login")(sql, opts))
+        .catch((err: unknown) => err)
+        .finally(() => sql.close());
+      expect((e as Error).message).toContain("検証子を送らずに止めた");
+      expect(notices.some((n) => n.includes("nd_prep.role_verifier"))).toBe(false);
+      expectNoSecretIn(notices, password);
       const admin = await db.connect();
       const { rows } = await admin.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [role]);
       await admin.end();
       expect(rows).toHaveLength(0);
+    });
+  });
+
+  it("superuser でない管理の役割でも、クラスタの設定が 0 なら権限を要さずに書ける", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = await db.nonSuperuserExecutor();
+      const role = newRole(db);
+      await inTx(sql, (opts) => prepareRolePassword(role, newPassword(), "create_login")(sql, opts));
+      const admin = await db.connect();
+      const { rows } = await admin.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [role]);
+      await admin.end();
+      expect(rows).toHaveLength(1);
     });
   });
 });
