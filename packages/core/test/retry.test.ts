@@ -1,6 +1,6 @@
 import ky, { HTTPError, NetworkError, TimeoutError } from "ky";
 import { describe, expect, it } from "vitest";
-import { classifyFailure } from "../src/retry.ts";
+import { classifyFailure, isRetryableCancellation } from "../src/retry.ts";
 
 function awsError(name: string, extra: Record<string, unknown> = {}, httpStatusCode = 400): Error {
   return Object.assign(new Error(name), { name, $metadata: { httpStatusCode }, ...extra });
@@ -113,8 +113,21 @@ describe("classifyFailure", () => {
     expect(classifyFailure(awsError("TransactionCanceledException", { $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: "None" }, { Code: code }] }))).toBe("rejected");
   });
 
-  it("取り消しの理由に一時の失敗と断った理由が並ぶときは retryable", () => {
-    expect(classifyFailure(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ValidationError" }, { Code: "TransactionConflict" }] }))).toBe("retryable");
+  it("isRetryableCancellation は取り消しの理由に一時の失敗があるときだけ真で、例外の名前だけでは真にしない", () => {
+    for (const code of ["TransactionConflict", "ThrottlingError", "ProvisionedThroughputExceeded", "RequestLimitExceeded"]) {
+      expect(isRetryableCancellation(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "None" }, { Code: code }] }))).toBe(true);
+    }
+    expect(isRetryableCancellation(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ConditionalCheckFailed" }] }))).toBe(false);
+    expect(isRetryableCancellation(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ValidationError" }] }))).toBe(false);
+    expect(isRetryableCancellation(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ValidationError" }, { Code: "ThrottlingError" }] }))).toBe(false);
+    expect(isRetryableCancellation(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "TransactionConflict" }, { Code: "ItemCollectionSizeLimitExceeded" }] }))).toBe(false);
+    expect(isRetryableCancellation(awsError("ThrottlingException"))).toBe(false);
+    expect(isRetryableCancellation(null)).toBe(false);
+  });
+
+  it("取り消しの理由に一時の失敗と断った理由が並ぶときは rejected", () => {
+    expect(classifyFailure(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ValidationError" }, { Code: "TransactionConflict" }] }))).toBe("rejected");
+    expect(classifyFailure(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ThrottlingError" }, { Code: "ValidationError" }] }))).toBe("rejected");
   });
 
   it.each([

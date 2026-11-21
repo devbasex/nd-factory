@@ -387,7 +387,7 @@ flowchart LR
 | --- | --- | --- |
 | OpenAPI の文書（`buildOpenApi`） | `zod-openapi` 6.0.2・`@asteasolutions/zod-to-openapi` 9.1.0 | `zod-openapi` で組む（api.md の決定 55 を改めた）。内部で `z.toJSONSchema` を呼ぶため往復のテストと生成元が同じ |
 | 公開鍵の控え（直す前の `createJwksCache`） | `aws-jwt-verify` 5.2.1・`jose` 6.2.18 | `aws-jwt-verify` の組み込みの `SimpleJwksCache` と `SimplePenaltyBox` を既定のまま使い、`createJwksCache` をやめる（決定 48 を改めた）。控えを 1 時間で捨てる・取り直しを 60 秒あける、は設計が自分で置いた要件で外した。知らない `kid` で取り直すため鍵の差し替えに付いていける。鍵の取得の時間切れは組み込みの取り手 `SimpleFetcher` の `responseTimeout` で持たせ、取り手は差し替えない。`jose` は Cognito に固有の照らしを自前で書くことになるため採らない |
-| 外への呼び出しと再試行（`callHttp`・直す前の `withRetry`） | `ky` 2.2.0・`ofetch` 1.5.1・`cockatiel` 4.0.0・`p-retry` 9.0.0・`exponential-backoff` 3.1.3・AWS SDK の組み込み | 共通の `withRetry` を持たない。HTTP は `ky` で `callHttp` を作り、AWS の呼び出しは SDK の再試行の設定（`standard`・回数・時間切れ）で持たせる。どちらにも当たらない所はトランザクションの衝突（`TransactionCanceledException` の `TransactionConflict`。SDK はトランザクションの取り消しを繰り返さない）だけで、`writeAtomically` が `p-retry` で繰り返す。全幅のゆらぎと待ちの差し込みは設計が自分で置いた要件で外し、テストは偽のタイマーとライブラリの設定の照らしで行う。`cockatiel` は利用が狭く、SDK と `ky` が持つ再試行と二重になるため採らない。`classifyFailure` は再試行の判断に使わず、呼び手が結果の扱い（409・404・503）を決めるための分類として残す |
+| 外への呼び出しと再試行（`callHttp`・直す前の `withRetry`） | `ky` 2.2.0・`ofetch` 1.5.1・`cockatiel` 4.0.0・`p-retry` 9.0.0・`exponential-backoff` 3.1.3・AWS SDK の組み込み | 共通の `withRetry` を持たない。HTTP は `ky` で `callHttp` を作り、AWS の呼び出しは SDK の再試行の設定（`standard`・回数・時間切れ）で持たせる。どちらにも当たらない所は一時の失敗によるトランザクションの取り消し（`TransactionCanceledException` の理由の `TransactionConflict` と書き込みの呼びすぎ。SDK はトランザクションの取り消しを繰り返さない）だけで、`writeAtomically` が `p-retry` で繰り返す。全幅のゆらぎと待ちの差し込みは設計が自分で置いた要件で外し、テストは偽のタイマーとライブラリの設定の照らしで行う。`cockatiel` は利用が狭く、SDK と `ky` が持つ再試行と二重になるため採らない。`classifyFailure` は再試行の判断に使わず、呼び手が結果の扱い（409・404・503）を決めるための分類として残す |
 | ログ（`createLogger`） | `pino` 10.4.0・`@aws-lambda-powertools/logger`・`winston`・`consola` | `pino` を書き手にし（ブラウザーでは `pino` のブラウザー版）、値の形での伏せ字だけを自前の `redact` で通す（detail.md の再利用の表を改めた）。値の形での伏せ字を持つ候補は無い。Powertools の Logger は `node:` の組み込みを読み、画面で動かない |
 | 冪等の鍵（`claimIdempotency`・`settleIdempotency`） | `@aws-lambda-powertools/idempotency` | 使えない。記録を単独の `PutItem`・`UpdateItem` で書き、状態の書き込みと同じ `TransactWriteItems` に入れる口と要素ごとの鍵を持たない（I9 と全部か無かを守れない）。自前のまま |
 | 条件つきの書き込み | `electrodb`・`dynamodb-toolbox`・`@aws-sdk/lib-dynamodb` | `@aws-sdk/lib-dynamodb` の `TransactWriteCommand` を使い、条件式の組み立てと失敗の訳しだけを書く（detail.md のまま）。`electrodb`・`dynamodb-toolbox` は独自のスキーマの言葉を持ち込み、形の正本の zod と 2 つ目の正本になる |
@@ -494,7 +494,7 @@ flowchart LR
 | LIB-A14 | `ky` | 2.2.0・MIT・週 1,075 万・依存 0 | `fetch` の上の再試行（全幅のゆらぎ・`maxRetryAfter`）・`timeout`・`totalTimeout`・`fetch` の差し替え | 採る（決定 17）。待ちの差し込みは外した要件で、テストは偽のタイマーで行う |
 | LIB-A15 | `ofetch` | 1.5.1・MIT・週 2,901 万・最終 2025-11-01 | `fetch` の上の再試行と時間切れ | 一部。全体の期限と `Retry-After` が無い |
 | LIB-A16 | `cockatiel` | 4.0.0・MIT・週 293 万・依存 0 | 全幅のゆらぎ（`fullJitterGenerator`）・`DelegateBackoff`・`handleWhen`・時間切れ | 採らない。利用が狭く、AWS SDK と `ky` が持つ再試行と二重になる（決定 17） |
-| LIB-A17 | `p-retry` | 9.0.0・MIT・週 7,634 万 | 指数の待ちの再試行（回数・待ちの下限と上限・`shouldRetry`） | 採る。HTTP と AWS SDK に当たらないトランザクションの衝突だけ（決定 17） |
+| LIB-A17 | `p-retry` | 9.0.0・MIT・週 7,634 万 | 指数の待ちの再試行（回数・待ちの下限と上限・`shouldRetry`） | 採る。HTTP と AWS SDK に当たらない、一時の失敗によるトランザクションの取り消し（衝突と書き込みの呼びすぎ）だけ（決定 17） |
 | LIB-A18 | `exponential-backoff` | 3.1.3・Apache-2.0・週 5,948 万 | 全幅のゆらぎの再試行 | 一部。`Retry-After`・期限が無い |
 | LIB-A19 | `pino` | 10.4.0・MIT・週 8,186 万 | 構造化ログ（ブラウザー版あり）・鍵のパスでの伏せ字 | 採る（決定 17）。値の形での伏せ字は自前の `redact` を通す |
 | LIB-A20 | `@tanstack/react-query` | 5.108.2・MIT・週 9,180 万 | React の取得・控え・更新の状態の層 | 採るかは画面の基盤（#12）が決める（決定 16） |

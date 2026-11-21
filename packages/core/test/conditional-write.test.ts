@@ -179,6 +179,32 @@ describe("writeAtomically", () => {
     expect(warns[0]).toMatchObject({ policy: "dynamodb-transaction", attempt: 1, tables: ["events"], count: 1 });
   });
 
+  it.each(["ThrottlingError", "ProvisionedThroughputExceeded", "RequestLimitExceeded"])("取り消しの理由 %s は方針の回数まで繰り返して確定する", async (code) => {
+    const table = fakeTable();
+    const { log, records } = logs();
+    let calls = 0;
+    const thrown = Object.assign(new Error("throttled"), { name: "TransactionCanceledException", $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: code }] });
+    const db = {
+      transactWrite: async (items: readonly TransactItem[]) => {
+        calls += 1;
+        if (calls <= RETRY_POLICIES["dynamodb-transaction"].retries) throw thrown;
+        await table.db.transactWrite(items);
+      },
+    } as unknown as Parameters<typeof writeAtomically>[0];
+    expect(await writeAtomically(db, [put(0)], log)).toEqual({ ok: true });
+    expect(calls).toBe(RETRY_POLICIES["dynamodb-transaction"].retries + 1);
+    expect(table.rows("events")).toHaveLength(1);
+    expect(records().filter((r) => r["level"] === "warn")).toHaveLength(RETRY_POLICIES["dynamodb-transaction"].retries);
+  });
+
+  it("呼びすぎの取り消しを使い切ると WriteUnavailableError を投げ、何も書かない", async () => {
+    const table = fakeTable();
+    table.failNext("throttled", "throttled", "throttled");
+    await expect(writeAtomically(table.db, [put(0), put(1)])).rejects.toBeInstanceOf(WriteUnavailableError);
+    expect(table.transactions).toHaveLength(RETRY_POLICIES["dynamodb-transaction"].retries + 1);
+    expect(table.rows("events")).toEqual([]);
+  });
+
   it("衝突を使い切ると WriteUnavailableError を投げ、何も書かない", async () => {
     const table = fakeTable();
     table.failNext("conflict", "conflict", "conflict");
@@ -212,14 +238,50 @@ describe("writeAtomically", () => {
   it.each([
     ["要求の形を断った例外", Object.assign(new Error("bad"), { name: "SerializationException", $metadata: { httpStatusCode: 400 } })],
     ["取り消しの理由が行の形の誤り", Object.assign(new Error("bad"), { name: "TransactionCanceledException", $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: "None" }, { Code: "ValidationError" }] })],
-  ])("%s は記録の行を含んでも WriteUnavailableError に包まず、元の例外のまま投げる", async (_why, thrown) => {
+    ["取り消しの理由に行の形の誤りと書き込みの呼びすぎが並ぶ", Object.assign(new Error("bad"), { name: "TransactionCanceledException", $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: "ValidationError" }, { Code: "ThrottlingError" }] })],
+  ])("%s は記録の行を含んでも WriteUnavailableError に包まず、繰り返さずに元の例外のまま投げる", async (_why, thrown) => {
     const { log, records } = logs();
-    const db = { transactWrite: async () => Promise.reject(thrown) } as unknown as Parameters<typeof writeAtomically>[0];
+    let calls = 0;
+    const db = {
+      transactWrite: async () => {
+        calls += 1;
+        return Promise.reject(thrown);
+      },
+    } as unknown as Parameters<typeof writeAtomically>[0];
     const audit = putIfAbsent({ table: "audit", item: { pk: "AUDIT#1", sk: "AUDIT", schema_version: 1 }, onConflict: "fail" });
     const error = await writeAtomically(db, [audit], log).catch((e: unknown) => e);
     expect(error).toBe(thrown);
+    expect(calls).toBe(1);
     expect(records().at(-1)).toMatchObject({ level: "error", msg: "書き込みを表が断った", result: "rejected", class: "rejected" });
   });
+
+  it.each(["ValidationError", "ItemCollectionSizeLimitExceeded"])(
+    "条件の外れと断った理由 %s が別の件に並ぶ取り消しは、条件の外れとして返さず、繰り返さずに元の例外のまま投げる",
+    async (code) => {
+      const { log, records } = logs();
+      // 件ごとに理由を対応させる: 0 番の版の比べが外れ、1 番の新しい行を表が断った
+      const thrown = Object.assign(new Error("canceled"), {
+        name: "TransactionCanceledException",
+        $metadata: { httpStatusCode: 400 },
+        CancellationReasons: [{ Code: "ConditionalCheckFailed" }, { Code: code }],
+      });
+      let calls = 0;
+      const db = {
+        transactWrite: async () => {
+          calls += 1;
+          return Promise.reject(thrown);
+        },
+      } as unknown as Parameters<typeof writeAtomically>[0];
+      const items = [
+        updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version: 1, set: { name: "x" }, onConflict: "version_mismatch" }),
+        putIfAbsent({ table: "events", item: { pk: "EVENT#1", sk: "EVENT", schema_version: 1 }, onConflict: "return_existing" }),
+      ];
+      const error = await writeAtomically(db, items, log).catch((e: unknown) => e);
+      expect(error).toBe(thrown);
+      expect(calls).toBe(1);
+      expect(records().at(-1)).toMatchObject({ level: "error", msg: "書き込みを表が断った", result: "rejected", class: "rejected", error: "TransactionCanceledException" });
+    },
+  );
 
   it.each([
     ["取り消しの理由が書き込みの呼びすぎ", Object.assign(new Error("throttled"), { name: "TransactionCanceledException", $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: "None" }, { Code: "ThrottlingError" }] }), "retryable"],
