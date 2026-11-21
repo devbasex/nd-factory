@@ -192,6 +192,34 @@ function failureResult(error: unknown): OutboundResult {
 type HandleArgs = Parameters<NodeHttpHandler["handle"]>;
 type HandleResult = Awaited<ReturnType<NodeHttpHandler["handle"]>>;
 
+type GivenAbortSignal = NonNullable<NonNullable<HandleArgs[1]>["abortSignal"]>;
+
+// 呼び手のシグナル（ネイティブの AbortSignal か、aborted と onabort だけを持つ従来の Smithy のシグナル）が切れたら controller を切る。
+// AbortSignal.any は従来のシグナルを受け付けず TypeError を投げるため使わない。戻り値は繋ぎを解く関数
+function linkAbort(given: GivenAbortSignal | undefined, controller: AbortController): () => void {
+  if (given === undefined) return () => undefined;
+  const abort = () => controller.abort("reason" in given ? given.reason : undefined);
+  if (given.aborted) {
+    abort();
+    return () => undefined;
+  }
+  if ("addEventListener" in given && typeof given.addEventListener === "function") {
+    const signal = given as AbortSignal;
+    signal.addEventListener("abort", abort, { once: true });
+    return () => signal.removeEventListener("abort", abort);
+  }
+  // 従来のシグナルは onabort の 1 つだけを持つ。前の扱いを残して繋ぐ
+  const previous = given.onabort;
+  const chained = function (this: unknown, ...args: unknown[]): unknown {
+    abort();
+    return typeof previous === "function" ? (previous as (...a: unknown[]) => unknown).apply(this, args) : undefined;
+  };
+  given.onabort = chained;
+  return () => {
+    if (given.onabort === chained) given.onabort = previous;
+  };
+}
+
 function timeoutErrorOf(ms: number): Error {
   // 名前と符号は SDK が一時の失敗として繰り返すもの（TimeoutError・ETIMEDOUT）
   return Object.assign(new Error(`要求が期限 ${ms} ms を過ぎた`), { name: "TimeoutError", code: "ETIMEDOUT" });
@@ -222,27 +250,32 @@ export class DeadlineHttpHandler {
     const controller = new AbortController();
     let expired = false;
     let body: Readable | undefined;
-    const timer = setTimeout(() => {
-      expired = true;
-      controller.abort(timeoutError);
-      body?.destroy(timeoutError);
-    }, ms);
-    const given = options.abortSignal as AbortSignal | undefined;
-    const abortSignal = given === undefined ? controller.signal : AbortSignal.any([given, controller.signal]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let unlink: () => void = () => undefined;
+    const release = () => {
+      clearTimeout(timer);
+      unlink();
+    };
     let result: HandleResult;
     try {
-      result = await this.#inner.handle(request, { ...options, abortSignal });
+      unlink = linkAbort(options.abortSignal, controller);
+      timer = setTimeout(() => {
+        expired = true;
+        controller.abort(timeoutError);
+        body?.destroy(timeoutError);
+      }, ms);
+      result = await this.#inner.handle(request, { ...options, abortSignal: controller.signal });
     } catch (error) {
-      clearTimeout(timer);
+      release();
       // 期限で切った要求は AbortError でなく TimeoutError で返す（SDK は AbortError を繰り返さない）
       throw expired ? timeoutError : error;
     }
     const stream = result.response.body as unknown;
     if (stream instanceof Readable && !stream.destroyed) {
       body = stream;
-      stream.once("close", () => clearTimeout(timer));
+      stream.once("close", release);
     } else {
-      clearTimeout(timer);
+      release();
     }
     return result;
   }
