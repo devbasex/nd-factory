@@ -51,21 +51,50 @@ export const loginSubjectKey = (row: LoginSubjectRow): RowKey => ({ pk: `LOGIN#$
 // 実行が AdminUserGlobalSignOut を呼ぶ前に、同じ世代の signing_out で借りが無いか期限を過ぎたときだけ取り、借りの持ち主だけが unlinked へ進める。
 // signout_unsettled_until は、応答を失った呼び出し（打ち切り・期限切れ・失敗。Cognito に届いた実行は取り消せない）の結果の分からない期間の終わり。
 // この時刻より前は借りを取らず、この時刻より後に始めた呼び出しの成功だけで unlinked へ進める（後から処理される前の失効が、結び直したセッションへ届かない）
+// 状態ごとに持つ列を形で決める（bound は user_id と bound_auth_time、unlinked は revoked_before が必須。失効の借りと
+// 結果の分からない期間の列は signing_out の間だけ）。状態に当たらない列を持つ行は断つ（読み手が状態の値を組めない行を書かせない）
 export const COGNITO_SUBJECT_STATES = ["bound", "signing_out", "unlinked"] as const;
-export const cognitoSubjectRow = overwriteRow(1, {
+const cognitoSubjectCommon = {
   cognito_sub: z.string().min(1),
   cognito_username: z.string().min(1),
   idp,
   subject: z.string().min(1),
-  state: z.enum(COGNITO_SUBJECT_STATES),
   binding_epoch: z.int().min(0),
-  user_id: idOf("usr").optional(),
-  bound_auth_time: utcDateTime.optional(),
-  revoked_before: utcDateTime.optional(),
-  signout_lease_id: uuid.optional(),
-  signout_lease_until: utcDateTime.optional(),
-  signout_unsettled_until: utcDateTime.optional(),
-});
+};
+// その状態では持たない列
+const absent = z.never().optional();
+export const cognitoSubjectRow = z.discriminatedUnion("state", [
+  overwriteRow(1, {
+    ...cognitoSubjectCommon,
+    state: z.literal("bound"),
+    user_id: idOf("usr"),
+    bound_auth_time: utcDateTime,
+    revoked_before: absent,
+    signout_lease_id: absent,
+    signout_lease_until: absent,
+    signout_unsettled_until: absent,
+  }),
+  overwriteRow(1, {
+    ...cognitoSubjectCommon,
+    state: z.literal("signing_out"),
+    user_id: absent,
+    bound_auth_time: absent,
+    revoked_before: absent,
+    signout_lease_id: uuid.optional(),
+    signout_lease_until: utcDateTime.optional(),
+    signout_unsettled_until: utcDateTime.optional(),
+  }),
+  overwriteRow(1, {
+    ...cognitoSubjectCommon,
+    state: z.literal("unlinked"),
+    user_id: absent,
+    bound_auth_time: absent,
+    revoked_before: utcDateTime,
+    signout_lease_id: absent,
+    signout_lease_until: absent,
+    signout_unsettled_until: absent,
+  }),
+]);
 export type CognitoSubjectRow = z.infer<typeof cognitoSubjectRow>;
 export const cognitoSubjectKey = (row: CognitoSubjectRow): RowKey => ({ pk: `COGNITO#${row.cognito_sub}`, sk: "COGNITO" });
 
