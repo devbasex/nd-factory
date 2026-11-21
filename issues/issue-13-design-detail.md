@@ -401,14 +401,19 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `main` | 用意の ID・種類・結果・理由のコード・所要時間 | `pino` の 1 行の JSON を標準出力へ（ログの群へ） | パスワード・管理の接続の値・token・データベースと役割の名前（`redact` で伏せる） |
+| `main` | 用意の ID・種類・結果・理由のコード・所要時間・失敗のときの例外の名前と SQLSTATE（`err.code`）・API の要素の `status` と `reason` | `pino` の 1 行の JSON を標準出力へ（ログの群へ） | パスワード・管理の接続の値・token・データベースと役割の名前 |
+
+値を出さない決まりは 2 つで、`redact` は 2 つ目の守りとする。
+
+1. 出す項目を決まった形で組む。ログの呼び出しは `logger.info({ prep_id, kind, result, reason, duration_ms, err_name, sqlstate, api_status, api_reason }, "<固定の文>")` の形だけにし、メッセージの文字列は定数にして値を埋め込まない。例外は `err` のまま渡さず、`err.name` と `err.code` だけを取り出す（`pg` と `fetch` の例外の `message` と `stack` には、接続の値・データベースや役割の名前・URL が入りうるが、`redact` はキーのパスでしか伏せず文字列の中は伏せられないため）。応答の本文・要求の本文・`admin`・`project` の物をそのまま渡さない
+2. `redact: { paths, remove: true }` の `paths` に次を並べる: `password`・`*.password`・`admin`・`*.admin`・`project`・`*.project`・`token`・`completion_token`・`*.completion_token`・`exchange_token`・`database`・`*.database`・`role`・`*.role`・`host`・`*.host`・`user`・`*.user`・`err`・`*.err`・`message`・`stack`・`*.message`・`*.stack`・`req`・`res`
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `complete`・`connectAdmin` の再試行 | `p-retry`（設計文書の LIB8）・横断の部品の `callHttp`（[詳細設計の横断の部品](../docs/design/detail.md)） | 設計文書の決定 14・`ls packages/` | `p-retry` を使う。`packages/core` は #2 が作り、まだ無い。そろえ方は #56 |
-| `main` のログ | `pino`（設計文書の LIB10）・横断の部品の `createLogger` | 設計文書の決定 14 | `pino` を使い、パスワード・管理の接続の値・token を `redact` で伏せる。そろえ方は #56 |
+| `main` のログ | `pino`（設計文書の LIB10）・横断の部品の `createLogger` | 設計文書の決定 14 | `pino` を使い、出す項目を決まった形で組み、`redact` を 2 つ目の守りにする（上の「ログと記録の出力」）。そろえ方は #56 |
 | 識別子の組み立て | `pg` の `escapeIdentifier` | LIB3 | 使う |
 
 ### 単体テストの観点
@@ -422,7 +427,8 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 | `terminateRoleConnections`（PostgreSQL のサービスコンテナ） | 書く前に開いた役割の接続を切り、残り 0 | 境の時刻が記されていれば記し直さない。`pg_terminate_backend` が `false`（5 秒の待ちの切れ）を返しても、期限の中で残りが 0 になれば 0 を返す（作り物の数え方で、1 回目の読み直しが 1・2 回目が 0）。期限の 15 秒を過ぎても残れば残りの数を返す（時計は差し替える） | 順序の逆転: タスク T1 が番号 n を書いて切りの前で止まり、起こし直しの T2（同じ n）が `superseded_equal`・切り・終わりまで進み、その後に新しいパスワードで接続 C を開き、T1 を再開すると C が切られずに残る（C が切られると落ちる）。T1 が `rotateRole` の前で止まり、T2 が終わって C を開いた後に T1 を最初から打っても C が残る。記した番号が n+1 に上がった後の T1（n）は何も切らずに `superseded_greater` |
 | `connectAdmin` | 3 回目の試行で開ければ返す。既定の `opts` で `p-retry` に渡す値が `retries: 11`・`factor: 1`・`minTimeout: 5000`・`maxTimeout: 5000`・`randomize: false`・`maxRetryTime: 60000` で、開けない作り物の接続を 12 回試す。作り物の `pg.Client` が受けた設定の `ssl` が CA の束と `rejectUnauthorized: true` を持ち、`checkServerIdentity` を差し替えない | 作り物の接続が応答を返さず保留のままでも、試行ごとに `connectTimeoutMs` で打ち切って次へ進む。`deadlineMs` を過ぎた後は次の試行を始めない（時計は差し替える） | 期限の尽きで投げ、`main` が `admin_connect_failed` を報告する |
 | `exchange`・`complete` | 形の正本に合う `ok: true` の要素 | HTTP 200 の `ok: false`・`status: 409` を、HTTP 401 と別の結果として返す | 形の違う応答を誤りにする・HTTP 401 と HTTP 200 の `status: 409` の要素のどちらでも再試行しない。`complete` は、ネットワークの失敗・打ち切り・503・429 では 4 回まで試し（4 回目が成功すれば成功）、400・401・403・409 の要素・形の誤りでは 1 回で止める。5 回目を打たない |
-| `main` | 処理の手順の表の 6 行 | — | パスワードがログに出ると落ちる |
+| `main` | 処理の手順の表の 6 行 | — | ログの出力（作り物の書き先に集めた全行）に、作り物のパスワード・管理の接続の `host` と `user` と `password`・引き換えの token・終わりの報告の token・データベースと役割の名前のどれかが部分の文字列として現れると落ちる。作り物の `pg` と `fetch` が、それらの値を `message` に含む例外を投げる場合（管理の接続の失敗・SQL の失敗・終わりの報告の失敗）でも同じに照らす |
+| ロガーの設定 | — | — | `paths` の各キーに値を入れた物を渡すと、出力にそのキーが無い |
 
 CI の `check` のジョブに `postgres:16`（要約値で固定）のサービスコンテナを置き、接続の値を `ND_TEST_PG_URL` で渡す。値が無いとき、`CI` が真なら DB のテストは落ち、手元では飛ばす（このリポジトリはテストを CI に寄せる）。
 

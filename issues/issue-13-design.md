@@ -398,7 +398,7 @@ sequenceDiagram
 | --- | --- | --- |
 | PostgreSQL への接続と SQL | `pg`（LIB3）。識別子と文字列の組み立ては `pg` の `escapeIdentifier`・`escapeLiteral` | `postgres`（LIB4。DDL の組み立てに利点が無い）・`pg-format`（LIB9。最後のリリースが 2022 年で保守が止まっている） |
 | 管理の接続の再試行・終わりの報告の再試行 | `p-retry`（LIB8）。渡す値（回数・間隔・期限・繰り返さない失敗）は詳細設計の「DB の用意のタスク」に決める | 自前の繰り返し（Value 15）。横断の部品の再試行（#2 がまだ作っていない。そろえ方は #56） |
-| DB の用意のタスクのログ | `pino`（LIB10）。1 行の JSON を標準出力へ出し、伏せる項目を `redact` で外す | AWS Lambda Powertools の Logger（LIB11。Lambda の文脈を前提にした項目が多く、ECS のタスクでは利点が少ない）・自前の `JSON.stringify`（Value 15。横断の部品とのそろえ方は #56） |
+| DB の用意のタスクのログ | `pino`（LIB10）。1 行の JSON を標準出力へ出し、出す項目を決まった形で組んで値をメッセージに埋め込まず、`redact` で伏せるキーを外す（`redact` はキーのパスだけを伏せ、文字列の中は伏せない） | AWS Lambda Powertools の Logger（LIB11。Lambda の文脈を前提にした項目が多く、ECS のタスクでは利点が少ない）・自前の `JSON.stringify`（Value 15。横断の部品とのそろえ方は #56） |
 | 資格情報の差し替え | 今の設計のまま、DB の用意のタスクが差し替える（全体の設計の決定 95） | Secrets Manager の公式のローテーションの Lambda（LIB12。Lambda を VPC に入れ、Secrets Manager の端点へ NAT か Interface 型のエンドポイントで出る必要があり、時間で費用が掛かる。予定による差し替えで、割り当ての移しを引き金に番号を照らす I17 の形を持たない） |
 | 管理の役割のパスワード | 今の設計のまま、CDK が生成して自前の秘密の器 `<prefix>/<environment>/progress-db-admin` に置く | Aurora が管理するマスターユーザーのパスワード（LIB13。秘密の器の名前を選べず `rds!cluster-…` になり、API の関数が読める器を `<prefix>/<environment>/` の頭に絞る全体の設計の決定 90 と合わない。7 日ごとの差し替えでクラスタが起きる） |
 | DB の用意そのもの | 今の設計のまま、ECS の DB の用意のタスク | RDS Data API（LIB14。API の関数から VPC に入らずに SQL を打て、タスク・イメージ・引き換えの経路・時間切れの見回りを外せる見込みがある。ただし全体の設計の決定 83 が使わないと決めており、`data.md`・`api.md` に及ぶため、この課題では乗り換えず #55 で確かめる） |
