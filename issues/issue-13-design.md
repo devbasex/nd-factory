@@ -399,11 +399,11 @@ flowchart TD
 ### 決定 17: 役割のパスワードを DB の側のログに残さないため、関数が SCRAM-SHA-256 の検証子を作り、平文を SQL の文に載せない
 
 - **質問**: `CREATE ROLE … PASSWORD`・`ALTER ROLE … PASSWORD` は引数を束縛できず、パスワードは文の中の文字列になる。PostgreSQL は既定で失敗した文をサーバーのログに書くため（LIB24）、関数のログを伏せても Aurora の側に資格情報が残りうる。どう防ぐか
-- **選んだ案**: 関数は秘密の器から読んだ平文を、SQL に載せる前に SCRAM-SHA-256 の検証子（RFC 7677。塩 16 バイト・回数 4096）へ変え、検証子を文字列として渡す。PostgreSQL は SCRAM の形の文字列をそのまま保存し（LIB23）、平文での接続はそのまま通る。Data API も Aurora PostgreSQL 14 以上では `scram-sha-256` だけを受けるため、方式は変わらない（[全体の設計の LIB91](../docs/design/platform.md#ライブラリとサービス)）。検証子は `node:crypto` の `pbkdf2Sync`・`createHmac`・`createHash`・`randomBytes` で組む。SCRAM の検証子は塩が無作為で、同じ平文でも作るたびに違うため、正しさは次の 2 つで CI の PostgreSQL に照らす。(1) PostgreSQL が平文から作った役割の検証子（`pg_authid.rolpassword`）から塩と回数を取り出し、同じ平文・塩・回数で自前の関数が組んだ値と文字列で比べる。(2) 自前の検証子で作った役割へ、平文のパスワードで接続が通る（差し替えの後は新しい平文で通り、古い平文で落ちる）。文がログに残っても検証子だけで、32 バイトの乱数のパスワードは検証子から求められない
-- 採らなかった案: パスワードを含む文の前に `SET LOCAL log_min_error_statement = PANIC`・`log_statement = none` を打つ（どちらも superuser か SET の権限が要り、Aurora の管理の役割で打てるかが分からない。打てても、クラスタのパラメータで `log_statement` を上げた設置先や、文の前の失敗では効かない）
+- **選んだ案**: 関数は秘密の器から読んだ平文を、SQL に載せる前に SCRAM-SHA-256 の検証子（RFC 7677。塩 16 バイト・回数 4096）へ変え、検証子を文字列として渡す。PostgreSQL は SCRAM の形の文字列をそのまま保存し（LIB23）、平文での接続はそのまま通る。Data API も Aurora PostgreSQL 14 以上では `scram-sha-256` だけを受けるため、方式は変わらない（[全体の設計の LIB91](../docs/design/platform.md#ライブラリとサービス)）。検証子は `node:crypto` の `pbkdf2Sync`・`createHmac`・`createHash`・`randomBytes` で組む。SCRAM の検証子は塩が無作為で、同じ平文でも作るたびに違うため、正しさは次の 2 つで CI の PostgreSQL に照らす。(1) PostgreSQL が平文から作った役割の検証子（`pg_authid.rolpassword`）から塩と回数を取り出し、同じ平文・塩・回数で自前の関数が組んだ値と文字列で比べる。(2) 自前の検証子で作った役割へ、平文のパスワードで接続が通る（差し替えの後は新しい平文で通り、古い平文で落ちる）。文がログに残っても検証子だけで、32 バイトの乱数のパスワードは検証子から求められない。検証子も認証に使う秘密のため文の本文に載せず、引数で渡す。引数の値は通常の文のログ（`log_statement` が `all`・`log_min_duration_statement` の対象）では `log_parameter_max_length`（既定 -1 で全部書く）に従って書かれるため、検証子を送る前に `log_parameter_max_length` と `log_parameter_max_length_on_error` をトランザクションの中だけで 0 にし、置けなければ検証子を送らずに止める（詳細設計の `prepareRolePassword`）
+- 採らなかった案: 平文のパスワードを含む文の前に `SET LOCAL log_min_error_statement = PANIC`・`log_statement = none` を打つだけにする（クラスタのパラメータで `log_statement` を上げた設置先や、文の前の失敗では効かない。引数の値を記録しない設定は、検証子を引数で渡す文の守りとして置き、置けなければ止める）
 - 採らなかった案: クラスタのパラメータの群で `log_min_error_statement` を `PANIC` にする（ランナーの NDF の失敗した文もログに残らなくなり、調べる手がかりを失う。平文を送らなければ要らない）
 - 採らなかった案: 検証子の部品に `scram_sha_256`（LIB25）を使う（版が 0.0 のまま 2024 年から更新が無い。`node:crypto` の標準の関数だけで 20 行ほどで組め、正しさは CI で PostgreSQL と照らせる）
-- **代償**: 自前の暗号の計算が 1 つ増える（Value 15）。パスワードに印字できない文字を受けない（PostgreSQL の SASLprep を持たないため。API が作るパスワードは base64url の文字だけ）。Aurora のログに検証子が残ることは許す
+- **代償**: 自前の暗号の計算が 1 つ増える（Value 15）。パスワードに印字できない文字を受けない（PostgreSQL の SASLprep を持たないため。API が作るパスワードは base64url の文字だけ）。検証子を送る前に `log_parameter_max_length`（SUSET）を置くため、Aurora の管理の役割が置けなければ用意と差し替えが止まる（#44 で確かめる）
 - 作り方: 標準に倣う・自前で作る（RFC 7677・PostgreSQL の SCRAM の形を `node:crypto` で組む）
 - 比べた候補: LIB23 / LIB24 / LIB25
 - 根拠: Value 7 / Value 9（MVV 版 1）
@@ -484,7 +484,7 @@ flowchart TD
 | --- | --- |
 | Aurora の一時停止 | 接続の無い間に一時停止に入り続けること・保守で起きる回数（骨組みの環境で数日。この課題） |
 | 単価 | EventBridge のスケジュール（無料の枠の外の単価）・DynamoDB の PITR とストリーム（この課題） |
-| 接続して確かめる項目 | 時間切れの後の DB への働き（関数が排他の鎖を持ったまま時間切れになった後、3 分のうちに巻き戻って鎖が外れること。決定 9）・パスワードを含む文の DB の側のログ（作り物のパスワードで `CREATE ROLE` を既にある役割へ打って失敗させ、Aurora の PostgreSQL のログのファイルを `DownloadDBLogFilePortion` で読み、平文が現れず検証子だけであること。決定 17）・戻しの後もプロジェクトのデータベースが残ること（決定 10）・再開の待ち・カタログの分け方（Aurora の管理の役割は superuser でなく、CI の PostgreSQL の結果と違いうる）・`ALTER ROLE` と排他の鎖を 1 つの Data API のトランザクションで打てること・Data API で用意の手順の文が打てて接続を残さないこと（用意の後に一時停止へ入るまでの時間）・文の長さの上限と値の型が `pg` の実装と同じに扱えること・`pg_stat_clear_snapshot()` と `pg_terminate_backend` が Data API のトランザクションの中で `pg` の実装と同じに動くこと・DBOS と PostgreSQL 16.13・ACU の平均と既定 2 ACU。関数を呼ぶ API の側と終わりの記録の口が #6 までできないため、#44 へ分けた（決定 13） |
+| 接続して確かめる項目 | 時間切れの後の DB への働き（関数が排他の鎖を持ったまま時間切れになった後、3 分のうちに巻き戻って鎖が外れること。決定 9）・パスワードを含む文の DB の側のログ（作り物のパスワードで `CREATE ROLE` を既にある役割へ打って失敗させ、`log_statement` を `all` にして成功させた文と合わせて、Aurora の PostgreSQL のログのファイルを `DownloadDBLogFilePortion` で読み、平文も検証子も現れないこと。管理の役割が引数の値を記録しない設定を置けること。決定 17）・戻しの後もプロジェクトのデータベースが残ること（決定 10）・再開の待ち・カタログの分け方（Aurora の管理の役割は superuser でなく、CI の PostgreSQL の結果と違いうる）・`ALTER ROLE` と排他の鎖を 1 つの Data API のトランザクションで打てること・Data API で用意の手順の文が打てて接続を残さないこと（用意の後に一時停止へ入るまでの時間）・文の長さの上限と値の型が `pg` の実装と同じに扱えること・`pg_stat_clear_snapshot()` と `pg_terminate_backend` が Data API のトランザクションの中で `pg` の実装と同じに動くこと・DBOS と PostgreSQL 16.13・ACU の平均と既定 2 ACU。関数を呼ぶ API の側と終わりの記録の口が #6 までできないため、#44 へ分けた（決定 13） |
 
 ## 外部の調査
 
