@@ -203,13 +203,14 @@ infra/
 | 10 | `ownerOnly` | 真偽 | 偽 |
 | 11 | `allOrNothing` | `{ maxItems: number } \| null` | `null` |
 | 12 | `idempotencyKey` | 真偽 | 偽 |
-| 13 | `item`・`result` | `item` は zod \| `PendingShape`。`result` は `SuccessEnvelope`（`ok` を `z.literal(true)` で持つ `strictObject`。`okItem`・`okList` が作る） \| `PendingShape` | —。`result` が `ok: true` の strict な封筒でなければ `defineOperation` が投げる（`z.object` と `z.strictObject` は型で見分けられないため、型の制約に加えて実行の時にも照らす）。あわせて、list の封筒は `ok`・`items`・`next_cursor` を、list でなければ `ok`・`item`（オブジェクトの形）を必ず持ち、受け口 `user` はそのキーだけを持ち、どの封筒も失敗の要素のキー（`status`・`reason`・`fields`）を置かない。照らす規則の全部は `defineOperation` の事後条件に書く |
-| 14 | `reasons` | `readonly ReasonDef[]`（操作ごとのコードだけ。`when` は `always`） | `[]`（共通の `ITEM_REASONS` は書かずに `itemReasonsOf` が合わせる）。`ITEM_REASONS` と同じコードを書くと `defineOperation` が投げる |
-| 15 | `auditKeys` | 要素の鍵の名前の配列 | `[]` |
-| 16 | `order` | 文字列 \| `null` | `list` 以外は `null` |
-| 17 | `examples` | `{ normal?: unknown[]; edge?: unknown[]; empty?: unknown } \| null` | `null`。書いたときだけ、生成した見本をその場面で上書きする（決定 3）。`empty` は空の場面の結果 1 件（`null` で空の場面を持たない） |
-| 18 | `description_en` | 文字列 | `"<verb> <entity>"` |
-| 19 | `owner` | `` `#${number}` `` | — |
+| 13 | `onceOnly` | 成功の結果の中の場所（`item.token` の形）の配列 | `[]`。冪等の鍵を持つ操作だけが持ち、場所は成功の結果にあって `null` を受ける形でなければ `defineOperation` が投げる（場所の途中は optional・nullable・default などの包みを外し、配列は要素へ下りる。末尾は配列や包みを含めたその場所の形そのものが `null` を受ける）。`settleIdempotency` はこの場所だけを `null` に替える |
+| 14 | `item`・`result` | `item` は zod \| `PendingShape`。`result` は `SuccessEnvelope`（`ok` を `z.literal(true)` で持つ `strictObject`。`okItem`・`okList` が作る） \| `PendingShape` | —。`result` が `ok: true` の strict な封筒でなければ `defineOperation` が投げる（`z.object` と `z.strictObject` は型で見分けられないため、型の制約に加えて実行の時にも照らす）。あわせて、list の封筒は `ok`・`items`・`next_cursor` を、list でなければ `ok`・`item`（オブジェクトの形）を必ず持ち、受け口 `user` はそのキーだけを持ち、どの封筒も失敗の要素のキー（`status`・`reason`・`fields`）を置かない。照らす規則の全部は `defineOperation` の事後条件に書く |
+| 15 | `reasons` | `readonly ReasonDef[]`（操作ごとのコードだけ。`when` は `always`） | `[]`（共通の `ITEM_REASONS` は書かずに `itemReasonsOf` が合わせる）。`ITEM_REASONS` と同じコードを書くと `defineOperation` が投げる |
+| 16 | `auditKeys` | 要素の鍵の名前の配列 | `[]` |
+| 17 | `order` | 文字列 \| `null` | `list` 以外は `null` |
+| 18 | `examples` | `{ normal?: unknown[]; edge?: unknown[]; empty?: unknown } \| null` | `null`。書いたときだけ、生成した見本をその場面で上書きする（決定 3）。`empty` は空の場面の結果 1 件（`null` で空の場面を持たない） |
+| 19 | `description_en` | 文字列 | `"<verb> <entity>"` |
+| 20 | `owner` | `` `#${number}` `` | — |
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
