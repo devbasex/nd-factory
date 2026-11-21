@@ -164,7 +164,7 @@ export async function synthesize(
 ): Promise<void> {
   const settings = loadSettingsFile(settingsPath);
   const ordered = orderStacks(stacks);
-  // 前の合成の結果を残さない。残すと別の合成の資産が要約値に混ざる
+  // 前の合成の結果を残さない。残すと別の合成のアセットが要約値に混ざる
   await deps.files.removeDir(out);
 
   const build = await deps.run("npm", ["run", "build", "-w", "apps/web"], { cwd: deps.repoRoot });

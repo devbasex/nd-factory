@@ -46,7 +46,7 @@ export function applyTags(scope: IConstruct, s: Naming): void {
   Tags.of(scope).add(envKey, s.environment);
 }
 
-// 縦の切れ端のスタックが名前を付ける資源。設置のコマンドもここから名前を出す
+// アプリのスタックが名前を付ける資源。設置のコマンドもここから名前を出す
 export function appResourceNames(s: Naming) {
   return {
     userPool: resourceName(s, "users"),

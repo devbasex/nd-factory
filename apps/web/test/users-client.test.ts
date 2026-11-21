@@ -54,7 +54,7 @@ describe("fetchSelf", () => {
     });
   });
 
-  it("網の失敗は network_error で、再試行しない", async () => {
+  it("ネットワークの失敗は network_error で、再試行しない", async () => {
     const fetchFn = vi.fn(async () => {
       throw new TypeError("failed");
     });
