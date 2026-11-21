@@ -38,7 +38,7 @@ function refused(): Promise<Response> {
 function logs() {
   const lines: string[] = [];
   const records = () => lines.map((line) => JSON.parse(line) as Record<string, unknown>);
-  return { lines, records, log: createLogger({ request_id: "req-1", fn: "runner" }, (line) => lines.push(line)) };
+  return { lines, records, log: createLogger({ request_id: "req-1", fn: "runner", endpoint: "runner" }, (line) => lines.push(line)) };
 }
 
 const get = (url = "https://api.example.com/v1/repos"): OutboundRequest => ({ method: "get", url, idempotent: true, peer: "github" });
