@@ -111,14 +111,14 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 
 1. 設定のファイルに `"login": { "google": {} }` を置く（`client_id` は書かない）
 2. `diff` を打ち、差分と資源の名前を読む
-3. 差分に納得したら、出た確認の値で `deploy` を打つ。秘密の器ができ、画面は「ログインの設定を待っています」を示す
+3. 差分に納得したら、出た確認の値で `deploy` を打つ。確認の値は端末にしか出ないため、控えておく（スタックを消して作り直すときに、反映した先のアカウントとリージョンの出所になる）。秘密の器ができ、画面は「ログインの設定を待っています」を示す
 4. [idp-and-apps.md](idp-and-apps.md) の順で Google のクライアントを作り、器へ secret を入れて確かめる
 5. 設定のファイルへ `client_id` を書き、`diff` と `deploy` を打ち直す
 
 ### 運用する環境
 
 - 設置のコマンドで反映するのはパイプラインのスタックだけにする。`diff` に `--stack pipeline` を渡す。アプリのスタックは反映のパイプラインが、人の承認の後に反映する（[pipeline-approval.md](pipeline-approval.md)）
-- パイプラインのスタックの `diff` の差分をリリース承認ゲートで承認した後にだけ `deploy` を打つ（自動の承認では通さない）。設定を変えるときも同じ（[settings.md](settings.md) の「運用する環境で設定を変える」）
+- パイプラインのスタックの `diff` の差分をリリース承認ゲートで承認した後にだけ `deploy` を打つ（自動の承認では通さない）。`deploy` に渡した確認の値は、承認の記録と一緒に控えておく。アプリのスタックはパイプラインのスタックと同じアカウントとリージョンに反映されるため、アプリのスタックを消して作り直すときの接続先の出所になる。設定を変えるときも同じ（[settings.md](settings.md) の「運用する環境で設定を変える」）
 - パイプラインのスタックを初めて反映した後は、GitHub との接続を有効にし、承認を拒む方針を AI の主体へ付けて確かめるまで、起点のブランチへ push しない（[pipeline-approval.md](pipeline-approval.md)）
 - 設定を変えるときの手順は [settings.md](settings.md) にある
 
@@ -136,9 +136,13 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 
 名前は設定の接頭辞と環境から決まり、変える口を持たない。名前が衝突する資源を残したまま同じ設定で `deploy` を打つと、作成が失敗して CloudFormation が戻す（終了コード 8）。作り直す前に、残った資源を次の順で消す。データが要るときは、各段の退避を先に取る。
 
-各コマンドには、`deploy` に渡した profile と、そのリージョンを `--profile <profile> --region <region>` で必ず渡す。省くと既定の profile とリージョン（環境変数 `AWS_PROFILE`・`AWS_REGION` を含む）が先になり、同じ接頭辞と環境の名前を持つ別のアカウントかリージョンの DB・秘密の器・表を消しうる。初めに接続先を確かめる。
+各コマンドには、消したアプリのスタックがあったアカウントで作業する profile と、そのリージョンを `--profile <profile> --region <region>` で必ず渡す。省くと既定の profile とリージョン（環境変数 `AWS_PROFILE`・`AWS_REGION` を含む）が先になり、同じ接頭辞と環境の名前を持つ別のアカウントかリージョンの DB・秘密の器・表を消しうる。初めに接続先を確かめる。
 
-0. 接続先を確かめる: 反映したときに `diff` が出し `deploy` へ渡した確認の値（`<要約値>:<アカウント>:<リージョン>:<スタックの一覧>`）の 3 つ目を `<region>`、2 つ目を反映した先のアカウントとする。profile の `region`（`aws configure get region`）は使わない。反映のときに環境変数 `AWS_REGION` が先になっていると、実際の反映先と食い違う。`aws sts get-caller-identity --profile <profile> --region <region> --query Account` が確認の値のアカウントと同じであることを見る
+0. 接続先を確かめる: 消したアプリのスタック `<prefix>-<environment>-app` があったアカウントとリージョンを、アプリのスタックを反映した仕方に応じて次から取る。profile の `region`（`aws configure get region`）は出所にしない。反映のときに環境変数 `AWS_REGION` が先になっていると、実際の反映先と食い違う
+   - 設置のコマンドで反映した場合（自分で設置する人）: 反映したときに `diff` が出し `deploy` へ渡した確認の値（`<要約値>:<アカウント>:<リージョン>:<スタックの一覧>`）の 2 つ目をアカウント、3 つ目を `<region>` とする
+   - 反映のパイプラインで反映した場合（運用する環境）: アプリのスタックの反映に使った確認の値は無い。パイプラインは、パイプラインのスタックと同じアカウントとリージョンでアプリのスタックを合成して反映する。そのため、パイプラインのスタック `<prefix>-<environment>-pipeline` を設置したときの確認の値の 2 つ目と 3 つ目を使う
+   - 確認の値を控えていない場合: CloudFormation が残す、消したスタックの記録（消してから 90 日残る）から取る。候補のリージョンで `aws cloudformation list-stacks --stack-status-filter DELETE_COMPLETE --query "StackSummaries[?StackName=='<prefix>-<environment>-app'].StackId" --profile <profile> --region <候補のリージョン>` を打つ。出た `arn:aws:cloudformation:<リージョン>:<アカウント>:stack/...` の 4 つ目がリージョン、5 つ目がアカウントである。空なら、そのアカウントとリージョンに消したスタックは無いため、別の候補で打ち直す。パイプラインのスタックが残っていれば、`aws cloudformation describe-stacks --stack-name <prefix>-<environment>-pipeline --query 'Stacks[0].StackId' --profile <profile> --region <候補のリージョン>` の ARN からも同じ 2 つを取れる
+   - どの場合も、最後に次の 2 つで照合する。`aws sts get-caller-identity --profile <profile> --region <region> --query Account` が上のアカウントと同じであること。同じ profile とリージョンで上の `list-stacks` を打ち、消したアプリのスタックの記録が出ること
 
 以下の 1〜6 の AWS CLI のコマンドは、どれも末尾に `--profile <profile> --region <region>` を付けて打つ（例では「…」と略す）。
 
