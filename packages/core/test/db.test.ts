@@ -77,7 +77,7 @@ describe("createDb", () => {
     const db = createDb(client, NAMES);
     await db.transactWrite([
       putIfAbsent({ table: "events", item: { pk: "PROJECT#p#LANE#l", sk: "SEQ#1", schema_version: 1, kind: "x" }, onConflict: "return_existing" }),
-      updateIfVersion({ table: "sprints", key: { pk: "PROJECT#p", sk: "SPRINT#s" }, version: 2, set: { state: "stopped" }, onConflict: "version_mismatch" }),
+      updateIfVersion({ table: "sprints", key: { pk: "PROJECT#p", sk: "SPRINT#s" }, version: 2, schemaVersion: 1, set: { state: "stopped" }, onConflict: "version_mismatch" }),
     ]);
     expect(inputOf(sent[0], TransactWriteCommand)).toEqual({
       TransactItems: [
@@ -93,10 +93,10 @@ describe("createDb", () => {
           Update: {
             TableName: "acme-dev-db-sprints",
             Key: { pk: "PROJECT#p", sk: "SPRINT#s" },
-            ConditionExpression: "#n0 = :v0",
-            UpdateExpression: "SET #n1 = :v1, #n0 = #n0 + :v2",
-            ExpressionAttributeNames: { "#n0": "version", "#n1": "state" },
-            ExpressionAttributeValues: { ":v0": 2, ":v1": "stopped", ":v2": 1 },
+            ConditionExpression: "(#n0 = :v0 AND #n1 = :v1)",
+            UpdateExpression: "SET #n2 = :v2, #n0 = #n0 + :v3",
+            ExpressionAttributeNames: { "#n0": "version", "#n1": "schema_version", "#n2": "state" },
+            ExpressionAttributeValues: { ":v0": 2, ":v1": 1, ":v2": "stopped", ":v3": 1 },
           },
         },
       ],

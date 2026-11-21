@@ -19,7 +19,9 @@ export const TABLE_PURPOSES = ["users", "teams", "projects", "sprints", "events"
 export type TablePurpose = (typeof TABLE_PURPOSES)[number];
 
 // 行の書き方。上書き（version で照らす）・追記だけ・作ると消すだけ・借りから済みへ 1 回だけ書き換える・
-// 状態を条件に決まった向きへだけ書き換える（version を持たない。ログインをつなぐ流れの open → verified → used）
+// 状態を条件に決まった向きへだけ書き換える（version を持たない。ログインをつなぐ流れの open → verified → used）。
+// 書き換えの経路は、overwrite が rewriteIfVersion（読んだ version と schema_version を条件にする）、advance_state が rewriteIfState
+// （読んだ schema_version と遷移元の state を条件に、同じ版の set と remove を一緒に当てる。updateIfSchemaVersion は書く版が上がる移しだけが使う）
 export type RowWrites = "overwrite" | "append" | "create_delete" | "settle_once" | "advance_state";
 
 // 索引。鍵は元の行の列そのもので、索引のための写しの列を持たない。どの索引も結果整合で、候補を出すだけに使う（決定 14）
