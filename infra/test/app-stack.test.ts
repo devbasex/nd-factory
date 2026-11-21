@@ -74,6 +74,15 @@ describe("AppStack（client_id なし）", () => {
     });
   });
 
+  it("Node の Lambda はどれも nodejs24.x で動く（束ねる依存の engines の下限を満たす。p-retry 9 は node>=22）", () => {
+    const runtimes = Object.values(resources(built.template))
+      .filter((r) => r.Type === "AWS::Lambda::Function")
+      .map((r) => String(r.Properties?.Runtime))
+      .filter((rt) => rt.startsWith("nodejs"));
+    expect(runtimes.length).toBeGreaterThan(0);
+    expect(new Set(runtimes)).toEqual(new Set(["nodejs24.x"]));
+  });
+
   it("Google の IdP を作らず、アプリのクライアントは利用者プールの直のログインだけ", () => {
     built.template.resourceCountIs("AWS::Cognito::UserPoolIdentityProvider", 0);
     built.template.hasResourceProperties("AWS::Cognito::UserPoolClient", {
