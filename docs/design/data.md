@@ -149,7 +149,7 @@ erDiagram
 
 結ぶ（初めてのサインインとログインをつなぐ）token は、IdP でサインインした時刻（`auth_time`）が 5 分の内のものだけを受ける。`bound_auth_time` には結ぶのに使った token の `auth_time` を、`cognito_username` には検証した token の `username` を書く。
 
-認証（`authenticate` の読み手 `userOfSubject`）は、検証した access token の `sub` で `COGNITO#<sub>` / `COGNITO` を強い整合で読む。`bound` で token の `auth_time` が `bound_auth_time` 以後なら `user_id` を利用者にし、前なら 401 にする。外して結び直す前のセッションの token が、同じ `sub` で結び直した後の利用者へ届かないようにするためである（refresh token で取り直した token も `auth_time` を変えないため同じく断つ）。行が無い主体と `unlinked` の主体は、`sessions.create` にだけ「まだ結んでいない人」として渡り（`unlinked` は `auth_time` が `revoked_before` より後のときだけ）、ほかの操作では 401 になる。結ぶトランザクションも上の条件で同じ境を照らし直す（認証の読みの後に外し直された行へ結ばない）。認証は同じ読みで、下の [セッションの取り消しの行](#セッションの取り消しの行)（`COGNITO#<sub>` / `REVOKED#<token の origin_jti>`）も強い整合で読み（2 行を並べて読む）、あれば `state` によらず 401 にする。
+認証（`authenticate` の読み手 `userOfSubject`）は、検証した access token の `sub` で `COGNITO#<sub>` / `COGNITO` を強い整合で読む。`bound` で token の `auth_time` が `bound_auth_time` 以後なら `user_id` を利用者にし、前なら 401 にする。外して結び直す前のセッションの token が、同じ `sub` で結び直した後の利用者へ届かないようにするためである（refresh token で取り直した token も `auth_time` を変えないため同じく断つ）。行が無い主体と `unlinked` の主体は、`sessions.create` にだけ「まだ結んでいない人」として渡り（`unlinked` は `auth_time` が `revoked_before` より後のときだけ）、ほかの操作では 401 になる。結ぶトランザクションも上の条件で同じ境を照らし直す（認証の読みの後に外し直された行へ結ばない）。認証は同じ読みで、下の [セッションの取り消しの行](#セッションの取り消しの行)（`COGNITO#<sub>` / `REVOKED#<token の origin_jti>`）も強い整合で読み（2 行を並べて読む）、あれば `state` によらず 401 にする。ただし `sessions.delete` だけは取り消しの行があっても 401 にせず、ハンドラーが「取り消し済み」を返す（下の「`sessions.delete` の再送」）。
 
 「行う予定」の行の起こし方と終わり方は次のとおりである。
 
@@ -179,14 +179,14 @@ erDiagram
 
 | 表 | 区切りの鍵 / 並びの鍵 | 持つ列 | 書き方 |
 | --- | --- | --- | --- |
-| `db-users` | `COGNITO#<Cognito の sub>` / `REVOKED#<origin_jti>` | `cognito_sub`・`session_id`（取り消したセッションの `origin_jti`）・`revoked_at`・`expire_at`（TTL。`revoked_at` に `SESSION_REVOKED_KEEP_MS` を足した時刻）・`schema_version` | `sessions.delete` が、要求の主体の `sub` と `sessionId` で無いときだけ書く（既にあれば済んだとして成功。行はどちらでも同じ長さ残るため、成功で省く処理は無い）。`sessions.delete` は Cognito を呼ばず、refresh token を受けない |
+| `db-users` | `COGNITO#<Cognito の sub>` / `REVOKED#<origin_jti>` | `cognito_sub`・`session_id`（取り消したセッションの `origin_jti`）・`revoked_at`・`expire_at`（TTL。`revoked_at` に `SESSION_REVOKED_KEEP_MS` を足した時刻）・`schema_version` | `sessions.delete` が、要求の主体の `sub` と `sessionId` で無いときだけ書く（既にあれば済んだとして成功。行はどちらでも同じ長さ残るため、成功で省く処理は無い）。成功の要素は、書いたときも既にあったときも、その行の `revoked_at` を返す（「このセッションの取り消しが確定済み」を表す。画面はこの応答だけで取り消しの確定を知る）。`sessions.delete` は Cognito を呼ばず、refresh token を受けない |
 
 | 決まり | 中身 |
 | --- | --- |
 | 残す長さ | `SESSION_REVOKED_KEEP_MS` は、refresh token の寿命（30 日）と access token の寿命（15 分）の和より長くする。アプリのクライアントは refresh token の回し（rotation）を使わず、refresh token の寿命はサインインから数えて延びないため、行が消える時点ではそのセッションから出た token はどれも期限を過ぎている。Cognito の取り消しが一度も成功しなくても、API はそのセッションを最後まで断つ |
-| Cognito の取り消しの主体と照合 | 画面が、`sessions.delete` の成功（か、401。下）を受けた後に、端末のログインの控えに持つ refresh token とアプリのクライアントの ID で Cognito の取り消しを呼ぶ。画面が持つ refresh token は 1 つで、`sessions.delete` に使った access token はその refresh token から出したものなので、取り消す token と API で断ったセッションは同じものに当たる。サーバーは refresh token を受けず、持たない |
+| Cognito の取り消しの主体と照合 | 画面が、`sessions.delete` の成功（取り消しの確定。下）を受けた後に、端末のログインの控えに持つ refresh token とアプリのクライアントの ID で Cognito の取り消しを呼ぶ。画面が持つ refresh token は 1 つで、`sessions.delete` に使った access token はその refresh token から出したものなので、取り消す token と API で断ったセッションは同じものに当たる。サーバーは refresh token を受けず、持たない |
 | 取り消しの再試行 | 取り消しは API の認証を通らないため、`sessions.delete` の後に 401 になる心配が無い。画面は一時の失敗（通信の失敗・5xx・呼びすぎ）を間を空けて 3 回まで試し直し、それでも成功しなければ、取り消しを済ませずにサインアウトの残りへ進む（API の拒否は上の行が受け持つ。端末の refresh token はサインアウトで消す）。`unsupported_token_type` などの恒久の応答では試し直さない |
-| `sessions.delete` の再送 | `sessions.delete` の確定の後に応答を失って送り直すと、認証が取り消しの行で 401 にする。画面は `sessions.delete` の 401 を「このセッションは API で断たれた」として済んだ扱いにし、上の取り消しへ進む（取り消しの行が無い 401 であっても、そのセッションの token は API で通らないため、サインアウトの目的は満たす） |
+| `sessions.delete` の再送 | `sessions.delete` の確定の後に応答を失って送り直すと、認証は取り消しの行があっても `sessions.delete` だけは通し（署名・期限・対応の行の照らしはほかの操作と同じ）、ハンドラーが既にある行の `revoked_at` を成功で返す。401 は取り消しの確定を表さない。401 には access token の期限切れ（15 分）が含まれ、期限切れの 401 を済んだ扱いにすると、取り消しの行が無いまま、続く Cognito の取り消しが失敗したときに同じ refresh token から出した access token が API を通り続けるためである。画面は `sessions.delete` の 401 を受けたら、同じセッションの refresh token で access token を取り直し（`origin_jti` は同じ）、`sessions.delete` を送り直す。分かれは次の 3 つである。(1) 送り直しが成功すれば取り消しの確定として上の取り消しへ進む。(2) 取り直しを Cognito が恒久に断った（`invalid_grant`。refresh token が取り消し済みか期限切れ）なら、そのセッションは新しい access token を出せず、手元の access token は API が既に断っているため、取り消しの行が無くても API を通る token は残らないとして上の取り消しへ進む。(3) 取り直した token でも 401 なら、そのセッションは期限によらず API で断たれている（外したログインの、結び直しの境より前のセッションなど。境は行が残る間続く）として上の取り消しへ進む。取り直しと送り直しの一時の失敗（通信の失敗・5xx・呼びすぎ）では進まず、サインアウトを途中のまま残して試し直す（[画面の文書のサインアウトで消す](screens.md#サインアウトで消す)） |
 
 認証（上）と連携の確定（`logins.create` の開始元の照らし）と人の書き込みの要求元の照らしは、この行があれば断つ。TTL の削除は遅れるため、行があれば `expire_at` によらず断つ。
 
