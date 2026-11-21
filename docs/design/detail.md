@@ -98,7 +98,7 @@ nd-factory/
 | `packages/contracts` | zod だけ | ほかに何にも依らない |
 | `packages/core` | `packages/contracts` だけ | 各コンテキストの表の行を読む所（席・割り当て・委任・マシン・レーン）は、`core` が読み手の型（ポート）だけを持ち、`apps/api/src/modules/` が中身を渡す。これで `core` から `apps` への向きの依存を作らない |
 | `apps/api`・`apps/runner`・`apps/nd-runtime`・`apps/db-prep` | `packages/core` と `packages/contracts` | `apps/*` どうしは互いに import しない（ランナーと API は HTTP の経路だけでつながる） |
-| `apps/web` | `packages/contracts` と、`packages/core` のうちブラウザーで動くモジュール（`clock`・`ids`・`redact`・`log`）だけ | — |
+| `apps/web` | `packages/contracts` と、`packages/core` のうちブラウザーで動くモジュール（`clock`・`ids`・`redact`・`log`・`web-http`）だけ | 画面から API への HTTP は `web-http` を通す。`apps/web/src/generated/` の生成した呼び出しは `WebHttp` を引数で受け、画面の起点（`main.ts`）が `createWebHttp` で作って渡す。`outbound` は AWS SDK を含みブラウザーで動かないので import しない |
 | `infra` | `packages/contracts` | `apps/*` を import せず、起点のファイルのパスをアセットとして束ねるだけにする |
 | `tools` | `packages/contracts` | ほかの置き場のコードを文字として読む |
 
@@ -112,6 +112,7 @@ nd-factory/
 | `packages/core/` | `log` | `createLogger`（新設） |
 | `packages/core/` | `retry` | `withRetry`・`classifyFailure`（新設） |
 | `packages/core/` | `outbound` | `callHttp`・`awsClient`（新設） |
+| `packages/core/` | `web-http` | `createWebHttp`（新設。画面の通信部品） |
 | `packages/core/` | `conditional-write` | `putIfAbsent`・`updateIfVersion`・`writeAtomically`（新設） |
 | `packages/core/` | `auth` | `authenticate`・`createJwksCache`（新設） |
 | `packages/core/` | `authorize` | `visibleProjectIds`・`authorize`（新設） |
@@ -145,6 +146,7 @@ nd-factory/
 | `withRetry` | `packages/core`（`retry`） | 新設 | `<T>(op: (attempt: number) => Promise<T>, policy: RetryPolicy, opts: { classify: (e: unknown) => FailureClass; deadline?: number; sleep?: (ms: number) => Promise<void> }) => Promise<T>` | 方針のデータに従って、再試行してよい失敗だけを待って繰り返す | `op` は同じ引数で繰り返してよい処理（冪等か、届かなかったと分かる失敗だけを繰り返す方針） | 成功の値を返すか、最後の失敗を `RetryExhausted`（回数と分類を持つ）で投げる。`deadline` を越えて待たない | 渡した処理の副作用を最大 `policy.max_attempts` 回起こし、間で待つ |
 | `classifyFailure` | `packages/core`（`retry`） | 新設 | `(e: unknown) => FailureClass` | HTTP の状態・AWS SDK の例外の名前・ネットワークの誤りを 5 つの分類に分ける | 無し | 戻り値は `retryable`・`conflict`・`not_found`・`rejected`・`unknown` のどれか | 無し |
 | `callHttp` | `packages/core`（`outbound`） | 新設 | `(req: OutboundRequest, policyName: RetryPolicyName, deps: OutboundDeps) => Promise<OutboundResult>` | 外への HTTP の呼び出しを時間切れ・再試行・分類つきで行う | `req.url` は `https:`。`req.idempotent` を呼び手が決めている | 戻り値は状態・頭書きの一部・本文と分類。冪等でない要求は、届かなかったと分かる失敗（接続の拒否・429）だけを繰り返す | 外部への HTTPS の要求（GitHub・IdP の鍵・Web Push・Slack・ランナーから API） |
+| `createWebHttp` | `packages/core`（`web-http`） | 新設 | `(deps?: { fetch?: typeof fetch; sleep?: (ms: number) => Promise<void> }) => WebHttp` | 画面から API（同じ配信元）への HTTP の呼び出しを、時間切れ・失敗の分類・再試行つきで行う関数を作る | ブラウザーで動く。`deps.fetch` を省くと `globalThis.fetch` を使う（`apps/web` は `fetch` を直に使わない）。AWS SDK と `node:*` を import しない | `WebHttp` は `(req: { method, path, headers, body, idempotent }) => Promise<{ status, headers, body, class }>`。時間切れは `AbortSignal.timeout`、回数と待ちは方針 `http-web` のデータ。冪等でない要求は、届かなかったと分かる失敗（接続の拒否・429）だけを繰り返す。`class` は `callHttp` の結果と同じ分類を、HTTP の状態とネットワークの誤りだけから決める（AWS SDK の例外を見ないので `retry` の `classifyFailure` を import しない） | 同じ配信元の API への HTTPS の要求 |
 | `awsClient` | `packages/core`（`outbound`） | 新設 | `<C>(make: (config: AwsClientConfig) => C, policyName: RetryPolicyName) => C` | AWS SDK のクライアントを、方針のデータの回数と時間切れで作る | `make` は SDK のクライアントの構築子を包む関数 | 戻り値のクライアントは `maxAttempts` と要求ごとの時間切れが方針のデータの値。同じ方針の名前の 2 回目は同じクライアントを返す | 無し |
 | `putIfAbsent` | `packages/core`（`conditional-write`） | 新設 | `(spec: { table: TableName; item: Row; onConflict: ConflictRule }) => TransactItem` | 行が無いときだけ足す書き込みを組む | `item` は `pk`・`sk`・`schema_version` を持つ | 戻り値は `attribute_not_exists(pk)` を条件にした 1 件で、外れたときの扱い（`state_mismatch`・`return_existing` など）を持つ | 無し |
 | `updateIfVersion` | `packages/core`（`conditional-write`） | 新設 | `(spec: { table: TableName; key: RowKey; version: number; set: Record<string, unknown>; extra?: Condition; onConflict: ConflictRule }) => TransactItem` | 読んだときの版と同じときだけ書き、版を 1 つ上げる書き込みを組む | `version` は 1 以上の整数。`set` に `pk`・`sk`・`version` を含まない | 戻り値は `version = :expected`（と `extra`）を条件にし、`version` を 1 上げる 1 件 | 無し |
@@ -282,7 +284,7 @@ nd-factory/
 | `LogContext`・`Logger` | 型 | `packages/core`（`log`） | 文脈は `request_id`・`fn`・`endpoint`（受け口）。項目は `level`・`msg`・`time` と任意の ID と数 |
 | 秘密の形のデータ | 設定値（データ） | `packages/contracts/data/`（秘密の形） | 鍵の名前（`authorization`・`token`・`secret`・`password`・`credentials`・`private_key`・`dsn` を含む名前）と値の形（`ndfd_`・`ndfm_`・JWT の形・`ghs_` などの GitHub の token・私有鍵の頭・利用者と合言葉を含む接続の URL・AWS の一時の鍵の形）。漏れの検査も同じデータを読み、2 か所に持たない |
 | `RetryPolicy` | 型 | `packages/contracts`（形） | `{ max_attempts, base_ms, cap_ms, timeout_ms, honor_retry_after }`。待ちは上限つきの指数と全幅のゆらぎ |
-| 再試行の方針の表 | 設定値（データ） | `packages/contracts/data/`（再試行の方針） | `dynamodb` 3 回・50〜1000 ミリ秒・2 秒、`aws-control`（ECS・Secrets Manager・STS）3 回・200〜2000 ミリ秒・5 秒、`http-github` 3 回・500〜5000 ミリ秒・10 秒、`http-idp-keys` 2 回・200〜1000 ミリ秒・3 秒、`http-notify`（Web Push・Slack）3 回・500〜5000 ミリ秒・5 秒、`runner-to-api` 5 回・1000〜30000 ミリ秒・10 秒 |
+| 再試行の方針の表 | 設定値（データ） | `packages/contracts/data/`（再試行の方針） | `dynamodb` 3 回・50〜1000 ミリ秒・2 秒、`aws-control`（ECS・Secrets Manager・STS）3 回・200〜2000 ミリ秒・5 秒、`http-github` 3 回・500〜5000 ミリ秒・10 秒、`http-idp-keys` 2 回・200〜1000 ミリ秒・3 秒、`http-notify`（Web Push・Slack）3 回・500〜5000 ミリ秒・5 秒、`runner-to-api` 5 回・1000〜30000 ミリ秒・10 秒、`http-web`（画面から API）2 回・300〜1500 ミリ秒・10 秒 |
 | `FailureClass` | 型 | `packages/core`（`retry`） | `retryable`・`conflict`・`not_found`・`rejected`・`unknown` |
 | `OutboundRequest`・`OutboundResult` | 型 | `packages/core`（`outbound`） | 要求は `{ method, url, headers, body, idempotent }`、結果は `{ status, headers, body, class }` |
 | `TransactItem` | 型 | `packages/core`（`conditional-write`） | SDK の 1 件と、外れたときの扱い `onConflict`（`version_mismatch`・`state_mismatch`・`return_existing`・`fail`） |
@@ -356,6 +358,7 @@ nd-factory/
 | `withRetry` | AWS SDK の既定の再試行（`@smithy/core`）・`@humanwhocodes/retry` | 依存のライブラリの一覧 | SDK の呼び出しは SDK の再試行を使う（`awsClient` が回数を方針から渡す）。`@humanwhocodes/retry` は ESLint の開発の依存で実行の時に入らないため使えない。HTTP の呼び出しの繰り返しは作る |
 | `classifyFailure` | AWS SDK の例外の型と名前 | `@aws-sdk/client-dynamodb` の例外の型 | 使う（例外の型と名前の両方で見る）。分類は作る |
 | `callHttp` | Node 24 の組み込みの `fetch` と `AbortSignal.timeout`・HTTP のライブラリ | Node 24 の組み込みと依存のライブラリの一覧 | 使う（組み込みの `fetch` と `AbortSignal.timeout` を包む）。HTTP のライブラリは足さない。包む部品は作る |
+| `createWebHttp` | ブラウザーの組み込みの `fetch` と `AbortSignal.timeout`・`callHttp` | ブラウザーの組み込みと `outbound` の依存 | 使う（組み込みの `fetch` と `AbortSignal.timeout` を包む）。`callHttp` は `outbound` が AWS SDK を含みブラウザーで動かないので使わない。包む部品は作る |
 | `awsClient` | AWS SDK のクライアントの構築子 | `apps/api/package.json` の依存 | 使う（実行環境ごとに 1 回作って使い回す）。方針の回数と時間切れを渡す包みは作る |
 | `putIfAbsent` | `@aws-sdk/lib-dynamodb` の条件式 `attribute_not_exists(pk)` | `apps/api/package.json` の依存 | 使う（条件式で `TransactItem` を組む） |
 | `updateIfVersion` | エンティティの版の条件の部品 | 依存のライブラリの一覧 | 使えない（無い）。作る |
@@ -391,6 +394,7 @@ nd-factory/
 | `withRetry` | 2 回目で成功した値を返す | `max_attempts` 回ちょうどで止まる。`Retry-After` が上限を越えると上限で待つ | 使い切りで `RetryExhausted`、`conflict` は 1 回で返す、`deadline` を越える待ちをしない |
 | `classifyFailure` | 表の各行の入力が決まった分類になる | 501 は `rejected`、504 は `retryable` | 形の分からない値は `unknown` |
 | `callHttp` | 200 の本文と分類 `ok` を返す | 時間切れの直前に届いた応答を受ける | 時間切れ（冪等なら繰り返す・冪等でなければ繰り返さない）、429・5xx の再試行、4xx をそのまま返す、`http:` の URL で止まる |
+| `createWebHttp` | 200 の本文と分類 `ok` を返す。`deps.fetch` を省くと `globalThis.fetch` で送る | 時間切れの直前に届いた応答を受ける | 時間切れ（冪等なら繰り返す・冪等でなければ繰り返さない）、429・5xx の再試行、4xx をそのまま返す |
 | `awsClient` | 方針の回数と時間切れを持つクライアント | 同じ方針の 2 回目は同じインスタンス | 知らない方針の名前は型で弾く |
 | `putIfAbsent` | 条件 `attribute_not_exists(pk)` と扱いを持つ 1 件 | `schema_version` の無い行を型で弾く | 無し |
 | `updateIfVersion` | 版の条件と `version + 1` を持つ 1 件 | `version` が 1・`extra` あり | `set` に `version` を含むと型で弾く |

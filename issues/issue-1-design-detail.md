@@ -90,7 +90,7 @@ nd-factory/
 | `core-depends-on-contracts-only` | `^packages/core/src/` | `packages/contracts/` と `packages/core/` の外のこのリポジトリのファイル |
 | `apps-do-not-import-each-other` | `^apps/([^/]+)/` | `^apps/` のうち自分の app の外（`$1` を使う） |
 | `apps-do-not-import-infra-or-tools` | `^apps/` | `^infra/`・`^tools/` |
-| `web-uses-browser-core-only` | `^apps/web/` | `^packages/core/src/` のうち `clock`・`ids`・`redact`・`log` の外 |
+| `web-uses-browser-core-only` | `^apps/web/` | `^packages/core/src/` のうち `clock`・`ids`・`redact`・`log`・`web-http`（画面の通信部品。#2 が置き、生成した呼び出しが受けて送る。設計の K2-2）の外 |
 | `infra-depends-on-contracts-only` | `^infra/` | `^packages/core/`・`^apps/`・`^tools/`（全体の設計の依存の表で `infra` が依るのは `packages/contracts` だけ） |
 | `tools-depends-on-contracts-only` | `^tools/` | `^packages/core/`・`^apps/`・`^infra/` |
 | `react-only-in-web` | `apps/web/` の外 | `react`・`react-dom`・`@vitejs/plugin-react` |

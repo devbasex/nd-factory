@@ -48,10 +48,11 @@ module.exports = {
     },
     {
       name: "web-uses-browser-core-only",
-      comment: "画面が使う横断の部品は、ブラウザーで動く clock・ids・redact・log だけ",
+      comment:
+        "画面が使う横断の部品は、ブラウザーで動く clock・ids・redact・log と画面の通信部品 web-http だけ（生成した呼び出しも web-http で送る。#2 の K2-2）",
       severity: "error",
       from: { path: "^apps/web/" },
-      to: { path: "^packages/core/src/", pathNot: "^packages/core/src/(clock|ids|redact|log)([./]|$)" },
+      to: { path: "^packages/core/src/", pathNot: "^packages/core/src/(clock|ids|redact|log|web-http)([./]|$)" },
     },
     {
       name: "infra-depends-on-contracts-only",
