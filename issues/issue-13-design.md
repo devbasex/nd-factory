@@ -168,8 +168,10 @@ graph TD
 | コマンド | 足すもの | 終了コード |
 | --- | --- | --- |
 | `npm run nd-setup -- diff …` | 出力の最後に「足りない設定」の欄（1 件 1 行。0 件なら「無し」） | 変えない |
-| `npm run nd-setup -- gc --profile <profile>` | 消せる資産の数（イメージとファイル）・戻しの猶予・確認の値を示して止まる。AWS へ書かない | 成功 0。profile の誤りは今の `diff` と同じコード |
-| `npm run nd-setup -- gc --profile <profile> --confirm <確認の値> [--rollback-buffer-days <日数>]` | 確認の値が同じときだけ、新しく使われなくなった資産に日付のタグを付け、猶予を過ぎた資産を消す | 確認の値が違えば書かずに止まる（今の `deploy` と同じコード） |
+| `npm run nd-setup -- gc --profile <profile> [--rollback-buffer-days <日数>]` | 更新の途中のスタックが無いことを照らし、どのスタックからも使われていない資産の数（イメージとファイル。猶予の内のものを含む。CLI の `print` の数）・戻しの猶予・確認の値（発行から 60 分だけ有効）を示して止まる。消える数はここでは示せないことも示す。AWS へ書かない | 成功 0。profile の誤りは今の `diff` と同じコード。更新の途中のスタックがあれば 9 |
+| `npm run nd-setup -- gc --profile <profile> --confirm <確認の値> [--rollback-buffer-days <日数>]` | 端末から打たれたときだけ動く。確認の値・有効の期限・更新の途中のスタック・使われていない資産の数を照らし直し、どれも合うときだけ CLI の `full` を CLI の確かめつきで打つ。CLI は消す一まとまりごとに「猶予を満了して消す数」を示して止まり、設置する人が `y` を答えた一まとまりだけを消す。新しく使われなくなった資産には日付のタグを付ける | 確認の値が違う・期限切れ・使われていない資産の数が変わったときは書かずに止まる（7）。更新の途中のスタックがあれば 9。端末でなければ 2 |
+
+`gc` の承認は 2 段である。1 段目の確認の値は「どのアカウント・リージョン・猶予で、どれだけの使われていない資産を見て打つか」を縛り、同じ条件で以前に得た値の使い回しを有効の期限と数の照らし直しで拒む。2 段目は CLI が消す直前に示す「猶予を満了した数」への答えで、消す数そのものを承認する（受け入れ条件 9）。`print` の数は猶予の内の資産も含み、消える数ではないため、出力で両者を別の語（「使われていない資産」と「猶予を満了して消す資産」）で示す。
 
 ## 処理の流れ
 
@@ -206,13 +208,20 @@ sequenceDiagram
     participant C as CDK の CLI（固定の版）
     participant A as bootstrap のバケットと資産のリポジトリ
     P->>S: gc --profile
+    S->>S: 更新の途中のスタックを読む（あれば 9 で止まる）
     S->>C: cdk gc --unstable=gc --action=print
     C->>A: 読むだけ
-    S-->>P: 消せる数・猶予・確認の値
-    P->>S: gc --profile --confirm <確認の値>
-    S->>S: 確認の値を照らす（違えば止まる）
-    S->>C: cdk gc --unstable=gc --action=full --confirm=false
-    C->>A: 新しく使われなくなった資産にタグ・猶予を過ぎた資産を消す
+    S-->>P: 使われていない資産の数・猶予・確認の値（60 分）
+    P->>S: gc --profile --confirm <確認の値>（端末から）
+    S->>S: 確認の値・期限を照らす（違えば 7）
+    S->>S: 更新の途中のスタックを読む（あれば 9）
+    S->>C: cdk gc --unstable=gc --action=print
+    S->>S: 使われていない資産の数を照らす（変われば 7 と新しい確認の値）
+    S->>C: cdk gc --unstable=gc --action=full --confirm=true
+    C-->>P: 猶予を満了して消す数（一まとまりごと）
+    P->>C: y か n
+    C->>A: 答えた分を消す・新しく使われなくなった資産にタグ
+    S->>S: 更新の途中のスタックを読み直す（あれば打ち直しを示す）
 ```
 
 ## 非機能の実現方式
@@ -229,7 +238,7 @@ sequenceDiagram
 ### 決定 1: 保管の費用を抑えるため、自前の ECR を作らず、使われなくなった資産を設置のコマンドの `cdk gc` で戻しの猶予 30 日の後に消す（全体の設計を直した）
 
 - **質問**: イメージの古い版を何で消すか。全体の設計は `app` のスタックに ECR を置いてライフサイクルの規則で消すとしたが、CDK の資産のイメージは bootstrap の資産のリポジトリにしか置けない（LIB85・LIB90）
-- **選んだ案**: 自前の ECR を作らない。設置のコマンドに `gc` を足し、固定の版の CDK の CLI の `cdk gc --unstable=gc` で、どのスタックからも引かれなくなった資産を戻しの猶予（既定 30 日、`--rollback-buffer-days` で変えられる）の後に消す。作ってから日の浅い資産を外す猶予（`--created-buffer-days`）は 1 日。まず消す数を示して止まり、確認の値を付けて打ち直したときだけ消す。全体の設計は [土台の文書の決定 141](../docs/design/platform.md#決定の記録) として直し、ECR の行・決定 87・決定 89・LIB85・費用の見込みの ECR の行・設置の段の表・未確認のまま残ることを合わせた。#6 のランナーのイメージも同じ置き場と同じ片付けに乗る
+- **選んだ案**: 自前の ECR を作らない。設置のコマンドに `gc` を足し、固定の版の CDK の CLI の `cdk gc --unstable=gc` で、どのスタックからも引かれなくなった資産を戻しの猶予（既定 30 日、`--rollback-buffer-days` で変えられる）の後に消す。作ってから日の浅い資産を外す猶予（`--created-buffer-days`）は 1 日。まず使われていない資産の数と確認の値を示して止まり、確認の値を付けて端末から打ち直したときだけ、CLI が示す「猶予を満了して消す数」への答えを受けて消す（「入出力のコントラクト」の設置のコマンド）。更新の途中のスタックがあれば消さずに止まる（「影響と危険」）。全体の設計は [土台の文書の決定 141](../docs/design/platform.md#決定の記録) として直し、ECR の行・決定 87・決定 89・LIB85・費用の見込みの ECR の行・設置の段の表・未確認のまま残ることを合わせた。#6 のランナーのイメージも同じ置き場と同じ片付けに乗る
 - 採らなかった案: 自前の ECR に資産のイメージを写してライフサイクルの規則を掛ける（写す部品の依存が増え、bootstrap の側の古い版が残るため保管の費用が下がらない）
 - 採らなかった案: bootstrap の資産のリポジトリに規則を足す（bootstrap のテンプレートを変えることは P1 に当たり、同じ bootstrap を使うほかのアプリの資産も消しうる）
 - 採らなかった案: 反映のパイプラインで毎回 `cdk gc` を打つ（パイプラインの役割に消す権限が要り、反映の途中の資産を消す競合が増える）
@@ -241,7 +250,7 @@ sequenceDiagram
 ### 決定 2: `cdk gc` が安定でない機能のまま使えるよう、CLI の版を固定し、使う引数を CI のテストで照らす
 
 - **質問**: 範囲と引数が変わりうる機能（`--unstable=gc`）を、設置する人が打つコマンドの中でどう扱うか
-- **選んだ案**: CLI は今の `package.json` の固定の版（`aws-cdk` 2.1148.1）だけを使う。`gc` のサブコマンドが渡す 6 つの引数（`--unstable=gc`・`--action`・`--type`・`--rollback-buffer-days`・`--created-buffer-days`・`--confirm`）は、組み立てる関数を単体テストで縛る。あわせて、CI で `cdk gc --help` の出力にこれらの引数があることを照らすテスト（`gc-cli.test.ts`）を足す。CLI の版を上げる PR で引数が変われば CI が落ちる
+- **選んだ案**: CLI は今の `package.json` の固定の版（`aws-cdk` 2.1148.1）だけを使う。`gc` のサブコマンドが渡す 6 つの引数（`--unstable=gc`・`--action`・`--type`・`--rollback-buffer-days`・`--created-buffer-days`・`--confirm`）は、組み立てる関数を単体テストで縛る。あわせて、CI で `cdk gc --help` の出力にこれらの引数があることを照らすテスト（`gc-cli.test.ts`）を足す。CLI の版を上げる PR で引数が変われば CI が落ちる。`full` は CLI の確かめ（`--confirm=true`）を使い、消す一まとまりごとの「猶予を満了して消す数」を CLI に示させる。この固定の版の CLI は端末でないと確かめの既定の答え（消す）を使うため、設置のコマンドは端末から打たれたときだけ `full` を呼ぶ
 - 採らなかった案: 安定になるまで片付けを持たない（使わない間の保管の費用が月ごとに増え続ける）
 - 採らなかった案: 資産を自前のスクリプトで探して消す（どのスタックからも引かれないことの判定を自前で持ち、同じ bootstrap を使うほかのアプリの資産を誤って消しうる）
 - **代償**: CLI の版を上げるたびに `gc` の振る舞いを読み直す
@@ -375,7 +384,8 @@ sequenceDiagram
 
 | 危険 | 扱い |
 | --- | --- |
-| `cdk gc` はアカウントとリージョンの全体の資産を見る | どのスタックからも引かれない資産だけを消す。ほかのアプリの反映と同時に打つと途中の資産を消しうるため、作った日の猶予を 1 日置き、手順書に「反映と同時に打たない」と書く |
+| `cdk gc` はアカウントとリージョンの全体の資産を見る | どのスタックからも引かれない資産だけを消す。ほかのアプリの反映と同時に打つと途中の資産を消しうるため、コマンドの側で守る。(1) `gc` は 1 段目・2 段目の照らし・`full` の直前に `ListStacks` を読み、状態が `_IN_PROGRESS` で終わるスタック（`REVIEW_IN_PROGRESS` を含む。CLI の `gc` は変更セットの待ちのスタックの新しいテンプレートを数えない）が 1 つでもあれば消さずに 9 で止まる。(2) 作った日の猶予を 1 日置く。(3) 手順書に「反映と同時に打たない」と書く |
+| 照らしの直後に始まる反映・CloudFormation の更新の前の資産の発行 | 更新の状態を読む守りでは防げない。`cdk deploy` と反映のパイプラインは変更セットを作る前に資産を発行するため、その間はスタックの状態に現れない。扱いは次のとおり。新しく発行した資産は作った日の猶予（1 日）で消えない。残るのは、戻しの猶予（既定 30 日）を超えて使われていなかった古い資産を、同じ要約値のまま発行し直さずに使う反映（猶予より古い版への戻し）と重なったときだけである。`gc` は `full` の後にスタックの状態を読み直し、更新の途中のスタックか `gc` の開始より後に更新を始めたスタックがあれば、「その反映が終わった後に `diff` から打ち直す」と示す（打ち直しは消えた資産を発行し直す）。猶予より古い版へ戻す反映の前後 1 日は `gc` を打たないと手順書に書く |
 | 予算がタグの有効化まで 0 を数える | 足りない設定の一覧に、0 を数え続けることと有効にする先（組織のメンバーなら組織の管理のアカウント）を出す。有効にできない設置先は `budget.scope` を `account` にする（決定 6） |
 | Aurora を足すと今の「時間で費用が掛かる資源」のテストが落ちる | 同じ変更で許しの一覧に理由つきで足す（決定 4） |
 | 利用者の表に PITR が無い | 「PITR が無い」の行を足すと今の表が落ちるため、同じ変更で PITR を有効にする |
@@ -399,7 +409,7 @@ sequenceDiagram
 | 5 | `diff` の出力の最後に足りない設定の欄が出て、5 種類が当たる入力でそれぞれ 1 行になる。タグの行は、0 を数え続けることと有効にする先（組織のメンバーなら管理のアカウント）と `budget.scope` の代わりを含み、`budget.scope` が `account` なら出ない。既定のサブネットが 1 つの AZ にだけある入力で (5) の行が出て、既定のサブネットが無く使える AZ が 2 つ以上ある入力では出ない | 欄が出ない・終了コードが変わる・1 つの AZ の入力で行が出ないと落ちる |
 | 6 | 戻しの予行の記録（手動確認） | — |
 | 7 | 接続しない実測の記録（手動確認）。接続する項目は #44 | — |
-| 9 | `gc` の確認の値なしは AWS へ書かない引数（`--action=print`）だけで CLI を呼び、確認の値が違えば CLI を呼ばない。CI で `cdk gc --help` に使う引数がある | 確認の値なしで消す引数を渡す・違う確認の値で消す・CLI の引数の名前が変わると落ちる |
+| 9 | `gc` の確認の値なしは AWS へ書かない引数（`--action=print`）だけで CLI を呼ぶ。確認の値が違う・期限を過ぎた・使われていない資産の数が変わった・更新の途中のスタックがある・端末でないときは `full` を呼ばない。`full` は CLI の確かめつき（`--confirm=true`）で呼ぶ。CI で `cdk gc --help` に使う引数がある | 確認の値なしで消す引数を渡す・違う確認の値や 60 分を過ぎた値で消す・数が変わっても消す・更新の途中のスタックがあっても消す・`--confirm=false` で消す・CLI の引数の名前が変わると落ちる |
 | 8 | 詳細設計があり、全体の設計の直しが ECR の 1 件だけ（設計 Pull Request の差分で `docs/design/` の変更が `platform.md` だけであることを読む） | — |
 | 10 | `platform.md` に ECR の資源を作る文が無い（設計 Pull Request のレビューで読む） | — |
 | 設定のキー | 5 つのキーの既定・境界（CIDR の接頭辞 15 と 21・ACU の 0.5 と 16.5・予算 0・範囲の `tags` と `account` のほかの値）・未知のキー | 範囲の外を受ける・既定が変わると落ちる |
@@ -416,7 +426,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #13 | 実装する | — | `packages/contracts/src/settings.ts`、`packages/contracts/src/db-prep-api.ts`（新設）、`packages/contracts/test/settings.test.ts`、`packages/contracts/test/db-prep-api.test.ts`（新設）、`packages/contracts/schema/settings.schema.json`、`infra/settings.example.json`、`docs/operations/settings.md`、`docs/operations/setup.md`、`infra/lib/app-stack.ts`、`infra/lib/naming.ts`、`infra/lib/network.ts`（新設）、`infra/lib/progress-db.ts`（新設）、`infra/lib/tasks.ts`（新設）、`infra/lib/cost-watch.ts`（新設）、`infra/lib/pipeline-stack.ts`、`infra/test/support.ts`、`infra/test/app-stack.test.ts`、`infra/test/stack-rules.test.ts`（新設）、`infra/test/pipeline-stack.test.ts`、`infra/test/naming.test.ts`、`infra/setup/nd-setup.ts`、`infra/setup/missing-settings.ts`（新設）、`infra/setup/gc.ts`（新設）、`infra/setup/aws-reader.ts`、`infra/test/nd-setup.test.ts`、`infra/test/missing-settings.test.ts`（新設）、`infra/test/gc.test.ts`（新設）、`infra/test/gc-cli.test.ts`（新設）、`apps/db-prep/package.json`（新設）、`apps/db-prep/tsconfig.json`（新設）、`apps/db-prep/Dockerfile`（新設）、`apps/db-prep/src/main.ts`（新設）、`apps/db-prep/src/exchange.ts`（新設）、`apps/db-prep/src/provision.ts`（新設）、`apps/db-prep/src/rotate.ts`（新設）、`apps/db-prep/test/provision.test.ts`（新設）、`apps/db-prep/test/rotate.test.ts`（新設）、`apps/db-prep/test/exchange.test.ts`（新設）、`.github/workflows/ci.yml`、`package-lock.json` |
+| #13 | 実装する | — | `packages/contracts/src/settings.ts`、`packages/contracts/src/db-prep-api.ts`（新設）、`packages/contracts/test/settings.test.ts`、`packages/contracts/test/db-prep-api.test.ts`（新設）、`packages/contracts/schema/settings.schema.json`、`packages/contracts/data/exit-codes.json`、`infra/settings.example.json`、`docs/operations/settings.md`、`docs/operations/setup.md`、`infra/lib/app-stack.ts`、`infra/lib/naming.ts`、`infra/lib/network.ts`（新設）、`infra/lib/progress-db.ts`（新設）、`infra/lib/tasks.ts`（新設）、`infra/lib/cost-watch.ts`（新設）、`infra/lib/pipeline-stack.ts`、`infra/test/support.ts`、`infra/test/app-stack.test.ts`、`infra/test/stack-rules.test.ts`（新設）、`infra/test/pipeline-stack.test.ts`、`infra/test/naming.test.ts`、`infra/setup/nd-setup.ts`、`infra/setup/missing-settings.ts`（新設）、`infra/setup/gc.ts`（新設）、`infra/setup/aws-reader.ts`、`infra/test/nd-setup.test.ts`、`infra/test/missing-settings.test.ts`（新設）、`infra/test/gc.test.ts`（新設）、`infra/test/gc-cli.test.ts`（新設）、`apps/db-prep/package.json`（新設）、`apps/db-prep/tsconfig.json`（新設）、`apps/db-prep/Dockerfile`（新設）、`apps/db-prep/src/main.ts`（新設）、`apps/db-prep/src/exchange.ts`（新設）、`apps/db-prep/src/provision.ts`（新設）、`apps/db-prep/src/rotate.ts`（新設）、`apps/db-prep/test/provision.test.ts`（新設）、`apps/db-prep/test/rotate.test.ts`（新設）、`apps/db-prep/test/exchange.test.ts`（新設）、`.github/workflows/ci.yml`、`package-lock.json` |
 
 ## 未確認のまま残ること
 
