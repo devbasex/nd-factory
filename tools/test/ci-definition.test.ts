@@ -12,7 +12,7 @@ const DECLARATION = join(ROOT, ".ndf", "project.json");
 export type Workflow = {
   on?: unknown;
   permissions?: unknown;
-  jobs?: Record<string, { permissions?: unknown } | null>;
+  jobs?: Record<string, { name?: unknown; permissions?: unknown; strategy?: { matrix?: unknown } | null } | null>;
 };
 
 export type LoadedWorkflow = { path: string; text: string; doc: Workflow };
@@ -38,6 +38,17 @@ export function loadWorkflows(root: string): LoadedWorkflow[] {
 /** `jobs` の鍵の名前を返す */
 export function jobNames(doc: Workflow): string[] {
   return doc.jobs ? Object.keys(doc.jobs) : [];
+}
+
+/**
+ * ジョブが GitHub へ報告するチェックの名前を返す。`name` があればその値、無ければ `jobs` の鍵。
+ * 行列のジョブは GitHub が名前に行列の値を足すため、宣言の名前と合わない印を付けて返す
+ */
+export function checkNames(doc: Workflow): string[] {
+  return Object.entries(doc.jobs ?? {}).map(([id, job]) => {
+    const name = typeof job?.name === "string" ? job.name : id;
+    return job?.strategy?.matrix === undefined ? name : `${name} (行列の値つき)`;
+  });
 }
 
 /** `on` が `pull_request` を持つか（文字列・配列・鍵の 3 つの書き方） */
@@ -89,11 +100,11 @@ function isReadOnly(value: unknown): boolean {
   return JSON.stringify(value) === JSON.stringify(READ_ONLY);
 }
 
-/** Pull Request で起動するワークフローのジョブの名前の和集合 */
-function pullRequestJobs(workflows: LoadedWorkflow[]): string[] {
+/** Pull Request で起動するワークフローのジョブが報告するチェックの名前の和集合 */
+function pullRequestChecks(workflows: LoadedWorkflow[]): string[] {
   return workflows
     .filter((workflow) => triggersPullRequest(workflow.doc))
-    .flatMap((workflow) => jobNames(workflow.doc));
+    .flatMap((workflow) => checkNames(workflow.doc));
 }
 
 /** ワークフローの間で重なるジョブの名前 */
@@ -165,7 +176,7 @@ describe("loadWorkflows・triggersPullRequest・jobNames", () => {
       join(".github", "workflows", "nightly.yaml"),
     ]);
     expect(workflows.map((workflow) => triggersPullRequest(workflow.doc))).toEqual([true, false]);
-    expect(pullRequestJobs(workflows)).toEqual(["check"]);
+    expect(pullRequestChecks(workflows)).toEqual(["check"]);
     expect(workflows[0]?.text).toBe(CHECK_WORKFLOW);
   });
 
@@ -194,6 +205,29 @@ describe("loadWorkflows・triggersPullRequest・jobNames", () => {
   it("jobs の鍵の名前を返し、jobs が無ければ空", () => {
     expect(jobNames(docOf(CHECK_WORKFLOW))).toEqual(["check"]);
     expect(jobNames(docOf("on: push\n"))).toEqual([]);
+  });
+
+  it("報告するチェックの名前は、name があればその値、無ければ jobs の鍵", () => {
+    expect(checkNames(docOf(CHECK_WORKFLOW))).toEqual(["check"]);
+    const renamed = CHECK_WORKFLOW.replace("  check:\n", "  check:\n    name: CDK synth\n");
+    expect(jobNames(docOf(renamed))).toEqual(["check"]);
+    expect(checkNames(docOf(renamed))).toEqual(["CDK synth"]);
+  });
+
+  it("鍵と同じ name は鍵のまま報告する", () => {
+    const same = CHECK_WORKFLOW.replace("  check:\n", "  check:\n    name: check\n");
+    expect(checkNames(docOf(same))).toEqual(["check"]);
+  });
+
+  it("行列のジョブは宣言の名前と合わない名前で報告する", () => {
+    const matrix = CHECK_WORKFLOW.replace("    runs-on:", "    strategy:\n      matrix:\n        node: [22, 24]\n    runs-on:");
+    expect(checkNames(docOf(matrix))).not.toContain("check");
+  });
+
+  it("name を上書きしたジョブは、鍵が必須のチェックの宣言と同じでも、宣言と合わない", () => {
+    const renamed = CHECK_WORKFLOW.replace("  check:\n", "  check:\n    name: CDK synth\n");
+    const root = makeTree({ "ci.yml": renamed });
+    expect(new Set(pullRequestChecks(loadWorkflows(root)))).not.toEqual(new Set(["check"]));
   });
 
   it("解けない YAML で失敗する", () => {
@@ -274,11 +308,11 @@ describe("CI の定義", () => {
     expect(workflows.length).toBeGreaterThan(0);
   });
 
-  it("Pull Request で起動するジョブの名前の集合が NDF の宣言の必須のチェックと等しい", () => {
+  it("Pull Request で起動するジョブが報告するチェックの名前の集合が NDF の宣言の必須のチェックと等しい", () => {
     const declared = JSON.parse(readFileSync(DECLARATION, "utf8")) as { ci: { required_checks: string[] } };
-    const jobs = pullRequestJobs(workflows);
-    expect(new Set(jobs)).toEqual(new Set(declared.ci.required_checks));
-    expect(jobs).toHaveLength(declared.ci.required_checks.length);
+    const checks = pullRequestChecks(workflows);
+    expect(new Set(checks)).toEqual(new Set(declared.ci.required_checks));
+    expect(checks).toHaveLength(declared.ci.required_checks.length);
   });
 
   it("ジョブの名前がワークフローの間で重ならない", () => {
