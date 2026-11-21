@@ -399,7 +399,7 @@ package-lock.json
 | `scramVerifier` | PostgreSQL のサービスコンテナで平文から作った役割の `pg_authid.rolpassword`（テストの準備だけで読む）の塩と回数を渡すと、同じ検証子を返す。`provisionProject` が検証子で作った役割へ、平文のパスワードで `pg` の接続が通る（PostgreSQL のサービスコンテナ）。`rotateRole` の後も新しい平文で通り、古い平文で落ちる | 呼ぶたびに塩が変わり、同じパスワードでも違う検証子になる | 印字できない文字を含むパスワードで投げる |
 | パスワードを含む文 | — | — | `provisionProject`・`rotateRole` を作り物の `SqlExecutor` で打ち、渡された SQL の文と引数のすべてに作り物のパスワードの平文が部分の文字列として現れると落ちる（作り直しの `ALTER ROLE` を含む）。PostgreSQL のサービスコンテナを `log_statement=all`・`log_min_error_statement=error` で起こし、既にある役割へ `CREATE ROLE` を打って失敗させた後、コンテナのログに平文が現れると落ちる |
 
-CI の `check` のジョブに `postgres:16`（要約値で固定）のサービスコンテナを置き、接続の値を `ND_TEST_PG_URL` で渡す。値が無いとき、`CI` が真なら DB のテストは落ち、手元では飛ばす（このリポジトリはテストを CI に寄せる）。用意の手順は `postgres`・`template1` の `PUBLIC` の権限のようにクラスタ全体の権限を変えるため、それを打つテスト（`provision.test.ts` の PostgreSQL の組）は、接続先が使い捨てのクラスタだと示す `ND_TEST_PG_DISPOSABLE_CLUSTER` も真のときだけ打つ（無ければ CI では落とし、手元では飛ばす）。手元の既存のクラスタを `ND_TEST_PG_URL` で指しても、その利用者の権限を変えない。CI はジョブだけのコンテナを指すため真にする。
+CI の `check` のジョブに `postgres:16`（要約値で固定）のサービスコンテナを置き、接続の値を `ND_TEST_PG_URL` で渡す。値が無いとき、`CI` が真なら DB のテストは落ち、手元では飛ばす（このリポジトリはテストを CI に寄せる）。用意の手順は `postgres`・`template1` の `PUBLIC` の権限のようにクラスタ全体の権限を変えるため、それを打つテスト（`provision.test.ts` の PostgreSQL の組）は、接続先が使い捨てのクラスタだと示す `ND_TEST_PG_DISPOSABLE_CLUSTER` が `1` と完全に一致するときだけ打つ（`off`・`no`・打ち間違いでは打たない。無ければ CI では落とし、手元では飛ばす）。手元の既存のクラスタを `ND_TEST_PG_URL` で指しても、その利用者の権限を変えない。CI はジョブだけのコンテナを指すため `1` にする。
 
 ## 実測と戻しの予行の手順
 

@@ -157,8 +157,9 @@ export function createPgExecutor(connect: (database: string) => Promise<Client>)
 
 const PG_URL = process.env.ND_TEST_PG_URL;
 // 接続先が使い捨てのクラスタだと示す印。クラスタ全体の権限（postgres・template1 の PUBLIC など）を変えるテストは、
-// これが真のときだけ打つ。手元の既存のクラスタを ND_TEST_PG_URL で指しても、その利用者の権限を変えない
-const PG_DISPOSABLE = truthy(process.env.ND_TEST_PG_DISPOSABLE_CLUSTER);
+// これが CI の渡す "1" と完全に一致するときだけ打つ（off・no・打ち間違いでは打たない）。
+// 手元の既存のクラスタを ND_TEST_PG_URL で指しても、その利用者の権限を変えない
+const PG_DISPOSABLE = process.env.ND_TEST_PG_DISPOSABLE_CLUSTER === "1";
 
 function truthy(raw: string | undefined): boolean {
   const v = raw?.trim().toLowerCase();
@@ -192,7 +193,7 @@ export function describePgDisposable(name: string, fn: () => void): void {
   } else if (isCi()) {
     describe(name, () => {
       it("ND_TEST_PG_URL と ND_TEST_PG_DISPOSABLE_CLUSTER が要る", () => {
-        throw new Error("CI では使い捨てのサービスコンテナを指し、ND_TEST_PG_DISPOSABLE_CLUSTER を真にする");
+        throw new Error("CI では使い捨てのサービスコンテナを指し、ND_TEST_PG_DISPOSABLE_CLUSTER を 1 にする");
       });
     });
   } else {
