@@ -25,7 +25,7 @@ export const REQUEST_REASONS = [
   { code: "duplicate_item", status: 400, when: "always" },
   { code: "cursor_invalid", status: 400, when: "always" },
   { code: "unauthorized", status: 401, when: "always" },
-  // 署名・claim・期限を通した人の token のセッションが、取り消しの行か対応の行で既に断たれている（docs/design/api.md の「401 の本文」）
+  // 署名・claim・期限を通した人の token のセッションが既に断たれている。セッションの取り消しの行がある・Cognito の主体の対応の行が無い・対応の行を結んだ時より前のサインイン（docs/design/api.md の「401 の本文」）
   { code: "session_ended", status: 401, when: "always" },
   { code: "human_only", status: 403, when: "always" },
   { code: "scope_insufficient", status: 403, when: "always" },
