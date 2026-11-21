@@ -39,17 +39,31 @@ export const dbPrepOutcome = z.discriminatedUnion("result", [
 ]);
 
 // 時間の関係（決定 9・全体の設計の決定 96）。待ち行列の年齢＋関数の時間切れ＋Data API の長い方が、
-// 前の呼び出しが DB へ働きうる最も遅い時刻で、それが用意の期限より短いことを単体テストで照らす。
-// dataApiCallSeconds と dataApiTxIdleSeconds は Data API が決める値で、関数からは変えない
-export const DB_PREP_TIMING = Object.freeze({
+// 前の呼び出しが DB へ働きうる最も遅い時刻で、それが用意の期限より短く、差が見回りの間隔以上であることを
+// test/db-prep.test.ts で照らす。dataApiCallSeconds と dataApiTxIdleSeconds は Data API が決める値で、関数からは変えない。
+// この定数が時間の値の正本で、実際の資源はここを読む。照らしをインフラの値の変化でも落とすため、読み手は
+// 値を写さずこの定数を参照し、合成のテストで合成の出力と定数の一致を照らす:
+// - functionTimeoutSeconds と maxEventAgeSeconds: DB の用意の関数の資源（infra/lib/db-prep-function.ts、#13 の U7）
+//   が Timeout と MaximumEventAgeInSeconds に使い、infra/test/db-prep-function.test.ts で照らす
+// - prepDeadlineSeconds と patrolIntervalSeconds: 見回りの資源とスケジュール、API の期限（#6）が使う
+export type DbPrepTiming = Readonly<{
+  maxEventAgeSeconds: number;
+  functionTimeoutSeconds: number;
+  dataApiCallSeconds: number;
+  dataApiTxIdleSeconds: number;
+  prepDeadlineSeconds: number;
+  patrolIntervalSeconds: number;
+}>;
+
+export const DB_PREP_TIMING: DbPrepTiming = Object.freeze({
   maxEventAgeSeconds: 60,
   functionTimeoutSeconds: 300,
   dataApiCallSeconds: 45,
   dataApiTxIdleSeconds: 180,
   prepDeadlineSeconds: 900,
+  patrolIntervalSeconds: 300,
 });
 
 export type DbPrepInvocation = z.infer<typeof dbPrepInvocation>;
 export type DbPrepOutcome = z.infer<typeof dbPrepOutcome>;
 export type DbPrepFailureReason = (typeof DB_PREP_FAILURE_REASONS)[number];
-export type DbPrepTiming = typeof DB_PREP_TIMING;

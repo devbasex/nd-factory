@@ -11,18 +11,19 @@ const PREFIX_NOT_AWS = /^(?!aws)/;
 const ENVIRONMENT_SHAPE = /^[a-z0-9]{2,10}$/;
 const REPOSITORY_SHAPE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 // VPC の CIDR。IPv4 の 4 つの数（先頭の 0 を許さない）と接頭辞の長さ 16〜20。
-// 20 より長いと 2 つの AZ の公開と隔離のサブネットが VPC に収まらず、16 より短い VPC は AWS が作らない
+// 20 より長いと 2 つの AZ の公開と隔離のサブネットが VPC に収まらず、16 より短い VPC は AWS が作らない。
+// ホストの部分が 0 でない CIDR（10.80.1.0/16 など）は、書いた人の意図した範囲と作られる範囲がずれるため止める。
+// この制約も正規表現に入れ、生成する JSON Schema の pattern（エディタの補完や外の検証）と parseSettings の
+// 判定をそろえる。接頭辞の長さ L ごとに、3 つ目の数は 2^(24-L) の倍数、4 つ目の数は 0 に限る
 const OCTET = "(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])";
-const VPC_CIDR_SHAPE = new RegExp(`^${OCTET}(?:\\.${OCTET}){3}/(?:1[6-9]|20)$`);
-const MAX_OPS_EMAILS = 10;
-
-// ホストの部分が 0 でない CIDR（10.80.1.0/16 など）は、書いた人の意図した範囲と作られる範囲がずれるため止める
-function isNetworkAddress(cidr: string): boolean {
-  const [address = "", length = ""] = cidr.split("/");
-  const value = address.split(".").reduce((acc, part) => acc * 256 + Number(part), 0);
-  const hostSize = 2 ** (32 - Number(length));
-  return value % hostSize === 0;
+const VPC_PREFIX_LENGTHS = [16, 17, 18, 19, 20] as const;
+function networkTail(length: number): string {
+  const step = 2 ** (24 - length);
+  const thirds = Array.from({ length: 256 / step }, (_, i) => String(i * step));
+  return `(?:${thirds.join("|")})\\.0/${length}`;
 }
+const VPC_CIDR_SHAPE = new RegExp(`^${OCTET}\\.${OCTET}\\.(?:${VPC_PREFIX_LENGTHS.map(networkTail).join("|")})$`);
+const MAX_OPS_EMAILS = 10;
 
 const email = z.email("メールの形でない");
 
@@ -50,8 +51,7 @@ export const settingsSchema = z.strictObject({
     .strictObject({
       vpc_cidr: z
         .string()
-        .regex(VPC_CIDR_SHAPE, { message: "IPv4 の CIDR で、接頭辞の長さを 16〜20 にする", abort: true })
-        .refine(isNetworkAddress, "ホストの部分を 0 にする（例 10.80.0.0/16）")
+        .regex(VPC_CIDR_SHAPE, "IPv4 の CIDR で、接頭辞の長さを 16〜20 にし、ホストの部分を 0 にする（例 10.80.0.0/16）")
         .optional(),
     })
     .optional(),

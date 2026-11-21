@@ -74,7 +74,15 @@ describe("generateArtifacts", () => {
   it("見本は JSON Schema の必須のキーを持ち、client_id を持たない", async () => {
     await generateArtifacts(root, "write");
     const example = JSON.parse(readFileSync(join(root, OUTPUTS[1]!), "utf8")) as Record<string, unknown>;
-    expect(example).toEqual({ prefix: "acme", environment: "test", login: { google: {} } });
+    expect(example).toEqual({
+      prefix: "acme",
+      environment: "test",
+      login: { google: {} },
+      network: { vpc_cidr: "10.80.0.0/16" },
+      progress_db: { max_acu: 2 },
+      budget: { monthly_usd: 30, scope: "tags" },
+      ops: { notify_emails: ["ops@example.com"] },
+    });
     const schema = JSON.parse(readFileSync(join(root, OUTPUTS[0]!), "utf8")) as { required: string[] };
     expect(schema.required).toEqual(["prefix", "environment", "login"]);
   });

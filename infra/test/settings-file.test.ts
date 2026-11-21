@@ -26,7 +26,15 @@ function catchError(fn: () => unknown): SettingsFileError {
 
 describe("loadSettingsFile", () => {
   it("見本を読むと形に合う値を返す", () => {
-    expect(loadSettingsFile(EXAMPLE)).toEqual({ prefix: "acme", environment: "test", login: { google: {} } });
+    expect(loadSettingsFile(EXAMPLE)).toEqual({
+      prefix: "acme",
+      environment: "test",
+      login: { google: {} },
+      network: { vpc_cidr: "10.80.0.0/16" },
+      progress_db: { max_acu: 2 },
+      budget: { monthly_usd: 30, scope: "tags" },
+      ops: { notify_emails: ["ops@example.com"] },
+    });
   });
 
   it("試験の作り物の値はパイプラインを持つ", () => {

@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import { INFRA_DEFAULTS, infraValues, parseSettings } from "../src/settings.ts";
 
 const example = JSON.parse(readFileSync(new URL("../../../infra/settings.example.json", import.meta.url), "utf8")) as unknown;
+const schema = JSON.parse(readFileSync(new URL("../schema/settings.schema.json", import.meta.url), "utf8")) as {
+  properties: { network: { properties: { vpc_cidr: { pattern: string } } } };
+};
+const schemaCidr = new RegExp(schema.properties.network.properties.vpc_cidr.pattern);
 
 function base(): Record<string, unknown> {
   return { prefix: "acme", environment: "test", login: { google: {} } };
@@ -148,6 +152,24 @@ describe("parseSettings のインフラのキー", () => {
     ]);
     expect(parseSettings({ ...base(), network: { vpc_cidr: "10.80.16.0/20" } }).ok).toBe(true);
     expect(parseSettings({ ...base(), network: { vpc_cidr: "10.80.8.0/20" } }).ok).toBe(false);
+  });
+
+  it.each([
+    "10.80.0.0/16",
+    "10.80.128.0/17",
+    "10.80.192.0/18",
+    "10.80.224.0/19",
+    "10.80.240.0/20",
+    "10.80.1.0/16",
+    "10.80.64.0/17",
+    "10.80.32.0/18",
+    "10.80.16.0/19",
+    "10.80.8.0/20",
+    "10.80.0.1/20",
+    "10.80.0.0/21",
+    "010.80.0.0/16",
+  ])("生成した JSON Schema の pattern と parseSettings の判定がそろう（%s）", (vpc_cidr) => {
+    expect(schemaCidr.test(vpc_cidr)).toBe(parseSettings({ ...base(), network: { vpc_cidr } }).ok);
   });
 
   it.each([1, 1.5, 16])("最大 ACU の 1〜16 の 0.5 刻みは通る（%s）", (max_acu) => {

@@ -148,8 +148,6 @@ describe("PROGRESS_DB_IDENT_SHAPE", () => {
 });
 
 describe("DB_PREP_TIMING", () => {
-  // 見回りの間隔（決定 9）。期限を過ぎた行を見回りが拾う前に、前の呼び出しが DB へ働き終えている余裕として照らす
-  const PATROL_INTERVAL_SECONDS = 300;
   // Lambda の非同期の呼び出しの MaximumEventAgeInSeconds の最小
   const MIN_EVENT_AGE_SECONDS = 60;
 
@@ -158,7 +156,7 @@ describe("DB_PREP_TIMING", () => {
   }
 
   function holds(t: DbPrepTiming): boolean {
-    return latestEffectSeconds(t) < t.prepDeadlineSeconds && t.prepDeadlineSeconds - latestEffectSeconds(t) >= PATROL_INTERVAL_SECONDS;
+    return latestEffectSeconds(t) < t.prepDeadlineSeconds && t.prepDeadlineSeconds - latestEffectSeconds(t) >= t.patrolIntervalSeconds;
   }
 
   it("値は設計の表のとおり", () => {
@@ -168,6 +166,7 @@ describe("DB_PREP_TIMING", () => {
       dataApiCallSeconds: 45,
       dataApiTxIdleSeconds: 180,
       prepDeadlineSeconds: 900,
+      patrolIntervalSeconds: 300,
     });
   });
 
@@ -181,7 +180,7 @@ describe("DB_PREP_TIMING", () => {
   });
 
   it("期限と最も遅い時刻の差は見回りの間隔 300 秒以上", () => {
-    expect(DB_PREP_TIMING.prepDeadlineSeconds - latestEffectSeconds(DB_PREP_TIMING)).toBeGreaterThanOrEqual(PATROL_INTERVAL_SECONDS);
+    expect(DB_PREP_TIMING.prepDeadlineSeconds - latestEffectSeconds(DB_PREP_TIMING)).toBeGreaterThanOrEqual(DB_PREP_TIMING.patrolIntervalSeconds);
     expect(holds(DB_PREP_TIMING)).toBe(true);
   });
 
@@ -191,6 +190,10 @@ describe("DB_PREP_TIMING", () => {
 
   it.each([541, 600])("関数の時間切れを %s 秒に延ばすと照らしが落ちる", (functionTimeoutSeconds) => {
     expect(holds({ ...DB_PREP_TIMING, functionTimeoutSeconds })).toBe(false);
+  });
+
+  it("見回りの間隔を 361 秒に延ばすと照らしが落ちる", () => {
+    expect(holds({ ...DB_PREP_TIMING, patrolIntervalSeconds: 361 })).toBe(false);
   });
 
   it("変えられない値にしてある", () => {
