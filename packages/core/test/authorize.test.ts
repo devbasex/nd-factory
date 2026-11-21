@@ -269,7 +269,7 @@ describe("authorize: 読み手の失敗とログ", () => {
   it("ログは操作の名前・要素の数・拒んだ数と理由だけで、プロジェクトの ID を出さない", async () => {
     const table = world();
     const lines: string[] = [];
-    const log = createLogger({ request_id: "req-1", fn: "api" }, (l) => lines.push(l));
+    const log = createLogger({ request_id: "req-1", fn: "api", endpoint: "user" }, (l) => lines.push(l));
     await authorize(human(MEMBER), projectsGet, [{ project_id: P_A }, { project_id: P_B }], fakeScope(table), log);
     const record = JSON.parse(lines.at(-1) ?? "{}") as Record<string, unknown>;
     expect(record).toMatchObject({ operation: "projects.get", items: 2, denied: 1, reasons: ["not_found"] });
