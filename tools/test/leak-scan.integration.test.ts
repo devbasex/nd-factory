@@ -77,17 +77,19 @@ function makeTree(files: Record<string, string>): string {
   return root;
 }
 
+// CI のランナーは git の利用者の設定を持たないので、作り物の名前とメールを環境変数で渡す
+const GIT_IDENTITY = {
+  GIT_AUTHOR_NAME: "acme",
+  GIT_AUTHOR_EMAIL: "ops@example.com",
+  GIT_COMMITTER_NAME: "acme",
+  GIT_COMMITTER_EMAIL: "ops@example.com",
+};
+
 function git(cwd: string, ...args: string[]): string {
   const result = spawnSync("git", ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], {
     cwd,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "acme",
-      GIT_AUTHOR_EMAIL: "ops@example.com",
-      GIT_COMMITTER_NAME: "acme",
-      GIT_COMMITTER_EMAIL: "ops@example.com",
-    },
+    env: { ...process.env, ...GIT_IDENTITY },
   });
   if (result.status !== 0) throw new Error(`git ${args.join(" ")} が失敗した: ${result.stderr}`);
   return result.stdout.trim();
@@ -405,12 +407,15 @@ describe("履歴の探し", () => {
     write(root, "docs/a.md", "主の側\n");
     commitAll(root, "main");
     // 競合させ、解消の中でだけ値を足す
-    const merge = spawnSync("git", ["-c", "commit.gpgsign=false", "merge", "-q", "side"], { cwd: root, encoding: "utf8" });
+    const merge = spawnSync("git", ["-c", "commit.gpgsign=false", "merge", "-q", "side"], { cwd: root, encoding: "utf8", env: { ...process.env, ...GIT_IDENTITY } });
     expect(merge.status).not.toBe(0);
     write(root, "docs/a.md", `主の側\n枝の側\nアカウント ${fakeAccount()}\n`);
     git(root, "add", "-A");
-    git(root, "commit", "-q", "--no-edit");
+    // CI の git は競合のマージのメッセージを空にし得るので、メッセージを明示する
+    git(root, "commit", "-q", "-m", "merge the side branch");
     const mergeCommit = git(root, "rev-parse", "HEAD");
+    // 競合を解いたコミットがマージのコミット（親が 2 つ）であること
+    expect(git(root, "rev-list", "--parents", "-n", "1", "HEAD").split(" ")).toHaveLength(3);
     write(root, "docs/a.md", "主の側\n枝の側\n");
     commitAll(root, "remove");
     expect(scan(root, ["dir", ND_CONFIG]).findings).toEqual([]);
