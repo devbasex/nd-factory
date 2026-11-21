@@ -59,7 +59,7 @@ docs/operations/settings.md・setup.md
 | `infra/setup/images-cli.ts` | 新設 | パイプラインの準備と反映のアクションから上の 3 つを打つ入口 | `setup/images.ts` | モジュール | `main` |
 | `packages/contracts/data/exit-codes.json` | 変更 | 終了コード 9 `GC_BUSY` を足す（`setup.md` の表は生成） | — | — | — |
 | `infra/setup/aws-reader.ts` | 変更 | コスト配分タグ・組織・AZ・スタックの更新の状態を読む | AWS SDK（Cost Explorer・Organizations・EC2・CloudFormation） | モジュール | `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount`・`readStackActivity`（新設） |
-| `infra/setup/nd-setup.ts` | 変更 | `diff` の合成の前にイメージを push し、`deploy` の前後で在りかの確かめと印のタグを打つ。`diff` の最後に一覧を出す | 上の 2 つ | モジュール | `runDiff`・`synthesize`・`runDeploy`・`defaultDeps`（変更） |
+| `infra/setup/nd-setup.ts` | 変更 | `diff` の合成の前にイメージを push し、`deploy` の前後で在りかの確かめと印のタグを打つ。`diff` の最後に一覧を出す | 上の 2 つ | モジュール | `parseArgs`・`runDiff`・`synthesize`・`runDeploy`・`defaultDeps`（変更） |
 | `infra/test/support.ts` | 変更 | スタックの決まりの検査 | — | モジュール | `stackRuleViolations`（新設）・`hourlyCostResources`（変更） |
 | `apps/db-prep/src/main.ts` | 新設 | タスクの入口。引き換え → 用意か差し替え → 終わりの報告 | 下の 3 つ・contracts | モジュール | `main` |
 | `apps/db-prep/src/exchange.ts` | 新設 | タスクの ID を読み、API と話す | contracts | モジュール | `readTaskArn`・`exchange`・`complete` |
@@ -216,11 +216,12 @@ docs/operations/settings.md・setup.md
 | `lifecycleRules` | 同上 | 新設 | `() => LifecycleRule[]` | 優先 1: `deployed-` の印の付いた版を 10 残す。優先 2: `build-` の版を push から 14 日で消す。優先 3: タグの無い版を 1 日で消す |
 | `readImageDigests` | 同上 | 新設 | `(env: NodeJS.ProcessEnv) => ImageDigests` | 環境の値 `ND_IMAGES` が指す一覧のファイル（`nd-setup-images.json`）を読み、キーごとのダイジェストを返す。無ければ空 |
 | `buildAndPushImages` | `infra/setup/images.ts` | 新設 | `(target: Target, s: Settings, out: string, deps: ImageDeps) => Promise<ImagesResult>` | リポジトリがあるかを読み、あれば `IMAGE_SPECS` ごとに `docker build --platform linux/amd64` → `build-<UTC の時刻>` のタグで push → ダイジェストを読み、`<out>/nd-setup-images.json` に書く。リポジトリが無ければ `{ status: "no_repository" }` を返して何も書かない |
-| `checkImagesExist` | 同上 | 新設 | `(target: Target, assembly: string, deps: ImageDeps) => Promise<string[]>` | 合成の結果の一覧のダイジェストがリポジトリにあるかを `BatchGetImage` で読み、無いダイジェストを返す |
+| `checkImagesExist` | 同上 | 新設 | `(target: Target, assembly: string, deps: ImageDeps) => Promise<{ missing: string[]; outsideKeep: string[] }>` | 合成の結果の一覧のダイジェストがリポジトリにあるかを `BatchGetImage` で読み、無いダイジェストを返す。あわせて `DescribeImages` で、そのダイジェストより push の新しい `deployed-` の印の付いた版が 10 以上あるもの（印を付けても規則で消える版）を返す |
 | `tagDeployedImages` | 同上 | 新設 | `(target: Target, assembly: string, at: Date, deps: ImageDeps) => Promise<void>` | 一覧のダイジェストの manifest を読み、`deployed-<UTC の時刻>` のタグで `PutImage` する |
 | `main` | `infra/setup/images-cli.ts` | 新設 | `(argv: string[], deps: ImageDeps) => Promise<number>` | `push --settings <file> --out <dir>`・`check --assembly <dir>`・`tag --assembly <dir>` の 3 つ。パイプラインの CodeBuild の資格情報（既定の解き方）で打つ |
 | `synthesize` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 画面のビルドの後、合成の前に `buildAndPushImages` を打ち、一覧のファイルを `ND_IMAGES` で合成へ渡す。一覧は合成の結果の置き場にあるため要約値に入る |
-| `runDeploy` | 同上 | 変更 | 変えない | 確認の値を照らした後・反映の前に `checkImagesExist` を打ち、無いダイジェストがあれば反映しない。反映が 0 で終わったら `tagDeployedImages` を打つ |
+| `parseArgs` | 同上 | 変更 | 戻り値の `DeployArgs` に `tagOnly: boolean` を足す | `deploy` の `--tag-only` を読む |
+| `runDeploy` | 同上 | 変更 | 変えない | 確認の値を照らした後・反映の前に `checkImagesExist` を打ち、無いダイジェストか規則で消えるダイジェストがあれば反映しない。反映が 0 で終わったら `tagDeployedImages` を打つ。`--tag-only` を付けると、反映を打たずに確認の値を照らして印だけを付ける（タグ付けの失敗の打ち直し） |
 
 - `SetupDeps` と `ImageDeps` に `docker: (args: string[]) => Promise<{ code: number; stdout: string }>`・`ecr`（`DescribeRepositories`・`GetAuthorizationToken`・`BatchGetImage`・`PutImage` の包み）を置く（テストは本物の Docker と AWS を呼ばない）
 - push の前の `docker login` は `GetAuthorizationToken` の値を標準入力で渡し、値をログ・出力に出さない
@@ -233,7 +234,8 @@ docs/operations/settings.md・setup.md
 | `buildAndPushImages` | Docker が無い・作れない | 端末に Docker が無い・Dockerfile の誤り | `docker` の終了コード | 合成せずに止める | 「Docker が要る」か docker の出力、`EXIT.BUILD` | 何も合成していない。push した分は印が無く 14 日で消える。再実行できる |
 | `buildAndPushImages` | push できない | 権限・網 | `docker push` の終了コード | 合成せずに止める | docker の出力、`EXIT.BUILD` | 同上 |
 | `checkImagesExist` | 引くイメージが無い | 印の無い版が 14 日で消えた・10 を超えて古い版へ戻す | `BatchGetImage` の `failures` | 反映しない | 無いダイジェストと「前の版のコミットで `diff` から作り直す」、`EXIT.BUILD` | 何も書いていない |
-| `tagDeployedImages` | タグを付けられない | 権限・網 | SDK の例外 | 止める | 「反映は済んだ。印のタグを付けられなかった」と打ち直しのコマンド、`EXIT.BUILD` | 反映は済んでいる。同じ置き場で打ち直せば付く（同じダイジェストへの新しい時刻のタグ） |
+| `checkImagesExist` | 印を付けても規則で消える | 10 を超えて古い版へ戻す | `DescribeImages` の push の時刻と印 | 反映しない | 当たるダイジェストと「前の版のコミットで `diff` から作り直す」、`EXIT.BUILD` | 何も書いていない |
+| `tagDeployedImages` | タグを付けられない | 権限・網 | SDK の例外 | 止める | 「反映は済んだ。印のタグを付けられなかった。14 日のうちに打ち直す」と `deploy --tag-only` の打ち直しのコマンド、`EXIT.BUILD` | 反映は済んでいる。同じ置き場で `--tag-only` を打てば付く（同じダイジェストへの新しい時刻のタグ） |
 
 ### 単体テストの観点
 
@@ -242,7 +244,7 @@ docs/operations/settings.md・setup.md
 | `ImageRepository`・`lifecycleRules` | 合成の出力に、タグ書き換え不可のリポジトリと 3 つの規則（優先 1 が `deployed-` の 10）がある | — | 優先の入れ替え・`deployed-` の規則が数でなく日数で落ちる |
 | `AppStack`（ダイジェストあり） | DB の用意のタスクの定義のイメージが `<リポジトリ>@sha256:…` | ダイジェストなしでタスクの定義を作らない | ダイジェストを変えると要約値が変わる（合成の結果の要約値の比べ） |
 | `buildAndPushImages` | リポジトリがあれば作って push し、一覧を書く | リポジトリが無ければ何もしない | Docker の失敗・push の失敗で投げ、一覧を書かない。login の値が出力に出ない |
-| `checkImagesExist`・`runDeploy` | すべてあれば反映して印を付ける | — | 1 つでも無ければ反映を呼ばない。反映の失敗で印を付けない |
+| `checkImagesExist`・`runDeploy` | すべてあれば反映して印を付ける | 新しい印の付いた版が 9 なら通り、10 なら止まる | 1 つでも無ければ反映を呼ばない。反映の失敗で印を付けない。`--tag-only` は反映を呼ばない |
 
 ## 設置のコマンド
 
