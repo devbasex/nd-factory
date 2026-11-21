@@ -8,6 +8,7 @@ import { putIfAbsent, WriteSpecError, writeAtomically, WriteUnavailableError, ty
 import type { Db, Row } from "./db.ts";
 import type { Id } from "./ids.ts";
 import { redact } from "./redact.ts";
+import { classifyFailure } from "./retry.ts";
 
 // 操作の記録（docs/design/api.md の「操作の記録」、I9）。追記だけで、許した鍵の ID だけを写し、本文・秘密・個人情報を持たない。
 // 状態を書く要素の行は auditItem をそのトランザクションへ入れ、状態を書かない要求の行は appendAudit で 1 行追記する
@@ -48,7 +49,7 @@ export type AuditEntry = {
   readonly itemIndex: number | null;
 };
 
-// 状態を書かない要求の記録を書けない。呼び手は要求全体の 503 audit_unavailable にし、読む操作は値を返さない
+// 状態を書かない要求の記録を書けない（表に届かない・表が断った）。呼び手は要求全体の 503 audit_unavailable にし、読む操作は値を返さない
 export class AuditUnavailableError extends Error {
   override name = "AuditUnavailableError";
 }
@@ -159,6 +160,9 @@ export async function appendAudit(db: Db, entry: AuditEntry, op: OperationDef | 
     outcome = await writeAtomically(db, [item]);
   } catch (error) {
     if (error instanceof WriteUnavailableError) throw new AuditUnavailableError("操作の記録を書けない", { cause: error });
+    // 表が断った失敗（rejected。SerializationException・取り消しの理由の ValidationError など）も記録を書けなかったことに変わりないため、
+    // 汎用の unavailable でなく audit_unavailable に分けられるよう包む。組み立ての誤り（WriteSpecError など）は包まない
+    if (classifyFailure(error) === "rejected") throw new AuditUnavailableError("操作の記録を表が断った", { cause: error });
     throw error;
   }
   // 同じ記録の行が既にある（記録の ID の重なり）。上書きせず、書けなかったと同じに扱う

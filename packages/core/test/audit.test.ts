@@ -159,6 +159,14 @@ describe("appendAudit", () => {
     await expect(appendAudit(table.db, entry({ itemIndex: null }), projectsGet, clock)).rejects.toBeInstanceOf(AuditUnavailableError);
   });
 
+  it("表が断った失敗（rejected）も AuditUnavailableError に包む", async () => {
+    const table = fakeTable();
+    table.failNext("invalid");
+    const error = await appendAudit(table.db, entry({ itemIndex: null }), projectsGet, clock).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AuditUnavailableError);
+    expect((error as Error).cause).toMatchObject({ name: "ValidationException" });
+  });
+
   it("同じ記録の行が既にあれば上書きせず AuditUnavailableError を投げる", async () => {
     const table = fakeTable();
     await appendAudit(table.db, entry({ itemIndex: null }), projectsGet, clock);
