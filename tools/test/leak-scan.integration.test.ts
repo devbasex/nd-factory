@@ -125,10 +125,18 @@ function overlayConfig(pattern: string): string {
  * スクリプトを子のプロセスで打ち、報告を木の外の一時のファイルに受ける。
  * 規則とファイルの組を照らすため既定で `--paths` を渡す（CI のジョブは渡さない。伏せる側は `paths: false` で確かめる）
  */
-function scan(cwd: string, args: string[], { paths = true }: { paths?: boolean } = {}): ScanResult {
+function scan(
+  cwd: string,
+  args: string[],
+  { paths = true, env }: { paths?: boolean; env?: NodeJS.ProcessEnv } = {},
+): ScanResult {
   const reportPath = join(tempDir("leak-report-"), "report.json");
   const extra = paths ? ["--paths"] : [];
-  const result = spawnSync("bash", [SCRIPT, ...args, ...extra, "--report", reportPath], { cwd, encoding: "utf8" });
+  const result = spawnSync("bash", [SCRIPT, ...args, ...extra, "--report", reportPath], {
+    cwd,
+    encoding: "utf8",
+    ...(env === undefined ? {} : { env }),
+  });
   const reportText = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : null;
   const findings = reportText === null ? [] : (JSON.parse(reportText) as Finding[]);
   return { status: result.status, output: `${result.stdout}${result.stderr}`, reportText, findings };
@@ -424,6 +432,43 @@ describe("履歴の探し", () => {
     expect(result.output).toContain("範囲");
     expect(result.reportText).toBeNull();
   }, TIMEOUT);
+});
+
+/**
+ * 診断にファイルの名前を載せる偽の gitleaks を置いた PATH を返す（v8.30.1 の dir は読めないファイルの診断などに名前を載せる。
+ * 実物で起こす条件は実行の環境に依るので、出力の扱いだけを偽の実行ファイルで確かめる）
+ */
+function fakeGitleaksPath(diagnostic: string): string {
+  const bin = tempDir("leak-fake-bin-");
+  const body = [
+    "#!/usr/bin/env bash",
+    'report=""',
+    'while (($# > 0)); do if [[ "$1" == --report-path ]]; then report="$2"; shift 2; else shift; fi; done',
+    `echo "stdout ${diagnostic}"`,
+    `echo "stderr ${diagnostic}" >&2`,
+    "printf '[]' >\"$report\"",
+    "exit 0",
+  ].join("\n");
+  writeFileSync(join(bin, "gitleaks"), `${body}\n`, { mode: 0o755 });
+  return `${bin}:${process.env.PATH ?? ""}`;
+}
+
+describe("gitleaks の生の出力", () => {
+  for (const mode of ["dir", "git"] as const) {
+    it(`${mode} の探しで、--paths を渡さなければ gitleaks の標準出力と標準エラーに載ったファイルの名前を出さない`, () => {
+      const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+      const root = makeTree({ "a.md": "中身\n" });
+      initRepo(root);
+      commitAll(root, "first");
+      const env = { ...process.env, PATH: fakeGitleaksPath(`docs/${realWord}.md`) };
+      const hidden = scan(root, [mode, ND_CONFIG], { paths: false, env });
+      expect(hidden.status).toBe(0);
+      expect(hidden.output).not.toContain(realWord);
+      const shown = scan(root, [mode, ND_CONFIG], { env });
+      expect(shown.status).toBe(0);
+      expect(shown.output).toContain(`stderr docs/${realWord}.md`);
+    }, TIMEOUT);
+  }
 });
 
 describe("除外の拒み", () => {

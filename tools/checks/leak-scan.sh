@@ -4,13 +4,15 @@
 # gitleaks の除外（値の行の gitleaks:allow・.gitleaksignore・前の報告）を効かなくし、当たりを規則・ファイル・行・コミットだけで出す。
 # 当たった行の残り・コミットの本文・作者は出さない（同じ行の別の秘密や、伏せた値の前後が記録に残るため）。
 # ファイルの名前も秘密の値を含み得るので、--paths を渡さなければ file-<番号>（名前の順の通し番号）に替えて出す。
+# gitleaks の標準出力と標準エラー（読めないファイルの診断などにファイルの名前が載る）は一時のファイルに受け、
+# --paths を渡さなければ出さない（出すのは終了コードと整形した当たりだけ）。
 # 今のディレクトリを探す木の根として打つ。
 #
 # 使い方: leak-scan.sh <dir|git> <設定> [--range <範囲>] [--report <報告のファイル>] [--paths]
 #   dir: 今の木を探す。git: 履歴を探す（--range を渡せばその範囲。マージのコミットの差分を含める）
 #   設定: 必ず渡す。省くと gitleaks は探す木の根の .gitleaks.toml を読み、既定の規則が抜けるため
 #   --report: 当たりを JSON で書く先（探す木の外に置く）。項目は RuleID・File・StartLine・EndLine・Commit だけ
-#   --paths: File に実際のファイルの名前を出す。手元で当たりの場所を引くときだけ渡す（CI のジョブは渡さない）
+#   --paths: File に実際のファイルの名前を出し、gitleaks の生の出力も標準エラーへ出す。手元で当たりの場所を引くときだけ渡す（CI のジョブは渡さない）
 # 終了コード: 0 当たり無し、1 当たりがある・gitleaks が失敗した、2 引数の誤り・除外のファイルがある
 set -euo pipefail
 
@@ -63,6 +65,7 @@ work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
 ignore_dir="$work_dir/ignore"
 raw_report="$work_dir/report.json"
+raw_log="$work_dir/gitleaks.log"
 mkdir "$ignore_dir"
 
 # --verbose を渡さない: gitleaks の詳しい出力は当たった行の残りとコミットの本文を出す
@@ -82,8 +85,14 @@ args=(
 # gitleaks の終了コードを受け、報告を読めなければ 1 で終える
 finish() {
   local status="$1"
+  if [[ "$paths" == true && -s "$raw_log" ]]; then
+    cat "$raw_log" >&2
+  fi
   if [[ ! -s "$raw_report" ]] || ! jq -e 'type == "array"' "$raw_report" >/dev/null 2>&1; then
     echo "leak-scan: gitleaks の報告を読めない（終了コード ${status}）" >&2
+    if [[ "$paths" == false ]]; then
+      echo "leak-scan: gitleaks の出力はファイルの名前を含み得るので伏せた。手元で同じ引数に --paths を足して打つと出る" >&2
+    fi
     exit 1
   fi
   local findings
@@ -109,7 +118,7 @@ finish() {
 
 if [[ "$mode" == dir ]]; then
   status=0
-  gitleaks dir . "${args[@]}" || status=$?
+  gitleaks dir . "${args[@]}" >"$raw_log" 2>&1 || status=$?
   finish "$status"
 fi
 
@@ -124,5 +133,5 @@ if [[ -n "$range" ]]; then
   log_opts="-m ${range}"
 fi
 status=0
-gitleaks git . --log-opts="$log_opts" "${args[@]}" || status=$?
+gitleaks git . --log-opts="$log_opts" "${args[@]}" >"$raw_log" 2>&1 || status=$?
 finish "$status"
