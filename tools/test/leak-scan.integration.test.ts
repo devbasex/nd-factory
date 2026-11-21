@@ -29,7 +29,7 @@ type ScanResult = { status: number | null; output: string; reportText: string | 
 const { tempDir, makeTree } = useTempTree("leak-scan-");
 
 beforeAll(() => {
-  requireBinary("gitleaks", ["version"], "gitleaks が PATH に無い。leak-check のジョブと同じ固定の版を置いて打つ");
+  requireBinary(spawnSync("gitleaks", ["version"], { encoding: "utf8" }), "gitleaks が PATH に無い。leak-check のジョブと同じ固定の版を置いて打つ");
 });
 
 function pick(chars: string, length: number): string {

@@ -54,7 +54,7 @@ afterEach(() => {
 });
 
 beforeAll(() => {
-  requireBinary("zizmor", ["--version"], "zizmor が PATH に無い。workflow-audit のジョブと同じ固定の版を置いて打つ");
+  requireBinary(spawnSync("zizmor", ["--version"], { encoding: "utf8" }), "zizmor が PATH に無い。workflow-audit のジョブと同じ固定の版を置いて打つ");
 });
 
 /** 今のワークフローと zizmor の設定を写し、足すワークフローを置いた一時の木で、ジョブの点検を打つ */
