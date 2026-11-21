@@ -22,7 +22,7 @@ import {
   toRow,
 } from "../../src/db-prep/sql-executor.ts";
 import { FakeSqlExecutor } from "./fake-sql-executor.ts";
-import { describePg, toPositional, withTestDatabase } from "./pg-executor.ts";
+import { describePg, gatedClientConfig, toPositional, withTestDatabase } from "./pg-executor.ts";
 
 // p-retry に渡した値を読むため、本物の関数を包んで呼ばれ方を残す
 vi.mock("p-retry", async (importOriginal) => {
@@ -535,6 +535,21 @@ describe("toRow", () => {
     expect(() => toRow({ t: new Date(0) })).toThrow();
     expect(() => toRow({ o: { a: 1 } })).toThrow();
     expect(() => toRow([1])).toThrow();
+  });
+});
+
+describe("gatedClientConfig", () => {
+  it("URL の接続の設定（sslmode・ポート・データベース）を残し、役割とパスワードの取り方だけを差し替える", () => {
+    const password = async (): Promise<string> => "acme-gated";
+    const config = gatedClientConfig(
+      "postgres://acme_admin:acme-admin-pw@db.example.test:6543/acme_db?sslmode=require&application_name=acme",
+      "acme_role",
+      password,
+    );
+    expect(config).toMatchObject({ host: "db.example.test", port: 6543, database: "acme_db", application_name: "acme", user: "acme_role" });
+    expect(config.ssl).toBeTruthy();
+    expect(config.password).toBe(password);
+    expect(config).not.toHaveProperty("connectionString");
   });
 });
 
