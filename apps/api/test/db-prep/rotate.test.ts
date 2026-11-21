@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { type TerminateOptions, rotateRole, terminateRoleConnections } from "../../src/db-prep/rotate.ts";
 import { ADMIN_DATABASE, type Row, type SqlExecutor } from "../../src/db-prep/sql-executor.ts";
 import { FakeSqlExecutor, type SqlCall } from "./fake-sql-executor.ts";
-import { type TestDatabase, describePg, withTestDatabase } from "./pg-executor.ts";
+import { type TestDatabase, describePg, describePgDisposable, withTestDatabase } from "./pg-executor.ts";
 
 // 作り物の値だけを使う
 const PROJECT = { projectId: "prj_acme_a", database: "acme_db_aaaaaaaa", role: "acme_role_aaaaaaaa" };
@@ -35,6 +35,8 @@ type FakeState = {
   holders?: string[];
   // 起動の途中と見た pid のうち、まだ pg_stat_activity に載っていないもの。渡された :starting の pid から選ぶ（既定はどれも載った）
   stillStarting?: (starting: string[]) => string[];
+  // サーバーの認証の時間切れ（秒。既定 60）
+  authTimeoutS?: unknown;
 };
 
 function fakeDb(state: FakeState = {}): FakeSqlExecutor {
@@ -62,6 +64,7 @@ function fakeDb(state: FakeState = {}): FakeSqlExecutor {
       const given = raw === "" ? [] : raw.split(",");
       return [{ remaining: n ?? 0, starting: (state.stillStarting?.(given) ?? []).join(",") }];
     }
+    if (sql.includes("AS auth_timeout_s")) return [{ auth_timeout_s: "authTimeoutS" in state ? (state.authTimeoutS as Row[string]) : 60 }];
     if (sql.includes("AS cleared")) return [{ cleared: 1 }];
     if (sql.includes("AS locked")) return [{ locked: 1 }];
     return [];
@@ -317,11 +320,68 @@ describe("terminateRoleConnections（作り物の SqlExecutor）", () => {
     }
   });
 
-  it("起動の途中の接続が期限まで残れば、その数を残りに足して返す", async () => {
-    const fake = fakeDb({ recorded: current, remaining: [1], holders: ["101,102"], stillStarting: (given) => given });
+  it("起動の途中の接続が残る間だけ、期限を認証の時間切れ＋余裕まで延ばし、そこでも残ればその数を残りに足して返す", async () => {
+    const fake = fakeDb({ recorded: current, remaining: [1], holders: ["101,102"], stillStarting: (given) => given, authTimeoutS: 30 });
     const clock = fakeClock();
     expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options())).toEqual({ kind: "done", remaining: 3 });
+    // 期限の 15 秒ではなく、認証の時間切れ 30 秒＋余裕 2 秒
+    expect(clock.now()).toBe(32_000);
+    expect(fake.statements().filter((x) => x.includes("AS auth_timeout_s"))).toHaveLength(1);
     expect(fake.calls.at(-1)).toEqual({ kind: "commit", transactionId: "tx-1" });
+  });
+
+  it("ほかの役割の認証が期限を過ぎて止まっていても、時間切れで終われば、対象の役割の残り 0 で返す", async () => {
+    // 102 はほかのプロジェクトの認証の途中。20 秒でサーバーに切られて鎖を放す（載らない）
+    const clock = fakeClock();
+    const fake = fakeDb({
+      recorded: current,
+      holders: ["102"],
+      stillStarting: (given) => (clock.now() < 20_000 ? given : []),
+    });
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options())).toEqual({ kind: "done", remaining: 0 });
+    expect(clock.now()).toBe(20_000);
+  });
+
+  it("延ばす上限は startingWaitCapMs で切り詰める", async () => {
+    const fake = fakeDb({ recorded: current, holders: ["101"], stillStarting: (given) => given, authTimeoutS: 600 });
+    const clock = fakeClock();
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options({ startingWaitCapMs: 40_000 }))).toEqual({ kind: "done", remaining: 1 });
+    expect(clock.now()).toBe(40_000);
+  });
+
+  it("起動の途中の接続がいなければ、残りが期限まで 0 にならなくても認証の時間切れを読まずに期限で返す", async () => {
+    const fake = fakeDb({ recorded: current, remaining: [1] });
+    const clock = fakeClock();
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options())).toEqual({ kind: "done", remaining: 1 });
+    expect(clock.now()).toBe(15_000);
+    expect(fake.statements().some((x) => x.includes("AS auth_timeout_s"))).toBe(false);
+  });
+
+  it("期限の後に起動の途中の接続が古い接続として載っても、余裕の内で切って読み直してから返す", async () => {
+    // 101 は期限の後の 16 秒の切りの後・読みの前に認証を終えて載り、次の切りで終わる
+    const clock = fakeClock();
+    let state: "starting" | "visible" | "gone" = "starting";
+    const fake = fakeDb({ recorded: current, holders: ["101"], stillStarting: (given) => (state === "starting" ? given : []) });
+    const inner = fake.respond;
+    fake.respond = (sql, params) => {
+      if (sql.includes("AS signalled") && state === "visible") state = "gone";
+      if (sql.includes("AS remaining")) {
+        if (state === "starting" && clock.now() >= 16_000) state = "visible";
+        const [row] = inner(sql, params);
+        return [{ ...row, remaining: state === "visible" ? 1 : 0 }];
+      }
+      return inner(sql, params);
+    };
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options())).toEqual({ kind: "done", remaining: 0 });
+    expect(clock.now()).toBe(16_500);
+  });
+
+  it("認証の時間切れが読めない形なら投げて巻き戻す", async () => {
+    for (const authTimeoutS of [null, "60", 0, 1.5]) {
+      const fake = fakeDb({ recorded: current, holders: ["101"], stillStarting: (given) => given, authTimeoutS });
+      await expect(terminateRoleConnections(fake, PROJECT.role, 3, fakeClock().options())).rejects.toThrow();
+      expect(fake.calls.at(-1)).toEqual({ kind: "rollback", transactionId: "tx-1" });
+    }
   });
 
   it("鎖を持つ pid と起動の途中の pid が読めない形なら投げて巻き戻す", async () => {
@@ -577,12 +637,40 @@ describePg("terminateRoleConnections（PostgreSQL）", () => {
       const old = await gatedOldConnection(db, r);
       try {
         expect(await rotateRole(sql, { ...r, password: newPassword(), seq: 1 })).toMatchObject({ kind: "applied" });
-        const result = await terminateRoleConnections(sql, r.role, 1, { deadlineMs: 300, pollMs: 50 });
+        // 起動の途中の接続を待つ上限も期限にそろえる（既定は認証の時間切れまで待つ）
+        const result = await terminateRoleConnections(sql, r.role, 1, { deadlineMs: 300, pollMs: 50, startingWaitCapMs: 300 });
         expect(result.kind).toBe("done");
         expect(result.kind === "done" && result.remaining).toBeGreaterThanOrEqual(1);
       } finally {
         old.release();
         await old.connected;
+      }
+    });
+  });
+
+  it("ほかの役割の認証が期限を過ぎて止まっていても、終われば対象の役割の差し替えは残り 0 で終わる", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      const r = await newRole(db);
+      const other = await newRole(db);
+      const old = await connectAs(db, r);
+      await old.query("SELECT 1");
+      // ほかのプロジェクトの役割の接続が、認証の途中で止まっている
+      const stalled = await gatedOldConnection(db, other);
+      try {
+        expect(await rotateRole(sql, { ...r, password: newPassword(), seq: 1 })).toMatchObject({ kind: "applied" });
+        const begin = performance.now();
+        // 期限の 300 ミリ秒を過ぎた 1.5 秒の後に、ほかの役割の認証を終えさせる
+        setTimeout(() => stalled.release(), 1_500);
+        const result = await terminateRoleConnections(sql, r.role, 1, { deadlineMs: 300, pollMs: 50 });
+        expect(result).toEqual({ kind: "done", remaining: 0 });
+        expect(performance.now() - begin).toBeGreaterThanOrEqual(1_400);
+        expect(await alive(old)).toBe(false);
+        // ほかの役割の接続は切らない
+        expect(await stalled.connected).toBe(true);
+        expect(await alive(stalled.client)).toBe(true);
+      } finally {
+        stalled.release();
       }
     });
   });
@@ -648,6 +736,47 @@ describePg("terminateRoleConnections（PostgreSQL）", () => {
       expect(await alive(old)).toBe(true);
       // 番号 2 の境の時刻も記さない
       expect((await recordedSeq(db, r.role))?.cutoff).toBeNull();
+    });
+  });
+});
+
+// サーバーの認証の時間切れ（クラスタ全体の設定）を縮めるため、使い捨てのクラスタだけで打つ
+describePgDisposable("terminateRoleConnections（PostgreSQL・認証の時間切れ）", () => {
+  it("ほかの役割の認証を止めたままでも、サーバーの時間切れの後に対象の役割の差し替えが残り 0 で終わる", async () => {
+    await withTestDatabase(async (db) => {
+      const admin = await db.connect();
+      await admin.query("ALTER SYSTEM SET authentication_timeout = '3s'");
+      await admin.query("SELECT pg_reload_conf()");
+      try {
+        // 設定の読み直しが届いてから接続を始める（認証の時間切れは接続を始めたときの値で決まる）
+        for (let i = 0; i < 50; i += 1) {
+          const c = await db.connect();
+          const v = (await c.query<{ s: string }>("SELECT setting AS s FROM pg_settings WHERE name = 'authentication_timeout'")).rows[0]?.s;
+          await c.end();
+          if (v === "3") break;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        const sql = db.executor();
+        const r = await newRole(db);
+        const other = await newRole(db);
+        const old = await connectAs(db, r);
+        await old.query("SELECT 1");
+        // ほかのプロジェクトの役割の接続を、認証の途中で止めたまま放さない
+        const stalled = await gatedOldConnection(db, other);
+        try {
+          expect(await rotateRole(sql, { ...r, password: newPassword(), seq: 1 })).toMatchObject({ kind: "applied" });
+          const result = await terminateRoleConnections(sql, r.role, 1, { deadlineMs: 300, pollMs: 100 });
+          expect(result).toEqual({ kind: "done", remaining: 0 });
+          expect(await alive(old)).toBe(false);
+          // 止めた接続はサーバーが時間切れで切った
+          expect(await stalled.connected).toBe(false);
+        } finally {
+          stalled.release();
+        }
+      } finally {
+        await admin.query("ALTER SYSTEM RESET authentication_timeout");
+        await admin.query("SELECT pg_reload_conf()");
+      }
     });
   });
 });

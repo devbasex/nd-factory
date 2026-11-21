@@ -13,9 +13,16 @@ export type TerminateOptions = {
   // 切りと読み直しが共にする期限と、読み直しの間隔（既定 15,000 と 500。provisionProject の手順の 5 とそろえる）
   deadlineMs?: number;
   pollMs?: number;
+  // 起動の途中の接続を待つ上限（既定 120,000）。起動の途中の接続が残る間だけ、期限をサーバーの認証の時間切れ
+  // （authentication_timeout）に余裕を足した所まで延ばし、この上限で切り詰める
+  startingWaitCapMs?: number;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 };
+
+// 認証の時間切れに足す余裕。時間切れで切られた接続が終わるまでと、認証を終えて載った古い接続へシグナルを送って
+// 終わるのを読むまでの時間
+const STARTING_GRACE_MS = 2_000;
 
 // 番号は表の integer の列に入る
 const MAX_SEQ = 2_147_483_647;
@@ -80,12 +87,22 @@ const REMAINING_OLD =
   " (SELECT coalesce(string_agg(u.pid::text, ','), '') FROM unnest(string_to_array(CAST(:starting AS text), ',')::int[]) AS u(pid)" +
   " WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity a WHERE a.pid = u.pid))::text AS starting";
 
+// サーバーの認証の時間切れ（秒）。起動の途中の接続は、認証をこの時間の内に終えるか、サーバーに切られる
+const AUTH_TIMEOUT = "SELECT setting::int AS auth_timeout_s FROM pg_catalog.pg_settings WHERE name = 'authentication_timeout'";
+
 function pidList(raw: unknown, what: string): string[] {
   if (typeof raw !== "string" || !/^(\d+(,\d+)*)?$/.test(raw)) throw new Error(`${what}を読めなかった`);
   return raw === "" ? [] : raw.split(",");
 }
 
 type TxOpts = { database: string; transactionId: string };
+
+async function authTimeoutMs(sql: SqlExecutor, opts: TxOpts): Promise<number> {
+  const [row] = await sql.execute(AUTH_TIMEOUT, undefined, opts);
+  const s = row?.auth_timeout_s;
+  if (typeof s !== "number" || !Number.isInteger(s) || s < 1) throw new Error("認証の時間切れを読めなかった");
+  return s * 1000;
+}
 
 // 1 つのトランザクションで打つ。途中で投げたら巻き戻して元の失敗を投げ、確定が投げたらそのまま投げる
 async function inTransaction<T>(sql: SqlExecutor, fn: (opts: TxOpts) => Promise<T>): Promise<T> {
@@ -156,7 +173,9 @@ export async function rotateRole(sql: SqlExecutor, project: ProjectIdent & { pas
 // rotateRole の確定の後に、別のトランザクションで同じ鎖を取り、境の時刻より前に始まった役割の接続を切る。
 // 記した番号が n より大きければ何も切らない。境の時刻が空なら記す。切りと読み直しは切り始めから 1 つの期限を共にし、
 // 期限を過ぎても読み直しを 1 回打ってから、その数を返す（1 以上なら呼ぶ側が connections_remain にする）。
-// 数には、確定の前に古い検証子を読んで起動の途中にある接続も入れる（0 を返した後に古いパスワードの接続が成り立たないように）
+// 確定の前に古い検証子を読んで起動の途中にありうる接続（役割が分からない）は、載るか終わるまで 0 を返さない（0 を返した後に
+// 古いパスワードの接続が成り立たないように）。それが残る間だけ期限を認証の時間切れまで延ばし、そこでも残るものを数に入れる
+// （ほかのプロジェクトの認証が止まっていても、サーバーが時間切れで切るため、対象の役割の差し替えは残り 0 で終わる）
 export async function terminateRoleConnections(
   sql: SqlExecutor,
   role: string,
@@ -167,6 +186,7 @@ export async function terminateRoleConnections(
   assertSeq(seq);
   const deadlineMs = options.deadlineMs ?? 15_000;
   const pollMs = options.pollMs ?? 500;
+  const startingWaitCapMs = options.startingWaitCapMs ?? 120_000;
   const now = options.now ?? (() => performance.now());
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const roleParam = [{ name: "role_name", value: role }];
@@ -178,13 +198,20 @@ export async function terminateRoleConnections(
     if (got.recorded > seq) return { kind: "superseded_greater", recorded: got.recorded };
     if (!got.cutoffRecorded) await sql.execute(RECORD_CUTOFF, [...roleParam, { name: "seq", value: seq }], opts);
 
-    const deadline = now() + deadlineMs;
+    const start = now();
+    const deadline = start + deadlineMs;
+    const hardLimit = start + startingWaitCapMs;
+    // 起動の途中の接続を待つ所。起動の途中の接続が初めて残ったときに、認証の時間切れを読んで決める
+    let startingLimit: number | undefined;
+    // 起動の途中の pid が最後に載ったか終わった後の余裕の終わり（載った古い接続を切って読み直す間）
+    let graceLimit = -Infinity;
     // 一覧を読む前にも写しを捨てる
     await sql.execute(CLEAR_SNAPSHOT, undefined, opts);
     await sql.execute(SIGNAL_OLD, roleParam, opts);
     // 起動の途中と見た pid。最初の読みで決め、以後は載ったか終わったものを外していく（後から起動した接続は新しい検証子を読む）
     let starting: string[] | undefined;
     for (;;) {
+      const before = starting?.length;
       // 期限を過ぎていても、読み直しを 1 回打ってから決める
       const [held] = await sql.execute(VXID_HOLDERS, undefined, opts);
       const holders = pidList(held?.holders, "起動の途中の接続");
@@ -195,10 +222,17 @@ export async function terminateRoleConnections(
       const visible = row?.remaining;
       if (typeof visible !== "number") throw new Error("残りの接続の数を読めなかった");
       starting = pidList(row?.starting, "起動の途中の接続");
-      // 起動の途中の接続は役割が分からないため、古い検証子を持ちうるものとして残りに数える
+      // 起動の途中の接続は役割が分からない（ほかのプロジェクトの接続でもありうる）ため、0 を返さずに、載るか終わるまで待つ。
+      // 認証の時間切れを過ぎた接続はサーバーが切るため、その所まで期限を延ばせば、ほかの役割の認証が止まっていても終わる。
+      // 延ばした所でもまだ残るものだけを、古い検証子を持ちうるものとして残りに数える
       const remaining = visible + starting.length;
       if (remaining === 0) return { kind: "done", remaining };
-      const left = deadline - now();
+      if (before !== undefined && starting.length < before) graceLimit = Math.min(now() + STARTING_GRACE_MS, hardLimit);
+      if (starting.length > 0 && startingLimit === undefined) {
+        startingLimit = Math.min(start + (await authTimeoutMs(sql, opts)) + STARTING_GRACE_MS, hardLimit);
+      }
+      const limit = Math.max(deadline, starting.length > 0 ? (startingLimit ?? deadline) : graceLimit);
+      const left = limit - now();
       if (left <= 0) return { kind: "done", remaining };
       await sleep(Math.min(pollMs, left));
       // 待つ間に起動を終えて載った古い接続にも、シグナルを送る
