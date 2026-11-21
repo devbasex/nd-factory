@@ -1,6 +1,6 @@
 # 検査: 値の漏れと設計の決まりの破れと NDF の契約の食い違いを、Pull Request ごとと定期の CI で落とす（#1）
 
-全体の設計が「検査が落とす」と決めた決まり（実際の値と秘密を置かない・横断の部品（時計・ID・ログと伏せ字・外部の呼び出しなどを 1 か所にまとめた `packages/core` の部品）を 1 か所に置く・依存の向き・使える量の判定は 1 か所・画面の操作はすべて API と MCP にもある・NDF の契約に載るものだけでやり取りする）のうち、今の CI が落とせるのは参照の検査と CI の定義のテストだけである。構文で見つかる破れは ESLint の組み込みの規則を置き場ごとに設定して今の `check` で落とし、形の往復と I14 の対応はリポジトリを読む単体テストで、漏れと NDF の契約の照合は資格情報を持たない新しい 2 つのジョブで落とす。形の正本（型や OpenAPI などを生成する元になる `packages/contracts` の zod の定義と操作の表）の側（操作の表・生成物・受ける契約の組（nd-factory が受け入れる NDF の契約の版と中身の sha256 の対の集まり））は #2 が作り、この設計は検査がそこから何を読むかと、#2 へ渡す欠けを決める。比べた案は「決定の記録」に、候補の調べは「外部の調査」にある。
+全体の設計が「検査が落とす」と決めた決まり（実際の値と秘密を置かない・横断の部品（時計・ID・ログと伏せ字・外部の呼び出しなどを 1 か所にまとめた `packages/core` の部品）を 1 か所に置く・依存の向き・使える量の判定は 1 か所・画面の操作はすべて API と MCP にもある・NDF の契約に載るものだけでやり取りする）のうち、今の CI が落とせるのは参照の検査と CI の定義のテストだけである。構文で見つかる破れは ESLint の組み込みの規則を置き場ごとに設定して今の `check` で落とし、形の往復と I14 の対応はリポジトリを読む単体テストで、漏れは gitleaks で、NDF の契約の照合は資格情報を持たない新しいジョブで落とす。自前で作る部分は、既存のツールで置き換えられるかを調べて残したものだけにする（MVV 版 2 の Value 15）。形の正本（型や OpenAPI などを生成する元になる `packages/contracts` の zod の定義と操作の表）の側（操作の表・生成物・受ける契約の組（nd-factory が受け入れる NDF の契約の版と中身の sha256 の対の集まり））は #2 が作り、この設計は検査がそこから何を読むかと、#2 へ渡す欠けを決める。比べた案は「決定の記録」に、候補の調べは「外部の調査」にある。
 
 ## 今の姿
 
@@ -39,6 +39,7 @@ flowchart LR
 - 全体の設計で決めた「落とすもの」の集合は変えない（要求の前提 1）。#41 の決定が承認で変われば、この設計の F23 の節を直す
 - #2（K2）の設計が同時に進む。形の往復と、検査が読む形の正本のデータは、両方の課題の境目に当たる（実行計画の変更重複）
 - `ndf_ref` を読む行に大小の比べの記号を置くと参照の検査が落ちる。この文書も追跡するファイルとして読まれる
+- MVV 版 2（PR #54。利用者が承認し、main へのマージ待ち）の開発の目標 Value 10〜16 と、画面を React 19 と TSX で組む決定 140 の改め（PR #53。同じくマージ待ち）に従う。どちらかの内容が承認と違ってマージされたら、この設計を直す
 
 ## 解き方の全体像
 
@@ -54,18 +55,19 @@ flowchart TB
     subgraph nc["ndf-contract.yml（新設。pull_request・push・毎日・手動）"]
         ndfc["ndf-contract"]
     end
-    check --> lint["ESLint の置き場ごとの規則<br/>境界・依存の向き・I8・画面の HTTP の経路"]
+    check --> lint["ESLint の置き場ごとの規則<br/>境界・依存の向き・I8・画面の HTTP の経路・React と TSX"]
     check --> unit["リポジトリを読む単体テスト<br/>形の往復・I14・CI の定義（すべてのワークフロー）"]
-    leak --> shapes["packages/contracts/data/secret-shapes.json<br/>と CI の秘密 LEAK_CHECK_TERMS"]
+    leak --> gl["gitleaks（既定の規則と、組んだ規則）"]
+    gl --> shapes["packages/contracts/data/secret-shapes.json<br/>と CI の秘密 LEAK_CHECK_TERMS"]
     ndfc --> up["devbasex/ai-plugins の<br/>固定の点と既定の枝の先端の契約"]
     ndfc --> use["形の正本の NDF の契約の使い方（#2）"]
     decl[".ndf/project.json の必須のチェック 6 つ"] -.CI の定義のテストが照らす.- ci
     decl -.-> nc
 ```
 
-- 構文で見つかる破れ（横断の部品の外での直の利用・依存の向きに反する import・料金プランの値の判定の外での import と名前の比べ・画面の HTTP の経路の直書き・API の振り分けと API Gateway の定義への HTTP の経路の手書き）は、`eslint.config.js` が `tools/checks/` の規則の組を置き場ごとに読み込み、今の `check` が落とす
+- 構文で見つかる破れ（横断の部品の外での直の利用・依存の向きに反する import・料金プランの値の判定の外での import と名前の比べ・画面の HTTP の経路の直書き・API の振り分けと API Gateway の定義への HTTP の経路の手書き・画面の外での React の import と TSX のファイル）は、`eslint.config.js` が `tools/checks/` の規則の組を置き場ごとに読み込み、今の `check` が落とす
 - 形の往復と I14 の対応は、形の正本と生成物を読む単体テスト（`tools/test/`）が落とす。I15（日時は時刻帯つきの UTC で、金額は `amount_minor` と `currency` の組で受ける）と I12（利用者向けの操作の要求と応答は配列で、1 件も配列の 1 要素として扱う）の形もここで照らす（どちらも [API と MCP の文書](../docs/design/api.md) の不変条件）
-- 漏れの検査は新しいジョブ `leak-check` が、秘密の形のデータと CI の秘密の実際の値で、`docs/` を含む追跡しているファイルを探す
+- 漏れの検査は新しいジョブ `leak-check` が、gitleaks の既定の規則と、秘密の形のデータと CI の秘密の実際の値から組んだ規則で、`docs/` を含む追跡しているファイルと、Pull Request の途中のコミットを探す
 - NDF の契約の照合は新しいワークフローのジョブ `ndf-contract` が、固定の点を変えた Pull Request・main への push・毎日 1 回・手動で照らし、ほかの Pull Request では照らさずに通る
 - 必須のチェックは 6 つ（`check`・`synth`・`e2e`・`ref-check`・`leak-check`・`ndf-contract`）になり、CI の定義のテストがすべてのワークフローを読んで宣言との食い違いと資格情報の語を落とす
 
@@ -73,14 +75,42 @@ flowchart TB
 
 | 要素 | 責務 | 走るジョブ |
 | --- | --- | --- |
-| 規則の組（`tools/checks/src/lint-rules.ts`、新設） | 境界・依存の向き・I8・画面の HTTP の経路の直書きを、ESLint の組み込みの規則（`no-restricted-imports`・`no-restricted-syntax`・`no-restricted-globals`・`no-restricted-properties`）の設定として置き場ごとに組む。期限つきの控え（下の決定 5）を外す置き場として持つ | `check` |
-| 漏れの検査（`tools/checks/src/leak-check.ts`、新設） | 形の当たりと実際の値の当たりを探し、「種類・ファイル・行」だけを出す | `leak-check` |
+| 規則の組（`tools/checks/src/lint-rules.ts`、新設） | 境界・依存の向き・I8・画面の HTTP の経路の直書き・画面の外の React と TSX を、ESLint の組み込みの規則（`no-restricted-imports`・`no-restricted-syntax`・`no-restricted-globals`・`no-restricted-properties`）の設定として置き場ごとに組む。期限つきの控え（下の決定 5）を外す置き場として持つ | `check` |
+| 漏れの検査（`tools/checks/src/leak-check.ts`、新設） | gitleaks（LIB1）の設定を秘密の形のデータと CI の秘密から実行の時に組んで起こし、報告を外しで絞って、「規則・ファイル・行」だけを出す。探す処理そのものは gitleaks が持つ | `leak-check` |
 | 秘密の形のデータ（`packages/contracts/data/secret-shapes.json` と形 `packages/contracts/src/secret-shapes.ts`、新設） | 値の形（私有鍵の頭・token の頭）と、漏れの検査が使うインフラの値の形（アカウント ID・ARN・資源の ID・端点）と、作り物の値の一覧を持つ。#2 の伏せ字も同じファイルを読む | — |
 | 形の往復の検査（`tools/checks/src/round-trip.ts`、新設） | 操作ごとの見本とその変形を、zod の形・生成した JSON Schema・OpenAPI の要素の形・MCP の道具の入力の形の 4 つで検証し、結果が食い違う組を返す。I15 と I12 の形も照らす | `check`（単体テスト） |
 | I14 の対応の検査（`tools/checks/src/operation-coverage.ts`、新設） | 操作の表・MCP の道具の一覧・HTTP の経路の登録・画面が呼ぶ操作の名前・機能 F1〜F20 を突き合わせ、欠けと余りを返す | `check`（単体テスト） |
 | NDF の契約の照合（`tools/checks/src/ndf-contract-check.ts`、新設） | 固定の点と既定の枝の先端の契約を取り、形の正本の NDF の契約の使い方（#2）と照らす。固定の点の食い違いで失敗し、先端だけの食い違いは要約に並べる | `ndf-contract` |
-| CI の定義のテスト（`tools/test/ci-definition.test.ts`、変更） | `.github/workflows/` のすべてのワークフローを読み、Pull Request で走るジョブの集合と必須のチェックの宣言の一致・資格情報の語の無さ・足したジョブの権限を照らす | `check` |
+| CI の定義のテスト（`tools/test/ci-definition.test.ts`、変更） | `.github/workflows/` のすべてのワークフローを `yaml`（LIB12）で解いて読み、Pull Request で走るジョブの集合と必須のチェックの宣言の一致・資格情報の語の無さ・足したジョブの権限を照らす | `check` |
 | 参照の検査（`tools/ref-check`、変えない） | 追跡しているファイルをすべて読むため、足すワークフローも今のまま対象に入る。テストだけを足す | `ref-check` |
+
+## 自前で作る部分と既存のツール
+
+検査ごとに、自前で作る部分を広く使われる既存のツールで置き換えられるかを調べた（MVV 版 2 の Value 15。候補は「外部の調査」の表）。置き換えたのは漏れの検査の探す処理と、CI の定義のテストのワークフローの読み方の 2 つである。
+
+| 検査・部品 | 使う既存のツール | 比べて使わなかったもの | 自前で残す部分と理由 |
+| --- | --- | --- | --- |
+| 漏れの検査 | gitleaks の CLI（LIB1。決定 3） | 自前の正規表現の走査・secretlint（LIB3）・trufflehog（LIB2）・GitHub の secret scanning（PRD1） | 設定を形の正本のデータと CI の秘密から組む包み・外しの件数の照らし・パスの伏せ字。gitleaks は nd-factory の作り物の値と外しの件数の決まりを知らないため |
+| 境界・依存の向き・I8・画面の HTTP の経路・React と TSX | ESLint の組み込みの規則（LIB5・LIB7。決定 1） | dependency-cruiser（LIB4）・eslint-plugin-boundaries（LIB6）・eslint-plugin-import-x（LIB10） | 規則の組の設定と控え。規則そのものは ESLint が持つ |
+| 形の往復 | ajv（LIB8）・zod の `z.toJSONSchema`（LIB9。決定 8） | fast-check と zod-fast-check（LIB13） | 見本を崩す 4 種類の変形と、4 つの形の結果の比べ。zod 4 から値を作る保守された部品が無いため |
+| I14 の対応 | TypeScript の構文木（このリポジトリが既に使う `typescript`） | — | 操作の表と画面・MCP・経路・機能の突き合わせ。nd-factory の操作の表の形に固有の照らしで、置き換えられる道具の候補を挙げられなかった（「外部の調査」の確かめられなかったこと） |
+| NDF の契約の照合（F23） | git（取得）・形の正本の判定（#2） | — | 契約のファイルと形の正本のデータの照らし。NDF の契約の形に固有の照らしで、置き換えられる道具の候補を挙げられなかった（同上） |
+| CI の定義のテスト | `yaml`（LIB12。決定 10） | actionlint・zizmor（LIB14） | 必須のチェックの宣言とジョブの集合の一致・資格情報の語・`permissions` の照らし。全体の設計が決めた照らしで、actionlint と zizmor は持たない |
+
+knip（LIB11）は使っていないファイル・書き出し・依存を見つけ、Value 13 の「使わなくなったコードを残さない」に効く。zizmor はワークフローの危うい書き方を見つける。どちらも全体の設計の検査の表に無い検査を足すことになり、この課題で足すと決め直しに当たるので、全体の設計に足すかを決める課題として #57 に起票した。
+
+### 開発の目標との照らし
+
+MVV 版 2 の Value 10〜14・16 と、この設計の決定を照らした。食い違ったのは CI の定義のテストの行の読み方（Value 15・16）だけで、決定 10 で直した。
+
+| Value | 照らした結果 |
+| --- | --- |
+| 10 正しいデータ構造 | 秘密の形・作り物の値は `secret-shapes.json` の 1 か所に置き、gitleaks の設定と伏せ字はそこから組む。控えと外しは「何を・なぜ・いつまで」だけを持ち、値を写さない |
+| 11 責務の分かれた設計 | 検査の判定は入出力を引数で受ける関数に置き、git・gitleaks・ネットワークの取得は CLI の端の関数に寄せる。NDF の取得は URL を引数で差し替え、テストはネットワークを使わない |
+| 12 リファクタリングを続ける | 構造を変える骨組み（#2・#4）が控えを消す形にし、直した後に控えが残るとテストが落ちる（決定 5） |
+| 13 重複と冗長を作らない | 形の照らしは形の正本と生成物から読み、写しを持たない。gitleaks の版と要約値はワークフローの 1 か所だけに書く。必須のチェックは宣言と GitHub の保護の 2 か所に残る（GitHub の保護は資格情報なしに読めない。「影響と危険」） |
+| 14 モダンな開発の手順 | 検査ごとに先に落ちるテストを書く（テスト設計）。依存を自動で新しく保つ仕組み（Dependabot）は #14 の対象範囲にある |
+| 16 前の形に縛られない | 今の CI の定義のテストの行の読み方を出発点にせず、解析器で読む形へ変えた（決定 10） |
 
 ## #2 との境目
 
@@ -112,17 +142,18 @@ flowchart TB
 
 決定の番号はこの文書の中の番号で、全体の設計の決定の番号（`docs/design/decisions.md` の置き場）とは別である。
 
-### 決定 1: 構文で見つかる破れを依存を足さずに今の CI で落とすため、境界・依存の向き・I8・画面の HTTP の経路を ESLint の組み込みの規則で置き場ごとに縛る
+### 決定 1: 構文で見つかる破れを依存を足さずに今の CI で落とすため、境界・依存の向き・I8・画面の HTTP の経路・画面の外の React と TSX を ESLint の組み込みの規則で置き場ごとに縛る
 
-- **質問**: 境界の検査・依存の向き・I8 の「判定の外の比べ」・画面の HTTP の経路の直書きを、どの道具で落とすか
-- **選んだ案**: ESLint の組み込みの 4 つの規則を、`tools/checks/src/lint-rules.ts` が置き場（`files` の glob）ごとの設定として組み、`eslint.config.js` が読み込む。型だけの import は `@typescript-eslint/no-restricted-imports` の `allowTypeImports` で許す。縛る置き場の設定は行の中の無効化の注釈（`eslint-disable`）を受けない（`linterOptions.noInlineConfig`）。違反を入れた文字列を ESLint の API で検査する単体テストで、規則ごとに落ちることを確かめる
+- **質問**: 境界の検査・依存の向き・I8 の「判定の外の比べ」・画面の HTTP の経路の直書きと、プラットフォームの言語と書き方の決まり（決定 140）の「画面は React 19 の部品を TSX で書き、画面の外のコードは TSX と React を import しない」を、どの道具で落とすか
+- **選んだ案**: ESLint の組み込みの 4 つの規則を、`tools/checks/src/lint-rules.ts` が置き場（`files` の glob）ごとの設定として組み、`eslint.config.js` が読み込む。型だけの import は `@typescript-eslint/no-restricted-imports` の `allowTypeImports` で許す。縛る置き場の設定は行の中の無効化の注釈（`eslint-disable`）を受けない（`linterOptions.noInlineConfig`）。画面の置き場（`apps/web/src`）の組は `*.ts` と `*.tsx` の両方に掛け、JSX の属性の値と本文も文字列として照らす。画面の外では `react`・`react-dom`・`@vitejs/plugin-react` の import と `*.tsx` のファイルを落とす（組 `deps.react`・`files.tsx`）。違反を入れた文字列を ESLint の API で検査する単体テストで、規則ごとに落ちることを確かめる
 - 採らなかった案: dependency-cruiser で依存の向きを縛る（依存を 1 つ足し、境界と I8 は別の道具になる。依存の向きは `no-restricted-imports` の置き場ごとの設定で表せる）
-- 採らなかった案: eslint-plugin-boundaries（依存を 1 つ足す。ESLint 10 での動作を確かめられなかった。境界の検査の「直の利用」は import でなく呼び出しの形なので、組み込みの規則が要ることは変わらない）
+- 採らなかった案: eslint-plugin-boundaries（star 約 1,000・2026-11-15 のリリースで保守は活発だが、flat config と ESLint 10 への対応を一次情報で確かめられなかった。境界の検査の「直の利用」は import でなく呼び出しの形なので、組み込みの規則が要ることは変わらず、依存の向きのためだけに 2 つ目の設定の書き方を持つことになる）
+- 採らなかった案: eslint-plugin-import-x の `no-restricted-paths`（ESLint 10 を対応の範囲に持つが、置き場の間の禁止は組み込みの `no-restricted-imports` の置き場ごとの設定で同じく書け、依存と解決の設定が増える）
 - 採らなかった案: TypeScript の構文木を自前で歩くスクリプト（ESLint の選び方の記法とファイルの選び方を作り直すことになる）
 - **代償**: 構文の印の無い破れ（変数に入れてから呼ぶ・別名で受ける）は落とせない。行の中の無効化を受けないため、正当な例外は控えのファイル（決定 5）を直す Pull Request でしか作れない
 - 作り方: ライブラリやサービスを使う
-- 比べた候補: LIB5 / LIB6 / LIB7
-- 根拠: Value 1・Value 7（MVV バージョン 1）
+- 比べた候補: LIB4 / LIB5 / LIB6 / LIB7 / LIB10
+- 根拠: Value 1・Value 7・Value 13・Value 15（MVV バージョン 2）。決定 140（プラットフォーム）
 
 ### 決定 2: 構文の印が無い「置き場の外で直に使わないもの」も落とせるよう、行ごとに印を決めて照らす
 
@@ -130,20 +161,21 @@ flowchart TB
 - **選んだ案**: 行ごとに印を決める。再試行は「繰り返しの文の中で外部の呼び出しの部品（`callHttp` か AWS SDK の `send`）を呼ぶこと」、条件つきの書き込みは「AWS SDK の import」と「`ConditionExpression` の鍵を持つオブジェクト」、認可の判定は「403 の数値と、認可の判定だけが返す理由のコードの文字列」を `apps/` の中で落とす。印とプラットフォームの行の対応は詳細設計の表に置く
 - 採らなかった案: 3 つの行を検査から外し、レビューに任せる（全体の設計の「落とすもの」を減らすことになり、要求の前提 1 に反する）
 - **代償**: 印は近似で、印を避けた書き方（再帰で繰り返す・応答を作る部品を別に作る）は通る。`apps/` の中の正当な 403（無い）や繰り返しの中の外部の呼び出し（一覧の頁送り）が出たら、控えに理由を書いて足す
-- 根拠: Value 7・Value 9（MVV バージョン 1）
+- 根拠: Value 7・Value 9（MVV バージョン 2）
 
-### 決定 3: 伏せ字と漏れの検査が同じ形を読むよう、漏れの検査を自前で作り、形を形の正本のデータから読む
+### 決定 3: 車輪の再発明をせず伏せ字と同じ形で探すため、漏れの検査を gitleaks で行い、規則を形の正本のデータと CI の秘密から実行の時に組む
 
-- **質問**: 漏れの検査を既存の秘密の走査の道具で行うか、自前で作るか
-- **選んだ案**: `tools/checks/src/leak-check.ts` を自前で作る。参照の検査と同じく `git grep` で追跡しているファイル（`docs/` を含む）を読み、形は `packages/contracts/data/secret-shapes.json` から読む。作り物の値（`123456789012`・`us-west-2`・`acme`・`example.com`）は同じデータの一覧で当たりから外す。当たりは「種類・ファイル・行」だけを出し、当たった文字を出さない
-- 採らなかった案: gitleaks（形を gitleaks の設定のファイルに持つことになり、伏せ字の部品（#2）と同じデータを読めない。組織のリポジトリで GitHub Action を使うには鍵の登録が要る）
-- 採らなかった案: trufflehog（AGPL-3.0 で、形の置き場の問題は gitleaks と同じ）
-- 採らなかった案: secretlint（形を規則の設定に持つ点は同じ。CI の秘密の実際の値の照合と作り物の値の外し方は、自前の照合を足すことになる）
+- **質問**: 漏れの検査を既存の秘密の走査の道具で行うか、自前で作るか。全体の設計は、伏せ字（#2）と漏れの検査が同じ秘密の形のデータを読み、実際の値を CI の秘密から受け、作り物の値を外すことを求める
+- **選んだ案**: 探すのは gitleaks の CLI にする。`tools/checks/src/leak-check.ts` は包みだけを持ち、gitleaks の設定（TOML）を `packages/contracts/data/secret-shapes.json` の形と作り物の値と CI の秘密の語から実行の時に組み、環境変数 `GITLEAKS_CONFIG_TOML` で渡す（設定をリポジトリにもファイルにも置かない）。gitleaks の既定の規則（既知の提供者の token・私有鍵の頭）を残したまま nd-factory の規則を足す。今の木は追跡しているファイルだけを一時のディレクトリへ写して `gitleaks dir` で、Pull Request では分岐点からのコミットを `gitleaks git` で探す。`--redact=100` で報告の秘密を伏せ、包みは報告の規則・ファイル・行だけを読んで、パスの中の当たりも伏せて出す。gitleaks は配布の資産を版と要約値で固定して取る
+- 採らなかった案: 自前で作る（`git grep` と正規表現で探す。既知の提供者の token の形の網羅を自分で保守することになり、Value 15 に反する）
+- 採らなかった案: gitleaks の GitHub Action（組織のリポジトリでは鍵の登録が要る。CLI は MIT で鍵が要らない）
+- 採らなかった案: secretlint（Node で動き、独自の正規表現の規則と出力の伏せ字を既定で持つが、star 約 1,500 で、gitleaks（star 約 31,000、GitLab の Secret Detection も内部で使う）より使われている広さが小さい）
+- 採らなかった案: trufflehog（AGPL-3.0）
 - 採らなかった案: GitHub の secret scanning に任せる（既知の提供者の token の形を探す。アカウント ID・profile・環境の名前の照合と作り物の値の外しは持たない。公開のリポジトリでは無料で走るので、この検査と重ねて使える）
-- **代償**: 形の正規表現の保守をこのリポジトリが持つ。既知の提供者の token の形の網羅は GitHub の secret scanning に劣る
-- 作り方: 自前で作る
+- **代償**: Node の外の実行ファイルに依る。CI は版と要約値を照らして取り、手元で打つ人は自分で入れる（無ければ終了コード 2）。gitleaks の最新の版は 2026-03-21 で、その後 8 か月リリースが無い（リポジトリへの push は 2026-10 まで続く）。既定の規則が今のリポジトリのファイルに当たれば、外しに理由を書いて置く
+- 作り方: ライブラリやサービスを使う
 - 比べた候補: PRD1 / PRD2 / LIB1 / LIB2 / LIB3 / STD4
-- 根拠: Value 7（MVV バージョン 1）。決定 92（プラットフォーム）
+- 根拠: Value 7・Value 13・Value 15（MVV バージョン 2）。決定 92（プラットフォーム）
 
 ### 決定 4: 実際の値の一覧を参照の検査の語と混ぜないため、漏れの検査の語を別の CI の秘密 `LEAK_CHECK_TERMS` で受ける
 
@@ -151,7 +183,7 @@ flowchart TB
 - **選んだ案**: 別の CI の秘密 `LEAK_CHECK_TERMS`（JSON。種類 `accounts`・`profiles`・`environments` ごとの語の配列）で受ける。語を必須にするかの切り替えは、参照の検査と同じ形（変数 `LEAK_CHECK_REQUIRE_TERMS` を `1` にした正本のリポジトリの中の実行だけ）にする。語の無い実行は形の当たりだけを探し、照合を飛ばしたと出力する
 - 採らなかった案: `REF_CHECK_TERMS` に種類を足す（参照の検査の語は旧い側の名前で、運用する環境の値とは持ち主と変える時期が違う。片方の形を変えるともう片方の検査が語の形の誤りで止まる）
 - **代償**: 秘密が 1 つ増え、正本のリポジトリの持ち主が登録する（下の「人へ残す判断」）。登録されるまで、照合は飛ばされる
-- 根拠: Value 7（MVV バージョン 1）
+- 根拠: Value 7（MVV バージョン 2）
 
 ### 決定 5: 検査を足した Pull Request から main を落とさずに入れるため、骨組みの既知の当たりを課題の番号つきの控えに置き、直した後の控えを残さない
 
@@ -161,7 +193,7 @@ flowchart TB
 - 採らなかった案: #1 の Pull Request で骨組みを直す（横断の部品が無いので移す先が無く、#2 の範囲を先取りする）
 - **代償**: 控えが残る間、控えたファイルは同じ規則に当たる新しい行も通る。控えはファイルの単位で、行の単位でない
 - 同じ考えを I14 の画面の対応にも使う。#2 が操作の表を置いた時点では画面の多くが無く、利用者向けの操作がすべて `screen-missing` になる。画面を作る課題が別に分かれているため、画面の無い操作を `tools/checks/data/screen-pending.json` に「操作の名前・画面を作る課題の番号・理由」で置き、その操作だけを `screen-missing` から外す。単体テストが、画面から呼ばれるようになった操作の行（直したのに残った控え）と、表に無い操作の行で落ちる。表に操作を足す Pull Request は、画面を同じ Pull Request で足すか、控えに画面を作る課題を書いて足す。画面を作る課題は、自分の番号の行を消すことで画面の対応が必須になる
-- 根拠: Value 7（MVV バージョン 1）
+- 根拠: Value 7（MVV バージョン 2）
 
 ### 決定 6: 全体の設計の「いつ」を変えずに必須のチェックへ載せるため、NDF の契約の照合を別のワークフローの常に起動するジョブにし、固定の点を変えない Pull Request では照らさずに通す
 
@@ -171,7 +203,7 @@ flowchart TB
 - 採らなかった案: すべての Pull Request で照らす（全体の設計の「いつ」を広げることになり、詳細設計で決め直さない決まりに当たる。照らす相手のコード（#2・#6）の変更は毎日の実行で知る）
 - 採らなかった案: `ci.yml` に `schedule` を足す（毎日、ほかのすべてのジョブも走る）
 - **代償**: 照らす相手（形の正本の NDF の契約の使い方）を変えて固定の点を変えない Pull Request は、その Pull Request では照らされず、マージした後の push か次の毎日の実行で落ちる。公開のリポジトリで 60 日活動が無いと、毎日の起動が止まる（STD2）
-- 根拠: Value 8・Vision（MVV バージョン 1）
+- 根拠: Value 8・Vision（MVV バージョン 2）
 
 ### 決定 7: 契約の見本でランナーと同じ判定を照らすため、検査は形の正本の判定とデータを呼び、自前の判定を持たない
 
@@ -180,7 +212,7 @@ flowchart TB
 - 採らなかった案: 検査の中に契約の判定を自前で持つ（契約を契約自身と照らすことになり、ランナーの食い違いを拾えない）
 - 採らなかった案: 検査がランナーのコードを読み込む（`tools` は `packages/contracts` だけに依る決まりに反する）
 - **代償**: #2 が判定とデータを置くまで、照合は 1〜6 を照らさずに `skip: no-contract-use` と出して通る（要求の前提 2）。#6 が判定を使わずに組み立てを書くと、検査は食い違いを拾えない。#6 の受け入れ条件へ「判定を通す」ことを渡す
-- 根拠: Vision・Value 8（MVV バージョン 1）
+- 根拠: Vision・Value 8（MVV バージョン 2）
 
 ### 決定 8: 生成物の間の食い違いを見本の外でも拾うため、形の往復は見本とその機械的な変形を 4 つの形で検証して比べる
 
@@ -188,10 +220,11 @@ flowchart TB
 - **選んだ案**: 操作ごとの見本（#2 が作るダミーデータ）に、機械的な変形（必須の項目を 1 つ消す・項目の型を変える・知らない項目を足す・配列を 1 件の値にする）を加え、zod の形・JSON Schema・OpenAPI の要素の形・MCP の道具の入力の形の 4 つで検証し、通るか拒むかが 1 つでも違う組を落とす。加えて、変形していない見本は、該当するすべての形で通ることを確かめ、どれか 1 つでも拒めば落とす（すべての形が見本を拒むように揃って変わると、比べだけでは食い違いが出ないため）。JSON Schema の検証は ajv の draft 2020-12 のクラスと書式の拡張で行う
 - 採らなかった案: 見本だけを検証する（見本はすべて通る値なので、拒むべき値を片方だけが通す食い違いを拾えない）
 - 採らなかった案: 拒む見本を操作ごとに手で書く（操作が増えるたびに書き足しが要り、書き漏れた操作は照らされない）
+- 採らなかった案: fast-check で値を無作為に作る（fast-check 4 は保守が活発だが、zod から値を作る部品の `zod-fast-check` は最後のリリースが 2023-09 で、fast-check 4 と zod 4 を対応の範囲に持たない。変形は形の正本の項目を 1 つずつ崩す 4 種類だけで、無作為の値を作る道具を足すほどの量でない）
 - **代償**: 開発の依存に ajv と書式の拡張を足す。zod の形に表せても JSON Schema に表せない制約（変換・独自の検査）は、変形が当たると食い違いとして出るので、#2 が形の正本の側でそうした制約を使わないことを前提にする
 - 作り方: ライブラリやサービスを使う・標準に倣う
-- 比べた候補: LIB8 / LIB9 / STD3
-- 根拠: Value 2・Value 4（MVV バージョン 1）
+- 比べた候補: LIB8 / LIB9 / LIB13 / STD3
+- 根拠: Value 2・Value 4・Value 15（MVV バージョン 2）
 
 ### 決定 9: 漏れの検査を伏せ字の部品より先に入れるため、秘密の形のデータは #1 が作り、#2 の伏せ字が同じファイルを読む
 
@@ -200,7 +233,18 @@ flowchart TB
 - 採らなかった案: #2 が作り、#1 は待つ（漏れの検査が伏せ字の部品の設計と実装を待つ。漏れは一度入ると公開の履歴から消せない）
 - 採らなかった案: 漏れの検査の形を `tools/checks/` に別に持つ（伏せ字と漏れの検査が違う形を読む。全体の設計の「同じデータを読む」に反する）
 - **代償**: `packages/contracts/` の中で #1 と #2 が同じファイルを触る。#1 の実装の Pull Request が先にマージされ、#2 はその上で鍵の名前の形を足す
-- 根拠: Value 7（MVV バージョン 1）
+- 根拠: Value 7（MVV バージョン 2）
+
+### 決定 10: ワークフローの読み違いを無くし前の形に縛られないため、CI の定義のテストはワークフローを YAML の解析器で読む
+
+- **質問**: CI の定義のテストは今、`ci.yml` の行を正規表現で読んでジョブの名前を拾う。すべてのワークフローの起動の条件とジョブごとの `permissions` まで照らすのに、行の読み方を広げるか、YAML の解析器で読むか
+- **選んだ案**: `yaml`（LIB12）で解いて読む。ジョブの名前・起動の条件・最上位とジョブの `permissions` は解いた値から取り、資格情報の語だけは鍵でも値でも当たるように元の文字列で探す。`yaml` は YAML 1.2 で読むので、最上位の `on` を真偽値と取り違えない（今の `ci.yml` で確かめた）
+- 採らなかった案: 行の正規表現を広げる（字下げと書き方の違い（`on: [pull_request]` と鍵の形、`permissions: write-all` と鍵の形）ごとに読み方を足すことになり、YAML の解析を作り直す）
+- 採らなかった案: actionlint・zizmor（ワークフローの書き誤りや危うい書き方を見つける道具で、必須のチェックの宣言とジョブの集合の一致は照らさない。全体の設計の検査の表に無い検査を足すことになるので、#57 に起票した）
+- **代償**: 開発の依存が 1 つ増える
+- 作り方: ライブラリやサービスを使う
+- 比べた候補: LIB12 / LIB14
+- 根拠: Value 8・Value 15・Value 16（MVV バージョン 2）
 
 ## 影響と危険
 
@@ -211,6 +255,7 @@ flowchart TB
 - **同じファイルを触る別の変更**: #2 が `packages/contracts/` の別のファイルと `package.json` を触る（決定 9・「#2 との境目」）。#13 は `infra/` と `docs/design/platform.md` を触り、重ならない。#41 の実装（N11-実装）は `ndf-pin.json` を付け替える。その Pull Request が #1 の実装の後なら `ndf-contract` が照らす最初の Pull Request になり、前なら照らさない
 - **壊れうる箇所**: 漏れの検査は今のリポジトリの 12 桁の数（コミットの SHA の一部・数の並び）に誤って当たりうる。実装の Pull Request で main の全体を走らせ、当たりを直すか、外し（`tools/checks/data/leak-allow.json`）に理由を書いて置く。テストの見本は、違反の文字列をリポジトリに置かないよう実行の時に組み立てる（置くと漏れの検査と参照の検査がそのテストのファイルに当たる）
 - **漏れの検査の外しの粒度**: 外しは「パス・種類・当たりの件数・理由」で、値もその要約値（ハッシュなど）も書かない。要約値を置くと、桁の少ない値（12 桁のアカウント ID など）は総当たりで戻せるためである。外したパスと種類の当たりの件数が外しの件数と違えば落とすので、外したファイルに同じ種類の値を足すと落ちる。行の番号は外しに使わない（上の行の編集で動き、外しが無駄に壊れる）。**代償**: 外したファイルの当たりを、同じ件数のまま別の実際の値へ置き換えると、形の検査では通る。秘密の一覧（`LEAK_CHECK_TERMS`）との照合は外しに関わらず効くので、一覧にある値は落ちる。一覧に無い値や、秘密が渡らない実行（fork・秘密の未登録）では、この置き換えは検査で見つからず、外しのあるファイルの変更はレビューで見る
+- **gitleaks の版**: 版と要約値は `ci.yml` のジョブ `leak-check` の環境変数の 1 か所に置き、上げるときはその 2 つを同じ Pull Request で直す。依存を自動で新しく保つ仕組み（Dependabot）はこのリポジトリにまだ無く、#14 の対象範囲にある。gitleaks はワークフローに書いた版なので、Dependabot を入れた後も版の上げは手で行う
 - **NDF の取得**: `ndf-contract` は devbasex/ai-plugins を資格情報なしで取る。GitHub が落ちていると照らす実行は失敗し、照らさない Pull Request は通る
 - **#41（PR #42）の承認との順序**: この設計の F23 の節（決定 6・7、詳細設計の「NDF の契約の照合」）は、承認待ちの #41 の決定 104〜108（固定の点・契約の置き場・受ける組・区間の報告・先端を既定の枝にすること）を前提にする。PR #42 の承認で決定 104〜108 のどれかが変わったら、#1 の実装を始める前に、その結果をこの設計と詳細設計の F23 の節（NDF のリポジトリの URL と契約の置き場の定数・照らすこと 1〜6 の契約のファイル・先端の取り方）へ取り込む Pull Request を先に通す。#1 の実装は、PR #42 が承認され、F23 の節が承認された決定と合ってから始める
 
@@ -254,7 +299,7 @@ flowchart TB
 
 | 受け入れ条件・決定 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 受け入れ条件 1（漏れ） | 漏れの検査に、実行の時に組み立てた作り物でない 12 桁・ARN・端点・私有鍵の頭・token の頭を含むファイルを持つ作業の木を渡すと、終了コード 1 と種類・ファイル・行が出る | 形を 1 つでもデータから読まなくすると落ちる |
+| 受け入れ条件 1（漏れ） | 漏れの検査に、実行の時に組み立てた作り物でない 12 桁・ARN・端点・私有鍵の頭・token の頭を含むファイルを持つ作業の木を渡すと、gitleaks を起こして終了コード 1 と規則・ファイル・行が出る。Pull Request の途中のコミットで足して消した値も当たる | 形を 1 つでもデータから組まなくする・既定の規則を外す・分岐点からのコミットを探さないと落ちる |
 | 受け入れ条件 1（形の往復） | 4 つの形のうち 1 つだけ必須の項目を外した操作の定義を渡すと、食い違った操作と変形が返る。4 つの形がそろって見本を拒む操作の定義を渡すと、見本が拒まれたことが返る | 変形を作らずに見本だけを検証する・見本が通ることを確かめずに比べだけにすると落ちる |
 | 受け入れ条件 1（境界・依存の向き・I8・画面の HTTP の経路） | 規則ごとに、違反を入れた文字列を置き場のパスで ESLint にかけると、その規則の誤りが出る | 置き場の glob を外す・規則を消すと落ちる |
 | 受け入れ条件 1（F23）・9 | 固定の点の見本 1 件の `valid` を判定と食い違わせた契約を渡すと終了コード 1、先端だけで食い違わせると終了コード 0 で、要約に見本の id と契約のファイルのパスが並ぶ | 先端の食い違いで失敗にする・要約に id を出さないと落ちる |
@@ -263,10 +308,10 @@ flowchart TB
 | 受け入れ条件 4（I8） | 判定のモジュールの外で料金プランの値の書き出しを import する・画面で料金プランの名前の文字列を使うと誤りが出る。判定のモジュールの中では出ない | 判定のモジュールも対象にする・画面の名前の照らしを外すと落ちる |
 | 受け入れ条件 5（I14） | 画面だけが呼ぶ操作・MCP の道具の無い人だけでない操作・対になる読み出しの無い人だけの操作・表に無い HTTP の経路・どの操作にも無い機能を、それぞれ足した表を渡すと欠けとして返る。`apps/api` と `infra/` に HTTP の経路を手で書くと規則の組 `routes.generated` の誤りが出る。画面の控えに載せた操作は `screen-missing` にならず、画面から呼ばれるようになった控えの行で落ちる | 片方向だけを照らす・手書きの経路を許す・控えの照らしを消すと落ちる |
 | 受け入れ条件 6 | `apps/` の 5 つの置き場で「置き場の外で直に使わないもの」の印ごとに誤りが出て、`packages/core`・`infra/`・`tools/`・テストのファイルでは出ない | 対象の置き場を広げる・狭めると落ちる |
-| 受け入れ条件 7 | `packages/core` から `apps/*`・`apps/*` どうし・`infra` から `apps/*` の import で誤りが出る。型だけの import も同じ | 置き場の 1 つの規則を外すと落ちる |
+| 受け入れ条件 7 | `packages/core` から `apps/*`・`apps/*` どうし・`infra` から `apps/*` の import で誤りが出る。型だけの import も同じ。画面の外で `react` を import する・画面の外に `*.tsx` を置くと誤りが出て、`apps/web/src` の `*.tsx` では出ない | 置き場の 1 つの規則を外す・画面の組を `*.ts` にだけ掛けると落ちる |
 | 受け入れ条件 8（旧い名前） | 照合の語（旧い名前）を含む追跡しているファイルで、参照の検査が終了コード 1 で終わる。既存の `tools/test/ref-check.test.ts` の `mainRefCheck` の「当たりがあれば 1 で、種類とファイルと行を出し語そのものは出さない」と、`findOldRefs` の「文書にだけ当たりがあれば 1 件」「リポジトリの名前は大文字小文字を問わず当たる」（`.github/workflows/ci.yml` の当たり）が縛る。#1 はこのテストを変えない | 照合の語の照らしを外す・ワークフローを読む範囲から外すと落ちる |
 | 受け入れ条件 8（版の比べ） | 足すワークフローの文字列に NDF の版を読む式と大小の比べを同じ行に置くと参照の検査が当たる | 参照の検査がワークフローを読まなくなると落ちる |
-| 受け入れ条件 10 | ジョブを宣言とワークフローの片方にだけ足す・どれかのワークフローに資格情報の語を足す・最上位かジョブの `permissions` に `contents: read` 以外を足すと、CI の定義のテストが落ちる | `ci.yml` だけを読む・最上位の `permissions` だけを読むと落ちる |
+| 受け入れ条件 10 | ジョブを宣言とワークフローの片方にだけ足す・どれかのワークフローに資格情報の語を足す・最上位かジョブの `permissions` に `contents: read` 以外を足すと、CI の定義のテストが落ちる | `ci.yml` だけを読む・最上位の `permissions` だけを読む・`on: [pull_request]` の書き方を読み落とすと落ちる |
 | 受け入れ条件 11 | 詳細設計（[issue-1-design-detail.md](./issue-1-design-detail.md)）が、全体の設計の置き場・依存の向き・落とすものを引いて書かれ、決め直していない（cross-review が読む） | 全体の設計に無い置き場や、落とすものの増減を書くと cross-review が落とす |
 | 決定 5 | 控えの行のファイルが規則に当たらなくなると単体テストが落ちる | 控えの照らしを消すと落ちる |
 | 決定 6 | `ndf-pin.json` が分岐点と head で同じ Pull Request では照らさずに成功し、違えば照らす。分岐の後に基点の枝だけで `ndf-pin.json` を変えた作業の木では照らさない | 起動の判定を逆にする・基点の枝の先端と比べると落ちる |
@@ -302,7 +347,7 @@ C1 と C7 は、NDF の共通原則が「AI が自分で進めずに必ず人の
 | --- | --- | --- |
 | 標準・仕様 | 調べる | 必須のチェックと起動の条件の扱い（GitHub Actions）・JSON Schema の版・AWS の ARN の形が、検査の作りを縛る |
 | 主要な製品 | 調べる | 秘密の走査は GitHub と GitLab が製品として持つ |
-| ライブラリとサービス | 調べる | 秘密の走査・依存の向き・JSON Schema の検証に既存の道具がある |
+| ライブラリとサービス | 調べる | 秘密の走査・依存の向き・JSON Schema の検証・値の生成・YAML の解析・ワークフローの点検・使っていないコードの検出に既存の道具がある（MVV 版 2 の Value 15 の見直しで候補を足した） |
 
 ### 標準・仕様
 
@@ -325,23 +370,33 @@ C1 と C7 は、NDF の共通原則が「AI が自分で進めずに必ず人の
 
 | # | 候補 | バージョン | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | gitleaks と gitleaks-action | v8.30.1・v3.0.0 | MIT・登録の判定なし | 2026-03-21・2026-05-30 | 無し | 形は gitleaks の設定のファイルに持つ。組織のリポジトリで Action を使うには鍵の登録が要る。伏せ字の部品と同じデータを読めない | `gh api repos/gitleaks/gitleaks/releases/latest`・https://github.com/gitleaks/gitleaks-action（2026-11-21） |
+| LIB1 | gitleaks（CLI）と gitleaks-action | v8.30.1・v3.0.0 | MIT・登録の判定なし | 2026-03-21・2026-05-30（リポジトリへの push は 2026-10-28） | 無し | 満たす（CLI）。採る（決定 3）。star 31,228。今の木（`dir`）と履歴の範囲（`git --log-opts`）を探せる。`--redact` で標準出力と報告の `Secret`・`Match` を伏せる。独自の規則（`regex`・`secretGroup`・`path`）と規則ごとの許可（`regexes`・`stopwords`・`paths`）を書け、`[extend] useDefault = true` で既定の規則を残す。設定は環境変数 `GITLEAKS_CONFIG_TOML` で中身ごと渡せる。配布の資産にチェックサムのファイルがある。`SECURITY.md` がある。Action は組織のリポジトリで鍵の登録が要る | `gh api repos/gitleaks/gitleaks`・`gh api repos/gitleaks/gitleaks/releases`・README・`report/finding.go`（2026-11-21）。配布の v8.30.1 を要約値で確かめて取り、環境変数で渡した設定・`--redact=100`・許可で一時の木を探して、報告に値が現れないことを確かめた（2026-11-21） |
 | LIB2 | trufflehog | v3.100.0 | AGPL-3.0 | 2026-11-19 | 無し | 形の置き場は LIB1 と同じ問題を持つ | `gh api repos/trufflesecurity/trufflehog/releases/latest`（2026-11-21） |
-| LIB3 | secretlint | 14.0.1 | MIT | 2026-11-16（登録簿の更新） | 無し | Node で動く。実際の値の照合と作り物の値の外しは自前で足すことになる | `npm view secretlint version time.modified license deprecated`（2026-11-21） |
-| LIB4 | dependency-cruiser | 18.8.0 | MIT | 2026-11-16（登録簿の更新） | 無し | 依存の向きは縛れるが、境界と I8 には別の道具が要る | `npm view dependency-cruiser version time.modified license deprecated`（2026-11-21） |
+| LIB3 | secretlint | 14.0.1 | MIT | 2026-11-16（登録簿の更新） | 無し | 満たす。Node で動き、独自の正規表現の規則（`@secretlint/secretlint-rule-pattern`）を持ち、出力の秘密を既定で伏せる。star 1,503 で LIB1 より使われている広さが小さい | `npm view secretlint`・https://registry.npmjs.org/@secretlint/secretlint-rule-pattern・`gh api repos/secretlint/secretlint`（2026-11-21） |
+| LIB4 | dependency-cruiser | 18.8.0 | MIT | 2026-11-16（登録簿の更新） | 無し | 依存の向きは `forbidden` の規則で縛れる（star 7,448）。境界と I8 には別の道具が要る | `npm view dependency-cruiser`・`gh api repos/sverweij/dependency-cruiser`（2026-11-21） |
 | LIB5 | ESLint の組み込みの規則（`no-restricted-imports`・`no-restricted-syntax`・`no-restricted-globals`・`no-restricted-properties`） | 10.15.0（このリポジトリが既に使う） | MIT | 2026-11-16（登録簿の更新） | 無し | import の先・構文の形・グローバルの名前・オブジェクトの性質を、設定の `files` ごとに落とせる。行の中の無効化の注釈を設定で受けなくできる | https://eslint.org/docs/latest/rules/no-restricted-imports・https://eslint.org/docs/latest/rules/no-restricted-syntax・https://eslint.org/docs/latest/rules/no-restricted-globals（2026-11-21）、`node_modules/eslint/lib/rules/no-restricted-properties.js` と `node_modules/eslint/lib/config/flat-config-schema.js` の `noInlineConfig`（2026-11-21） |
-| LIB6 | eslint-plugin-boundaries | 7.4.4 | MIT | 2026-11-15（登録簿の更新） | 無し | 置き場ごとの import を縛れる。ESLint 10 での動作は確かめられなかった | `npm view eslint-plugin-boundaries version time.modified license deprecated peerDependencies`（2026-11-21） |
+| LIB6 | eslint-plugin-boundaries | 7.4.4 | MIT | 2026-11-15 | 無し | 置き場ごとの import を `boundaries/dependencies` で縛れる（star 1,024）。`peerDependencies` は `eslint >=6.0.0` で、flat config と ESLint 10 への対応を書いた文は README に見つからなかった | https://registry.npmjs.org/eslint-plugin-boundaries・`gh api repos/javierbrea/eslint-plugin-boundaries`（2026-11-21） |
 | LIB7 | typescript-eslint の `no-restricted-imports` | 8.73.0（このリポジトリが既に使う） | MIT | — | 無し | ESLint の規則に `allowTypeImports` を足す | 根の `package.json` の `typescript-eslint`（2026-11-21） |
 | LIB8 | ajv | 8.20.0 | MIT | 2026-04-24（登録簿の更新） | 無し | draft 2020-12 を別のクラスで検証できる。書式（`date-time`）は書式の拡張が要る | `npm view ajv version time.modified license deprecated`・https://ajv.js.org/json-schema.html（2026-11-21） |
 | LIB9 | zod | 4.6.7 | MIT | 2026-10-12（登録簿の更新） | 無し | 形の正本の正。`z.toJSONSchema` が draft 2020-12 を出す。変換などは既定で書き出せず例外にする | `npm view zod version time.modified license deprecated`・https://zod.dev/json-schema（2026-11-21） |
+| LIB10 | eslint-plugin-import-x（`no-restricted-paths`） | 4.18.1 | MIT | 2026-11-09 | 無し | ESLint `^10.0.0` と flat config を対応の範囲に持つ（star 786）。置き場の間の禁止は LIB5 の置き場ごとの設定でも書ける | https://registry.npmjs.org/eslint-plugin-import-x（2026-11-21） |
+| LIB11 | knip | 6.47.0 | ISC | 2026-11-20 | 無し | 使っていないファイル・書き出し・依存を見つける（star 12,699）。全体の設計の検査の表に無い検査なので、この課題では足さない | https://registry.npmjs.org/knip・`gh api repos/webpro-nl/knip`（2026-11-21） |
+| LIB12 | yaml（eemeli/yaml） | 2.9.1 | ISC | 2026-09-11 | 無し | 満たす。採る（決定 10）。YAML 1.2 で読み、今の `ci.yml` の `on`・`jobs`・`permissions` を鍵の名前のまま取れた。`SECURITY.md` がある | https://registry.npmjs.org/yaml・`gh api repos/eemeli/yaml`（2026-11-21）。作業ディレクトリに 2.9.1 を入れて `ci.yml` を解いた（2026-11-21） |
+| LIB13 | fast-check と zod-fast-check | 4.10.3・0.10.1 | MIT・MIT | 2026-11-18・2023-09-13 | 無し | fast-check は保守が活発（star 5,296）。zod から値を作る zod-fast-check は `peerDependencies` が `fast-check <4.0.0`・`zod ^3.18.0` で、今の fast-check 4 と zod 4 を範囲に持たない | https://registry.npmjs.org/fast-check・https://registry.npmjs.org/zod-fast-check・`gh api repos/dubzzz/fast-check`（2026-11-21） |
+| LIB14 | actionlint・zizmor | v1.7.12・v1.32.0 | MIT・MIT | 2026-03-30・2026-11-02 | 無し | ワークフローを点検する道具（star 4,421・7,102）。何を見つけるかの一次情報は取れなかった。どちらも必須のチェックの宣言とジョブの集合の一致は持たない（CI の定義のテストの照らしを置き換えない） | `gh api repos/rhysd/actionlint`・`gh api repos/zizmorcore/zizmor`（2026-11-21） |
 
 ### 確かめられなかったこと
 
 | 対象 | 試した手段 | 結果と理由 |
 | --- | --- | --- |
-| gitleaks・trufflehog・secretlint の許可の一覧と出力の伏せ字の設定 | 試していない | 上限。決定 3 は形の置き場の理由で退けたので、この結果に依らない |
+| trufflehog の許可の一覧と出力の伏せ字の設定 | 試していない | 上限。trufflehog は AGPL-3.0 の理由で退けたので、この結果に依らない |
+| npm の週のダウンロード数（secretlint・eslint-plugin-boundaries・eslint-plugin-import-x・dependency-cruiser・knip・yaml・fast-check） | `https://api.npmjs.org/downloads/point/last-week/<名前>` | 取得の制限（`error code: 1015`）で拒まれた。使われている広さは GitHub の star 数で比べた |
+| eslint-plugin-import-x の `no-restricted-paths` と dependency-cruiser の型だけの import の扱い | 試していない | 上限。どちらも採らず、LIB5 で書けることを確かめたので、この結果に依らない |
+| actionlint・zizmor が見つけるもの | 試していない | 上限。#57 で調べる |
+| `gitleaks dir` が git の追跡しているファイルだけに絞るか | README | 書かれていない。包みが追跡しているファイルだけを一時のディレクトリへ写すので、この結果に依らない |
+| I14 の対応（操作の表と画面・MCP・経路の突き合わせ）と NDF の契約の照合をする既存の道具 | 試していない | nd-factory の操作の表と NDF の契約の形に固有の照らしで、調べる候補を挙げられなかった。道具が無いとは確かめていない |
 | eslint-plugin-boundaries の ESLint 10 での動作 | `npm view eslint-plugin-boundaries peerDependencies`（`eslint >=6.0.0`） | 範囲の宣言だけで、実際の動作は確かめていない（上限） |
 | 公開のリポジトリでの GitHub の独自の形と push protection の費用 | secret scanning・push protection・独自の形の 3 つの頁 | どの頁も公開のリポジトリの費用を書いていない。無料かは確かめていない |
 | `ajv/dist/2020` の読み込みの経路 | ajv の JSON Schema の頁 | 取得した範囲にコードの例が無い。実装の最初のタスクで読み込んで確かめる |
 
-調べた量: 候補 16 件・取得の試み 32 回。
+調べた量: 候補 23 件・取得の試み 74 回（初めの調べで 32 回、MVV 版 2 の Value 15 の見直しで 42 回）。種類ごとの候補の上限（6 件）を、ライブラリとサービスで超えた。Value 15 の見直しで、自前で作る部分ごとに比べる候補を足したためである。

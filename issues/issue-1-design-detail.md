@@ -24,7 +24,7 @@ nd-factory/
     ├── tsconfig.json                      checks/src を含める
     ├── checks/
     │   ├── data/lint-exceptions.json    * 規則の控え（決定 5）
-    │   ├── data/leak-allow.json         * 漏れの検査の外し（パス・種類・件数）
+    │   ├── data/leak-allow.json         * 漏れの検査の外し（パス・規則・件数）
     │   ├── data/screen-pending.json     * I14 の画面の控え（操作の名前・画面を作る課題）
     │   └── src/
     │       ├── lint-rules.ts            * ESLint の規則の組
@@ -47,12 +47,12 @@ nd-factory/
 | パス | 種類 | 役割 1 文 | 依存する先 | モジュール | 最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `tools/checks/src/lint-rules.ts` | 新設 | 置き場ごとの ESLint の設定の塊を組む | `@nd-factory/contracts`（料金プランの名前があれば） | `lint-rules` | `loadLintExceptions`・`ruleGroups`・`buildLintConfigs`（新設） |
-| `tools/checks/src/leak-check.ts` | 新設 | 追跡しているファイルのパスと本文の、形と実際の値の当たりを出す | `@nd-factory/contracts/secret-shapes` | `leak-check` | `loadLeakTerms`・`listTrackedTexts`・`findShapeHits`・`findTermHits`・`maskPath`・`mainLeakCheck`（新設） |
+| `tools/checks/src/leak-check.ts` | 新設 | gitleaks の設定を組んで起こし、報告を外しで絞って、値を出さずに当たりを出す | `@nd-factory/contracts/secret-shapes`・gitleaks の実行ファイル | `leak-check` | `loadLeakTerms`・`buildGitleaksConfig`・`snapshotTracked`・`runGitleaks`・`applyAllow`・`maskPath`・`mainLeakCheck`（新設） |
 | `tools/checks/src/round-trip.ts` | 新設 | 4 つの形の検証の結果を比べる | `@nd-factory/contracts`・ajv・ajv-formats | `round-trip` | `mutate`・`representationsOf`・`findRoundTripMismatches`・`findValueShapeFindings`（新設） |
 | `tools/checks/src/operation-coverage.ts` | 新設 | 操作の表と画面・MCP・HTTP の経路・機能を突き合わせる | `@nd-factory/contracts`・`typescript` | `operation-coverage` | `screenOperationNames`・`loadScreenPending`・`findCoverageFindings`（新設） |
 | `tools/checks/src/ndf-contract-check.ts` | 新設 | 固定の点と既定の枝の先端の契約を照らす | `@nd-factory/contracts`（NDF の契約の使い方） | `ndf-contract-check` | `pinChanged`・`fetchContract`・`compareContract`・`renderSummary`・`mainNdfContractCheck`（新設） |
 | `packages/contracts/src/secret-shapes.ts` | 新設 | 秘密の形のデータの形と読み手 | zod | `secret-shapes` | `secretShapesSchema`・`loadSecretShapes`（新設） |
-| `tools/test/ci-definition.test.ts` | 変更 | すべてのワークフローを照らす | — | テスト | `workflowFiles`・`triggersPullRequest`・`permissionBlocks`（新設）、`jobNames`・`credentialWords`（変えない） |
+| `tools/test/ci-definition.test.ts` | 変更 | すべてのワークフローを YAML として読んで照らす | `yaml` | テスト | `loadWorkflows`・`triggersPullRequest`・`permissionBlocks`（新設）、`jobNames`（YAML の `jobs` の鍵から取るように変える）、`credentialWords`（変えない） |
 | `eslint.config.js` | 変更 | 規則の組を最後に足す | `tools/checks/src/lint-rules.ts` | 設定 | — |
 
 ## 規則の組（境界・依存の向き・I8・画面の HTTP の経路）
@@ -72,8 +72,9 @@ nd-factory/
   - 事後条件: どのファイルにも、規則ごとに 1 つの塊だけが効く（ESLint は同じ規則を後の塊で上書きするため、選び方を塊の中で合わせる）。縛る塊は `linterOptions.noInlineConfig: true` を持つ
   - 副作用: 無し
 - `eslint.config.js` は最上位の `await` で料金プランの名前（#29 の書き出し。無ければ空）と控えを読み、`buildLintConfigs` の結果を今の設定の後ろに足す
+- 規則の組の `files` は `*.ts` と `*.tsx` を両方書く。`*.tsx` の構文は typescript-eslint の解析器が拡張子で JSX として読む（今の設定は `**/*.ts` にだけ型の規則を掛けているので、`**/*.tsx` を同じ塊へ足す）。React の部品の規則（フックの使い方など）は画面を組む課題が足し、この組は持たない
 
-規則の組（`apps/*` は `apps/api`・`apps/web`・`apps/runner`・`apps/nd-runtime`・`apps/db-prep` の `src/` の `*.ts`。テストのディレクトリと e2e を含まない）:
+規則の組（`apps/*` は `apps/api`・`apps/web`・`apps/runner`・`apps/nd-runtime`・`apps/db-prep` の `src/` の `*.ts` と、画面の `apps/web/src/` の `*.tsx`。テストのディレクトリと e2e を含まない。画面は React 19 の部品を TSX で書く（プラットフォームの決定 140）ので、画面の組はどれも `*.ts` と `*.tsx` の両方に掛ける）:
 
 | 組の ID | 掛ける置き場 | 規則と選び方 | プラットフォームの行 |
 | --- | --- | --- | --- |
@@ -86,14 +87,16 @@ nd-factory/
 | `boundary.authorize` | `apps/*` から `apps/web` を除く | `no-restricted-syntax` の数値 `403` と、文字列 `human_only`・`scope_insufficient`・`role_insufficient` | 認可の判定 |
 | `usage.reason` | `apps/*` から `apps/web` を除く | `no-restricted-syntax` の文字列 `monthly_cap_reached`・`place_not_allowed`・`inference_not_allowed`・`currency_mismatch`・`concurrency_full`（使える量の判定が返す理由のコード） | 使える量の判定（I8） |
 | `usage.plan-values` | `apps/**`・`packages/core/src/**` から使える量の判定のモジュール（`packages/core/src/usage-limit*`）を除く | `no-restricted-imports` の料金プランの値の書き出し（#29 へ渡す欠けの 1 つの書き出し） | 使える量の判定（I8） |
-| `usage.plan-names` | `apps/web/src/**` | `no-restricted-syntax` の、料金プランの名前と同じ文字列。名前は #29 の閉じた語の集まりから読み、無ければこの組を作らない | I8（画面） |
-| `screen.route` | `apps/web/src/**` | `no-restricted-syntax` の、`/v1/` を含む文字列とテンプレートの文字列 | I14 の画面の呼び出し |
+| `usage.plan-names` | `apps/web/src/**` | `no-restricted-syntax` の、料金プランの名前と同じ文字列（JSX の属性の値を含む）と JSX の本文（`JSXText`）。名前は #29 の閉じた語の集まりから読み、無ければこの組を作らない | I8（画面） |
+| `screen.route` | `apps/web/src/**` | `no-restricted-syntax` の、`/v1/` を含む文字列（JSX の属性の値を含む）とテンプレートの文字列 | I14 の画面の呼び出し |
 | `routes.generated` | `apps/api/src/**`・`infra/**`（テストを除く） | `no-restricted-syntax` の、`/v1/` で始まる文字列とテンプレートの文字列、と HTTP の方法と `/` で始まる経路の鍵の形（`GET /…` など）の文字列。経路は #2 の生成した登録の書き出し（`packages/contracts`）からだけ読む | I14 の HTTP の経路の登録（API Gateway と Lambda の振り分け） |
 | `deps.contracts` | `packages/contracts/src/**` | `no-restricted-imports` の `@nd-factory/*`（自分を除く）・`zod` 以外の外のパッケージ・相対で置き場の外 | 依存の向き |
 | `deps.core` | `packages/core/src/**` | 同上の、`@nd-factory/contracts` 以外の `@nd-factory/*`・相対で置き場の外 | 依存の向き |
 | `deps.apps` | `apps/*/src/**` ごと | `@nd-factory/` の別の app・`@nd-factory/infra`・`@nd-factory/tools`・相対で自分の app の外 | 依存の向き |
 | `deps.web` | `apps/web/src/**` | `@nd-factory/core` のうち `clock`・`ids`・`redact`・`log` 以外の書き出し | 依存の向き |
 | `deps.infra` | `infra/**` | `apps/*` の名前・相対で `apps/` | 依存の向き |
+| `deps.react` | `apps/web/**` の外のすべての `*.ts` | `no-restricted-imports` の `react`・`react-dom`・`react/*`・`react-dom/*`・`@vitejs/plugin-react`（型だけの import も落とす） | 言語と書き方の決まりの「画面の外のコードは TSX と React を import しない」（決定 140） |
+| `files.tsx` | `apps/web/**` の外の `*.tsx` | `no-restricted-syntax` の `Program`（ファイルそのものを 1 件の誤りにする） | 同上（TSX は画面の置き場だけ） |
 | `deps.tools` | `tools/**` | `@nd-factory/contracts` 以外の `@nd-factory/*`・相対で `tools/` の外 | 依存の向き |
 
 依存の向きの組は、型だけの import も落とす（ESLint の組み込みの `no-restricted-imports` を使い、`allowTypeImports` を持たない）。
@@ -126,7 +129,7 @@ nd-factory/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `buildLintConfigs` と ESLint の API（`ESLint#lintText` に置き場のパスを渡す） | 組ごとに違反の文字列で誤りが 1 件出る | 掛けない置き場（`packages/core`・`infra`・`tools`・`apps/*/test`）で出ない。型だけの import が依存の向きで出て、`@aws-sdk/*` では出ない。`new Date(0)` は出ない | 行の中の `eslint-disable` が効かない |
+| `buildLintConfigs` と ESLint の API（`ESLint#lintText` に置き場のパスを渡す） | 組ごとに違反の文字列で誤りが 1 件出る。画面の組は `*.tsx` のパス（JSX の属性の値と本文を含む）でも出る。`apps/web` の外で `react` を import する・`apps/web` の外に `*.tsx` を置くと出て、`apps/web/src` の `*.tsx` で `react` を import しても出ない | 掛けない置き場（`packages/core`・`infra`・`tools`・`apps/*/test`）で出ない。型だけの import が依存の向きで出て、`@aws-sdk/*` では出ない。`new Date(0)` は出ない | 行の中の `eslint-disable` が効かない |
 | 控えの照らし（テスト） | 控えの行のファイルが、今もその組に当たる | 控えの無いファイルは同じ違反で落ちる | 当たらなくなった控えの行で落ちる |
 | `loadLintExceptions` | 正しい形を読む | 空の配列 | 知らない組の ID で例外 |
 
@@ -134,27 +137,35 @@ nd-factory/
 
 満たす決定: 設計の決定 3・4・9、受け入れ条件 1・2・3
 
+探すのは gitleaks（設計の LIB1）である。この節の関数は、gitleaks の設定を形の正本のデータと CI の秘密から実行の時に組み、gitleaks を起こし、報告を外しで絞り、値を出さずに出力する包みだけを持つ。正規表現で本文を探す処理は自前で持たない。
+
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `loadLeakTerms` | `tools/checks/src/leak-check.ts` | 新設 | `(env: NodeJS.ProcessEnv) => LeakTerms \| null` | `LEAK_CHECK_TERMS` を読み、種類ごとの語の配列を返す。無いか空なら `null` |
-| `listTrackedTexts` | 同上 | 新設 | `(root: string) => Promise<TrackedText[]>` | `git ls-files -z` の追跡しているファイルのパスをすべて返し、そのうち先頭 8,000 バイトに NUL の無いものは本文も読む。`TrackedText` は `{ path: string; text: string \| null }` |
-| `findShapeHits` | 同上 | 新設 | `(texts: TrackedText[], shapes: SecretShapes, allow: LeakAllow[]) => { hits: LeakHit[]; allowFindings: AllowFinding[] }` | 形ごとの正規表現でパスと本文の行を探し、作り物の値を除く。外しの行のパスと種類の本文の当たりは、件数が外しの `count` と等しいときだけ除き、違えばその当たりを残して件数の食い違いを返す |
-| `findTermHits` | 同上 | 新設 | `(texts: TrackedText[], terms: LeakTerms) => LeakHit[]` | 語を大文字と小文字を区別せずに、パスと本文の中に文字列として探す。外しは効かない |
+| `buildGitleaksConfig` | 同上 | 新設 | `(shapes: SecretShapes, terms: LeakTerms \| null) => string` | gitleaks の設定（TOML）の中身を組む。既定の規則を残し（`[extend] useDefault = true`）、データの形ごとに規則 `nd-<種類>-<id>`（`regex`・`secretGroup`）を足し、作り物の値・頭・印を規則ごとの許可（`regexTarget = "secret"` の `regexes`）にする。語があれば、種類ごとに大文字と小文字を区別しない規則 `nd-real-<種類>` を本文用（`regex`）とパス用（`path`）の 2 つ足す。語は正規表現の記号を外して入れる |
+| `snapshotTracked` | 同上 | 新設 | `(root: string, dir: string) => Promise<void>` | `git ls-files -z` の追跡しているファイルだけを一時のディレクトリへ写す（依存や生成の出力など、追跡していないファイルを探さないため） |
+| `runGitleaks` | 同上 | 新設 | `(args: GitleaksRun, config: string) => Promise<GitleaksFinding[]>` | gitleaks を `--redact=100 --no-banner --report-format json --report-path <一時のファイル> --exit-code 0` で起こし、設定は環境変数 `GITLEAKS_CONFIG_TOML` で渡す（ファイルに書かない）。`GitleaksRun` は `{ mode: "dir"; target } \| { mode: "git"; repo; range }`。報告の `RuleID`・`File`・`StartLine`・`Commit` だけを読み、`Secret`・`Match` は読まない |
+| `applyAllow` | 同上 | 新設 | `(findings: GitleaksFinding[], allow: LeakAllow[]) => { hits: LeakHit[]; allowFindings: AllowFinding[] }` | 外しの行のパスと規則の当たりは、件数が外しの `count` と等しいときだけ除き、違えばその当たりを残して件数の食い違いを返す。`nd-real-*` の当たりには外しを効かせない |
 | `maskPath` | 同上 | 新設 | `(path: string, shapes: SecretShapes, terms: LeakTerms \| null) => string` | パスの中の形の当たりと語の当たりの部分を `***` に置き換える。出力と標準エラーに出すパスはすべてこれを通す |
 | `mainLeakCheck` | 同上 | 新設 | `(argv: string[], env: NodeJS.ProcessEnv) => Promise<number>` | 上をつなぎ、当たりを出して終了コードを返す |
 | `secretShapesSchema`・`loadSecretShapes` | `packages/contracts/src/secret-shapes.ts` | 新設 | `z.ZodType`・`() => SecretShapes` | データの形と、データのファイルを読んで照らす読み手 |
 
-- `findShapeHits`
-  - 事前条件: 形の正規表現は名前つきの組 `value` を 1 つ持つ（照らす値の部分）
-  - 事後条件: 当たりは `{ kind, file, line }` だけで、当たった文字を持たない。パスの当たりは `line` を `0` にする
+- `buildGitleaksConfig`
+  - 事前条件: 形の正規表現は gitleaks の正規表現（Go の RE2）で書け、照らす値の部分を 1 つ目の組に持つ
+  - 事後条件: 返す TOML はリポジトリにもファイルにも書かれない（`runGitleaks` が環境変数で渡すだけ）
   - 副作用: 無し
+- `runGitleaks`
+  - 事前条件: `gitleaks` の実行ファイルが `GITLEAKS_BIN` か `PATH` にある
+  - 事後条件: 報告のファイルは読んだ後に消す。gitleaks の標準出力と標準エラーは捨て、終了コードだけを見る（`--exit-code 0` なので、0 以外は道具の誤り）
+  - 副作用: 子のプロセス・一時のファイル
 - `mainLeakCheck`
-  - 引数: `[--root <作業の木>]`。スクリプト `npm run leak-check`
-  - 副作用: 標準出力に当たりの行（`leak:<種類>` と `<伏せたファイル>:<行>` をタブで区切る）と要約、標準エラーに誤り。ファイルのパスは当たりの行でも読み込みの誤りでも `maskPath` を通し、git や読み込みの誤りの文言（パスを含みうる）はそのまま出さずに誤りの種類だけを出す
+  - 引数: `[--root <作業の木>] [--base <分岐点のコミット>]`。スクリプト `npm run leak-check`
+  - 流れ: `snapshotTracked` で写した木を `dir` で探す。`--base` があれば、続けて `git` で `<分岐点>..HEAD` のコミットの差分を探す（Pull Request の途中のコミットで足して消した値も、Pull Request の上の公開の履歴に残るため）
+  - 副作用: 標準出力に当たりの行（今の木は `leak:<規則>`、履歴は `leak-history:<規則>` と、`<伏せたファイル>:<行>` をタブで区切る。履歴の行はコミットの短い SHA を頭に足す）と要約、標準エラーに誤り。ファイルのパスはどの行でも `maskPath` を通し、git と gitleaks の誤りの文言（パスを含みうる）はそのまま出さずに誤りの種類だけを出す
 
-照らす形（データの中身。正規表現はデータが持ち、ここでは何を当たりにするかだけを書く）:
+照らす形（データ `secret-shapes.json` の中身。正規表現はデータが持ち、ここでは何を当たりにするかだけを書く。既知の提供者の token の形は gitleaks の既定の規則が持つので、データには nd-factory に固有の形と、既定の規則に無い形だけを置く）:
 
 | 種類 | 当たり | 当たりにしない |
 | --- | --- | --- |
@@ -162,19 +173,20 @@ nd-factory/
 | `arn` | `arn:` とパーティション（`aws`・`aws-cn`・`aws-us-gov`）で始まり、アカウントの欄が 12 桁で作り物でないもの。アカウントの欄が空の ARN は、資源の名前が英数字で始まり作り物の頭（`acme`）で始まらないもの | 置き場所の記号（`<…>`・`${…}`）の欄 |
 | `resource-id` | AWS の資源の ID の頭（`vpc-`・`subnet-`・`sg-`・`i-`・`vol-`・`snap-`・`ami-`・`igw-`・`rtb-`・`eni-`・`nat-`・`eipalloc-`・`lt-`）と 8 か 17 桁の 16 進 | データの作り物の ID の一覧 |
 | `endpoint` | 資源ごとに名前の付く AWS の端点（`*.execute-api.<リージョン>.amazonaws.com`・`*.lambda-url.<リージョン>.on.aws`・`*.cloudfront.net`・`*.auth.<リージョン>.amazoncognito.com`・`*.rds.amazonaws.com`・`*.s3.amazonaws.com` の資源の部分） | 資源の部分が作り物の頭で始まる・置き場所の記号 |
-| `private-key` | 私有鍵の頭（`-----BEGIN` と `PRIVATE KEY-----` の間に種類） | — |
-| `token` | token の頭の形（GitHub の `ghp_`・`gho_`・`ghu_`・`ghs_`・`ghr_`・`github_pat_`、AWS のアクセスキーの `AKIA`・`ASIA`、Slack の `xox?-`、Anthropic の `sk-ant-`）と続く長さ | 値に作り物の印（`EXAMPLE`）を含む |
-| `real:accounts`・`real:profiles`・`real:environments` | CI の秘密の語のどれか | — |
+| `private-key`・`token` | gitleaks の既定の規則（私有鍵の頭・GitHub・AWS・Slack などの token）。既定の規則に無い形（Anthropic の `sk-ant-` など、実装の時に既定の規則の一覧と照らして決める）だけをデータに足す | 値に作り物の印（`EXAMPLE`）を含む（データの作り物の印を、既定の規則にも全体の許可として掛ける） |
+| `real:accounts`・`real:profiles`・`real:environments` | CI の秘密の語のどれか（本文とパス） | — |
 
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `SecretShapes` | 型 `{ value_shapes: Shape[]; infra_shapes: Shape[]; fake: { values: string[]; prefixes: string[]; markers: string[] }; key_names?: string[] }`。`Shape` は `{ id, kind, pattern, flags }` | `packages/contracts/src/secret-shapes.ts` | `key_names` は #2 が足す |
+| `SecretShapes` | 型 `{ value_shapes: Shape[]; infra_shapes: Shape[]; fake: { values: string[]; prefixes: string[]; markers: string[] }; key_names?: string[] }`。`Shape` は `{ id, kind, pattern }`（`pattern` は RE2 で書き、伏せ字（#2）の JavaScript の正規表現としても読めるものに限る） | `packages/contracts/src/secret-shapes.ts` | `key_names` は #2 が足す |
 | `LeakTerms` | 型 `{ accounts: string[]; profiles: string[]; environments: string[] }` | `tools/checks/src/leak-check.ts` | — |
-| `LeakAllow` | 型 `{ path: string; kind: string; count: number; reason: string }`（値も値の要約値も持たない。`count` はそのパスのその種類の本文の当たりの件数） | `tools/checks/data/leak-allow.json` | 空の配列 |
-| `AllowFinding` | 型 `{ path: string; kind: string; expected: number; actual: number }`。件数が増えれば新しい値の混入、減れば外しの残り | `tools/checks/src/leak-check.ts` | — |
+| `GitleaksFinding` | 型 `{ rule: string; file: string; line: number; commit?: string }`（報告の `RuleID`・`File`・`StartLine`・`Commit` だけ） | 同上 | — |
+| `LeakAllow` | 型 `{ path: string; rule: string; count: number; reason: string }`（値も値の要約値も持たない。`count` はそのパスのその規則の今の木の当たりの件数） | `tools/checks/data/leak-allow.json` | 空の配列 |
+| `AllowFinding` | 型 `{ path: string; rule: string; expected: number; actual: number }`。件数が増えれば新しい値の混入、減れば外しの残り | `tools/checks/src/leak-check.ts` | — |
 | 作り物の値 | データ | `packages/contracts/data/secret-shapes.json` の `fake` | `123456789012`・`us-west-2`・頭 `acme`・`example.com`・印 `EXAMPLE` |
+| gitleaks の版と要約値 | 設定値 | `.github/workflows/ci.yml` のジョブ `leak-check` の環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256`（この 1 か所だけ） | 8.30.1 と、配布のチェックサムのファイルの `linux_x64.tar.gz` の行 |
 | 語を必須にする切り替え | 環境変数 `LEAK_CHECK_REQUIRE_TERMS` | `ci.yml` | 正本のリポジトリの中の実行だけ `1`（参照の検査と同じ式） |
 
 ### 異常系の処理
@@ -184,33 +196,34 @@ nd-factory/
 | `loadLeakTerms` | 語の形の誤り | JSON でない・種類の欠け・空の語 | 読んだ直後 | 止める | 標準エラーに誤りの種類だけ（語を出さない）、終了コード 2 | 秘密を直して打ち直す |
 | `mainLeakCheck` | 語が要る実行で語が無い | 秘密の未登録 | 切り替えの照らし | 止める | 終了コード 2 | 同上 |
 | `mainLeakCheck` | 語が無い実行 | fork・秘密の未登録 | 同上 | 既定値で続ける（形だけを探す） | `skip:` の 1 行 | — |
-| `loadSecretShapes` | データの形の誤り・正規表現が作れない | データの書き誤り | 読んだ直後 | 止める | 終了コード 2 | 直して打ち直す |
-| `listTrackedTexts` | git が失敗する | 作業の木でない | 子のプロセスの終了コード | 止める | 終了コード 2 | 打ち直せる |
-| `mainLeakCheck` | 当たりがある | 実際の値か秘密の形の混入 | 探した後 | 呼び出し元へ返す | 当たりの行と件数、終了コード 1 | 混入を消す。履歴に残った値は別に扱う（検査の外） |
-| `mainLeakCheck` | 外しの件数が合わない | 外したファイルへの同じ種類の値の追加・当たりを直したのに外しが残る | 探した後 | 呼び出し元へ返す | `allow:` の行に伏せたパス・種類・外しの件数と実際の件数、終了コード 1 | 値を消すか、正当なら外しの件数を直す（レビューで見る） |
-| `listTrackedTexts` | ファイルを読めない | 消えた・権限 | 読み込み | 止める | 標準エラーに `maskPath` を通したパスと誤りの種類（`ENOENT` などの符号）だけ、終了コード 2 | 打ち直せる |
+| `loadSecretShapes` | データの形の誤り | データの書き誤り | 読んだ直後 | 止める | 終了コード 2 | 直して打ち直す |
+| `runGitleaks` | gitleaks が無い・起きない・0 以外で終わる・報告を読めない | 未導入・設定の正規表現の誤り・道具の不具合 | 起動と終了コードと報告の読み込み | 止める | 標準エラーに誤りの種類だけ（gitleaks の出力は出さない）、終了コード 2 | 導入するかデータを直して打ち直す |
+| `snapshotTracked` | git が失敗する・ファイルを読めない | 作業の木でない・消えた・権限 | 子のプロセスの終了コード・読み込み | 止める | 標準エラーに `maskPath` を通したパスと誤りの種類（`ENOENT` などの符号）だけ、終了コード 2 | 打ち直せる |
+| `mainLeakCheck` | 当たりがある | 実際の値か秘密の形の混入 | 探した後 | 呼び出し元へ返す | 当たりの行と件数、終了コード 1 | 混入を消す。履歴の当たりは、Pull Request の枝を作り直して値を含むコミットを外す（検査の外の作業） |
+| `mainLeakCheck` | 外しの件数が合わない | 外したファイルへの同じ規則の値の追加・当たりを直したのに外しが残る | 探した後 | 呼び出し元へ返す | `allow:` の行に伏せたパス・規則・外しの件数と実際の件数、終了コード 1 | 値を消すか、正当なら外しの件数を直す（レビューで見る） |
 
 ### ログと記録の出力
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `mainLeakCheck` | 当たりの種類・伏せたファイル・行と件数、外しの件数の食い違い、照合を飛ばした旨 | 標準出力 | 当たった文字・当たった行の中身・語・語の数・パスの中の当たった部分 |
-| `mainLeakCheck`・`listTrackedTexts` | 誤りの種類と伏せたパス | 標準エラー | 子のプロセスと読み込みの誤りの文言そのもの・パスの中の当たった部分 |
+| `mainLeakCheck` | 当たりの規則・伏せたファイル・行（履歴はコミットの短い SHA）と件数、外しの件数の食い違い、照合を飛ばした旨 | 標準出力 | 当たった文字・当たった行の中身・語・語の数・パスの中の当たった部分・組んだ設定 |
+| `mainLeakCheck`・`runGitleaks`・`snapshotTracked` | 誤りの種類と伏せたパス | 標準エラー | gitleaks と子のプロセスの出力と誤りの文言そのもの・パスの中の当たった部分 |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `listTrackedTexts`・`findTermHits` | 参照の検査の `gitGrep`・`loadMatchTerms` | `tools/ref-check/src/ref-check.ts` を読んだ | 形の正規表現に前後の照らし（後読み）が要り、`git grep -E` では書けない。語の読み方は同じ形に揃え、関数は共有しない（参照の検査の語の種類と混ぜない、設計の決定 4） |
+| 本文とパスの探し方 | gitleaks 8.30.1 の `dir`・`git`・`--redact`・`GITLEAKS_CONFIG_TOML`・規則ごとの許可 | 配布の実行ファイルをチェックサムで確かめて取り、作り物でない 12 桁と語を含む一時の木を、環境変数で渡した設定（既定の規則に 2 つの規則を足し、`123456789012` を許可）で探した。終了コード 1、報告の `Secret` と `Match` は `REDACTED`、`123456789012` の行は当たらず、報告に値が現れなかった（2026-11-21） | 使う |
+| `loadLeakTerms` | 参照の検査の `loadMatchTerms` | `tools/ref-check/src/ref-check.ts` を読んだ | 語の読み方は同じ形に揃え、関数は共有しない（参照の検査の語の種類と混ぜない、設計の決定 4） |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `findShapeHits` | 種類ごとに当たる（違反の文字列は実行の時に組み立てる）。パスに形の値を含むファイルで `line` 0 の当たりが出る | 作り物の値・置き場所の記号・13 桁の数・16 進の中の 12 桁で当たらない。`docs/` の下のファイルで当たる | 外しの行のファイルと種類で、件数が同じなら当たらない。同じファイルに同じ種類の別の値を 1 つ足すと、当たりと件数の食い違いが出る。当たりを消して外しが残ると件数の食い違いが出る |
-| `findTermHits` | 大文字と小文字によらず当たる。パスの中の語にも当たる | 語の前後に別の文字があっても当たる | 外しの行のファイルでも当たる |
+| `buildGitleaksConfig` | 形ごとと語の種類ごとに規則が 1 つずつでき、既定の規則を残す | 語が `null` で `nd-real-*` を作らない。正規表現の記号を含む語が文字どおりに当たる | — |
+| `applyAllow` | 外しの行のパスと規則で、件数が同じなら当たらない | 外しの無いパスはそのまま当たる | 同じファイルに同じ規則の値を 1 つ足すと当たりと件数の食い違いが出る。当たりを消して外しが残ると件数の食い違いが出る。`nd-real-*` は外しの行のファイルでも当たる |
 | `maskPath` | 当たりの無いパスはそのまま | 語と形の両方を含むパスで両方を伏せる | — |
-| `mainLeakCheck` | 当たりで終了コード 1、無ければ 0 | 語の無い実行で `skip:` と 0 | 語の形の誤り・必須なのに無いで 2。実際の値をパスに含み本文にも当たりのあるファイルで、標準出力と標準エラーのどちらにも語と当たった文字が現れない。同じパスのファイルを読めなくした（権限を外した）作業の木で終了コード 2、標準エラーに語が現れない |
+| `mainLeakCheck`（実際の gitleaks を起こす結合のテスト） | 種類ごとに当たり（違反の文字列は実行の時に組み立てる）、終了コード 1。無ければ 0 | 作り物の値・置き場所の記号・13 桁の数・16 進の中の 12 桁で当たらない。`docs/` の下のファイルで当たる。追跡していないファイルの値には当たらない。`--base` を渡すと、途中のコミットで足して消した値が `leak-history:` で当たる | 語の形の誤り・必須なのに無い・gitleaks が無いで 2。実際の値をパスに含み本文にも当たりのあるファイルで、標準出力と標準エラーのどちらにも語と当たった文字が現れない |
 
 ## 形の往復と I15・I12 の形
 
@@ -256,7 +269,7 @@ nd-factory/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `screenOperationNames` | `tools/checks/src/operation-coverage.ts` | 新設 | `(files: { path: string; text: string }[], clientModule: string) => Set<string>` | 画面のコード（`apps/web/src` のテストでない `*.ts`）を TypeScript の構文木で読み、生成した呼び出しの書き出しから import した操作の関数の名前か、呼び出しの第 1 引数の文字列の定数を操作の名前として集める（#2 へ渡す K2-2 の形） |
+| `screenOperationNames` | `tools/checks/src/operation-coverage.ts` | 新設 | `(files: { path: string; text: string }[], clientModule: string) => Set<string>` | 画面のコード（`apps/web/src` のテストでない `*.ts` と `*.tsx`。`*.tsx` は TSX として読む）を TypeScript の構文木で読み、生成した呼び出しの書き出しから import した操作の関数の名前か、呼び出しの第 1 引数の文字列の定数を操作の名前として集める（#2 へ渡す K2-2 の形） |
 | `loadScreenPending` | 同上 | 新設 | `(path: string) => ScreenPending[]` | 画面の控え `tools/checks/data/screen-pending.json` を読み、形を照らして返す。`ScreenPending` は `{ operation: string; issue: string; reason: string }` |
 | `findCoverageFindings` | 同上 | 新設 | `(input: CoverageInput) => CoverageFinding[]` | 下の 8 つの欠けと余りを返す。`CoverageInput` は操作の表・MCP の道具の一覧・HTTP の経路の登録・画面が呼ぶ名前・画面の控え |
 
@@ -385,29 +398,33 @@ nd-factory/
 
 | ファイル | 変える中身 |
 | --- | --- |
-| `.github/workflows/ci.yml` | ジョブ `leak-check` を足す。`check` と同じ取得と Node の用意の後に `npm run leak-check` を打ち、環境変数 `LEAK_CHECK_TERMS`（秘密）と `LEAK_CHECK_REQUIRE_TERMS`（`ref-check` と同じ式で変数 `LEAK_CHECK_REQUIRE_TERMS` から作る）を渡す |
+| `.github/workflows/ci.yml` | ジョブ `leak-check` を足す。取得は履歴をすべて取り（`fetch-depth: 0`。分岐点からのコミットを探すため）、Node の用意の後に、gitleaks の配布の資産と同じ版のチェックサムのファイルを取って要約値を照らしてから `PATH` へ置き、`npm run leak-check` を打つ（Pull Request では `-- --base <分岐点>`）。gitleaks の版と要約値はこのジョブの環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の 1 か所にだけ書く。環境変数 `LEAK_CHECK_TERMS`（秘密）と `LEAK_CHECK_REQUIRE_TERMS`（`ref-check` と同じ式で変数 `LEAK_CHECK_REQUIRE_TERMS` から作る）を渡す |
 | `.github/workflows/ndf-contract.yml`（新設） | `on` は `pull_request`・`push`（main）・`schedule`（毎日 1 回）・`workflow_dispatch`。`permissions: contents: read`。ジョブ `ndf-contract` は Pull Request のとき、既定の取得（マージした結果のコミット）に加えて `base.sha` と `head.sha` を分岐点が求まる深さまで取り（`fetch-depth: 0`）、`npm run ndf-contract -- --base <base.sha> --head <head.sha> --summary "$GITHUB_STEP_SUMMARY"` を打つ。ほかの起動では `--base` と `--head` を渡さない。動作の版はコミットの SHA で固定する（`ci.yml` と同じ） |
 | `.ndf/project.json` | `ci.required_checks` に `leak-check`・`ndf-contract` を足す。`ci.workflows` に `ndf-contract.yml` の行を足す |
 | `package.json` | スクリプト `leak-check`・`ndf-contract` |
-| `tools/package.json` | 依存 `@nd-factory/contracts`・`ajv`・`ajv-formats` |
+| `tools/package.json` | 依存 `@nd-factory/contracts`・`ajv`・`ajv-formats`・`yaml` |
 | `tools/tsconfig.json` | `checks/src` を含める |
 | `packages/contracts/package.json` | 書き出し `./secret-shapes` |
 | `AGENTS.md` | 「秘密とインフラの値を置かない」に、実際の値の一覧は CI の秘密 `LEAK_CHECK_TERMS` から受ける行を足す |
 
 ### 関数の仕様（CI の定義のテスト）
 
+ワークフローは `yaml`（設計の LIB12）で読み、行の正規表現で鍵を拾わない。`yaml` は YAML 1.2 で読むので、最上位の `on` は真偽値でなく鍵の名前として読める（今の `ci.yml` を読んで `on` の下の `push`・`pull_request`、`jobs` の下の 4 つ、`permissions` の `{"contents":"read"}` が取れることを確かめた。2026-11-21）。
+
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `workflowFiles` | `tools/test/ci-definition.test.ts` | 新設 | `(root: string) => { path: string; text: string }[]` | `.github/workflows/` の `*.yml`・`*.yaml` を読む |
-| `triggersPullRequest` | 同上 | 新設 | `(yaml: string) => boolean` | 最上位の `on:` が `pull_request` を持つか |
-| `permissionBlocks` | 同上 | 新設 | `(yaml: string) => { scope: string; entries: string[] }[]` | 最上位の `permissions` と、各ジョブの `permissions` を、場所（`top` かジョブの名前）と中身の行の組で返す。`permissions: write-all`・`read-all` の 1 行の形も 1 つの中身として返す |
+| `loadWorkflows` | `tools/test/ci-definition.test.ts` | 新設 | `(root: string) => { path: string; text: string; doc: Workflow }[]` | `.github/workflows/` の `*.yml`・`*.yaml` を読み、`yaml` で解いた値と元の文字列の両方を返す。解けないファイルは失敗にする |
+| `jobNames` | 同上 | 変更 | `(doc: Workflow) => string[]` | `jobs` の鍵の名前を返す（今は文字列を行で読んでいる） |
+| `triggersPullRequest` | 同上 | 新設 | `(doc: Workflow) => boolean` | `on` が `pull_request` を持つか（文字列・配列・鍵の 3 つの書き方） |
+| `permissionBlocks` | 同上 | 新設 | `(doc: Workflow) => { scope: string; value: unknown }[]` | 最上位の `permissions` と、各ジョブの `permissions` を、場所（`top` かジョブの名前）と値の組で返す。`write-all`・`read-all` の文字列の形もそのまま返す |
+| `credentialWords` | 同上 | 変えない | `(yaml: string) => string[]` | 元の文字列で資格情報の語を探す（鍵でも値でも当たるように、解いた値でなく文字列を読む） |
 
-テストが照らすこと: Pull Request で起動するワークフローのジョブの名前の和集合が必須のチェックの宣言と等しい・ジョブの名前がワークフローの間で重ならない・どのワークフローにも資格情報の語が無い・どのワークフローも最上位の `permissions` に `contents: read` だけを持ち、ジョブの `permissions` は持たないか `contents: read` だけを持つ（ジョブの上書きで権限を足させない）。
+テストが照らすこと: Pull Request で起動するワークフローのジョブの名前の和集合が必須のチェックの宣言と等しい・ジョブの名前がワークフローの間で重ならない・どのワークフローにも資格情報の語が無い・どのワークフローも最上位の `permissions` が `{ contents: read }` だけで、ジョブの `permissions` は持たないか `{ contents: read }` だけ（ジョブの上書きで権限を足させない）。
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `workflowFiles`・`triggersPullRequest` | 2 つのワークフローを読み、Pull Request で起動するものを選ぶ | `on: [pull_request]` と `on:` の下の鍵の両方の書き方 | 片方のワークフローにだけ資格情報の語・`id-token: write` を足すと当たる |
+| `loadWorkflows`・`triggersPullRequest`・`jobNames` | 2 つのワークフローを読み、Pull Request で起動するものを選ぶ | `on: pull_request`・`on: [pull_request]`・`on:` の下の鍵の 3 つの書き方 | 解けない YAML のファイルで失敗する。片方のワークフローにだけ資格情報の語・`id-token: write` を足すと当たる |
 | `permissionBlocks` と権限の照らし | 今の 2 つのワークフローで違反 0 件 | ジョブの `permissions: { contents: read }` は通る | ジョブの `permissions` に `pull-requests: write`（資格情報の語に当たらない種類）を足す・ジョブに `permissions: write-all` を書く・最上位に `issues: write` を足すと、それぞれ場所つきで当たる |
 | 参照の検査のテスト | — | — | ワークフローの文字列に NDF の版を読む式と比べを同じ行に置くと当たる |
