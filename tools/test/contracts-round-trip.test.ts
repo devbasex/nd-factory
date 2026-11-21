@@ -109,7 +109,7 @@ const NON_OPERATION_ROUTES: readonly NonOperationRoute[] = [
 ];
 
 /**
- * 照らすこと 8 の期限付きの除外（承認で足したこと 2）。表が空になったとき、照らすこと 8 は合成の経路と登録の経路の完全一致になる。
+ * 照らすこと 8 の期限付きの除外（承認で足したこと 2）。表が空になったとき、照らすこと 8 は合成の経路と、登録の経路と操作でない受け口の経路を合わせた集まりの完全一致になる。
  * #2 の登録にある受け口（user・runner・machine・db_prep）はすべてここに持つ。表に無い受け口の経路は「登録にだけある経路」で落ちる
  */
 const ROUTE_EXCLUSIONS: readonly RouteExclusion[] = [
