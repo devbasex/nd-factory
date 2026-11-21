@@ -123,10 +123,18 @@ function write(root: string, path: string, content: string): void {
   writeFileSync(join(root, path), content);
 }
 
+/** 一時の木の tsconfig.base.json の中身 */
+const TSCONFIG_BASE = { compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext", allowImportingTsExtensions: true, resolveJsonModule: true, noEmit: true } };
+
+/** 一時の木の根へ tsconfig.base.json を書く */
+function writeTsConfigBase(root: string): void {
+  write(root, "tsconfig.base.json", JSON.stringify(TSCONFIG_BASE));
+}
+
 /** 作り物のワークスペースと npm のパッケージを組んだ一時の木を作る */
 function buildTree(): string {
   const root = mkdtempSync(join(tmpdir(), "deps-config-"));
-  write(root, "tsconfig.base.json", JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext", allowImportingTsExtensions: true, resolveJsonModule: true, noEmit: true } }));
+  writeTsConfigBase(root);
   for (const ws of WORKSPACES) {
     write(root, join(ws.dir, "package.json"), JSON.stringify({ name: `@nd-factory/${ws.name}`, type: "module", exports: ws.exports }));
     mkdirSync(join(root, "node_modules", "@nd-factory"), { recursive: true });
@@ -316,7 +324,7 @@ async function planValuesOutsideRule(
 /** 料金プランの書き出しだけを持つ作り物の形の正本の木を組む */
 function buildPlanTree(files: Record<string, string>, exportsField: Record<string, string> = { "./plans": "./src/plans.ts" }): string {
   const root = mkdtempSync(join(tmpdir(), "deps-plans-"));
-  write(root, "tsconfig.base.json", JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext", allowImportingTsExtensions: true, resolveJsonModule: true, noEmit: true } }));
+  writeTsConfigBase(root);
   write(root, "packages/contracts/package.json", JSON.stringify({ name: CONTRACTS_NAME, type: "module", exports: exportsField }));
   for (const [path, content] of Object.entries(files)) write(root, path, content);
   return root;
