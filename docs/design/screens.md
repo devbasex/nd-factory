@@ -63,6 +63,7 @@ HTTP の経路は 14 本にする。機能ごとの一覧の画面・タブの H
 | R14 | `/me` | 自分の設定 | 自分 |
 
 - サインインの戻り（認可コードと `state` の検索の値）は `/` で受け、受けたら履歴から検索の値を消す
+- サインインの手段をつなぐ戻りは、連携専用の戻り先 `/me/logins/return` で受ける（画面ではなく、受けたら履歴を R14 の `/me` へ置き換える）。IdP から戻ったブラウザーはこの path を直に開くため、CDN は地図の経路と同じにこの path へも `index.html` を返す（[プラットフォームの文書の CloudFront と画面の S3](platform.md#資源ごとの形)）。起動のときは通常のサインインの戻りより先にこの経路を見て、その `code` と `state` を `signinRedirectCallback` へ渡さない（連携の `state` はサーバーが作り、通常のサインインの状態の控えに無い）。`state` が `login_links.create` の後に `sessionStorage` へ控えた流れの ID と同じときだけ `logins.create` へ送る。手順は [詳細設計の `verifyLoginToLink`](detail.md#関数の仕様)
 - GitHub App を入れた後の戻りは R10 で受ける（検索の値を保ったまま、登録の候補を読み直す）
 - 地図に無い HTTP の経路は `/` へ履歴を置き換えて移る。転送の表は持たない
 - チームを作る・委任を発行する・手元のマシンを登録するは、それぞれ R9・R14・R11 の中のダイアログにし、HTTP の経路を足さない
@@ -340,7 +341,7 @@ stateDiagram-v2
 | R11 `/t/:teamId/execution` | 実行の場所 | F17・F18 | `execution_settings.get`・`execution_settings.update`・`model_keys.list`・`model_keys.create`・`model_keys.delete`・`machines.list`・`machines.create`・`machines.delete` | 読めない | `execution_settings.update`・`model_keys.create`・`machines.create` |
 | R12 `/t/:teamId/usage` | 使える量と費用 | F19 | `usage.get`・`usage_records.list`・`spend_caps.update` | 読めない | `spend_caps.update` |
 | R13 `/t/:teamId/audit` | 操作の記録 | F20 | `audit_records.list`（チームとそのプロジェクト、絞り込み: プロジェクト・主体・入口・期間） | 読めない | — |
-| R14 `/me` | 自分の設定 | F1・F2・F15・F16 | `users.get`・`users.update`・`logins.create`・`logins.delete`・`notification_targets.list`・`notification_targets.create`・`notification_targets.test`・`notification_targets.delete`・`delegations.list`・`delegations.create`・`delegations.revoke`・`sessions.delete`（サインアウト） | 読める（自分の設定だけ） | `logins.create`・`logins.delete`・`notification_targets.create`・`delegations.create`・`delegations.revoke`・`sessions.delete` |
+| R14 `/me` | 自分の設定 | F1・F2・F15・F16 | `users.get`・`users.update`・`login_links.create`・`logins.create`・`logins.delete`・`notification_targets.list`・`notification_targets.create`・`notification_targets.test`・`notification_targets.delete`・`delegations.list`・`delegations.create`・`delegations.revoke`・`sessions.delete`（サインアウト） | 読める（自分の設定だけ） | `login_links.create`・`logins.create`・`logins.delete`・`notification_targets.create`・`delegations.create`・`delegations.revoke`・`sessions.delete` |
 
 F1〜F20 はどれも 1 回以上この表に現れる。画面にしか無い操作は無く、どの操作も API の操作の一覧と MCP の道具にある（I14）。画面の操作と形の正本の操作の一覧の対応を検査で照らす。
 
@@ -465,7 +466,7 @@ F1〜F20 はどれも 1 回以上この表に現れる。画面にしか無い�
 
 | 画面 | 主な項目 | 主な操作 | 失敗と状態の見せ方 |
 | --- | --- | --- | --- |
-| 自分の設定（R14） | 呼び名（0〜32 字）・言語（選択）・時刻帯（選択）・サインインの手段（Google・GitHub）・通知先（この端末の Web Push・Slack）・委任の一覧（クライアントの名前・範囲・期限・最後に使った時刻・状態）・サインアウト | 設定を変える（`users.update`。控えて送る）・サインインの手段をつなぐ・外す（`logins.create`・`logins.delete`。つなぐは IdP へ移って戻る。最後の 1 つは外せない）・この端末へ知らせを受ける（`notification_targets.create`。押したときだけ許可を求める）・試す（`notification_targets.test`）・外す（`notification_targets.delete`）・委任を発行する（`delegations.create`。ダイアログ。token は 1 度だけ出し、写す操作を置く）・取り消す（`delegations.revoke`。確かめのダイアログ）・サインアウト（`sessions.delete`） | Web Push の許可を断られた: 端末の設定から許す案内。iOS でホーム画面に加えていない: 「ホーム画面に加えると知らせを受けられます」と手順（PRD20）。Slack の宛先の値は保存の後に出さず、末尾 4 字だけ |
+| 自分の設定（R14） | 呼び名（0〜32 字）・言語（選択）・時刻帯（選択）・サインインの手段（Google・GitHub）・通知先（この端末の Web Push・Slack）・委任の一覧（クライアントの名前・範囲・期限・最後に使った時刻・状態）・サインアウト | 設定を変える（`users.update`。控えて送る）・サインインの手段をつなぐ・外す（`login_links.create`・`logins.create`・`logins.delete`。つなぐは `login_links.create` が返した認可の URL で選んだ IdP へ移り、その IdP でサインインし直して戻る。戻りは連携専用の戻り先 `/me/logins/return` で受ける（上の決まり）。手順は [詳細設計の `verifyLoginToLink`](detail.md#関数の仕様)。要素の 409 `already_linked` なら IdP で別のアカウントを選び直す案内を、409 `link_invalid`（流れの期限切れ・使い終え・照らしの外れ）か控えた流れの ID と違う `state` なら、つなぐ操作を始め直す案内を出す。最後の 1 つは外せない）・この端末へ知らせを受ける（`notification_targets.create`。押したときだけ許可を求める）・試す（`notification_targets.test`）・外す（`notification_targets.delete`）・委任を発行する（`delegations.create`。ダイアログ。token は 1 度だけ出し、写す操作を置く）・取り消す（`delegations.revoke`。確かめのダイアログ）・サインアウト（`sessions.delete`） | Web Push の許可を断られた: 端末の設定から許す案内。iOS でホーム画面に加えていない: 「ホーム画面に加えると知らせを受けられます」と手順（PRD20）。Slack の宛先の値は保存の後に出さず、末尾 4 字だけ |
 | チーム（R9） | チームの名前・席の一覧（呼び名・役割・加えた時刻）・招待の一覧・プロジェクトの一覧・受け入れ待ちの割り当て | 名前を変える（`teams.update`）・人を招く（`invitations.create`）・招待を取り下げる（`invitations.delete`）・役割を変える（`seats.update`）・外す（`seats.delete`。確かめ）・チームを作る（`teams.create`。ダイアログ）・プロジェクトを作る（R10 へ）・割り当てを受け入れる（`project_transfers.accept`。人だけ・確かめ）。招かれた人が招待のリンクから開いたときは、招待を受ける（`invitations.accept`）だけを出す | メンバーには操作を出さず読むだけ。最後の持ち主を外す・メンバーにする: 409 の理由を出す |
 | プロジェクトを作る（R10） | 名前（1〜100 字）・割り当てるチーム（今のチーム）・GitHub App の導入の状態・リポジトリの候補（主を 1 つ、サブを 0 以上選ぶ） | GitHub App を入れる（GitHub へ移り R10 へ戻る。戻りで `github_installations.link`）・作る（`projects.create`） | 主が 0 か 2 つ: 「主のリポジトリを 1 つ選んでください」（I1）。メンバーには画面への導線を出さず、直に開いたら「チームの持ち主に作成を頼んでください」と案内する |
 | プロジェクトの設定（R8） | 名前・リポジトリ（主・サブ）・割り当てたチーム・移す先と状態 | 名前を変える（`projects.update`）・リポジトリを足す（`repositories.add`）・外す（`repositories.remove`。主は外せない）・割り当てを移す（`project_transfers.create`。移す先のチームを選び、確かめ）・取り下げる（`project_transfers.delete`）・閉じる（`projects.close`。確かめ。閉じた後は見えなくなる） | 移す・閉じるは止まるスプリントの数を確かめのダイアログに出す。409（スプリントが止まりきっていない・移しの途中・資格情報の差し替えの途中）: 理由を出す。メンバーには操作を出さず、名前・リポジトリ・割り当てたチーム・移す先と状態を読むだけ |
@@ -719,7 +720,7 @@ API が利用者の言語で文を返す形は、言語の判定と文面が API
 
 ### 決定 38: 知らせと Slack から直に画面を開けるよう、HTTP の経路を URL の path で持ち、地図の HTTP の経路には CDN が `index.html` を返す
 
-Web Push の知らせと Slack の文面は URL だけを運ぶ。path の HTTP の経路なら、`/p/:projectId/approvals/:approvalId` を開くだけで承認の詳細が出る。オフラインでは Service Worker が控えた画面の殻を返す。CDN が地図の HTTP の経路へ `index.html` を返す設定は[プラットフォームの文書](platform.md)が受ける。
+Web Push の知らせと Slack の文面は URL だけを運ぶ。path の HTTP の経路なら、`/p/:projectId/approvals/:approvalId` を開くだけで承認の詳細が出る。オフラインでは Service Worker が控えた画面の殻を返す。CDN が地図の HTTP の経路と連携の戻り先 `/me/logins/return` へ `index.html` を返す設定は[プラットフォームの文書](platform.md#資源ごとの形)が受ける（拡張子の無い path を `index.html` へ書き換える CloudFront Function）。
 
 `#` の後ろに HTTP の経路を置く形は採らなかった。得るのは CDN の設定が 1 つ減ることだけである。知らせと Slack に載せる URL が読みにくくなり、サインインの戻りの検索の値と並べて扱う所が増える。
 

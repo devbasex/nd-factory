@@ -82,7 +82,7 @@ API の操作は 1 つの画面に合わせず、エンティティ（スプリ�
 | 決まり | 中身 |
 | --- | --- |
 | どこに置くか | 新しいものを作る操作と、外へ働きかける操作（`sprints.create`・`sprints.cancel`・`approvals.answer`・`questions.answer`・`delegations.create`・`machines.create` など）の要素に `idempotency_key`（UUID の形）を必ず持たせる |
-| 何で見分けるか | 主体の利用者・操作の名前・鍵の 3 つの組 |
+| 何で見分けるか | 主体の利用者・操作の名前・鍵の 3 つの組。`sessions.create` だけは主体の利用者の代わりに、認証が検証した Cognito の `sub` と、[Cognito の主体の対応の行](data.md#cognito-の主体の対応の行) の `binding_epoch`（外した回数）の組で区切る。初回は利用者がまだ無く（まだ結んでいない人）、初回の確定の後に応答を失って送り直すと対応の行ができて主体が人に変わるため、どちらでも同じ鍵にして初回の結果を返す。ログインを外すと `binding_epoch` が上がるため、外す前の鍵で送り直しても外す前の利用者の結果は返らない（同じ `sub` を別の利用者へ結び直した後も） |
 | 2 回目 | 24 時間の間、同じ組の 2 回目は 1 回目の要素の結果を返し、状態を変えない。1 回だけ返す値（委任の token など）は 2 回目に `null` にする。どの値かは操作ごとに形の正本（`onceOnly`）が場所で決め、その場所の形は `null` を受ける |
 | 中身が違う | 同じ組で要素の中身が違えば 422 `idempotency_key_reused` |
 | 1 回目が途中 | 409 `in_progress`。呼び手は待って同じ要素を送り直す |
@@ -151,7 +151,7 @@ ID の種類の頭:
 
 | 操作と HTTP の経路 | 受け持つ子の課題 |
 | --- | --- |
-| F1〜F3（`sessions.*`・`users.*`・`logins.*`・`teams.*`・`seats.*`・`invitations.*`） | #4 |
+| F1〜F3（`sessions.*`・`users.*`・`login_links.*`・`logins.*`・`teams.*`・`seats.*`・`invitations.*`） | #4 |
 | F4〜F6（`projects.*`・`github_installations.*`・`repositories.*`・`project_transfers.*`） | #5 |
 | F7〜F10・F17（`waiting_counts.get`・`issue_candidates.list`・`sprints.*`・`lanes.list`・`progress_events.list`・`execution_settings.*`・`model_keys.*`）とランナー向けの 5 つの HTTP の経路 | #6 |
 | F18（`machines.*`）と手元のマシン向けの 2 つの HTTP の経路 | #7 |
@@ -178,6 +178,7 @@ ID の種類の頭:
 | `sessions.delete` | `/v1/sessions/delete` | F1 | 依頼と材料の読み出しだけ（`users.get`） | 人だけ | 書く |
 | `users.get` | `/v1/users/get` | F1・F2 | 道具 | — | 読む（read） |
 | `users.update` | `/v1/users/update` | F2 | 道具 | — | 書く（manage） |
+| `login_links.create` | `/v1/login_links/create` | F1 | 依頼と材料の読み出しだけ（`users.get`） | 人だけ | 書く |
 | `logins.create` | `/v1/logins/create` | F1 | 依頼と材料の読み出しだけ（`users.get`） | 人だけ | 書く |
 | `logins.delete` | `/v1/logins/delete` | F1 | 依頼と材料の読み出しだけ（`users.get`） | 人だけ | 書く |
 | `teams.list` | `/v1/teams/list` | F3 | 道具 | — | 読む（read） |
@@ -262,7 +263,7 @@ ID の種類の頭:
 | `notification_targets.create`・`model_keys.create` | 宛先の値と持ち込みのキーは秘密の値で、秘密を受け取る操作は人だけ（[全体の設計](overview.md) の「人へ残す判断」の C1） |
 | `execution_settings.update`・`spend_caps.update` | 推論の手段と上限額は請求の額を変える |
 | `machines.create` | 登録の token（秘密）を発行する |
-| `sessions.create`・`sessions.delete`・`logins.create`・`logins.delete`・`github_installations.link` | 人のブラウザーの中の流れ（サインイン・IdP のログインをつなぐ戻り・GitHub の導入の戻り）で、委任の主体が通る流れでない。`logins.delete` は最後の 1 つのログインを外す要求を 409 で拒む |
+| `sessions.create`・`sessions.delete`・`login_links.create`・`logins.create`・`logins.delete`・`github_installations.link` | 人のブラウザーの中の流れ（サインイン・IdP のログインをつなぐ戻り・GitHub の導入の戻り）で、委任の主体が通る流れでない。`logins.delete` は最後の 1 つのログインを外す要求を 409 で拒む |
 
 外す・狭める操作は、見える範囲も費用も広げないため委任から呼べる。当たるのは `repositories.remove`・`notification_targets.delete`・`model_keys.delete`・`machines.delete` である。
 
@@ -316,7 +317,7 @@ GitHub が形を決める本文は配列にできないため、I12 の外に置
 
 | 主体 | token | 確かめること | 通れる HTTP の経路 | 操作の記録の入口 |
 | --- | --- | --- | --- | --- |
-| 人 | Cognito の access token（Google か GitHub でサインイン） | 署名・発行元・クライアント・期限・`token_use` が access | 利用者向けの操作（`/v1/<エンティティ>/…`） | 画面 |
+| 人 | Cognito の access token（Google か GitHub でサインイン） | 署名・発行元・クライアント・期限・`token_use` が access。`sub` で [Cognito の主体の対応の行](data.md#cognito-の主体の対応の行) を強い整合で読んで利用者を引き、token の `auth_time` が行を結んだ時（`bound_auth_time`）より前なら断つ（外して結び直す前のセッション）。外した主体（行が `bound` でない）は利用者を引かず、外して失効を済ませた後（`revoked_before` より後）にサインインした token でだけ結び直せる。ログインを結ぶ（初めてのサインイン・`logins.create`）ときは、IdP と主体を要求の本文から採らず、検証した token の `username` で利用者プールを読んで得て、`auth_time` が 5 分の内のサインインだけを受ける。`logins.create` は今の利用者の token（Authorization）を照らし、つなぐログインの token は要求から受けず、`login_links.create` で今の利用者とセッション（`sub`・セッションの識別子 `origin_jti`・`binding_epoch`）に結んだ流れの認可コードをサーバーが交換して得る。つなぐ流れの外れは要素の 409 `link_invalid`（始め直す）と `already_linked`（別のアカウントを選び直す）で返す（[詳細設計の `verifyLoginToLink`](detail.md#関数の仕様)）。access token は `origin_jti` を必須にする（アプリのクライアントの token の取り消しを有効にする） | 利用者向けの操作（`/v1/<エンティティ>/…`）。対応の行がまだ無い主体（初めてのサインイン）は、利用者を作る `sessions.create` だけ | 画面 |
 | 委任 | 委任の token（`ndfd_<利用者の ID>.<委任の ID>.<秘密の部分>` の形の不透明な値） | 中の利用者と委任の ID で委任の行を強い整合で読み、秘密の部分の SHA-256 を一定時間で比べ、期限・取り消し・委任した人の今の席を照らす。だれの委任（利用者の ID）とどのクライアント（クライアントの名前）かを要求の文脈に置く | 利用者向けの操作と `/mcp` | API か MCP（受けた HTTP の経路で決める） |
 | ランナー | 引き換えの token・レーンの token（Ed25519 で署名した JWT。宛先は「レーン」） | 署名・期限・宛先。レーンの行が終わっていないこと | `/v1/runner/…` だけ | ランナー |
 | 手元のマシン | 登録の token（`ndfm_<チームの ID>.<マシンの ID>.<秘密の部分>` の形の不透明な値） | 中のチームとマシンの ID でマシンの行を強い整合で読み、秘密の部分の SHA-256 を一定時間で比べ、取り消し・期限を照らす | `/v1/machine/…` だけ | 手元のマシン |
