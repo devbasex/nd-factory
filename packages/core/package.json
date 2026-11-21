@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@nd-factory/contracts": "*",
+    "@noble/hashes": "2.4.0",
     "pino": "10.4.0",
     "uuid": "14.0.3"
   }
