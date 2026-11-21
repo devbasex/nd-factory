@@ -1,0 +1,9 @@
+[
+  {
+    "name": "unlimited",
+    "places": ["hosted", "machine"],
+    "inference": ["managed", "byok"],
+    "concurrency": null,
+    "monthly_cap": null
+  }
+]
