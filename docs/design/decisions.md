@@ -10,7 +10,7 @@
 | 20〜39 | 画面 | [screens.md](screens.md#決定の記録) |
 | 40〜59 | API と MCP | [api.md](api.md#決定の記録) |
 | 60〜79 | 実行 | [execution.md](execution.md#決定の記録) |
-| 80〜99 | 共通の仕組み | [platform.md](platform.md#決定の記録) |
+| 80〜99 | 基盤 | [platform.md](platform.md#決定の記録) |
 | 100〜119 | 実行の続き | [execution.md](execution.md#決定の記録) |
 | 120〜139 | 画面の続き | [screens.md](screens.md#決定の記録) |
 | 140〜159 | プラットフォームの続き | [platform.md](platform.md#決定の記録) |
