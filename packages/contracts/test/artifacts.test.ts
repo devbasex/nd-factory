@@ -419,6 +419,12 @@ describe("buildDummy", () => {
   it("形の未定は null", () => {
     expect(buildDummy(OPERATIONS[0])).toBeNull();
   });
+
+  it("要素だけが未定でも null（buildPending と同じく形の未定に数える）", () => {
+    const itemOnly = defineOperation({ ...FIXTURE_LIST, item: pendingShape("#9"), owner: "#9" });
+    expect(buildPending([itemOnly])).toEqual([{ operation: FIXTURE_LIST.name, owner: "#9" }]);
+    expect(buildDummy(itemOnly)).toBeNull();
+  });
 });
 
 describe("buildReasons・buildRoutes・buildPending", () => {

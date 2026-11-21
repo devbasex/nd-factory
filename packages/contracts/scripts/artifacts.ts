@@ -403,8 +403,9 @@ export function examplesOf(op: OperationDef): ExampleSet {
   return { ...picked, empty: emptyOf(op) };
 }
 
+// 要素か結果のどちらかの形が未定なら作らない（buildPending と同じ判定。ダミーの送り手はその操作に 503 を返す）
 export function buildDummy(op: OperationDef): DummyDoc | null {
-  if (isPending(op.result)) return null;
+  if (isPending(op.item) || isPending(op.result)) return null;
   const { normal, edge, empty } = examplesOf(op);
   const failures = itemReasonsOf(op).map((r) => ({ ok: false as const, status: r.status, reason: r.code }));
   return { operation: op.name, normal, empty, edge, failures };
