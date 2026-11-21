@@ -109,6 +109,16 @@ function checkReasons(name: string, reasons: readonly ReasonDef[]): void {
   }
 }
 
+// 成功の要素の item はオブジェクト（docs/design/api.md の「本文は配列」の `item: {…}`）。
+// 1 つのオブジェクトか、どの選択肢もオブジェクトの和（z.union・z.discriminatedUnion）を通す
+export type ItemObjectShape = z.ZodObject | z.ZodUnion<readonly z.ZodObject[]>;
+
+function isObjectShape(schema: unknown): boolean {
+  if (schema instanceof z.ZodObject) return true;
+  if (schema instanceof z.ZodUnion) return schema.options.length > 0 && schema.options.every(isObjectShape);
+  return false;
+}
+
 // 失敗の要素だけが持つキー。成功の封筒には置かない
 const FAILURE_KEYS = ["status", "reason", "fields"] as const;
 
@@ -129,6 +139,7 @@ function checkResult(name: string, verb: string, endpoint: Endpoint, result: Res
     const field = shape[key];
     if (!(field instanceof z.ZodType) || field.safeParse(undefined).success) fail(name, `成功の結果の封筒は ${key} を必ず持つ`);
   }
+  if (verb !== "list" && !isObjectShape(shape["item"])) fail(name, "成功の結果の item はオブジェクトの形（z.object か、オブジェクトだけの和）で持つ");
   if (verb === "list") {
     if (!(shape["items"] instanceof z.ZodArray)) fail(name, "一覧の成功の結果の items は配列で持つ");
     const cursor = shape["next_cursor"];
@@ -206,8 +217,8 @@ export function isPending(shape: z.ZodType | PendingShape): shape is PendingShap
   return !(shape instanceof z.ZodType) && shape.kind === "pending";
 }
 
-// 成功の要素の結果の封筒。strictObject で組み、封筒の余分なキー（reason など）を拒む
-export function okItem<R extends z.ZodType>(item: R): z.ZodObject<{ ok: z.ZodLiteral<true>; item: R }, z.core.$strict> {
+// 成功の要素の結果の封筒。strictObject で組み、封筒の余分なキー（reason など）を拒む。item はオブジェクトの形だけを型で受ける
+export function okItem<R extends ItemObjectShape>(item: R): z.ZodObject<{ ok: z.ZodLiteral<true>; item: R }, z.core.$strict> {
   return z.strictObject({ ok: z.literal(true), item });
 }
 

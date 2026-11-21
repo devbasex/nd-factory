@@ -149,6 +149,20 @@ describe("defineOperation", () => {
     // z.object と z.strictObject は型の上で見分けられないため、strict かは defineOperation が実行の時に照らす（下のテスト）
   });
 
+  it("okItem は item にオブジェクトの形だけを型で受ける", () => {
+    // @ts-expect-error item が文字列の封筒は作れない
+    okItem(z.string());
+    // @ts-expect-error item が配列の封筒は作れない
+    okItem(z.array(sprint));
+  });
+
+  it("item がオブジェクトだけの和なら通す", () => {
+    const other = z.strictObject({ kind: z.literal("other") });
+    for (const item of [z.union([sprint, other]), z.discriminatedUnion("kind", [z.strictObject({ kind: z.literal("a") }), other])]) {
+      expect(defineOperation(base({ result: okItem(item) })).name).toBe("sprints.get");
+    }
+  });
+
   it.each<[string, z.ZodType]>([
     ["ok を持たない形", z.string()],
     ["ok を持たないオブジェクト", z.strictObject({ item: sprint })],
@@ -164,6 +178,10 @@ describe("defineOperation", () => {
     ["item を省ける", "sprints.get", z.strictObject({ ok: z.literal(true), item: sprint.optional() })],
     ["reason を持つ", "sprints.get", z.strictObject({ ok: z.literal(true), item: sprint, reason: z.string() })],
     ["余分なキーを持つ", "sprints.get", z.strictObject({ ok: z.literal(true), item: sprint, note: z.string() })],
+    ["item が文字列", "sprints.get", z.strictObject({ ok: z.literal(true), item: z.string() })],
+    ["item が配列", "sprints.get", z.strictObject({ ok: z.literal(true), item: z.array(sprint) })],
+    ["item が null を許す", "sprints.get", z.strictObject({ ok: z.literal(true), item: sprint.nullable() })],
+    ["item の和がオブジェクトでない選択肢を持つ", "sprints.get", z.strictObject({ ok: z.literal(true), item: z.union([sprint, z.string()]) })],
     ["list でない操作が一覧の封筒", "sprints.get", okList(sprint)],
     ["list の操作が要素の封筒", "sprints.list", okItem(sprint)],
     ["一覧が next_cursor を欠く", "sprints.list", z.strictObject({ ok: z.literal(true), items: z.array(sprint) })],
