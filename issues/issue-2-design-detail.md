@@ -473,7 +473,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | `OperationCall` | `dispatch/types.ts` | `endpoint`・`channel`・`operation`・`token`・`principal?`・`items`・`requestId`・`mcpClientName?`・`remainingMs` |
 | `DispatchDeps` | `dispatch/types.ts` | `operations`・`handlers`・`scope`・`auth`・`db`・`clock`・`log` |
 | `Handler` | `dispatch/types.ts` | `(item, ctx: { principal; authz: ItemAuthz; clock; db }) => Promise<{ result; writes: TransactItem[]; effect?: SyncEffect }>`（`effect` は応答の前に外の結果が要る操作だけが返す。ハンドラーの中で外へ働きかけず、`dispatch` が要求元の照らしと記録の確定の後に呼ぶ） |
-| `SyncEffect` | `dispatch/types.ts` | `() => Promise<{ kind: "delivered"; result } \| { kind: "rejected"; status: number } \| { kind: "unknown" }>`（届いた・断られた・分からない。`dispatch` が冪等の行へ控え、要素の成功・409 `delivery_rejected`・409 `delivery_unknown` にする） |
+| `SyncEffect` | `dispatch/types.ts` | `() => Promise<{ kind: "delivered"; result } \| { kind: "rejected"; status: number } \| { kind: "unknown" }>`（届いた・断られた・分からない。`dispatch` が冪等の行へ控え、要素の成功・409 `delivery_rejected`・409 `delivery_unknown` にする。届いたでも冪等の行へ控えられなければ初回も 409 `delivery_unknown`） |
 | `TableNames` | `db.ts` | 表の用途（`users`・`teams`・…・`idempotency`）から実際の表の名前への対応。値は起点が環境変数から渡す |
 
 ### 単体テストの観点（detail.md に足すもの）
