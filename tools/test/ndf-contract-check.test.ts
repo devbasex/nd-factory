@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,10 +11,12 @@ import {
   PIN_KEY,
   compareContract,
   contractNotices,
+  contractUseLoaderFrom,
   fetchContract,
   loadContractUse,
   mainNdfContractCheck,
   renderSummary,
+  reportShapeDiff,
 } from "../checks/src/ndf-contract-check.ts";
 import type { ContractFiles, ContractFinding, NdfContractUse } from "../checks/src/ndf-contract-check.ts";
 
@@ -76,7 +79,13 @@ function fakeContract(): Record<string, Json> {
         items: ["結果", "課題", "質問", "材料", "理由"],
         material: { item: "材料", body: "本文", heading: "## 判断の材料", url_prefix: "https://" },
         required: {
-          判断が要る: { always: ["質問", "材料"], when: [] },
+          判断が要る: {
+            always: ["区分", "質問", "材料"],
+            when: [
+              { item: "区分", prefix: "ndf-gate:", need: ["承認ゲート"] },
+              { item: "承認ゲート", equals: "設計 Pull Request のマージ", need: ["Pull Request"] },
+            ],
+          },
           完了: { always: [], when: [] },
           できなかった: { always: ["理由"], when: [] },
         },
@@ -106,6 +115,7 @@ function fakeUse(): NdfContractUse {
       { entrypoint: "skill-workflow", site: "hosted", names: ["NDF_FACTORY_RUN", READ_WORD, "NDF_PROGRESS_DB", "GH_TOKEN"] },
       { entrypoint: "skill-workflow", site: "local", names: ["NDF_FACTORY_RUN", READ_WORD, "GH_TOKEN"] },
     ],
+    envSetBy: { GH_TOKEN: "user" },
     files: [
       { id: "plan-progress", fields: ["step", "attention"] },
       { id: "ask-journal", fields: [] },
@@ -113,7 +123,13 @@ function fakeUse(): NdfContractUse {
     report: {
       values: REPORT_VALUES,
       items: ["結果", "質問", "材料", "理由"],
-      required: { 判断が要る: ["質問", "材料"], できなかった: ["理由"] },
+      required: {
+        判断が要る: {
+          always: ["質問", "材料"],
+          when: [{ item: "承認ゲート", equals: "設計 Pull Request のマージ", need: ["Pull Request"] }],
+        },
+        できなかった: { always: ["理由"], when: [] },
+      },
       material: { item: "材料", body: "本文", heading: "## 判断の材料", url_prefix: "https://" },
     },
     judgeCall: ({ entrypoint, call, env }) => {
@@ -145,9 +161,33 @@ function rowById(contract: Record<string, Json>, path: string, id: string): Json
   return row;
 }
 
-function reportShape(contract: Record<string, Json>): { items: string[]; values: Json } {
-  return (contract["hooks/unattended-report.json"] as { shape: { items: string[]; values: Json } }).shape;
+type WhenRule = Json & { need: string[] };
+type Shape = { items: string[]; values: Json; required: Record<string, { always: string[]; when: WhenRule[] }> };
+
+function reportShape(contract: Record<string, Json>): Shape {
+  return (contract["hooks/unattended-report.json"] as { shape: Shape }).shape;
 }
+
+/** 固定の点（752a9cf）の `env.json` と `entrypoints.json` の写し */
+const PINNED_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ndf-contract-752a9cf");
+function pinnedContract(): Record<string, Json> {
+  const contract = fakeContract();
+  for (const name of ["env", "entrypoints"]) {
+    contract[`domains/${name}.json`] = JSON.parse(readFileSync(join(PINNED_DIR, `${name}.json`), "utf8")) as Json;
+  }
+  return contract;
+}
+
+/** 固定の点の skill-workflow の env 列のうち、サービスの実行ジョブ（ランナー）が渡す名前 */
+const PINNED_RUNNER_NAMES = [
+  "NDF_FACTORY_RUN",
+  READ_WORD,
+  "NDF_LOOP_EXCLUDE",
+  "NDF_ISSUE_REQUEST_FILE",
+  "NDF_MVV_STATE_DIR",
+  "NDF_PROGRESS_DB",
+  "GH_TOKEN",
+];
 
 const roots: string[] = [];
 
@@ -293,6 +333,40 @@ describe("compareContract", () => {
     expect(findings.map((f) => f.id)).toEqual(["skill-workflow/hosted"]);
   });
 
+  it("3: 固定の点の env.json と口の表で、GH_TOKEN（set_by: user）を envSetBy に載せたランナーの名前が通る", () => {
+    const use = { ...fakeUse(), env: [{ entrypoint: "skill-workflow", site: "hosted" as const, names: PINNED_RUNNER_NAMES }] };
+    expect(compareContract(asFiles(pinnedContract()), use)).toEqual([]);
+  });
+
+  it("3: 固定の点のデータで、GH_TOKEN を envSetBy に載せないと 3 の食い違い", () => {
+    const use = {
+      ...fakeUse(),
+      env: [{ entrypoint: "skill-workflow", site: "hosted" as const, names: PINNED_RUNNER_NAMES }],
+      envSetBy: {},
+    };
+    const findings = compareContract(asFiles(pinnedContract()), use);
+    expect(checksOf(findings)).toEqual([3]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.detail).toContain("GH_TOKEN（set_by: user）");
+  });
+
+  it("3: サービスが入れる名前の set_by が user へ移ると 3 の食い違い", () => {
+    const contract = pinnedContract();
+    rowById(contract, "domains/env.json", "NDF_PROGRESS_DB").set_by = "user";
+    const use = { ...fakeUse(), env: [{ entrypoint: "skill-workflow", site: "hosted" as const, names: PINNED_RUNNER_NAMES }] };
+    const findings = compareContract(asFiles(contract), use);
+    expect(checksOf(findings)).toEqual([3]);
+    expect(findings[0]?.detail).toContain("NDF_PROGRESS_DB（set_by: user）");
+  });
+
+  it("3: envSetBy に載せた名前の set_by が別の値へ変わると 3 の食い違い", () => {
+    const contract = fakeContract();
+    rowById(contract, "domains/env.json", "GH_TOKEN").set_by = "ndf";
+    const findings = compareContract(asFiles(contract), fakeUse());
+    expect(checksOf(findings)).toEqual([3]);
+    expect(findings[0]?.detail).toContain("使い方は user");
+  });
+
   it("4: 読むファイルの fields から翻訳が読む項目を消すと 4 の食い違い", () => {
     const contract = fakeContract();
     rowById(contract, "domains/ndf-files.json", "plan-progress").fields = ["step"];
@@ -335,6 +409,36 @@ describe("compareContract", () => {
     expect(checksOf(findings)).toEqual([5]);
   });
 
+  it("5: 条件つきで要る項目の条件だけを変えると 5 の食い違い", () => {
+    const contract = fakeContract();
+    const rule = reportShape(contract).required.判断が要る?.when[1];
+    if (rule === undefined) throw new Error("条件の行が無い");
+    rule.equals = "実装 Pull Request のマージ";
+    const findings = compareContract(asFiles(contract), fakeUse());
+    expect(checksOf(findings)).toEqual([5]);
+    expect(findings[0]?.detail).toContain("Pull Request");
+  });
+
+  it("5: 無条件に要る項目を条件つきへ移すと 5 の食い違い", () => {
+    const contract = fakeContract();
+    const rule = reportShape(contract).required.判断が要る;
+    if (rule === undefined) throw new Error("値が無い");
+    rule.always = rule.always.filter((item) => item !== "質問");
+    rule.when.push({ item: "区分", prefix: "ndf-ask:", need: ["質問"] });
+    const findings = compareContract(asFiles(contract), fakeUse());
+    expect(checksOf(findings)).toEqual([5]);
+    expect(findings[0]?.detail).toContain("always");
+  });
+
+  it("5: 条件つきで要る項目が無条件へ移っても食い違わない", () => {
+    const contract = fakeContract();
+    const rule = reportShape(contract).required.判断が要る;
+    if (rule === undefined) throw new Error("値が無い");
+    rule.always.push("Pull Request");
+    rule.when = rule.when.slice(0, 1);
+    expect(compareContract(asFiles(contract), fakeUse())).toEqual([]);
+  });
+
   it("6: 使う口を口の表から消すと 6 の食い違い", () => {
     const contract = fakeContract();
     rowById(contract, "domains/entrypoints.json", "file-journals").id = "file-journal";
@@ -348,6 +452,31 @@ describe("compareContract", () => {
     contract["domains/ndf-files.json"] = { rows: "x" };
     const findings = compareContract(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([4]);
+  });
+});
+
+describe("reportShapeDiff", () => {
+  it("要る項目の条件だけが変わっても、条件を含めた差分を出す", () => {
+    const tip = fakeContract();
+    const rule = reportShape(tip).required.判断が要る?.when[1];
+    if (rule === undefined) throw new Error("条件の行が無い");
+    rule.equals = "実装 Pull Request のマージ";
+    const lines = reportShapeDiff(asFiles(fakeContract()), asFiles(tip));
+    expect(lines.some((line) => line.includes("設計 Pull Request のマージ") && line.includes("消えた"))).toBe(true);
+    expect(lines.some((line) => line.includes("実装 Pull Request のマージ") && line.includes("足された"))).toBe(true);
+  });
+
+  it("条件が同じで need だけが変わると、その条件の need の差分を出す", () => {
+    const tip = fakeContract();
+    reportShape(tip).required.判断が要る?.when[0]?.need.push("期限");
+    const lines = reportShapeDiff(asFiles(fakeContract()), asFiles(tip));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("ndf-gate:");
+    expect(lines[0]).toContain("期限");
+  });
+
+  it("形が同じなら差分を出さない", () => {
+    expect(reportShapeDiff(asFiles(fakeContract()), asFiles(fakeContract()))).toEqual([]);
   });
 });
 
@@ -406,6 +535,37 @@ describe("fetchContract", () => {
     await expect(fetchContract({ kind: "fixed", commit: "--upload-pack=x" }, up.url, tempDir("ndf-work-"))).rejects.toThrow(
       ContractFetchError,
     );
+  });
+});
+
+describe("contractUseLoaderFrom", () => {
+  /** 使い方の書き出しを持つパッケージを node_modules に置いた作業の木を作る */
+  function rootWithExport(marker: string, exported = true): string {
+    const root = tempDir("ndf-use-root-");
+    writeFileSync(join(root, "package.json"), `${JSON.stringify({ name: "root", private: true, type: "module" })}\n`);
+    const pkg = join(root, "node_modules", "@nd-factory", "contracts");
+    mkdirSync(pkg, { recursive: true });
+    const exportsField = exported ? { "./ndf-contract-use": "./use.mjs" } : { "./settings": "./use.mjs" };
+    writeFileSync(join(pkg, "package.json"), `${JSON.stringify({ name: "@nd-factory/contracts", type: "module", exports: exportsField })}\n`);
+    writeFileSync(join(pkg, "use.mjs"), `export const marker = ${JSON.stringify(marker)};\n`);
+    return root;
+  }
+
+  it("指定した作業の木の書き出しを読む（スクリプトの置き場の書き出しを読まない）", async () => {
+    const a = rootWithExport("a");
+    const b = rootWithExport("b");
+    expect(await contractUseLoaderFrom(a)()).toMatchObject({ marker: "a" });
+    expect(await contractUseLoaderFrom(b)()).toMatchObject({ marker: "b" });
+  });
+
+  it("作業の木のパッケージに書き出しが無ければ loadContractUse は null", async () => {
+    expect(await loadContractUse(contractUseLoaderFrom(rootWithExport("a", false)))).toBeNull();
+  });
+
+  it("作業の木でパッケージを引けなければ例外（書き出しが無いとして通さない）", async () => {
+    const root = tempDir("ndf-use-empty-");
+    writeFileSync(join(root, "package.json"), "{}\n");
+    await expect(loadContractUse(contractUseLoaderFrom(root))).rejects.toThrow();
   });
 });
 
@@ -527,6 +687,15 @@ describe("mainNdfContractCheck", () => {
     expect(result.out).toContain(`checked: fixed ${up.fixed} 1-6`);
     expect(result.out).not.toContain("checked: tip");
     expect(result.summary).toContain("先端は照らさなかった");
+  });
+
+  it("使い方の書き出しは --root の作業の木から解決する（そこでパッケージを引けなければ 2）", async () => {
+    const up = makeUpstream(fakeContract(), fakeContract());
+    const root = makeRoot(up.fixed);
+    writeFileSync(join(root, "package.json"), "{}\n");
+    const io = capture();
+    expect(await mainNdfContractCheck(["--root", root], {}, { repoUrl: up.url })).toBe(2);
+    expect(io.err.join("")).toContain("使い方の書き出しを読めない");
   });
 
   it("引数が違うと 2", async () => {
