@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { Client, escapeIdentifier, escapeLiteral } from "pg";
+import { Client, type ClientConfig, escapeIdentifier, escapeLiteral } from "pg";
+import { parseIntoClientConfig } from "pg-connection-string";
 import { describe, it } from "vitest";
 import { ADMIN_DATABASE, type Row, type SqlExecutor, type SqlParam, type SqlValue, toRow } from "../../src/db-prep/sql-executor.ts";
 
@@ -234,6 +235,12 @@ function urlFor(database: string, credentials?: Credentials): string {
   return url.toString();
 }
 
+// 通常の接続と同じ URL を pg と同じ読み方で読み（sslmode などの接続の設定を残す）、役割とパスワードの取り方だけを差し替える。
+// connectionString のまま渡すと、URL の役割とパスワードが渡した値を上書きする
+export function gatedClientConfig(connectionString: string, user: string, password: () => Promise<string>): ClientConfig {
+  return { ...parseIntoClientConfig(connectionString), user, password };
+}
+
 function adminDatabaseOfUrl(): string {
   if (!PG_URL) throw new Error("ND_TEST_PG_URL が無い");
   return decodeURIComponent(new URL(PG_URL).pathname.replace(/^\//, "")) || "postgres";
@@ -273,14 +280,7 @@ export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>):
       name,
       connect,
       connectGated(user, password) {
-        const url = new URL(urlFor(name));
-        const client = new Client({
-          host: url.hostname,
-          port: Number(url.port || 5432),
-          database: name,
-          user,
-          password,
-        });
+        const client = new Client(gatedClientConfig(urlFor(name), user, password));
         client.on("error", () => undefined);
         clients.push(client);
         return { client, connected: client.connect().then(() => undefined) };
