@@ -156,9 +156,18 @@ graph TD
 | `/v1/db_prep/exchanges/create` | 要求 | `task_arn`（文字列。タスクのメタデータの端点の `TaskARN`） |
 | 同上 | 応答 | `prep_id`・`kind`（`create` か `rotate`）・`admin`（`host`・`port`・`database`・`user`・`password`）・`project`（`id`・`database`・`role`・`password`・`rotation_seq`。`id` はプロジェクトの ID で I10 の結び付きの照らしに使う。`rotation_seq` は `rotate` だけ）・`completion_token` |
 | `/v1/db_prep/completions/create` | 要求 | `prep_id`・`kind`・`result`（`applied`・`rotation_superseded`・`failed`）・`rotation_seq`（`rotate` だけ。タスクが受けた番号 n）・`recorded_seq`（`rotation_superseded` だけ。DB に記してあった番号）・`reason`（`failed` だけ。下の表） |
-| 同上 | 応答 | `status`（`accepted`）。用意の ID か番号が今の値と合わなければ要素の 409 `state_mismatch` |
+| 同上 | 応答 | `status`（`accepted`）。用意の ID か番号が今の値と合わなければ要素の 409 `state_mismatch`（下の表） |
 
-応答は [API の文書の要素の結果](../docs/design/api.md) の包みに入る。上の表の「応答」の項目は、成功の要素 `{"ok": true, "item": {…}}` の `item` の中身である。失敗の要素は HTTP 200 の中の `{"ok": false, "status": <数>, "reason": "<コード>"}` で返り、状態の不一致は `status: 409`（引き換えでは使い終えた・期限の切れた引き換えの token、終わりの報告では `state_mismatch`）になる。token が認証できないときだけは要求全体の誤りで、HTTP 401 と RFC 9457 の本文（`reason: unauthorized`）になる。タスクは HTTP の状態で 401 を、HTTP 200 の要素の `ok` と `status` で 409 を見分ける。どちらも繰り返さない（詳細設計の「DB の用意のタスク」）。
+応答は [API の文書の要素の結果](../docs/design/api.md) の包みに入る。上の表の「応答」の項目は、成功の要素 `{"ok": true, "item": {…}}` の `item` の中身である。失敗の要素は HTTP 200 の中の `{"ok": false, "status": <数>, "reason": "<コード>"}` で返る。#6 の API とタスクは、token の誤りと用意の状態の不一致を次の表のとおりに分けて同じ応答を使う。token の誤りは [API の文書の認証](../docs/design/api.md#認証と主体) のとおり要求全体の誤りで、理由によらず同じ 401 の本文を返し、何が違ったかを明かさない。
+
+| 起きたこと | 2 つの経路の応答 |
+| --- | --- |
+| token の署名・宛先が合わない、期限が切れた、引き換えの token を使い終えた（引き換えた時点で失効する）、終わりの報告の token で下の「同じ報告の送り直し」に当たらない 2 回目を送った | HTTP 401 と RFC 9457 の本文（`reason: unauthorized`） |
+| token は認証できたが、token に結んだ用意の ID がプロジェクトの行の今の用意の ID と合わない、進行表の DB が作成中でも差し替えの途中でもない、引き換えで `DescribeTasks` の確かめが通らない（I18）、終わりの報告で差し替えの番号が今の番号と合わない | HTTP 200 の要素の 409 `state_mismatch` |
+| 終わりの報告の同じ報告の送り直し: 1 回目の報告が確定した後に、同じ終わりの報告の token（期限の内）で、1 回目と同じ本文の要素を送った | HTTP 200 の要素の `ok: true`。1 回目と同じ `item`（`status: accepted`）を返し、状態を 2 回は移さない |
+| 同じ終わりの報告の token で、1 回目と違う本文の要素を送った | HTTP 200 の要素の 422 `idempotency_key_reused`（token を冪等の鍵と同じに扱う。[API の文書の冪等の鍵](../docs/design/api.md#冪等の鍵)） |
+
+同じ報告の送り直しを受けるため、#6 の API は終わりの報告を受けて状態を移すトランザクションで、token の ID（JWT の `jti`）と受けた本文の要素（`prep_id`・`kind`・`result`・`rotation_seq`・`recorded_seq`・`reason`）を用意の行に記す。2 回目の要求は、署名・宛先・期限が合い、`jti` が記した値と同じときに限って本文を比べる。期限（用意の時間切れ）を過ぎた送り直しは 401 になる。そのときも 1 回目の報告は確定しているため、タスクが終了コード 1 で終わっても用意の状態は変わらない。タスクは HTTP の状態で 401 を、HTTP 200 の要素の `ok` と `status` で 409・422 を見分ける。どれも繰り返さない（詳細設計の「DB の用意のタスク」）。
 
 | `reason` | 起きたこと |
 | --- | --- |
@@ -186,7 +195,7 @@ graph TD
 ```mermaid
 flowchart TD
     A[メタデータの端点から TaskARN を読む] --> B[引き換える]
-    B -->|409・401| X[終わりを知らせずに終える]
+    B -->|401・409| X[終わりを知らせずに終える]
     B --> C[管理の接続を再試行で開く]
     C -->|開けない| F1[failed: admin_connect_failed]
     C --> D{kind}
@@ -491,7 +500,7 @@ sequenceDiagram
 | LIB5 | EventBridge Scheduler | — | AWS のサービス | — | 無し | 満たす。月 1,400 万回の呼び出しまでは無料の枠。例の計算では枠の外は 100 万回あたり 1.00 ドル | https://aws.amazon.com/eventbridge/pricing/ （2026-11-21） |
 | LIB6 | CloudFormation の `Fn::GetAZs` | — | AWS のサービス | — | 無し | 条件つきで満たす。既定の VPC の既定のサブネットがある AZ だけを返し、既定のサブネットが無ければ使える AZ をすべて返す。既定のサブネットが 1 つの AZ にだけあると 1 つしか返さない | https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/intrinsic-function-reference-getavailabilityzones.html （2026-11-21） |
 | LIB7 | ECR のライフサイクルの規則の評価 | — | AWS のサービス | — | 無し | 満たす。規則はすべて同時に評価し、優先の順に当てる。1 つのイメージを消すのは 0 か 1 つの規則で、ある規則のタグの条件に当たるイメージは、それより優先の低い規則では消えない。`imageCountMoreThan` は push の時刻の新しい順に並べて数を超えたものを消す。`tagPrefixList` は `tagStatus` が `tagged` のときだけ使える。消すのは条件に当たってから 24 時間のうち | https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html ・ https://docs.aws.amazon.com/AmazonECR/latest/userguide/lifecycle_policy_parameters.html （2026-11-21） |
-| LIB8 | `p-retry` | 9.0.0 | MIT | 2026-11-02 | 無し | 満たす。Promise を返す処理を回数と間隔で繰り返す。既定は `retries: 10`（初回を除いた回数）・`factor: 2` の指数の待ちで、`factor: 1` と同じ `minTimeout`・`maxTimeout` で固定の間隔にできる。`maxRetryTime` で全体の期限を、`AbortError` と `shouldRetry` で繰り返さない失敗を決められる。広く使われ、保守が続く | `npm view p-retry version license time.modified`・`npm view p-retry readme`・`npm view p-retry@9.0.0 readme`（2026-11-21） |
+| LIB8 | `p-retry` | 9.0.0 | MIT | 2026-11-02 | 無し | 満たす。Promise を返す処理を回数と間隔で繰り返す。既定は `retries: 10`（初回を除いた回数）・`factor: 2` の指数の待ちで、`factor: 1` と同じ `minTimeout`・`maxTimeout` で固定の間隔にできる。`maxRetryTime` で全体の期限を、`AbortError` と `shouldRetry` で繰り返さない失敗を決められる。`maxRetryTime` は `performance.now()` で測り、失敗の後の待ちを残り時間に切り詰めるが、待ちが明けた後は期限を照らさずに次の試行を呼ぶ。そのため期限は試行の関数の始めでも照らす。広く使われ、保守が続く | `npm view p-retry version license time.modified`・`npm view p-retry readme`・`npm view p-retry@9.0.0 readme`・https://github.com/sindresorhus/p-retry/blob/v9.0.0/index.js （2026-11-21） |
 | LIB9 | `pg-format` | 1.0.4 | MIT | 2022-06-23 | 無し | 満たさない。識別子と文字列の組み立てを書式で行えるが、最後のリリースが 2022 年で保守が止まっている。`pg` の `escapeIdentifier`・`escapeLiteral` で足りる | `npm view pg-format version license time.modified`（2026-11-21） |
 | LIB10 | `pino` | 10.4.0 | MIT | 2026-10-02 | 無し | 満たす。1 行の JSON のログを速く出し、項目を `redact` で伏せられる。広く使われ、保守が続く | `npm view pino version license time.modified`（2026-11-21） |
 | LIB11 | AWS Lambda Powertools の Logger（`@aws-lambda-powertools/logger`） | 2.36.0 | MIT-0 | 2026-10-06 | 無し | 条件つきで満たす。構造化したログを出すが、Lambda の文脈の項目を前提にしている | `npm view @aws-lambda-powertools/logger version license time.modified`（2026-11-21） |
@@ -504,6 +513,8 @@ sequenceDiagram
 | LIB18 | Aurora PostgreSQL の TLS（`rds.force_ssl`） | — | AWS のサービス | — | 無し | 満たす。`rds.force_ssl` を 1 にすると TLS でない接続を断る。既定は Aurora PostgreSQL 17 以上で 1、16 以下で 0 | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.Security.html （2026-11-21） |
 | LIB19 | ECS の `RunTask` のタグの伝播（`propagateTags`） | — | AWS のサービス | — | 無し | 満たす。`propagateTags` に `TASK_DEFINITION` を渡すと、タスクの定義のタグを作る時に実行するタスクへ写す。値を渡さなければ写さず、作った後には `TagResource` でしか付けられない | https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RunTask.html （2026-11-21） |
 | LIB20 | AWS Budgets の SNS の知らせ | — | AWS のサービス | — | 無し | 満たす。トピックの資源の方針で `budgets.amazonaws.com` に `SNS:Publish` を許す。許していないトピックは「Invalid SNS topic」として受けない。暗号化したトピックは追加の許しが要る | https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-sns-policy.html （2026-11-21） |
+| LIB21 | PostgreSQL 16 の統計の写し（`pg_stat_activity`・`pg_stat_clear_snapshot()`） | 16 | PostgreSQL License | — | 無し | 満たす。すべてのセッションの今の問い合わせの情報は、トランザクションの中で最初に求めた時点で集め、そのトランザクションの間は同じものを見せる。`pg_stat_clear_snapshot()` で今のトランザクションの写しを捨て、次の読みで集め直す | https://www.postgresql.org/docs/16/monitoring-stats.html （2026-11-21） |
+| LIB22 | PostgreSQL 16 の `pg_terminate_backend(pid, timeout)` | 16 | PostgreSQL License | — | 無し | 満たす。`timeout` が無いか 0 ならシグナルを送るだけで、送れたら真を返す。0 より大きければ、実際に終わるか時間が過ぎるまで待ち、時間切れでは警告を出して偽を返す。待ちは呼び出しごとに掛かるため、接続ごとに呼ぶと待ちが積み重なる | https://www.postgresql.org/docs/16/functions-admin.html#FUNCTIONS-ADMIN-SIGNAL （2026-11-21） |
 
 ### 確かめられなかったこと
 
@@ -511,4 +522,4 @@ sequenceDiagram
 | --- | --- | --- |
 | DynamoDB の PITR とストリームの単価 | 試していない | 見込みの額への効きが小さいため、実測の段で単価の頁を読む |
 
-調べた量: 候補 20 件・取得の試み 29 回（2026-11-21）。内訳は、LIB1〜LIB7 の 10 回（レビューの指摘で LIB6 とコスト配分タグの頁を、イメージの置き場の作り直しで LIB7 を足した分を含む）、MVV 版 2 の Value 15 に照らして足した LIB8〜LIB16 の 12 回（`npm view` が LIB8・9・10・11・15・16 の 6 回、頁が LIB12 の 2・LIB13 の 1・LIB14 の 2・LIB16 の GitHub の 1 の 6 回）、cross-review の指摘で足した 7 回（LIB17 の `npm view` と npm の取得の数の 2 回、LIB8 の readme の 2 回、LIB18・LIB19・LIB20 の頁の 3 回）である。
+調べた量: 候補 22 件・取得の試み 32 回（2026-11-21）。内訳は次のとおりで、合計は 10 + 12 + 7 + 3 = 32 回である。LIB1〜LIB7 と表から外した候補の 10 回: 表の LIB1〜LIB7 の 9 回（LIB1 の頁 2・LIB2〜LIB6 の各 1・LIB7 の頁 2）と、反映のアクションの確かめのために調べ、その確かめを外したため表から外した AWS CLI の出力の絞りの 1 回。MVV 版 2 の Value 15 に照らして足した LIB8〜LIB16 の 12 回: `npm view` が LIB8・9・10・11・15・16 の 6 回、頁が LIB12 の 2・LIB13 の 1・LIB14 の 2・LIB16 の GitHub の 1 の 6 回。cross-review の 1 巡目の指摘で足した 7 回: LIB17 の `npm view` と npm の取得の数の 2 回、LIB8 の readme の 2 回、LIB18・LIB19・LIB20 の頁の 3 回。cross-review の 2 巡目の指摘で足した 3 回: LIB8 の v9.0.0 の実装・LIB21・LIB22 の頁。旧版の 19 回は、Value 15 に照らして足した候補の取得を 9 回と数え違えた値で（数え直すと LIB8〜LIB16 で 12 回）、LIB1〜LIB7 と外した候補の 10 回は旧版から変わらない。
