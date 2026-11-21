@@ -45,7 +45,8 @@ packages/contracts/
 │   ├── tables.ts               *   10 の表の仕様（名前の末尾・鍵・索引・TTL・行の種類）
 │   ├── row-codec.ts            *   行の版の読み手と書き手（RowCodec・readRow・writeRow・rowUpdateOf）
 │   ├── ndf.ts                  *   受ける NDF の契約の組の形・答えの語
-│   └── data.ts                 *   data/*.json の読みと検証
+│   ├── data.ts                 *   data/*.json の読みと検証
+│   └── client.ts               *   画面とテストが操作を呼ぶ口・ダミーの送り手（決定 16）
 ├── data/
 │   ├── exit-codes.json             （今のまま）
 │   ├── retry-policies.json     *
@@ -95,6 +96,7 @@ infra/
 | `packages/contracts/src/row-codec.ts` | 新設 | 行の版の読み手と書き手 | rows | row-codec | `rowCodec`・`readRow`・`writeRow`・`rowUpdateOf` |
 | `packages/contracts/src/ndf.ts` | 新設 | NDF の契約の値 | zod | ndf | `ndfContractSet`・`ndfAnswerWord` |
 | `packages/contracts/src/data.ts` | 新設 | データのファイルを形で検証して出す | ndf・values | data | `RETRY_POLICIES`・`SECRET_SHAPES`・`NDF_CONTRACTS`・`PLANS` |
+| `packages/contracts/src/client.ts` | 新設 | 操作の名前で型を引く呼び出しの口と、生成したダミーを返す送り手 | operations | client | `createOperationClient`・`createDummyTransport` |
 | `packages/contracts/scripts/artifacts.ts` | 新設 | 生成物を組む | operations・data | artifacts | `buildOperationSchemas`・`buildOpenApi`・`buildMcpTools`・`buildRoutes`・`buildReasons`・`buildDummy`・`buildPending`・`checkExamples` |
 | `packages/contracts/scripts/generate.ts` | 変更 | 生成物を書く・差を照らす | artifacts | generate | `generateArtifacts`（変更） |
 | `packages/core/src/*` | 新設 | 横断の部品 | contracts | detail.md の 13 のモジュール（MCP の 5 つの関数を除く）と `db` | detail.md の関数と `createDb` |
@@ -199,7 +201,7 @@ infra/
 | 14 | `reasons` | `readonly ReasonDef[]`（操作ごとのコードだけ。`when` は `always`） | `[]`（共通の `ITEM_REASONS` は書かずに `itemReasonsOf` が合わせる）。`ITEM_REASONS` と同じコードを書くと `defineOperation` が投げる |
 | 15 | `auditKeys` | 要素の鍵の名前の配列 | `[]` |
 | 16 | `order` | 文字列 \| `null` | `list` 以外は `null` |
-| 17 | `examples` | `{ normal: unknown[]; edge: unknown[] } \| null` | 形の未定なら `null`、形があれば必須 |
+| 17 | `examples` | `{ normal?: unknown[]; edge?: unknown[] } \| null` | `null`。書いたときだけ、生成した見本をその場面で上書きする（決定 3） |
 | 18 | `description_en` | 文字列 | `"<verb> <entity>"` |
 | 19 | `owner` | `` `#${number}` `` | — |
 
@@ -231,7 +233,7 @@ infra/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `defineOperation` | 経路が名前から作られる。受け口 `runner` は `/v1/runner/…` | `allOrNothing.maxItems` が 1 | 読む操作に冪等の鍵・人だけの操作に読み出しの道具が無い・名前の形の違いで投げる |
-| `OPERATIONS` | 66 + 9 行。利用者向けの操作の名前と経路と機能と人だけかが [操作の一覧](../docs/design/api.md#操作の一覧) と一致する（表の文字を読まずに、テストに一覧の写しを持つ） | — | 名前か経路の重なりで投げる |
+| `OPERATIONS` | 66 + 9 行。利用者向けの操作の名前と経路と機能と人だけかが [操作の一覧](../docs/design/api.md#操作の一覧) と一致する（テストは `docs/design/api.md` の操作の一覧の表を読んで照らし、一覧の写しをテストに持たない） | — | 名前か経路の重なりで投げる |
 | `pendingShape` | `isPending` が真。どの値も zod の検証を通らない | — | — |
 | `itemFailure`・`resultSchemaOf` | `ok: false` の理由を 3 つ持つ操作で、成功の結果と各理由の失敗をどちらも通す（失敗の分岐が `ok: false` を共有しても組める） | 理由が 1 つ（`itemFailure` の和の分岐が 1 つ） | 理由と `status` の組み替え（`not_found` と 409）・`ReasonDef` に無い `reason`・`okItem` と `okList` のどちらの封筒でも、`ok: true` に有効な `item`（`items`・`next_cursor`）と `reason: "not_found"` を持つ値を拒む。`op.result` が `PendingShape` で投げる。型のテスト（`expectTypeOf`）で、`ResultOf` の `ok: true` の側が `okItem` に渡した要素の型と一致し、`PendingShape` が和に入らない |
 
@@ -283,14 +285,14 @@ infra/
 | `buildMcpTools` | 同上 | 新設 | `(ops, schemas) => McpToolDoc[]` | 人だけでない利用者向けの操作の道具の定義 |
 | `buildRoutes` | 同上 | 新設 | `(ops) => RouteDoc[]` | 経路の登録 |
 | `buildReasons` | 同上 | 新設 | `(ops) => ReasonsDoc` | 理由のコードの一覧 |
-| `buildDummy` | 同上 | 新設 | `(op) => DummyDoc \| null` | 1 つの操作のダミーデータ（形の未定は `null`） |
+| `buildDummy` | 同上 | 新設 | `(op) => DummyDoc \| null` | 1 つの操作のダミーデータ（形の未定は `null`）。`normal` と `edge` は `examples` があればそれを、無ければ `fakeExamples` の値を使う |
+| `fakeExamples` | 同上 | 新設 | `(op) => { normal: unknown[]; edge: unknown[] }` | 結果の zod の形から `zod-schema-faker`（`zod-schema-faker/v4` の `fake`）で見本を作る。種は操作の名前の SHA-256 の頭 8 桁、`normal` は 3 件、`edge` は文字列を上限の長さ・配列を上限の件数・数を上下の端に寄せた 1 件（形の `max`・`min` を読んで生成器の上書きで寄せる）。メール・アカウント ID の形・接頭辞は作り物の値（`ops@example.com`・`123456789012`・`acme`）だけを返す生成器で上書きする |
 | `buildPending` | 同上 | 新設 | `(ops) => PendingDoc[]` | 形の未定の操作と受け持つ子 |
 | `generateArtifacts` | `scripts/generate.ts` | 変更 | `(root: string, mode: "write" \| "check") => Promise<string[]>`（変えない） | 今の 3 つに上の生成物を足す。`generated/dummy/` の中の、どの操作にも当たらないファイルは `check` で差に数え、`write` で消す |
 
 - `checkExamples`
   - 事前条件: 無し
   - 事後条件: 次のどれかを問題として返す。`generateArtifacts` は問題が 1 つでもあれば書かずに `GenerateError`（終了コード 2）を投げる
-    - 形があるのに `examples` が無い
     - 見本が `resultSchemaOf` の zod を通らない
     - 見本の文字列に `SECRET_SHAPES` の値の形が当たる
     - 12 桁の数で `123456789012` でないもの
@@ -342,6 +344,40 @@ infra/
 | `fixture_notes.list` | `user`・`read` | `{project_id: idOf("prj"), cursor: 文字列か null}` | `okList({note_id, title, due_at})` | `features: ["F1"]`・`delegationKind: "read"` |
 
 子が実際の形を入れた後も、テスト用の操作は残す（形の正本の値の形を 1 か所でまとめて往復させる見本として使い、本番の操作の形の入れ替えでこのテストが空にならないようにする）。
+
+## 形の正本: 画面とテストが操作を呼ぶ口
+
+満たす決定: 決定 16（決定 140 の改め）、受け入れ条件 1
+
+`client.ts` は zod と `operations/` だけを import し、React・DOM・`node:` の組み込みを import しない。画面（React 19 の TSX）・e2e・API のテストが同じ口を使う。React のフックの包みと、取得の控えの層（LIB-A20）・Service Worker のダミー（LIB-A21）を採るかは画面の基盤（#12）が決める。
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `createOperationClient` | `packages/contracts/src/client.ts` | 新設 | `(transport: Transport) => { call<N extends OperationName>(name: N, items: readonly ItemOf<N>[]): Promise<CallResult<N>> }` | 要素の配列を送り、応答を結果の zod で検証して型つきで返す |
+| `httpTransport` | 同上 | 新設 | `(opts: { baseUrl: string; fetch: typeof fetch; token: () => Promise<string \| null> }) => Transport` | `POST <baseUrl>/v1/<entity>/<verb>` に `Authorization: Bearer` と JSON の本文で送る |
+| `createDummyTransport` | 同上 | 新設 | `(dummies: Readonly<Record<OperationName, DummyDoc>>, scenario: () => DummyScenario) => Transport` | 生成したダミーを場面ごとに返す。`normal`・`empty` は同じ名前の配列、`error` は `failures`、`notFound` は 404 の要素、`slow` は `normal` を返す（待ちは画面の基盤が足す） |
+
+- `createOperationClient`
+  - 事前条件: `items` は 1 個以上で、`ItemOf<N>` の形（型で縛る）
+  - 事後条件: 戻り値は `{ ok: true; results: ResultOf<N>[] }`（要求と同じ数・同じ順）か、要求全体の誤り `{ ok: false; status; reason }`（problem の本文）。応答が結果の zod に合わなければ `{ ok: false; status: 0; reason: "response_invalid" }` を返し、例外を投げない
+  - 副作用: `transport` の副作用だけ
+
+### 内部のデータと定数
+
+| 名前 | 種類 | 保存先 | 既定値 |
+| --- | --- | --- | --- |
+| `Transport` | 型 | `client.ts` | `(op: OperationDef, items: readonly unknown[]) => Promise<{ status: number; body: unknown }>` |
+| `DummyScenario` | 型 | `client.ts` | `normal`・`empty`・`error`・`slow`・`notFound`（[画面のダミーデータで作り切る段](../docs/design/screens.md#ダミーデータで作り切る段) の値） |
+| `generated/dummy/index.json` | 生成物 | `packages/contracts/generated/` | 操作の名前からダミーのファイルへの対応。Vite は JSON を import できるため、画面は生成物をそのまま読む |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `createOperationClient` | 偽の送り手の応答を型つきの結果で返す | 要素 1 個と上限ちょうど | 結果の形に合わない応答で `response_invalid`、problem の本文で要求全体の誤り |
+| `createDummyTransport` | 場面ごとに `normal`・`empty`・`failures`・404 を返す | 形の未定の操作は `unavailable` の 503 | — |
 
 ## 横断の部品
 
@@ -509,16 +545,16 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | IdP の主体の一意の行（全体の設計が列を決めた行で、19 の行に数えない） | 全体の設計のまま（`user_id`） | 作ると消すだけ |
 | 委任（`db-users` / `DELEGATION#<委任>`） | `delegation_id`・`user_id`・`client_name`（1〜64 字）・`scope_project_ids`（`prj` の ID の配列、1 以上）・`scope_kind`（`read`・`run`・`manage`）・`secret_sha256`（64 桁）・`expires_at`・`created_at`・`last_used_at?`・`revoked_at?` | 上書き（状態は `expires_at`・`revoked_at` から導き、列に持たない） |
 | チーム（`db-teams` / `TEAM`） | `team_id`・`name`（1〜100 字）・`plan`（料金プランの行の名前）・`currency`（`currencyCode`）・`monthly_cap?`（`money`）・`default_place`（`hosted`・`machine`）・`default_inference`（`managed`・`byok`）・`created_at` | 上書き |
-| 席（`db-teams` / `SEAT#<利用者>`） | `team_id`・`user_id`・`role`・`added_at`・`us_pk`・`us_sk`（索引の鍵） | 上書き |
-| 招待（`db-teams` / `INVITE#<招待>`） | `invitation_id`・`team_id`・`role`・`state`（`open`・`accepted`・`deleted`）・`created_by`・`created_at`・`expires_at`・`accepted_by?`・`accepted_at?` | 上書き（期限の値と招く相手の指定の仕方は #4 が決め、列を足す） |
-| 手元のマシン（`db-teams` / `MACHINE#<マシン>`） | `machine_id`・`team_id`・`name`（1〜64 字）・`state`・`token_sha256`・`token_expires_at`・`last_heartbeat_at?`・`lane_capacity?`（1〜16）・`created_at`・`revoked_at?` | 上書き（`offline` への移しは見回りが書く。#7） |
+| 席（`db-teams` / `SEAT#<利用者>`） | `team_id`・`user_id`・`role`・`added_at` | 上書き |
+| 招待（`db-teams` / `INVITE#<招待>`） | `invitation_id`・`team_id`・`role`・`created_by`・`created_at`・`expires_at`・`accepted_by?`・`accepted_at?`・`withdrawn_at?` | 上書き（状態は `accepted_at`・`withdrawn_at`・`expires_at` から導き、列に持たない。期限の値と招く相手の指定の仕方は #4 が決め、列を足す） |
+| 手元のマシン（`db-teams` / `MACHINE#<マシン>`） | `machine_id`・`team_id`・`name`（1〜64 字）・`token_sha256`・`token_expires_at`・`last_heartbeat_at?`・`lane_capacity?`（1〜16）・`created_at`・`revoked_at?` | 上書き（状態は導く。`last_heartbeat_at` が無ければ `pending`、600 秒以内なら `online`、それより前なら `offline`。見回りが `offline` で行う止め方は #7） |
 | 月の使った量（`db-teams` / `USAGE#<UTC の年月>`） | `team_id`・`month`（`YYYY-MM`）・`used`（`money`） | 上書き（`usageAddItem` が加算） |
 | リポジトリ（`db-projects` / `REPO#<リポジトリ>`） | `repo_id`・`project_id`・`github_repo`（`githubRepo`）・`installation_id`（GitHub の整数）・`primary`（真偽）・`added_at` | 上書き |
 | 渡した GitHub の token の記録（`db-projects` / `GHTOKEN#<期限>#<レーン>#<連番>`） | `project_id`・`lane_id`・`generation`・`expires_at`・`expire_at`（TTL）。token の値と識別は #33 の答えで足す | 追記だけ |
 | スプリント（`db-sprints` / `SPRINT#<スプリント>`） | `sprint_id`・`project_id`・`title`（1〜200 字）・`issues`（`githubIssueRef` の配列、1〜20）・`place`・`inference`・`state`・`started_by`（利用者の ID。委任なら委任した人）・`started_at`・`ended_at?`・`end_reason?`（理由のコード） | 上書き |
-| 区間（`db-sprints` / `…#LANE#<レーン>#SEG#<連番>`） | `project_id`・`sprint_id`・`lane_id`・`seq`・`started_at`・`ended_at?`・`result?`・`category?`（区分の文字列）・`failure_reason?`（`result_line_missing`・`result_value_unknown`・`segment_crashed`・`segment_timeout`）・`duration_ms?` | 上書き（閉じるときに結果を書く） |
+| 区間（`db-sprints` / `…#LANE#<レーン>#SEG#<連番>`） | `project_id`・`sprint_id`・`lane_id`・`seq`・`started_at`・`ended_at?`・`result?`・`category?`（区分の文字列）・`failure_reason?`（`result_line_missing`・`result_value_unknown`・`segment_crashed`・`segment_timeout`） | 上書き（閉じるときに結果を書く） |
 | 進捗の事象（`db-events` / `SEQ#<連番>`） | `project_id`・`lane_id`・`seq`・`generation`・`kind`（形の正本の事象の種類。値の集合は #6）・`occurred_at`・`body`（種類ごとの形。`redact` を通す） | 追記だけ |
-| 問い（`db-decisions` / `QUESTION#<問い>`） | `question_id`・`project_id`・`sprint_id`・`lane_id`・`category`・`human_only`（真偽）・`state`・`body`・`options?`（`{key, label, description}` の配列）・`recommended?`（選択肢の鍵）・`ndf_gate_id?`・`machine_id?`（どちらも契約の `fields` の答えを待つ。#6）・`answer_id?`・`delivery?`・`waiting_since?`・`wt_pk?`・`wt_sk?` | 上書き |
+| 問い（`db-decisions` / `QUESTION#<問い>`） | `question_id`・`project_id`・`sprint_id`・`lane_id`・`category`・`human_only`（真偽）・`state`・`body`・`options?`（`{key, label, description}` の配列）・`recommended?`（選択肢の鍵）・`ndf_gate_id?`・`machine_id?`（どちらも契約の `fields` の答えを待つ。#6）・`answer_id?`・`delivery?`・`waiting_since?` | 上書き |
 | 答え（`db-decisions` / `APPROVAL#<依頼>#ANSWER#<答え>`・`QUESTION#<問い>#ANSWER#<答え>`） | `answer_id`・`project_id`・`parent_id`（依頼か問いの ID）・`word`（承認は `ndfAnswerWord`、問いは選択肢の鍵）・`reason?`（0〜2,000 字）・`notes?`（差し戻しの指摘、0〜10,000 字）・`drop_issues?`（整数の配列）・`material_digest?`・`head_sha?`・`answered_by`（`{kind, user_id, delegation_id?}`）・`answered_at`・`claimed_generation?`・`ndf_event_seqs?`（全体の設計のとおり） | 追記だけ（`claimed_generation` と `ndf_event_seqs` は空のときに 1 回だけ書く） |
 | 知らせ（`db-notices` / `NOTICE#<時刻>#<ID>`） | `notice_id`・`user_id`・`project_id`・`kind`・`target_id`（依頼・問い・スプリントの ID）・`occurred_at`・`read_at?`・`deliveries`（通知先の ID から `{state: pending・sent・failed・skipped, attempts}` への地図） | 上書き（既読は画面、送達は送り手。どちらも `updateIfVersion` で書き、外れたら読み直して 1 回やり直す） |
 | 通知先（`db-notices` / `DEST#<通知先>`） | `destination_id`・`user_id`・`kind`・`team_id?`（`slack` だけ）・`secret_name`（秘密の器の名前）・`fingerprint`（宛先の値の SHA-256 の 64 桁）・`last4`・`state`（`active`・`invalid`・`failed`）・`created_at` | 上書き |
@@ -531,11 +567,23 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 
 | 索引 | 表 | 区切り / 並び | 写す列 | 載る行 | 答える問い |
 | --- | --- | --- | --- | --- | --- |
-| `user-seats` | `db-teams` | `us_pk = USER#<利用者>` / `us_sk = TEAM#<チーム>` | `team_id`・`role` | 席の行だけ（書き手が席の行にだけ 2 列を書く） | 主体が席を持つチームの候補（`ScopeReader.seatsOf`） |
-| `team-projects` | `db-projects` | `tp_pk = TEAM#<current_team_id>` / `tp_sk = PROJECT#<プロジェクト>` | `project_id`・`name`・`current_assign_id` | `current_team_id` のあるプロジェクトの行だけ（閉じると 2 列を消す） | チームに今割り当てたプロジェクトの候補（`projectsOfTeams`） |
-| `waiting` | `db-decisions` | `wt_pk = PROJECT#<プロジェクト>` / `wt_sk = <waiting_since>#<依頼か問いの ID>` | `kind`（`approval`・`question`）・`sprint_id`・`lane_id`・`gate?`・`category?`・`state` | `state` が `waiting` の依頼と問いだけ（答えるか取り消すと 2 列を消す） | 見えるプロジェクトの待っているもの。古い順（`approvals.list`・`questions.list`・`waiting_counts.get`） |
+| `user-seats` | `db-teams` | `user_id` / `team_id` | `role` | `user_id` の列を持つ行（`db-teams` で `user_id` を持つのは席の行だけにする。ほかの行の利用者の ID は `created_by` などの別の名前） | 主体が席を持つチームの候補（`ScopeReader.seatsOf`） |
+| `team-projects` | `db-projects` | `current_team_id` / `project_id` | `name`・`current_assign_id` | `current_team_id` のあるプロジェクトの行だけ（閉じたら列を消す。DynamoDB は索引の鍵に空の文字列を許さないため、全体の設計の「空」は列が無いことで表す） | チームに今割り当てたプロジェクトの候補（`projectsOfTeams`） |
+| `waiting` | `db-decisions` | `project_id` / `waiting_since` | `sprint_id`・`lane_id`・`gate?`・`category?`（依頼か問いかは表の `sk` の頭で分かる） | `waiting_since` のある依頼と問いだけ（答えるか取り消すと列を消す。答えの行は `waiting_since` を持たない） | 見えるプロジェクトの待っているもの。古い順（`approvals.list`・`questions.list`・`waiting_counts.get`） |
 
-どの索引も結果整合で、候補を出すだけに使う。認可と確定の照らしは表の本体を強い整合で読む（決定 14）。索引の鍵の 2 列は、元の行を書く同じ `TransactItem` で書く。
+どの索引も結果整合で、候補を出すだけに使う。認可と確定の照らしは表の本体を強い整合で読む（決定 14）。索引の鍵は元の行の列そのもので、索引のための写しの列を持たない（Value 10）。
+
+索引を置く根拠（読む速さのための写しを足す根拠。Value 10）:
+
+| 索引 | 無いと何が起きるか |
+| --- | --- |
+| `user-seats` | 主体の席は `TEAM#<チーム>` の区切りの下にあり、利用者から引くには `db-teams` の全体を走査するしかない。要求ごとに `visibleProjectIds` が引くため、走査では要求の数とチームの数に比例して読む量が増える |
+| `team-projects` | プロジェクトは `PROJECT#<プロジェクト>` の区切りで、チームから引くには `db-projects` の全体の走査になる。一覧（`projects.list`）と見える集まりが要求ごとに引く |
+| `waiting` | 待っている依頼と問いは区切り（プロジェクト）の中の全行に混ざる。ホーム（いま）と待ちの数が要求ごとに引くため、区切りの全行を読んで絞ると、答えた行の数だけ読む量が増え続ける |
+
+月の使った量の行（`USAGE#<UTC の年月>`）は費用の記録の集計の写しで、全体の設計が決めた行である（使える量の判定が加算の後の値を強い整合で 1 行で読むため。費用の記録を毎回足し合わせない）。
+
+鍵の列（`pk`・`sk`）は行の列から組む写しで、行の種類ごとの `RowCodec` の `keyOf` だけが組む。書き手が鍵を手で組まないため、鍵と列が食い違わない（Value 13）。
 
 ### 単体テストの観点
 
@@ -556,7 +604,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `rowCodec` | `packages/contracts/src/row-codec.ts` | 新設 | `<L, P>(spec: { latest: { version: number; schema: ZodType<L> }; previous?: { version: number; schema: ZodType<P>; upgrade: (row: P) => L; downgrade: (row: L) => P }; writeVersion: number }) => RowCodec<L>` | 行の種類の、読み手が受ける 2 つの版と書き手が出す版をまとめる |
+| `rowCodec` | `packages/contracts/src/row-codec.ts` | 新設 | `<L, P>(spec: { latest: { version: number; schema: ZodType<L> }; previous?: { version: number; schema: ZodType<P>; upgrade: (row: P) => L; downgrade: (row: L) => P }; writeVersion: number; keyOf: (row: L) => { pk: string; sk: string \| null } }) => RowCodec<L>` | 行の種類の、読み手が受ける 2 つの版と書き手が出す版をまとめる |
 | `readRow` | 同上 | 新設 | `<L>(codec: RowCodec<L>, raw: unknown) => ReadRowResult<L>` | `latest` の版はそのまま、`previous` の版は `upgrade` で `latest` の形へそろえて返し、ほかは拒む |
 | `writeRow` | 同上 | 新設 | `<L>(codec: RowCodec<L>, row: L) => Record<string, unknown>` | `writeVersion` の形の行（`schema_version` を含む）を返す。`writeVersion` が `previous.version` なら `downgrade` を通す |
 | `rowUpdateOf` | 同上 | 新設 | `<L>(codec: RowCodec<L>, raw: Record<string, unknown>, row: L) => { set: Record<string, unknown>; remove: string[] }` | 読んだ行（`raw`）を `row` へ書き換える更新の `set` と `remove` を作る。`set` は `writeRow(codec, row)` の戻り値から `pk`・`sk`・`version` を外したもの。`remove` は `raw` の列のうち `writeRow` の戻り値に無く、`pk`・`sk`・`version` でもない列の名前 |
@@ -601,7 +649,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | --- | --- | --- | --- |
 | `MIGRATE_RESERVE_MS` | 定数 | `migrate.ts` | 10000 |
 | `MIGRATE_PAGE_SIZE` | 定数 | `migrate.ts` | 100 |
-| `RowCodec<L>` | 型 | `row-codec.ts` | `{ latest; previous: … \| null; writeVersion }`（`rowCodec` の引数のまま） |
+| `RowCodec<L>` | 型 | `row-codec.ts` | `{ latest; previous: … \| null; writeVersion; keyOf }`（`rowCodec` の引数のまま。`writeRow` は `keyOf` の戻り値を `pk`・`sk` に入れる） |
 | 版を上げる子の手順 | 手順 | この節 | 1. 次の版の zod を `latest` に、今の版を `previous` に移し、`upgrade` と `downgrade` を足す。`writeVersion` は今の版のまま（1 段目の反映。読み手は両方の版を読み、書き手は前の版だけを書く。1 段目のコードは次の版だけの列を使う機能を出さない）2. `writeVersion` を次の版へ上げ、`migrate` の Lambda（`createMigrateHandler`、権限はその表の読みと更新だけ。非同期の起動の設定は `MaximumEventAgeInSeconds` 60・`MaximumRetryAttempts` 0）を足す（2 段目の反映）。移しを起こすのは、この反映が終わってから API の Lambda の時間切れ（今の `app-stack.ts` で 10 秒）より長く待った後で、反映とは別の手順で 1 回起こす（前の版で書く古い書き手が走り終えてから読む）3. 2 段目を戻すときは、[並行と排他](#並行と排他) の「表の移しと、前の版で書く書き手」の行のとおり、次の 2 回の反映で戻す。3a. 移しの止め: `migrate` の Lambda の予約の同時実行を 0 にする反映を出す（新しい起動も、自分を起こし直す非同期の起動も走らない。止められた非同期の起動は 60 秒で捨てられる）。続けて `migrate` の Lambda の時間切れと 60 秒の長いほうを待ち、その Lambda の同時実行の数が 0 であることを CloudWatch の `ConcurrentExecutions` で確かめる 3b. 書き手の戻し: `writeVersion` だけを前の版へ戻す反映を出す。読み手は両方を読むため、書き換えた行は次の版のまま読め、書き手が次に書き換えるときに `downgrade` で前の版になる。戻した状態では `migrateTable` は何も書き換えず、予約の同時実行は 0 のまま置く。3a と 3b を 1 回の反映にまとめない |
 
 ### 並行と排他

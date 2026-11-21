@@ -75,7 +75,7 @@ graph TB
 ```
 
 - 操作の表は全体の設計の操作の一覧の全行（利用者向けの 66 の操作と、ランナー・手元のマシン・DB の用意のタスクの 9 の HTTP の経路）を印つきで持つ。要素の形がまだ無い操作は「形の未定」の印と受け持つ子の番号を持ち、受け持つ子が形と見本とハンドラーを足す
-- `npm run generate` が操作の表から生成物を `packages/contracts/generated/` へ書き、`check` が古い生成物を落とす。画面（#12・#28）・検査（#1）・CDK の部品は生成物か操作の表を読む
+- `npm run generate` が操作の表から生成物を `packages/contracts/generated/` へ書き、`check` が古い生成物を落とす。画面（#12・#28）・検査（#1）・CDK の部品は生成物か操作の表を読む。画面（React 19）は形の正本の呼び出しの口と `z.infer` の型で操作を呼び、ダミーの送り手で生成したダミーデータを読む
 - 横断の部品は `packages/core/` の 1 か所にあり、`apps/` の実行の時のコードは部品を通してだけ時計・ID・ログ・外部の呼び出し・条件つきの書き込みを使う。骨組みの `PUT /v1/users` も部品を通す形に置き換わる
 - サービスの表の 19 の行と 3 つの索引の列が行の形（zod）と表の仕様にあり、表を書く子は `ServiceTable` の部品で表と索引を作る。表の移しの読み手は今と 1 つ前の版を読む
 
@@ -111,7 +111,7 @@ graph TB
 
 | 構成要素 | 置き場 | 変えること |
 | --- | --- | --- |
-| 形の正本 | `packages/contracts/` | 操作の表の枠と全行の印・値の形・表の行の形と表の仕様・データのファイル・生成の足し |
+| 形の正本 | `packages/contracts/` | 操作の表の枠と全行の印・値の形・表の行の形と表の仕様・データのファイル・生成の足し・画面とテストが操作を呼ぶ口（決定 16） |
 | 横断の部品 | `packages/core/`（新設） | detail.md の 13 のモジュールのうち、`dispatch` の MCP の 5 つの関数を除くすべて |
 | API の起点 | `apps/api/src/entries/`（新設） | `api-fn`（HTTP の振り分け）と `migrate`（表の移し）の起点。反映は #4 と、最初に形の版を上げる子 |
 | 骨組みの API の関数 | `apps/api/src/users-handler.ts`・`user-store.ts` | 時計・ログ・クライアントの生成・条件つきの書き込み・失敗の分類を横断の部品へ移す。振る舞いは変えない |
@@ -165,9 +165,9 @@ graph TB
 
 | 索引 | 表 | 鍵（区切り / 並び） | 疎か |
 | --- | --- | --- | --- |
-| `user-seats` | `db-teams` | `us_pk = USER#<利用者>` / `us_sk = TEAM#<チーム>` | 席の行だけが持つ |
-| `team-projects` | `db-projects` | `tp_pk = TEAM#<今の割り当てのチーム>` / `tp_sk = PROJECT#<プロジェクト>` | 今の割り当てのあるプロジェクトの行だけ（閉じたプロジェクトは外れる） |
-| `waiting` | `db-decisions` | `wt_pk = PROJECT#<プロジェクト>` / `wt_sk = <待ち始めた時刻>#<ID>` | 待っている依頼と問いの行だけ（答えると消す） |
+| `user-seats` | `db-teams` | `user_id` / `team_id`（席の行の列をそのまま鍵にする） | `user_id` の列を持つ席の行だけ |
+| `team-projects` | `db-projects` | `current_team_id` / `project_id` | `current_team_id` のあるプロジェクトの行だけ（閉じると列が無くなり外れる） |
+| `waiting` | `db-decisions` | `project_id` / `waiting_since` | `waiting_since` のある依頼と問いの行だけ（答えるか取り消すと列を消す） |
 
 ## 処理の流れ
 
@@ -232,7 +232,7 @@ flowchart LR
 - **採らなかった案**: この課題で全操作の要素の形を書く案は、api.md の決定 56 の受け持ちを決め直す。形のある操作だけを登録する案は、操作の表が F1〜F20 を欠いたまま進み、MCP の道具と HTTP の経路の対応の検査（#1）が受け持つ子ごとに崩れる
 - **代償**: 形の未定の操作は、MCP の道具と HTTP の経路に名前だけが出る。受け持つ子が形を書くまで、画面のダミーデータが作れない（#28 の順序の問題は #48 へ起票した）
 - **作り方**: 自前で作る（操作の表は全体の設計の決定 55 のとおり自前の zod の定義）
-- 根拠: Value 4 / Value 2（MVV 版 1）
+- 根拠: Value 4 / Value 2（MVV 版 2）
 
 ### 決定 2: 生成物の読み手が 1 か所を見ればよいよう、新しい生成物を `packages/contracts/generated/` の JSON にまとめ、型は生成しない
 
@@ -240,17 +240,17 @@ flowchart LR
 - **選んだ案**: `packages/contracts/generated/` に JSON で置く。今の `schema/settings.schema.json` は動かさない。型は操作の表から `z.infer` で出し、ファイルへ生成しない。生成物の差は今の `generate:check` に足す
 - **採らなかった案**: 型の宣言のファイル（`.d.ts`）を生成する案は、`z.infer` で同じ型が出るため 2 つ目の正本になる。OpenAPI を YAML で出す案は、YAML の書き手の依存が増える。生成物を読み手ごとの置き場（`apps/web/`・`infra/`）へ書く案は、`check` の対象が散り、依存の向き（contracts が apps を知らない）に反する
 - **代償**: 画面と CDK は `packages/contracts/generated/` の JSON を読むため、生成物の形を変えると読み手を同じ変更で直す
-- 根拠: Value 2 / Value 4（MVV 版 1）
+- 根拠: Value 2 / Value 4（MVV 版 2）
 
-### 決定 3: 画面が見本を手で書かずに済むよう、見本は操作の定義に作り物の値で書き、空と失敗は生成が操作の印から作る
+### 決定 3: 画面が見本を手で書かずに済み、定義から作れるものを手で写さないよう、見本を zod の形から `zod-schema-faker` で操作ごとの種を固定して作り、空と失敗は操作の印から作る
 
 - **質問**: ダミーデータ（正常・空・境目の値）をどう作るか
-- **選んだ案**: 正常と境目の値は操作の定義の `examples`（結果の要素の配列）に作り物の値で書く。空は生成が作る（`list` は空の配列と `next_cursor: null`、`get` は 404 `not_found` の要素）。失敗は `reasons` の理由のコードごとに失敗の要素を 1 つ作る。生成は見本を結果の zod で検証し、秘密の形の値と作り物でない値（AGENTS.md の作り物の値の外のアカウント ID の形・メールの域名）を見つけたら書かない
-- **採らなかった案**: zod の型から乱数で見本を作る案（`@anatine/zod-mock`・`@faker-js/faker`）。`@anatine/zod-mock` は zod 3 だけを受ける（LIB-A3）。乱数の見本は生成のたびに変わり、`check` の差になる。種を固定しても、ライブラリの版で値が変わる
-- **代償**: 受け持つ子は操作ごとに見本を 2 つ書く
-- **作り方**: 自前で作る
-- **比べた候補**: LIB-A3 / LIB-A4
-- 根拠: Value 2 / Value 7（MVV 版 1）
+- **選んだ案**: 正常と境目の値は、結果の zod の形から `zod-schema-faker` 3.0.1（LIB-A7。zod 4 を受け、`seed` で種を固定できる）で作る。種は操作の名前から決め、ライブラリの版は錠のファイルで固定する（同じ版と同じ種で同じ値になり、`check` の差にならない）。メール・アカウント ID・接頭辞などの形は、作り物の値（AGENTS.md）だけを返す生成器で上書きする。読みやすい値が要る操作だけ、受け持つ子が操作の定義の `examples` に見本を書いて上書きできる。空は生成が作る（`list` は空の配列と `next_cursor: null`、`get` は 404 `not_found` の要素）。失敗は `reasons` の理由のコードごとに失敗の要素を 1 つ作る。生成は出した見本を結果の zod で検証し、秘密の形の値と作り物でない値を見つけたら書かない
+- **採らなかった案**: 見本をすべて操作の定義に手で書く案（直す前の案）は、定義（zod の形）から作れる値を手で写すことになり、形を変えるたびに見本も直す（Value 13）。`@anatine/zod-mock`（LIB-A3）と `zod-fixture`（LIB-A9）は zod 3 の内部の形を読み、zod 4 で動かない。`zocker`（LIB-A8）は zod 4 を受けるが、最後の更新が 2025-08-27 で、tarball に README が無い。`@faker-js/faker`（LIB-A4）だけでは zod の形から値へ写す部分を自前で書くことになる（`zod-schema-faker` はその上に載る）
+- **代償**: 開発の依存が 3 つ増える（`zod-schema-faker`・`@faker-js/faker`・`randexp`）。ライブラリの版を上げると見本の値が変わり、生成物を作り直すコミットが要る
+- **作り方**: 既存のライブラリを使い、作り物の値の生成器の上書きだけを書く
+- **比べた候補**: LIB-A3 / LIB-A4 / LIB-A7 / LIB-A8 / LIB-A9
+- 根拠: Value 2 / Value 7 / Value 13 / Value 15（MVV 版 2）
 
 ### 決定 4: zod と JSON Schema の食い違いを CI で拾うため、形の往復のテストをこの課題に置き、検証に Ajv 8 の draft 2020-12 を使う
 
@@ -259,7 +259,7 @@ flowchart LR
 - **採らなかった案**: 往復の検査を #1 の `tools/checks/` に置く案は、生成の形を知る側と検査する側が分かれ、生成を変えるたびに 2 つの子にまたがる。`@cfworker/json-schema`（LIB-A2）は依存が無く軽いが、検証の誤りの位置の出し方が Ajv より粗く、使う所が開発の依存だけのため軽さの得が小さい
 - **代償**: 開発の依存が 1 つ増える（実行の時には入らない）
 - **比べた候補**: LIB-A1 / LIB-A2 / LIB-A5
-- 根拠: Value 2 / Value 4 / Value 5（MVV 版 1）
+- 根拠: Value 2 / Value 4 / Value 5（MVV 版 2）
 
 ### 決定 5: 時刻帯と言語の形を JSON Schema と同じに縛るため、値の形を正規表現で書き、実在の確かめを形の正本の外へ置かない
 
@@ -267,7 +267,7 @@ flowchart LR
 - **選んだ案**: 正規表現で縛る。時刻帯は `UTC` か `<大文字で始まる地域>/<場所>` の形（`JST`・`+09:00` を落とす）、言語は BCP 47 の言語・文字・地域の部分だけを持つ形にする。名前の実在（`Asia/Tokio` などの綴り違い）は、利用者の設定を書く操作のハンドラー（#4）が `Intl.supportedValuesOf("timeZone")` で照らす
 - **採らなかった案**: zod の `refine` で `Intl` を呼ぶ案は、JSON Schema に出せず往復が食い違う（決定 4）。時刻帯の名前の列挙を生成物に持つ案は、Node の ICU の版で列挙が変わり、生成物の差が版の更新のたびに出る
 - **代償**: 綴り違いの時刻帯は形の検証を通り、ハンドラーで 400 `item_invalid` になる
-- 根拠: Value 5（MVV 版 1）
+- 根拠: Value 5（MVV 版 2）
 
 ### 決定 6: 依存の向きを検査で縛れるよう、横断の部品をモジュールごとに 1 ファイルにし、`package.json` の `exports` でモジュールごとに出す
 
@@ -275,7 +275,7 @@ flowchart LR
 - **選んだ案**: detail.md のモジュールごとに `src/<モジュール>.ts` を 1 つ置く（`auth` と `dispatch` だけはディレクトリ）。`exports` にはモジュールごとのエントリポイントを書く。画面が使ってよい 4 つ（`clock`・`ids`・`redact`・`log`）は Node の組み込みに依らずに書く。全部を 1 つのエントリポイントから出す `index.ts` は置かない
 - **採らなかった案**: 1 つのエントリポイントから出す案は、画面がブラウザーで動かないモジュール（AWS SDK を読む `outbound`）を import できる。依存の向きの検査（#1）も、エントリポイントの単位で見分けられない
 - **代償**: 使う側はモジュールごとに import の行を書く
-- 根拠: Value 7 / Value 9（MVV 版 1）
+- 根拠: Value 7 / Value 9（MVV 版 2）
 
 ### 決定 7: 1 子 1 スプリントに収めるため、MCP の受け口の 5 つの関数と MCP の SDK を #11 へ渡し、この課題は MCP の道具の定義の生成までにする（要求から変えた）
 
@@ -283,7 +283,7 @@ flowchart LR
 - **選んだ案**: #11 が作る。置き場（`packages/core/src/dispatch/`）と関数の仕様は detail.md のまま変えない。この課題は MCP の道具の定義（`mcp-tools.json`）を生成し、`dispatch` を MCP の入口（`call.principal` がある呼び出し）からも呼べる形にする
 - **採らなかった案**: この課題で作る案は、MCP の SDK（LIB40）の依存を、使う子より先に入れる。受け口の振る舞いのテスト（`initialize`・`tools/list` の記録の行）も、委任の token（#11）の無いまま偽の主体だけで書かれる。選んだ案は、開発の計画の構成要素の表が MCP を K11（#11）に置くのとも合う
 - **代償**: #11 の範囲が 5 つの関数の分だけ増える。#11 の本文へ足す（承認の後に直す）
-- 根拠: Value 4（MVV 版 1）
+- 根拠: Value 4（MVV 版 2）
 
 ### 決定 8: 表を書く子が同じ列と索引で表を作れるよう、表の仕様を形の正本に置き、表と索引の資源は表を最初に書く子が `ServiceTable` の部品で作る
 
@@ -300,7 +300,7 @@ flowchart LR
 
 - **採らなかった案**: この課題で 10 の表をすべて入れる案は、使われない表を先に反映する。`db-users` の置き換え（#4 の作り直しの段取り）と論理 ID が重なり、`infra/lib/app-stack.ts` も #13 と同時に触る
 - **代償**: 表の資源は子ごとに足される。部品と仕様は 1 つのため、名前・PITR・残す設定は子の間で食い違わない
-- 根拠: Value 6 / Value 8（MVV 版 1）
+- 根拠: Value 6 / Value 8（MVV 版 2）
 
 ### 決定 9: 2 段目だけを戻せるよう、表の移しの読み手を行の種類ごとに今と 1 つ前の版の zod と引き上げの関数で持ち、移しの関数の資源は最初に版を上げる子が足す
 
@@ -308,7 +308,7 @@ flowchart LR
 - **選んだ案**: 行の種類ごとに `RowCodec`（新しい版と 1 つ前の版の zod・前から新しいへ上げる関数・新しいから前へ下げる関数・書き手が出す版）を持つ。`readRow` は 2 つの版を受けて新しい版の形へそろえて返し、ほかの版を拒む。書き手は `writeRow` で、書き手が出す版だけを書く。読み手の受ける版と書き手の出す版を分けるため、前の版だけを書く 1 段目と、書き手だけを戻した状態を同じ値で表せる。移しの関数（`migrateTable`）は 1 つ前の版の行を、`schema_version = <前の版>` を条件にした更新（`updateIfSchemaVersion`。エンティティの版を持たない行にも使う）で書き換える（冪等）。残り時間が足りなければ、最後に処理を終えた行の鍵を続きの位置として返す。起点 `entries/migrate.ts` は続きの位置を持って自分を起こし直す。Lambda の資源と起こし方は、最初に形の版を上げる子が足す（今の行はどれも版 1 で、移すものが無い）
 - **採らなかった案**: 今 Lambda の資源まで入れる案は、使われない関数を反映し、権限（全表の書き込み）だけが先に広がる
 - **代償**: 最初に版を上げる子は、資源と起こし方を足す作業を持つ。その手順は詳細設計の「表の移し」にある
-- 根拠: Value 6 / Value 8（MVV 版 1）
+- 根拠: Value 6 / Value 8（MVV 版 2）
 
 ### 決定 10: ランナーが照らす値と全体の設計を食い違わせないため、受ける NDF の契約の組を `data/ndf-contracts.json` の集合にし、答えの語を契約の写しの列挙で持つ
 
@@ -316,7 +316,7 @@ flowchart LR
 - **選んだ案**: `packages/contracts/data/ndf-contracts.json` に `{"accepted": [{"version": 8, "sha256": "ed8b0365…（64 桁）"}]}` を置く。形は空でない・重ならない・版は正の整数・sha256 は 64 桁の小文字の 16 進の集合で、版の大小で選ばない（ランナーは対が集合にあるかだけを照らす）。答えの語は `src/ndf.ts` に zod の列挙として置き、出所（固定の点の `C/facts/answers.json`）を添える。列挙の値は `approved`・`rejected`・`request_changes`・`retry`・`finish`・`cancel` である。進行表の ID の引数と結果の項目の名前は `machine_id` を使い、旧いキーを型に持たない
 - **採らなかった案**: 受ける組を `ndf-pin.json` に置く案は、`ndf-pin.json` を `ndf_ref` の 1 か所に限る決まり（AGENTS.md）に反する。受ける組を 1 つの対の定数にする案は、全体の設計の「受ける組の集合」と形が違い、次の配布で 2 つの組を並べる移り目に形を変えることになる
 - **代償**: 固定の点を変える PR は、このデータも同じ PR で直す（#1 の契約の照合が食い違いを落とす）
-- 根拠: Value 4（MVV 版 1）
+- 根拠: Value 4（MVV 版 2）
 
 ### 決定 11: 骨組みの振る舞いを変えずに境界の検査を通すため、`PUT /v1/users` の関数を今のまま残して中を横断の部品へ移し、新しい振り分けの起点は反映しない
 
@@ -324,7 +324,7 @@ flowchart LR
 - **選んだ案**: 新しい起点 `apps/api/src/entries/api-fn.ts`（`readHttpCall` → `dispatch` → `writeHttpResponse`）を作り、テストで確かめる。反映している関数 `users-api` のエントリポイント（`users-handler.ts`）は、今の経路と応答の形のまま残す。その中の時計・ログ・クライアントの生成・条件つきの書き込み・失敗の分類を横断の部品へ移す。`api-fn` をアプリのスタックへ入れて `PUT /v1/users` を消すのは #4 が `sessions.create` と一緒に行う
 - **採らなかった案**: この課題で `api-fn` を反映し、`PUT /v1/users` を `api-fn` の中の古い分岐で残す案は、操作の表に無い経路を振り分けに持ち込む（I14）。#4 の置き換えと同じ関数も 2 回作り変える
 - **代償**: #4 が反映するまで、新しい起点は反映した環境で動かない
-- 根拠: Value 2 / Value 8（MVV 版 1）
+- 根拠: Value 2 / Value 8（MVV 版 2）
 
 ### 決定 12: 1 スプリントで閉じるため、実装を 5 つのレビューの単位に分け、形の正本の枠を最初の単位にする
 
@@ -333,7 +333,7 @@ flowchart LR
 
 | 単位 | 中身 | 満たす受け入れ条件 |
 | --- | --- | --- |
-| U1 形の正本の枠と生成 | 値の形・ID の頭・token の形・操作の表の枠と全行・データのファイル・生成と生成物・往復のテスト | 1・5（形の側）・6・7・10 |
+| U1 形の正本の枠と生成 | 値の形・ID の頭・token の形・操作の表の枠と全行・データのファイル・生成と生成物・往復のテスト・画面とテストが呼ぶ口 | 1・5（形の側）・6・7・10 |
 | U2 基本の部品 | `clock`・`ids`・`redact`・`log`・`retry`・`outbound` | 2（一部） |
 | U3 書き込みと判定 | `conditional-write`・`idempotency`・`audit`・`authorize`・`usage-limit` | 3・4 |
 | U4 認証と振り分け | `auth`・`dispatch`（HTTP）・`entries/api-fn`・骨組みの移し | 2・4・5 |
@@ -341,7 +341,7 @@ flowchart LR
 
 - **採らなかった案**: 課題を 2 つに分ける案（形の正本と部品・表の列と移し）は、表の行の形が形の正本の値の形と ID の頭を読み、分けた後の課題が前の課題の実装を待つだけになる
 - **代償**: 受け入れ条件 11（詳細設計）はこの設計 Pull Request で満たす
-- 根拠: Value 2（MVV 版 1）
+- 根拠: Value 2（MVV 版 2）
 
 ### 決定 13: 測った値の無いまま方針を変えないため、再試行の方針の値は detail.md の値をデータのファイルへそのまま移す
 
@@ -349,7 +349,7 @@ flowchart LR
 - **選んだ案**: 変えない。`data/retry-policies.json` に detail.md の値をそのまま置き、`awsClient` と `callHttp` はこのデータだけを読む。値を変えるのは、反映した環境のログ（`withRetry` の warn の行）で使い切りか待ちすぎが見えた後で、変えるのはデータの 1 か所だけにする
 - **採らなかった案**: 今の段で回数と待ちを詰める案は、根拠にする測定が無い
 - **代償**: 無し
-- 根拠: Value 6（MVV 版 1）
+- 根拠: Value 6（MVV 版 2）
 
 ### 決定 14: 索引の遅れで見えてはいけないものを見せないため、3 つの索引は候補を出すだけにし、認可と確定の照らしは表の本体を強い整合で読む
 
@@ -357,7 +357,7 @@ flowchart LR
 - **選んだ案**: `ScopeReader` は索引で候補のチームとプロジェクトを読む。続けて候補ごとに表の本体（席の行・プロジェクトの行）を強い整合で読み直し、今も成り立つものだけを返す。中身は表の持ち主の #4・#5 が書く。要素ごとの照らしは対象のプロジェクトの行を強い整合で読む。索引の遅れで足したばかりの席が 1 回見えないことは許し、外した席が見えることは許さない
 - **採らなかった案**: 索引の値だけで判定する案は、席を外した直後の要求でプロジェクトが見え、I2 と Value 9 の「迷うときは見せない」に反する。席の一覧を `db-users` に写す案は、1 つの処理が 2 つの表（2 つの集約）を書き、表と鍵の決まり（1 つの処理が書き換える集約は 1 つ）に反する
 - **代償**: 一覧の要求ごとに、候補の数だけ強い整合の読みが増える（候補はその人の席の数とチームのプロジェクトの数）
-- 根拠: Value 9（MVV 版 1）
+- 根拠: Value 9（MVV 版 2）
 
 ### 決定 15: 全体の設計の語と画面の文言を分けるため、表に持つ状態と種類の値を英小文字の識別子にし、文書の日本語の名前との対応を詳細設計の 1 つの表に置く
 
@@ -365,7 +365,38 @@ flowchart LR
 - **選んだ案**: 英小文字の識別子（`running`・`pending` など）で持ち、対応を詳細設計の「サービスの表」の「決めた書き方」の表に置く。画面は識別子から翻訳のファイルで文言を作る。全体の設計の表と鍵に無かった招待の行は `db-teams` の `TEAM#<チーム>` / `INVITE#<招待>` に置き、確定仕様化（スプリントの終わりに設計の記録を確定の文書へ移す工程）で全体の設計の表と鍵の行へ写す。招待の列は全体の設計が #2 に回した 19 の行の 1 つで、置き場は招待を持つ集約（チーム）の表に置くだけのため、モデルと状態の置き場を決め直さない
 - **採らなかった案**: 日本語の名前を値に持つ案は、画面の文言を言語ごとに翻訳のファイルで持つ決まり（Value 5）と食い違う。連携するシステム（全体の設計の利用者 A5）も日本語の値を比べることになる
 - **代償**: 全体の設計を読む人は、値を対応の表で引く
-- 根拠: Value 5（MVV 版 1）
+- 根拠: Value 5（MVV 版 2）
+
+### 決定 16: 画面（React 19）が操作を同じ型で呼べるよう、形の正本に操作の表の型で縛った呼び出しの口とダミーの送り手を置き、React の状態の層は画面の基盤（#12）に任せる
+
+- **質問**: 決定 140 の改め（画面は React 19 と TSX）を受けて、形の正本から画面向けに何をどの形で作るか
+- **選んだ案**: `packages/contracts/src/client.ts` に、操作の名前で要素と結果の型を引く呼び出しの口（`createOperationClient`）を置く。口は `fetch` と token の取り手を受け、`POST /v1/<entity>/<verb>` に要素の配列を送り、要素ごとの結果の配列を結果の zod で検証して返す。React も DOM も import せず、React の部品からもテストからも同じ口を使う。ダミーは同じ口に渡す送り手（`createDummyTransport`）で、生成した `generated/dummy/<操作>.json` を場面（`normal`・`empty`・`error`・`slow`・`notFound`）ごとに返す。型は `ItemOf`・`ResultOf`（`z.infer`）をそのまま TSX から import する。取得の控え・再読み込み・確定待ちの状態の層（`@tanstack/react-query` など、LIB-A20）と、Service Worker でダミーを返す形（`msw`、LIB-A21）を採るかは画面の基盤（#12）が決め、この口の上に載せる
+- **採らなかった案**: OpenAPI から呼び出しの口と型を生成する案（`@hey-api/openapi-ts`・`orval`・`openapi-typescript` と `openapi-fetch`、LIB-A22〜A25）は、`z.infer` の型と生成した型の 2 通りの型ができる（Value 13）。`openapi-typescript` 7.13.0 は TypeScript 5 を前提にし、このリポジトリの 6.0.3 と合わない。React のフックを形の正本に置く案は、形の正本の依存を zod だけにする決まり（detail.md の依存の表）に反し、状態の層の選び方を画面の基盤より先に決めてしまう
+- **代償**: React のフックの包みは画面の基盤（#12）が書く。呼び出しの口は全操作で同じ形のため、包みは 1 つで足りる
+- **作り方**: 自前で作る（型で縛った `fetch` の薄い包み。全操作が `POST` と配列の 1 つの形のため、生成器を足すより短い）
+- **比べた候補**: LIB-A20 / LIB-A21 / LIB-A22 / LIB-A23 / LIB-A24 / LIB-A25
+- 根拠: Value 2 / Value 13 / Value 15（MVV 版 2）
+
+### 決定 17: 自前の実装を減らすため、横断の部品ごとに既存のライブラリを調べ、乗り換えると全体の設計の決定を変える 4 つは全体の設計の直しに回し、ほかは使える部品を使う
+
+- **質問**: MVV 版 2 の Value 15 に照らし、詳細設計で「作る」とした横断の部品を既存のライブラリへ乗り換えるか
+- **選んだ案**: 部品ごとの調べた結果と扱いは次のとおりである（外部の調査の LIB-A10〜A19・A26〜A31）
+
+| 部品 | 調べた候補 | 扱い |
+| --- | --- | --- |
+| OpenAPI の文書（`buildOpenApi`） | `zod-openapi` 6.0.2・`@asteasolutions/zod-to-openapi` 9.1.0 | `zod-openapi` が要件を満たし、内部で `z.toJSONSchema` を呼ぶため往復のテストと生成元が同じ。全体の設計の api.md の決定 55（自前の生成のスクリプトで組む）を変えるため、全体の設計の直しに回す |
+| JWKS の控え（`createJwksCache`） | `jose` 6.2.18・`aws-jwt-verify` 5.2.1 | `jose` の `createRemoteJWKSet` は `cacheMaxAge`・`cooldownDuration`・同じ時の取り直しのまとめ・`customFetch` を設定だけで持つ。全体の設計の決定 48（`aws-jwt-verify`）と detail.md の「`jose` は足さない」を変えるため、全体の設計の直しに回す |
+| 外への HTTP と再試行（`callHttp`・`withRetry`） | `ky` 2.2.0・`ofetch` 1.5.1・`cockatiel` 4.0.0・`p-retry` 9.0.0・`exponential-backoff` 3.1.3 | `ky` は全幅のゆらぎ・`Retry-After` の上限・全体の期限・`fetch` の差し替えを持つ。`cockatiel` は全幅のゆらぎと `Retry-After` を持つ。どちらも待ちの差し込み（`sleep`）を持たず、detail.md の `withRetry` のシグネチャと「HTTP のライブラリは足さない」を変えるため、全体の設計の直しに回す |
+| ログ（`createLogger`） | `pino`・`@aws-lambda-powertools/logger`・`winston`・`consola` | 値の形での伏せ字を持つ候補は無い。ブラウザーでも動くのは `pino` だけで、伏せ字は自前の `redact` を通す形になる。detail.md の「ログのライブラリは使えない」を変えるため、全体の設計の直しに回す |
+| 冪等の鍵（`claimIdempotency`・`settleIdempotency`） | `@aws-lambda-powertools/idempotency` | 使えない。記録を単独の `PutItem`・`UpdateItem` で書き、状態の書き込みと同じ `TransactWriteItems` に入れる口と要素ごとの鍵を持たない（I9 と全部か無かを守れない）。自前のまま |
+| 条件つきの書き込み | `electrodb`・`dynamodb-toolbox`・`@aws-sdk/lib-dynamodb` | `@aws-sdk/lib-dynamodb` の `TransactWriteCommand` を使い、条件式の組み立てと失敗の訳しだけを書く（detail.md のまま）。`electrodb`・`dynamodb-toolbox` は独自のスキーマの言葉を持ち込み、形の正本の zod と 2 つ目の正本になる |
+| 伏せ字（`redact`） | 上のログの候補 | 鍵の名前と値の形の両方で伏せる候補は無い。自前のまま |
+| UUIDv7（`newId`） | `uuid` 14.0.3・`uuidv7` 1.2.1 | `uuid` を使う（detail.md のまま）。`uuidv7` は時計の戻りが 10 秒を超えると生成器を初め直し、注入した時計での単調性の扱いが合わない |
+| MCP の道具（#11 が作る受け口） | `@modelcontextprotocol/server` 2.4.0・`@modelcontextprotocol/sdk` 1.32.2 | v2 を使う（全体の設計の LIB40 のまま）。zod 4 から draft 2020-12 の `tools/list` を作るため、`mcp-tools.json` は同じ zod の形から作り、SDK と別の形を持たない |
+
+- **採らなかった案**: 全体の設計の決定を変える 4 つ（OpenAPI・JWKS・HTTP と再試行・ログ）を、この設計の中で乗り換える案は、全体の設計の決定と詳細設計が食い違ったまま承認を求めることになる（plan.md の決まり「決め直す必要が出たら全体の設計を直す PR を先に出す」）
+- **代償**: 4 つの扱いは全体の設計の直しの答えを待つ。それまで、この設計の 4 つの部品の作り方は detail.md のまま（自前）で書いてある
+- 根拠: Value 13 / Value 15（MVV 版 2）
 
 ## 影響と危険
 
@@ -413,7 +444,7 @@ flowchart LR
 
 | 課題 | 結果 | 依存 | 触るファイル |
 | --- | --- | --- | --- |
-| #2 | 実装する | — | `packages/contracts/`（`package.json`・`src/values.ts`・`src/ids.ts`・`src/tokens.ts`・`src/reasons.ts`・`src/operation.ts`・`src/operations/*.ts`・`src/rows/*.ts`・`src/tables.ts`・`src/ndf.ts`・`src/data.ts`・`data/retry-policies.json`・`data/secret-shapes.json`・`data/ndf-contracts.json`・`data/plans.json`・`scripts/generate.ts`・`generated/*`・`test/*`）、`packages/core/`（新設。`package.json`・`tsconfig.json`・`src/*.ts`・`src/auth/*.ts`・`src/dispatch/*.ts`・`test/*`）、`apps/api/`（`package.json`・`src/entries/api-fn.ts`・`src/entries/migrate.ts`・`src/users-handler.ts`・`src/user-store.ts`・`test/*`）、`infra/lib/service-table.ts`・`infra/lib/api-routes.ts`・`infra/test/service-table.test.ts`・`infra/test/api-routes.test.ts`（新設）、`package-lock.json` |
+| #2 | 実装する | — | `packages/contracts/`（`package.json`・`src/values.ts`・`src/ids.ts`・`src/tokens.ts`・`src/reasons.ts`・`src/operation.ts`・`src/operations/*.ts`・`src/rows/*.ts`・`src/tables.ts`・`src/ndf.ts`・`src/data.ts`・`src/client.ts`・`data/retry-policies.json`・`data/secret-shapes.json`・`data/ndf-contracts.json`・`data/plans.json`・`scripts/generate.ts`・`generated/*`・`test/*`）、`packages/core/`（新設。`package.json`・`tsconfig.json`・`src/*.ts`・`src/auth/*.ts`・`src/dispatch/*.ts`・`test/*`）、`apps/api/`（`package.json`・`src/entries/api-fn.ts`・`src/entries/migrate.ts`・`src/users-handler.ts`・`src/user-store.ts`・`test/*`）、`infra/lib/service-table.ts`・`infra/lib/api-routes.ts`・`infra/test/service-table.test.ts`・`infra/test/api-routes.test.ts`（新設）、`package-lock.json` |
 
 後に続く課題: #11 は決定 7 の 5 つの関数を受ける。#4・#5・#6・#8・#29 は決定 8 の表を入れ、#4・#5 は決定 14 の約束で `ScopeReader` の中身を書く。#28 の順序は #48 が受ける。#1 は詳細設計の「#1 へ渡す欠け」を受ける。
 
@@ -438,19 +469,48 @@ flowchart LR
 | --- | --- | --- |
 | 標準・仕様 | 調べない | 使う仕様（JSON Schema 2020-12・OpenAPI 3.1・RFC 3339・RFC 9562・ISO 4217・BCP 47・RFC 9457）は全体の設計の外部の調査（api.md の STD の行）が調べ済みで、この課題は同じ版を使う |
 | 主要な製品 | 調べない | 操作の表から表現を生成する形は全体の設計の決定 51・55 が決め、比べ済み |
-| ライブラリとサービス | 調べる | 往復の検証（決定 4）とダミーデータ（決定 3）で新しく比べる。ほかのライブラリ（zod・uuid・aws-jwt-verify・AWS SDK）は全体の設計の LIB の行のまま |
+| ライブラリとサービス | 調べる | MVV 版 2 の Value 15 に従い、詳細設計で「作る」とした部品ごとに既存のライブラリを比べる（決定 3・4・16・17）。zod・AWS SDK は全体の設計の LIB の行のまま |
 
 ### ライブラリとサービス
 
-| # | 候補 | 版 | 何に使えるか | 使えない理由・採った理由 | 出典（取得日 2026-11-21） |
-| --- | --- | --- | --- | --- | --- |
-| LIB-A1 | Ajv | 8.20.0（MIT） | draft 2020-12 の検証（`ajv/dist/2020`） | 採る。開発の依存だけに入れる。誤りの位置（`instancePath`）が往復のテストの差の説明に使える | `npm view ajv version license`・`npm pack ajv@8.20.0` の中の `package/dist/2020.js` |
-| LIB-A2 | `@cfworker/json-schema` | 4.1.6（MIT） | draft 2020-12 の検証 | 採らない。依存が無く軽いが、開発の依存だけでは軽さの得が小さい | `npm view @cfworker/json-schema version description` |
-| LIB-A3 | `@anatine/zod-mock` | 3.14.0（MIT） | zod の型から見本を作る | 使えない。同じ依存の zod が `^3.21.4`（このリポジトリは zod 4.6.7） | `npm view @anatine/zod-mock@3.14.0 peerDependencies` |
-| LIB-A4 | `@faker-js/faker` | 10.6.0（MIT） | 作り物の値の乱数の生成 | 採らない。乱数の見本は生成のたびに変わり、`check` の差になる | `npm view @faker-js/faker version` |
-| LIB-A5 | `@hyperjump/json-schema` | 1.18.1（MIT） | draft 2020-12 の検証 | 採らない。Ajv と同じ用途で、往復のテストに要る機能に差が無い | `npm view @hyperjump/json-schema version` |
-| LIB-A6 | zod の `z.toJSONSchema` | 4.6.7（MIT） | zod から draft 2020-12 の JSON Schema | 採る（全体の設計の決定 55 のまま） | `npm view zod version`・`packages/contracts/package.json` |
+（取得日 2026-11-21。版・ライセンス・最終更新は `npm view`、週の DL 数は `api.npmjs.org/downloads/point/last-week`、脆弱性は GitHub の勧告（`gh api /advisories`）の現行版への当たり。どの候補も現行版に当たる勧告は 0 件、npm の deprecated の印も無い）
+
+| # | 候補 | 版・ライセンス・広さ | 何に使えるか | 扱い |
+| --- | --- | --- | --- | --- |
+| LIB-A1 | `ajv` | 8.20.0・MIT | draft 2020-12 の検証（`ajv/dist/2020`） | 採る（決定 4）。開発の依存だけ |
+| LIB-A2 | `@cfworker/json-schema` | 4.1.6・MIT | draft 2020-12 の検証 | 採らない。依存が無く軽いが開発の依存だけでは得が小さい |
+| LIB-A3 | `@anatine/zod-mock` | 3.14.0・MIT・週 22 万・最終 2025-04-04 | zod から見本 | 使えない。peer が zod 3 |
+| LIB-A4 | `@faker-js/faker` | 10.6.0・MIT・週 2,648 万 | 作り物の値の乱数（`faker.seed`） | 単独では zod の形を読まない。LIB-A7 の下で使う |
+| LIB-A5 | `@hyperjump/json-schema` | 1.18.1・MIT | draft 2020-12 の検証 | 採らない。Ajv と用途が同じ |
+| LIB-A6 | zod の `z.toJSONSchema` | 4.6.7・MIT・週 4.7 億 | draft 2020-12 の JSON Schema | 採る（全体の設計の決定 55 のまま） |
+| LIB-A7 | `zod-schema-faker` | 3.0.1・MIT・週 9.7 万・最終 2026-10-29 | zod 4 の形から値（`zod-schema-faker/v4` の `fake`・`seed`） | 採る（決定 3）。開発の依存だけ。作り物の値の生成器を上書きする |
+| LIB-A8 | `zocker` | 3.0.0・MIT・週 10.8 万・最終 2025-08-27 | zod 4 の形から値（`setSeed`） | 採らない。更新が 1 年以上無く、tarball に README が無い |
+| LIB-A9 | `zod-fixture` | 2.5.2・MIT・最終 2024-03-09 | zod から見本（`seed`） | 使えない。zod 3 の内部の形（`_def.typeName`）を読む |
+| LIB-A10 | `zod-openapi` | 6.0.2・MIT・週 230 万・依存 0 | zod 4 から OpenAPI 3.1.1（`createDocument`） | 要件を満たす。内部で `z.toJSONSchema` を呼ぶ。全体の設計の決定 55 を変えるため直しに回す（決定 17） |
+| LIB-A11 | `@asteasolutions/zod-to-openapi` | 9.1.0・MIT・週 886 万 | zod 4 から OpenAPI 3.1 | 一部。JSON Schema を独自の生成器で作り、往復のテストの生成元と分かれる。zod のプロトタイプを拡張する |
+| LIB-A12 | `jose` | 6.2.18・MIT・週 2.5 億・依存 0 | `createRemoteJWKSet`（`cacheMaxAge`・`cooldownDuration`・同じ時の取り直しのまとめ・`customFetch`） | 要件を満たす（Cognito の `client_id`・`token_use` は薄い層で照らす）。全体の設計の決定 48 を変えるため直しに回す（決定 17） |
+| LIB-A13 | `aws-jwt-verify` | 5.2.1・Apache-2.0・週 306 万 | Cognito の照らしと差し替えられる鍵の控えの口 | 一部。控えの保持の期限と 60 秒の最短の間隔を持たない（detail.md の記述のとおり） |
+| LIB-A14 | `ky` | 2.2.0・MIT・週 1,075 万・依存 0 | `fetch` の上の再試行（全幅のゆらぎ・`maxRetryAfter`）・`timeout`・`totalTimeout`・`fetch` の差し替え | 一部（待ちの差し込みが無い）。detail.md の「HTTP のライブラリは足さない」を変えるため直しに回す（決定 17） |
+| LIB-A15 | `ofetch` | 1.5.1・MIT・週 2,901 万・最終 2025-11-01 | `fetch` の上の再試行と時間切れ | 一部。全体の期限と `Retry-After` が無い |
+| LIB-A16 | `cockatiel` | 4.0.0・MIT・週 293 万・依存 0 | 全幅のゆらぎ（`fullJitterGenerator`）・`DelegateBackoff`・`handleWhen`・時間切れ | 一部（待ちの差し込みが無い）。detail.md の `withRetry` を変えるため直しに回す（決定 17） |
+| LIB-A17 | `p-retry` | 9.0.0・MIT・週 7,634 万 | 指数の待ちの再試行 | 一部。ゆらぎが 1〜2 倍で全幅でなく、`Retry-After` と待ちを外から決める口が無い |
+| LIB-A18 | `exponential-backoff` | 3.1.3・Apache-2.0・週 5,948 万 | 全幅のゆらぎの再試行 | 一部。`Retry-After`・期限が無い |
+| LIB-A19 | `pino` | 10.4.0・MIT・週 8,186 万 | 構造化ログ（ブラウザー版あり）・鍵のパスでの伏せ字 | 一部。値の形での伏せ字は無い。detail.md の「ログのライブラリは使えない」を変えるため直しに回す（決定 17） |
+| LIB-A20 | `@tanstack/react-query` | 5.108.2・MIT・週 9,180 万 | React の取得・控え・更新の状態の層 | 採るかは画面の基盤（#12）が決める（決定 16） |
+| LIB-A21 | `msw` | 3.0.7・MIT・週 3,607 万 | Service Worker でダミーの応答を返す | 採るかは #12 が決める。ハンドラーは生成したダミーの JSON から作れる（決定 16） |
+| LIB-A22 | `@hey-api/openapi-ts` | 0.99.0・MIT・週 829 万 | OpenAPI から口・型・react-query の包み | 採らない。`z.infer` と別の型ができる。版が 0.x（決定 16） |
+| LIB-A23 | `orval` | 8.48.0・MIT・週 416 万 | OpenAPI から口・ダミー・zod | 採らない。同上。README は読めていない |
+| LIB-A24 | `openapi-typescript` | 7.13.0・MIT | OpenAPI から型 | 使えない。peer が TypeScript 5（このリポジトリは 6.0.3） |
+| LIB-A25 | `openapi-fetch` | 0.17.0・MIT・週 1,946 万 | 型つきの `fetch` の包み | 採らない。LIB-A24 の型を前提にする |
+| LIB-A26 | `@aws-lambda-powertools/logger` | 2.36.0・MIT-0・週 179 万 | Lambda の構造化ログ | 使えない。`node:` の組み込みを読み、画面で動かない |
+| LIB-A27 | `@aws-lambda-powertools/idempotency` | 2.36.0・MIT-0・週 19 万 | Lambda の冪等 | 使えない。記録を単独の書き込みで残し、状態と同じトランザクションに入らない。要素ごとの鍵を持たない（決定 17） |
+| LIB-A28 | `electrodb` | 3.9.3・ISC・週 92 万 | DynamoDB の実体とトランザクション | 採らない。独自のスキーマの言葉が形の正本の zod と 2 つ目の正本になる |
+| LIB-A29 | `dynamodb-toolbox` | 2.11.1・MIT・週 42 万 | 同上 | 採らない。同上 |
+| LIB-A30 | `uuidv7` | 1.2.1・Apache-2.0・週 447 万 | UUIDv7 | 採らない。注入した時計での単調性の扱いが合わない（`uuid` 14.0.3 のまま） |
+| LIB-A31 | `@modelcontextprotocol/server` | 2.4.0・Apache-2.0・週 3,348 万 | zod 4 から draft 2020-12 の `tools/list` | #11 が使う（全体の設計の LIB40 のまま）。v1 の `@modelcontextprotocol/sdk` 1.32.2 は draft-7 が既定 |
 
 ### 確かめられなかったこと
 
 - Ajv 8 の `Ajv2020` が zod 4.6.7 の `z.toJSONSchema` の出力（`$schema` と `format` の扱い）をそのまま受けるか。U1 の往復のテストで確かめる（未確認のまま残ることの表に同じ行がある）
+- `zod-schema-faker` 3.0.1 で、メール・アカウント ID の形の生成器を作り物の値だけを返すものへ上書きできるか、同じ種で 2 回の生成が同じ値になるか（README と型の宣言は読んだが、落としたコードは実行していない）。U1 の生成のテストで確かめ、上書きできなければ決定 3 の「`examples` で上書きできる」の経路だけで作り物の値に収める
+- `ky`・`cockatiel`・`jose`・`zod-openapi` が要件を満たすことは README と型の宣言と実装の読みまでで、実行していない（全体の設計の直しの答えの後に、使う部品の単体テストで確かめる）
