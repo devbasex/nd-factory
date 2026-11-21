@@ -254,8 +254,7 @@ export function writeRow<L>(codec: RowCodec<L>, row: L): Record<string, unknown>
   return { ...Object.fromEntries(columns), pk: key.pk, ...(key.sk === null ? {} : { sk: key.sk }) };
 }
 
-// 読んだ行（raw）を row へ書き換える更新の set と remove を作る。remove は raw の列だけから作るため、書き込みは読んだ schema_version を条件に含める
-// （core の rewriteIfVersion・rewriteIfState。移しが version を変えずに列を足した後の行へ、その列を消さない更新を当てない）。set は writeRow の戻り値から pk・sk・version を外したもの（schema_version を含む）。
+// 読んだ行（raw）を row へ書き換える更新の set と remove を作る。set は writeRow の戻り値から pk・sk・version を外したもの（schema_version を含む）。
 // remove は raw の列のうち writeRow の戻り値に無く、pk・sk・version でもない列（別の版で消した列と、undefined にした任意の列。索引の鍵なら書き込みで索引から外れる）。
 // 列の有無は自身の列だけで見る（constructor などの継承した名前を列と取り違えない）
 // downgradable の間に読んだ行が前の版なら、その行を上げて下げ直すと元の行に戻らなければ投げる（移しと通常の書き換えのどちらでも、upgrade で失う値を消さない）。

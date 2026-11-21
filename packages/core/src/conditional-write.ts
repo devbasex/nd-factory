@@ -1,7 +1,6 @@
 import { RETRY_POLICIES } from "@nd-factory/contracts/data";
 import pRetry from "p-retry";
-import { type RowCodec, rowUpdateOf } from "@nd-factory/contracts/row-codec";
-import type { Db, Row, RowKey, StoredRow, TableName } from "./db.ts";
+import type { Db, Row, RowKey, TableName } from "./db.ts";
 import type { Logger } from "./log.ts";
 import { classifyFailure, isRetryableCancellation } from "./retry.ts";
 
@@ -43,10 +42,6 @@ export type TransactItem = {
   readonly update?: Update;
   readonly condition: Condition;
   readonly onConflict: ConflictRule;
-  // 条件が外れたときの組み直し（rewriteIfVersion・rewriteIfState が付ける）。writeAtomically が行を強い整合で読み直して渡し、
-  // 照らした列（version か state）が読んだときのままで schema_version だけが変わった（表の移しが先に確定した）なら、
-  // 読み直した行から組み直した 1 件を返す。ほかは null（本当の衝突）
-  readonly rebuild?: (current: StoredRow | null) => TransactItem | null;
 };
 
 export type WriteOutcome = { readonly ok: true } | { readonly ok: false; readonly failed: readonly { readonly index: number; readonly onConflict: ConflictRule }[] };
@@ -126,126 +121,27 @@ export function putIfAbsent(spec: { table: TableName; item: Row; onConflict: Con
   };
 }
 
-// 読んだ版（version）と読んだ行の形の版（schema_version）が同じときだけ書き、version を 1 上げる。
-// schema_version も照らすのは、表の移しが version を変えずに列を足すため。移しが先に確定すると、読んだ行の列から作った set と remove は
-// 移しが足した列を消さない（索引の鍵の列なら行が索引に残る）。外れたら rewriteIfVersion の組み直しで読み直す
 export function updateIfVersion(spec: {
   table: TableName;
   key: RowKey;
   version: number;
-  schemaVersion: number;
   set: SetColumns;
   remove?: readonly string[];
   extra?: Condition;
   onConflict: ConflictRule;
 }): TransactItem {
   if (!Number.isInteger(spec.version) || spec.version < 1) throw new WriteSpecError("updateIfVersion: version は 1 以上の整数");
-  if (!Number.isInteger(spec.schemaVersion) || spec.schemaVersion < 1) throw new WriteSpecError("updateIfVersion: schemaVersion は 1 以上の整数");
   const remove = spec.remove ?? [];
   checkSetAndRemove("updateIfVersion", spec.set, remove, ["pk", "sk", "version", "schema_version"]);
-  const matches = [cond.eq("version", spec.version), cond.eq("schema_version", spec.schemaVersion)];
+  const versionMatches = cond.eq("version", spec.version);
   return {
     table: spec.table,
     op: "update",
     key: spec.key,
     update: [...setActions(spec.set), { kind: "increment", path: "version", by: 1 }, ...removeActions(remove)],
-    condition: cond.and(...matches, ...(spec.extra === undefined ? [] : [spec.extra])),
+    condition: spec.extra === undefined ? versionMatches : cond.and(versionMatches, spec.extra),
     onConflict: spec.onConflict,
   };
-}
-
-// version を持たず状態を条件に決まった向きへだけ書き換える行（ログインをつなぐ流れの open → verified → used）の書き換え。
-// 読んだ行の形の版（schema_version）と遷移元の状態のときだけ、同じ版の set と remove を一緒に当てる。
-// updateIfSchemaVersion（表の移し。書く版が from より大きい）と違い、書く版は読んだ版と同じでよい。version を持たないため上げない
-export function updateIfState(spec: {
-  table: TableName;
-  key: RowKey;
-  schemaVersion: number;
-  state: { readonly column: string; readonly from: string };
-  set: SetColumns;
-  remove: readonly string[];
-  extra?: Condition;
-  onConflict: ConflictRule;
-}): TransactItem {
-  if (!Number.isInteger(spec.schemaVersion) || spec.schemaVersion < 1) throw new WriteSpecError("updateIfState: schemaVersion は 1 以上の整数");
-  const to = spec.set["schema_version"];
-  if (typeof to !== "number" || !Number.isInteger(to) || to < 1) throw new WriteSpecError("updateIfState: set の schema_version は 1 以上の整数");
-  checkSetAndRemove("updateIfState", spec.set, spec.remove, ["pk", "sk", "version", "schema_version", spec.state.column]);
-  const matches = [cond.exists("pk"), cond.eq("schema_version", spec.schemaVersion), cond.eq(spec.state.column, spec.state.from)];
-  return {
-    table: spec.table,
-    op: "update",
-    key: spec.key,
-    update: [...setActions(spec.set), ...removeActions(spec.remove)],
-    condition: cond.and(...matches, ...(spec.extra === undefined ? [] : [spec.extra])),
-    onConflict: spec.onConflict,
-  };
-}
-
-function keyOfRaw(what: string, raw: StoredRow): RowKey {
-  const pk = raw["pk"];
-  const sk = raw["sk"];
-  if (typeof pk !== "string" || (sk !== undefined && typeof sk !== "string")) throw new WriteSpecError(`${what}: 読んだ行に鍵が無い`);
-  return { pk, sk: sk ?? null };
-}
-
-function integerColumn(what: string, raw: StoredRow, column: string): number {
-  const value = raw[column];
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) throw new WriteSpecError(`${what}: 読んだ行の ${column} は 1 以上の整数`);
-  return value;
-}
-
-// 読んだ行（raw）を row（latest の形）へ書き換える、version を照らす 1 件（書き手の決まり。上書きの行）。
-// set と remove は rowUpdateOf で読んだ行から作り、条件は読んだ version と schema_version。
-// 移しが先に確定して schema_version だけが変わったら、writeAtomically が読み直した行から set と remove を組み直して 1 回だけ送り直す
-export function rewriteIfVersion<L>(spec: { table: TableName; codec: RowCodec<L>; raw: StoredRow; row: L; extra?: Condition; onConflict: ConflictRule }, rebuildable = true): TransactItem {
-  const { raw } = spec;
-  const version = integerColumn("rewriteIfVersion", raw, "version");
-  const schemaVersion = integerColumn("rewriteIfVersion", raw, "schema_version");
-  const { set, remove } = rowUpdateOf(spec.codec, raw, spec.row);
-  const item = updateIfVersion({
-    table: spec.table,
-    key: keyOfRaw("rewriteIfVersion", raw),
-    version,
-    schemaVersion,
-    set,
-    remove,
-    ...(spec.extra === undefined ? {} : { extra: spec.extra }),
-    onConflict: spec.onConflict,
-  });
-  if (!rebuildable) return item;
-  const rebuild = (current: StoredRow | null): TransactItem | null =>
-    current !== null && current["version"] === version && current["schema_version"] !== schemaVersion ? rewriteIfVersion({ ...spec, raw: current }, false) : null;
-  return { ...item, rebuild };
-}
-
-// 読んだ行（raw）を row（latest の形）へ書き換える、遷移元の状態を照らす 1 件（書き手の決まり。advance_state の行）。
-// 条件は読んだ schema_version と読んだ状態（stateColumn の値）。組み直しは rewriteIfVersion と同じ
-export function rewriteIfState<L>(
-  spec: { table: TableName; codec: RowCodec<L>; raw: StoredRow; row: L; stateColumn?: string; extra?: Condition; onConflict: ConflictRule },
-  rebuildable = true,
-): TransactItem {
-  const { raw } = spec;
-  const column = spec.stateColumn ?? "state";
-  const from = raw[column];
-  if (typeof from !== "string") throw new WriteSpecError(`rewriteIfState: 読んだ行の ${column} は文字列`);
-  const schemaVersion = integerColumn("rewriteIfState", raw, "schema_version");
-  const { set, remove } = rowUpdateOf(spec.codec, raw, spec.row);
-  const item = updateIfState({
-    table: spec.table,
-    key: keyOfRaw("rewriteIfState", raw),
-    schemaVersion,
-    state: { column, from },
-    set,
-    // 状態の列は set で書き換える。remove には出さない（書き換え後の形が状態を持たないのは書き手の誤り）
-    remove,
-    ...(spec.extra === undefined ? {} : { extra: spec.extra }),
-    onConflict: spec.onConflict,
-  });
-  if (!rebuildable) return item;
-  const rebuild = (current: StoredRow | null): TransactItem | null =>
-    current !== null && current[column] === from && current["schema_version"] !== schemaVersion ? rewriteIfState({ ...spec, raw: current }, false) : null;
-  return { ...item, rebuild };
 }
 
 // 行の形の版が from のときだけ書き換える（表の移しと、version を持たない行の書き換え）。version を上げない
@@ -408,31 +304,7 @@ function tablesOf(items: readonly TransactItem[]): string[] {
 
 const TRANSACTION_POLICY = RETRY_POLICIES["dynamodb-transaction"];
 
-// 外れた件がどれも組み直せる（rebuild が読み直した行から 1 件を返す）なら、組み直した件へ替えた並びを返す。1 件でも組み直せなければ null
-async function rebuiltItems(db: Db, items: readonly TransactItem[], outcome: WriteOutcome): Promise<TransactItem[] | null> {
-  if (outcome.ok || outcome.failed.length === 0) return null;
-  const next = [...items];
-  for (const { index } of outcome.failed) {
-    const item = items[index];
-    if (item?.rebuild === undefined) return null;
-    const rebuilt = item.rebuild(await db.get(item.table, item.key, true));
-    if (rebuilt === null) return null;
-    next[index] = rebuilt;
-  }
-  return next;
-}
-
-// 確定する。条件が外れ、外れた件がどれも表の移しに先を越されただけ（rebuild が組み直せる）なら、組み直して 1 回だけ送り直す
 export async function writeAtomically(db: Db, items: readonly TransactItem[], log?: Logger): Promise<WriteOutcome> {
-  const outcome = await commitOnce(db, items, log);
-  const rebuilt = await rebuiltItems(db, items, outcome);
-  if (rebuilt === null) return outcome;
-  log?.info("表の移しが先に確定した行を読み直して組み直す", { tables: tablesOf(items), count: items.length });
-  // 組み直した件は rebuild を持たないため、2 回目が外れればそのまま返す
-  return commitOnce(db, rebuilt, log);
-}
-
-async function commitOnce(db: Db, items: readonly TransactItem[], log?: Logger): Promise<WriteOutcome> {
   checkItems(items);
   // ログは表の名前・件の数・結果・外れた件の扱いだけ（行の値を出さない）
   const summary = { tables: tablesOf(items), count: items.length };

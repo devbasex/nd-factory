@@ -1,17 +1,12 @@
 import { RETRY_POLICIES } from "@nd-factory/contracts/data";
-import { readRow, rowCodec } from "@nd-factory/contracts/row-codec";
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 import {
   AuditAppendOnlyError,
   cond,
   expressionsOf,
   putIfAbsent,
-  rewriteIfState,
-  rewriteIfVersion,
   TRANSACT_MAX_ITEMS,
   updateIfSchemaVersion,
-  updateIfState,
   updateIfVersion,
   WriteSpecError,
   WriteUnavailableError,
@@ -50,49 +45,48 @@ describe("putIfAbsent", () => {
 });
 
 describe("updateIfVersion", () => {
-  it("版と行の形の版の条件と version + 1 を持つ 1 件を組む", () => {
-    const item = updateIfVersion({ table: "teams", key: { pk: `TEAM#${TEAM}`, sk: "TEAM" }, version: 3, schemaVersion: 1, set: { name: "acme-2" }, onConflict: "version_mismatch" });
+  it("版の条件と version + 1 を持つ 1 件を組む", () => {
+    const item = updateIfVersion({ table: "teams", key: { pk: `TEAM#${TEAM}`, sk: "TEAM" }, version: 3, set: { name: "acme-2" }, onConflict: "version_mismatch" });
     expect(item.op).toBe("update");
     expect(expressionsOf(item.condition, item.update)).toEqual({
-      ConditionExpression: "(#n0 = :v0 AND #n1 = :v1)",
-      UpdateExpression: "SET #n2 = :v2, #n0 = #n0 + :v3",
-      ExpressionAttributeNames: { "#n0": "version", "#n1": "schema_version", "#n2": "name" },
-      ExpressionAttributeValues: { ":v0": 3, ":v1": 1, ":v2": "acme-2", ":v3": 1 },
+      ConditionExpression: "#n0 = :v0",
+      UpdateExpression: "SET #n1 = :v1, #n0 = #n0 + :v2",
+      ExpressionAttributeNames: { "#n0": "version", "#n1": "name" },
+      ExpressionAttributeValues: { ":v0": 3, ":v1": "acme-2", ":v2": 1 },
     });
   });
 
-  it("version が 1 で extra があると版と行の形の版と extra を条件にする", () => {
-    const item = updateIfVersion({ table: "decisions", key: { pk: "PROJECT#p", sk: "APPROVAL#a" }, version: 1, schemaVersion: 1, set: { state: "answered" }, extra: cond.eq("state", "waiting"), onConflict: "state_mismatch" });
-    expect(expressionsOf(item.condition, item.update).ConditionExpression).toBe("(#n0 = :v0 AND #n1 = :v1 AND #n2 = :v2)");
+  it("version が 1 で extra があると両方を条件にする", () => {
+    const item = updateIfVersion({ table: "decisions", key: { pk: "PROJECT#p", sk: "APPROVAL#a" }, version: 1, set: { state: "answered" }, extra: cond.eq("state", "waiting"), onConflict: "state_mismatch" });
+    expect(expressionsOf(item.condition, item.update).ConditionExpression).toBe("(#n0 = :v0 AND #n1 = :v1)");
   });
 
   it("remove の列は REMOVE 句に並び、SET と同じ 1 つの更新の式に入る", () => {
-    const item = updateIfVersion({ table: "projects", key: { pk: "PROJECT#p", sk: "PROJECT" }, version: 2, schemaVersion: 1, set: { schema_version: 2 }, remove: ["current_team_id", "current_assign_id"], onConflict: "version_mismatch" });
-    expect(expressionsOf(item.condition, item.update).UpdateExpression).toBe("SET #n1 = :v2, #n0 = #n0 + :v3 REMOVE #n2, #n3");
+    const item = updateIfVersion({ table: "projects", key: { pk: "PROJECT#p", sk: "PROJECT" }, version: 2, set: { schema_version: 2 }, remove: ["current_team_id", "current_assign_id"], onConflict: "version_mismatch" });
+    expect(expressionsOf(item.condition, item.update).UpdateExpression).toBe("SET #n1 = :v1, #n0 = #n0 + :v2 REMOVE #n2, #n3");
   });
 
   it("remove が空か無いと REMOVE 句を持たない", () => {
     for (const remove of [[], undefined]) {
-      const item = updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version: 1, schemaVersion: 1, set: { name: "x" }, ...(remove === undefined ? {} : { remove }), onConflict: "version_mismatch" });
+      const item = updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version: 1, set: { name: "x" }, ...(remove === undefined ? {} : { remove }), onConflict: "version_mismatch" });
       expect(expressionsOf(item.condition, item.update).UpdateExpression).not.toContain("REMOVE");
     }
   });
 
   it("set に version を含むと型で弾く", () => {
     // @ts-expect-error set に version を書けない
-    expect(() => updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version: 1, schemaVersion: 1, set: { version: 9 }, onConflict: "version_mismatch" })).toThrow(WriteSpecError);
+    expect(() => updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version: 1, set: { version: 9 }, onConflict: "version_mismatch" })).toThrow(WriteSpecError);
   });
 
   it("remove が set の鍵か pk・sk・version・schema_version を含むと投げる", () => {
     for (const remove of [["name"], ["pk"], ["sk"], ["version"], ["schema_version"]]) {
-      expect(() => updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version: 1, schemaVersion: 1, set: { name: "x" }, remove, onConflict: "version_mismatch" })).toThrow(WriteSpecError);
+      expect(() => updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version: 1, set: { name: "x" }, remove, onConflict: "version_mismatch" })).toThrow(WriteSpecError);
     }
   });
 
-  it("version と schemaVersion が 1 以上の整数でないと投げる", () => {
+  it("version が 1 以上の整数でないと投げる", () => {
     for (const version of [0, 1.5, -1]) {
-      expect(() => updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version, schemaVersion: 1, set: { name: "x" }, onConflict: "version_mismatch" })).toThrow(WriteSpecError);
-      expect(() => updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version: 1, schemaVersion: version, set: { name: "x" }, onConflict: "version_mismatch" })).toThrow(WriteSpecError);
+      expect(() => updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version, set: { name: "x" }, onConflict: "version_mismatch" })).toThrow(WriteSpecError);
     }
   });
 
@@ -100,10 +94,10 @@ describe("updateIfVersion", () => {
     const table = fakeTable();
     table.seed("teams", teamRow(1));
     const key = { pk: `TEAM#${TEAM}`, sk: "TEAM" };
-    expect(await writeAtomically(table.db, [updateIfVersion({ table: "teams", key, version: 1, schemaVersion: 1, set: { name: "acme-2" }, onConflict: "version_mismatch" })])).toEqual({ ok: true });
+    expect(await writeAtomically(table.db, [updateIfVersion({ table: "teams", key, version: 1, set: { name: "acme-2" }, onConflict: "version_mismatch" })])).toEqual({ ok: true });
     expect(table.row("teams", key)).toMatchObject({ name: "acme-2", version: 2 });
     // 古い版で書くと外れ、何も変わらない
-    expect(await writeAtomically(table.db, [updateIfVersion({ table: "teams", key, version: 1, schemaVersion: 1, set: { name: "stale" }, onConflict: "version_mismatch" })])).toEqual({
+    expect(await writeAtomically(table.db, [updateIfVersion({ table: "teams", key, version: 1, set: { name: "stale" }, onConflict: "version_mismatch" })])).toEqual({
       ok: false,
       failed: [{ index: 0, onConflict: "version_mismatch" }],
     });
@@ -279,7 +273,7 @@ describe("writeAtomically", () => {
         },
       } as unknown as Parameters<typeof writeAtomically>[0];
       const items = [
-        updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version: 1, schemaVersion: 1, set: { name: "x" }, onConflict: "version_mismatch" }),
+        updateIfVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, version: 1, set: { name: "x" }, onConflict: "version_mismatch" }),
         putIfAbsent({ table: "events", item: { pk: "EVENT#1", sk: "EVENT", schema_version: 1 }, onConflict: "return_existing" }),
       ];
       const error = await writeAtomically(db, items, log).catch((e: unknown) => e);
@@ -372,117 +366,5 @@ describe("記録の表は追記だけ", () => {
     const db = createDb(client as never, names as never);
     await expect(db.update("audit", auditKey, [{ kind: "set", path: "operation", value: "x" }], cond.exists("pk"))).rejects.toBeInstanceOf(AuditAppendOnlyError);
     expect(sent).toEqual([]);
-  });
-});
-
-describe("updateIfState", () => {
-  const key = { pk: "USER#u", sk: "LINK#l" };
-
-  it("読んだ行の形の版と遷移元の状態と attribute_exists(pk) を条件に、同じ版の set と remove を一緒に当て、version を上げない", () => {
-    const item = updateIfState({ table: "users", key, schemaVersion: 1, state: { column: "state", from: "open" }, set: { schema_version: 1, state: "verified" }, remove: ["code_verifier"], onConflict: "state_mismatch" });
-    const ex = expressionsOf(item.condition, item.update);
-    expect(ex.ConditionExpression).toBe("(attribute_exists(#n0) AND #n1 = :v0 AND #n2 = :v1)");
-    expect(ex.UpdateExpression).toBe("SET #n1 = :v2, #n2 = :v3 REMOVE #n3");
-    expect(ex.ExpressionAttributeNames).toEqual({ "#n0": "pk", "#n1": "schema_version", "#n2": "state", "#n3": "code_verifier" });
-  });
-
-  it("set の schema_version が無いか、remove が状態の列か pk・sk・version・schema_version を含むと投げる", () => {
-    const base = { table: "users" as const, key, schemaVersion: 1, state: { column: "state", from: "open" }, onConflict: "state_mismatch" as const };
-    expect(() => updateIfState({ ...base, set: { state: "verified" }, remove: [] })).toThrow(WriteSpecError);
-    for (const remove of [["state"], ["pk"], ["sk"], ["version"], ["schema_version"]]) {
-      expect(() => updateIfState({ ...base, set: { schema_version: 1 }, remove })).toThrow(WriteSpecError);
-    }
-  });
-});
-
-// 版 1 と版 2 を読む行の種類。版 2 は任意の列 owner_id（索引の鍵）を足す。移しは version を変えずに版 1 を版 2 へ書き換える
-const ITEM_V1 = z.looseObject({ pk: z.string(), sk: z.string(), schema_version: z.literal(1), version: z.number(), item_id: z.string(), memo: z.string().optional() });
-const ITEM_V2 = z.looseObject({ pk: z.string(), sk: z.string(), schema_version: z.literal(2), version: z.number(), item_id: z.string(), memo: z.string().optional(), owner_id: z.string().optional() });
-type ItemV2 = z.infer<typeof ITEM_V2>;
-const itemCodec = rowCodec({
-  latest: { version: 2, schema: ITEM_V2 },
-  previous: {
-    version: 1,
-    schema: ITEM_V1,
-    // 版 1 の memo を版 2 の owner_id にも写す（移しが旧版の値を新版の索引の鍵へ写す）
-    upgrade: (r: z.infer<typeof ITEM_V1>) => ({ ...r, schema_version: 2 as const, ...(r.memo === undefined ? {} : { owner_id: r.memo }) }),
-    downgrade: ({ owner_id: _owner, ...r }: ItemV2) => ({ ...r, schema_version: 1 as const }),
-  },
-  writeVersion: 2,
-  downgradable: false,
-  keyOf: (r: ItemV2) => ({ pk: `ITEM#${r.item_id}`, sk: "ITEM" }),
-});
-
-describe("rewriteIfVersion", () => {
-  const key = { pk: "ITEM#a", sk: "ITEM" };
-  const v1 = { pk: "ITEM#a", sk: "ITEM", schema_version: 1, version: 3, item_id: "a", memo: "usr_x" };
-
-  it("読んだ行の version と schema_version を条件にし、rowUpdateOf の set と remove を当てる", async () => {
-    const table = fakeTable();
-    table.seed("teams", v1);
-    const raw = table.row("teams", key) as Record<string, unknown>;
-    const read = readRow(itemCodec, raw);
-    if (!read.ok) throw new Error("読めない");
-    const { memo: _memo, ...without } = read.row;
-    const item = rewriteIfVersion({ table: "teams", codec: itemCodec, raw: v1, row: without, onConflict: "version_mismatch" });
-    expect(expressionsOf(item.condition, item.update).ConditionExpression).toBe("(#n0 = :v0 AND #n1 = :v1)");
-    expect(await writeAtomically(table.db, [item])).toEqual({ ok: true });
-    // memo を消した。版 2 の upgrade が写した owner_id は set に載る（書き手は消した memo の値から写さない）
-    expect(table.row("teams", key)).toMatchObject({ schema_version: 2, version: 4, owner_id: "usr_x" });
-    expect(table.row("teams", key)).not.toHaveProperty("memo");
-  });
-
-  it("旧版の行を読んだ後に移しが先に確定すると、読み直して組み直し、移しが足した列も消す", async () => {
-    const table = fakeTable();
-    table.seed("teams", v1);
-    // 利用者の更新は旧版の行を読み、memo を消した形を作る（書き手は 1 段目のように owner_id を持たない形を書く）
-    const raw = { ...v1 };
-    const target: ItemV2 = { pk: "ITEM#a", sk: "ITEM", schema_version: 2, version: 3, item_id: "a" };
-    const item = rewriteIfVersion({ table: "teams", codec: itemCodec, raw, row: target, onConflict: "version_mismatch" });
-    // 組み直さなければ set にも remove にも owner_id が載らない
-    expect(item.update?.some((a) => a.path === "owner_id")).toBe(false);
-    // 移しが先に確定する（version を変えずに owner_id を足す）
-    const migrated = updateIfSchemaVersion({ table: "teams", key, from: 1, set: { schema_version: 2, item_id: "a", memo: "usr_x", owner_id: "usr_x" }, remove: [], version: 3, onConflict: "fail" });
-    expect(await writeAtomically(table.db, [migrated])).toEqual({ ok: true });
-    expect(await writeAtomically(table.db, [item])).toEqual({ ok: true });
-    const row = table.row("teams", key);
-    expect(row).toMatchObject({ schema_version: 2, version: 4 });
-    expect(row).not.toHaveProperty("owner_id");
-    expect(row).not.toHaveProperty("memo");
-  });
-
-  it("version が変わっていれば組み直さず、条件の外れを返す", async () => {
-    const table = fakeTable();
-    table.seed("teams", { ...v1, schema_version: 2, version: 4, owner_id: "usr_x" });
-    const target: ItemV2 = { pk: "ITEM#a", sk: "ITEM", schema_version: 2, version: 3, item_id: "a" };
-    const item = rewriteIfVersion({ table: "teams", codec: itemCodec, raw: v1, row: target, onConflict: "version_mismatch" });
-    expect(await writeAtomically(table.db, [item])).toEqual({ ok: false, failed: [{ index: 0, onConflict: "version_mismatch" }] });
-    expect(table.row("teams", key)).toMatchObject({ version: 4, owner_id: "usr_x" });
-  });
-});
-
-describe("rewriteIfState", () => {
-  const key = { pk: "USER#u", sk: "LINK#l" };
-  const link = { pk: "USER#u", sk: "LINK#l", schema_version: 1 as const, link_id: "l", state: "open" as const, code_verifier: "v" };
-  const linkCodec = rowCodec({
-    latest: { version: 1, schema: z.looseObject({ pk: z.string(), sk: z.string(), schema_version: z.literal(1), link_id: z.string(), state: z.enum(["open", "verified", "used"]), code_verifier: z.string().optional() }) },
-    writeVersion: 1,
-    keyOf: () => key,
-  });
-
-  it("版 1 の行の open → verified → used を同じ版の set と remove で書き、遷移元の状態が違えば外れる", async () => {
-    const table = fakeTable();
-    table.seed("users", link);
-    const { code_verifier: _v, ...verified } = { ...link, state: "verified" as const };
-    expect(await writeAtomically(table.db, [rewriteIfState({ table: "users", codec: linkCodec, raw: link, row: verified, onConflict: "state_mismatch" })])).toEqual({ ok: true });
-    expect(table.row("users", key)).toEqual({ ...verified, schema_version: 1 });
-    const raw = table.row("users", key) as Record<string, unknown>;
-    expect(await writeAtomically(table.db, [rewriteIfState({ table: "users", codec: linkCodec, raw, row: { ...verified, state: "used" }, onConflict: "state_mismatch" })])).toEqual({ ok: true });
-    expect(table.row("users", key)).toMatchObject({ state: "used", schema_version: 1 });
-    // 古い読み（open）からの 2 回目の交換は外れる
-    expect(await writeAtomically(table.db, [rewriteIfState({ table: "users", codec: linkCodec, raw: link, row: verified, onConflict: "state_mismatch" })])).toEqual({
-      ok: false,
-      failed: [{ index: 0, onConflict: "state_mismatch" }],
-    });
   });
 });
