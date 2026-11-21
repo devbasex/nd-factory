@@ -14,7 +14,8 @@
     "./operation": "./src/operation.ts",
     "./operations": "./src/operations/index.ts",
     "./ndf": "./src/ndf.ts",
-    "./data": "./src/data.ts"
+    "./data": "./src/data.ts",
+    "./client": "./src/client.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."
@@ -23,6 +24,10 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "ajv": "8.20.0"
+    "@faker-js/faker": "10.6.0",
+    "ajv": "8.20.0",
+    "randexp": "0.6.1",
+    "zod-openapi": "6.0.2",
+    "zod-schema-faker": "3.0.1"
   }
 }

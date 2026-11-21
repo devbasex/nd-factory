@@ -1,0 +1,1658 @@
+{
+  "request": [
+    {
+      "code": "body_not_json",
+      "status": 400
+    },
+    {
+      "code": "body_not_array",
+      "status": 400
+    },
+    {
+      "code": "body_empty",
+      "status": 400
+    },
+    {
+      "code": "too_many_items",
+      "status": 400
+    },
+    {
+      "code": "duplicate_item",
+      "status": 400
+    },
+    {
+      "code": "cursor_invalid",
+      "status": 400
+    },
+    {
+      "code": "unauthorized",
+      "status": 401
+    },
+    {
+      "code": "human_only",
+      "status": 403
+    },
+    {
+      "code": "scope_insufficient",
+      "status": 403
+    },
+    {
+      "code": "unavailable",
+      "status": 503
+    },
+    {
+      "code": "audit_unavailable",
+      "status": 503
+    },
+    {
+      "code": "too_many_requests",
+      "status": 429
+    }
+  ],
+  "item": [
+    {
+      "code": "item_invalid",
+      "status": 400
+    },
+    {
+      "code": "not_found",
+      "status": 404
+    },
+    {
+      "code": "role_insufficient",
+      "status": 403
+    },
+    {
+      "code": "human_only",
+      "status": 403
+    },
+    {
+      "code": "version_mismatch",
+      "status": 409
+    },
+    {
+      "code": "state_mismatch",
+      "status": 409
+    },
+    {
+      "code": "idempotency_key_reused",
+      "status": 422
+    },
+    {
+      "code": "in_progress",
+      "status": 409
+    },
+    {
+      "code": "not_applied",
+      "status": 409
+    }
+  ],
+  "operations": {
+    "sessions.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "sessions.delete": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "users.get": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "users.update": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "logins.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "logins.delete": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "teams.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "teams.get": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "teams.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "teams.update": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "seats.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "seats.update": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "seats.delete": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "invitations.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "invitations.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "invitations.accept": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "invitations.delete": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "projects.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "projects.get": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "projects.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      },
+      {
+        "code": "not_applied",
+        "status": 409
+      }
+    ],
+    "projects.update": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "github_installations.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "github_installations.link": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "repositories.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "repositories.add": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      },
+      {
+        "code": "not_applied",
+        "status": 409
+      }
+    ],
+    "repositories.remove": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "project_transfers.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "project_transfers.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "project_transfers.accept": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "project_transfers.delete": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "projects.close": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "waiting_counts.get": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "issue_candidates.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "sprints.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "sprints.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "sprints.get": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "lanes.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "progress_events.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "sprints.cancel": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "approvals.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "approvals.get": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "approvals.answer": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "questions.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "questions.get": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "questions.answer": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "human_only",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "notices.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "notices.mark_read": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "notification_targets.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "notification_targets.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "notification_targets.test": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "notification_targets.delete": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "delegations.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "delegations.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "delegations.revoke": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "execution_settings.get": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "execution_settings.update": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "model_keys.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "model_keys.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "model_keys.delete": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "machines.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "machines.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "machines.delete": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "usage.get": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "usage_records.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "spend_caps.update": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "audit_records.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "runner.exchanges.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "runner.events.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "runner.heartbeats.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "runner.answers.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "runner.answer_deliveries.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "machine.heartbeats.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "machine.lane_claims.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "db_prep.exchanges.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "db_prep.completions.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ]
+  }
+}

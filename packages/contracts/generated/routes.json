@@ -1,0 +1,452 @@
+[
+  {
+    "method": "POST",
+    "path": "/v1/sessions/create",
+    "operation": "sessions.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/sessions/delete",
+    "operation": "sessions.delete",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/users/get",
+    "operation": "users.get",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/users/update",
+    "operation": "users.update",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/logins/create",
+    "operation": "logins.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/logins/delete",
+    "operation": "logins.delete",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/teams/list",
+    "operation": "teams.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/teams/get",
+    "operation": "teams.get",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/teams/create",
+    "operation": "teams.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/teams/update",
+    "operation": "teams.update",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/seats/list",
+    "operation": "seats.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/seats/update",
+    "operation": "seats.update",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/seats/delete",
+    "operation": "seats.delete",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/invitations/list",
+    "operation": "invitations.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/invitations/create",
+    "operation": "invitations.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/invitations/accept",
+    "operation": "invitations.accept",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/invitations/delete",
+    "operation": "invitations.delete",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/projects/list",
+    "operation": "projects.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/projects/get",
+    "operation": "projects.get",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/projects/create",
+    "operation": "projects.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/projects/update",
+    "operation": "projects.update",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/github_installations/list",
+    "operation": "github_installations.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/github_installations/link",
+    "operation": "github_installations.link",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/repositories/list",
+    "operation": "repositories.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/repositories/add",
+    "operation": "repositories.add",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/repositories/remove",
+    "operation": "repositories.remove",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/project_transfers/list",
+    "operation": "project_transfers.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/project_transfers/create",
+    "operation": "project_transfers.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/project_transfers/accept",
+    "operation": "project_transfers.accept",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/project_transfers/delete",
+    "operation": "project_transfers.delete",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/projects/close",
+    "operation": "projects.close",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/waiting_counts/get",
+    "operation": "waiting_counts.get",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/issue_candidates/list",
+    "operation": "issue_candidates.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/sprints/create",
+    "operation": "sprints.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/sprints/list",
+    "operation": "sprints.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/sprints/get",
+    "operation": "sprints.get",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/lanes/list",
+    "operation": "lanes.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/progress_events/list",
+    "operation": "progress_events.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/sprints/cancel",
+    "operation": "sprints.cancel",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/approvals/list",
+    "operation": "approvals.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/approvals/get",
+    "operation": "approvals.get",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/approvals/answer",
+    "operation": "approvals.answer",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/questions/list",
+    "operation": "questions.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/questions/get",
+    "operation": "questions.get",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/questions/answer",
+    "operation": "questions.answer",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/notices/list",
+    "operation": "notices.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/notices/mark_read",
+    "operation": "notices.mark_read",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/notification_targets/list",
+    "operation": "notification_targets.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/notification_targets/create",
+    "operation": "notification_targets.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/notification_targets/test",
+    "operation": "notification_targets.test",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/notification_targets/delete",
+    "operation": "notification_targets.delete",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/delegations/list",
+    "operation": "delegations.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/delegations/create",
+    "operation": "delegations.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/delegations/revoke",
+    "operation": "delegations.revoke",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/execution_settings/get",
+    "operation": "execution_settings.get",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/execution_settings/update",
+    "operation": "execution_settings.update",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/model_keys/list",
+    "operation": "model_keys.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/model_keys/create",
+    "operation": "model_keys.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/model_keys/delete",
+    "operation": "model_keys.delete",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/machines/list",
+    "operation": "machines.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/machines/create",
+    "operation": "machines.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/machines/delete",
+    "operation": "machines.delete",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/usage/get",
+    "operation": "usage.get",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/usage_records/list",
+    "operation": "usage_records.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/spend_caps/update",
+    "operation": "spend_caps.update",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/audit_records/list",
+    "operation": "audit_records.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/runner/exchanges/create",
+    "operation": "runner.exchanges.create",
+    "endpoint": "runner"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/runner/events/create",
+    "operation": "runner.events.create",
+    "endpoint": "runner"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/runner/heartbeats/create",
+    "operation": "runner.heartbeats.create",
+    "endpoint": "runner"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/runner/answers/list",
+    "operation": "runner.answers.list",
+    "endpoint": "runner"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/runner/answer_deliveries/create",
+    "operation": "runner.answer_deliveries.create",
+    "endpoint": "runner"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/machine/heartbeats/create",
+    "operation": "machine.heartbeats.create",
+    "endpoint": "machine"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/machine/lane_claims/create",
+    "operation": "machine.lane_claims.create",
+    "endpoint": "machine"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/db_prep/exchanges/create",
+    "operation": "db_prep.exchanges.create",
+    "endpoint": "db_prep"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/db_prep/completions/create",
+    "operation": "db_prep.completions.create",
+    "endpoint": "db_prep"
+  }
+]

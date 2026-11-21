@@ -122,7 +122,7 @@
 
 | リスク | 対処 |
 | --- | --- |
-| `zod-schema-faker` が作り物の値の生成器の上書きを受けない | 設計の「確かめられなかったこと」のとおり、`examples` の経路だけで作り物の値に収める |
+| `zod-schema-faker` が作り物の値の生成器の上書きを受けない | U1 で確かめ、受けなかった（`custom` は `z.custom` だけ、メールは内部の randexp）。生成の前に形の木を写してメール・アカウント ID・接頭辞の形を作り物の値の literal へ置き換える（詳細設計の `fakeExamples`）。`examples` の経路は残す |
 | #13 の `db-prep-api.ts` と `packages/contracts/package.json` の `exports` が重なる | 後からマージする側が食い違いを解く |
 | 単位が見込みの 1,000 行を超える | 実装の途中で単位を分け直す |
 
