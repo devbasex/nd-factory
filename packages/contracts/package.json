@@ -12,6 +12,7 @@
     "./tokens": "./src/tokens.ts",
     "./reasons": "./src/reasons.ts",
     "./operation": "./src/operation.ts",
+    "./operations": "./src/operations/index.ts",
     "./ndf": "./src/ndf.ts",
     "./data": "./src/data.ts"
   },
