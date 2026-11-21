@@ -461,7 +461,7 @@ flowchart TD
 | 5 | `diff` の出力の最後に足りない設定の欄が出て、4 種類が当たる入力でそれぞれ 1 行になる。タグの行は、0 を数え続けることと有効にする先（組織のメンバーなら管理のアカウント）と `budget.scope` の代わりを含み、`budget.scope` が `account` なら出ない。既定のサブネットが 1 つの AZ にだけある入力で (4) の行が出て、既定のサブネットが無く使える AZ が 2 つ以上ある入力では出ない | 欄が出ない・終了コードが変わる・1 つの AZ の入力で行が出ないと落ちる |
 | 6 | 戻しの予行の記録（手動確認） | — |
 | 7 | 接続しない実測の記録（手動確認）。接続する項目は #44 | — |
-| 9 | #6 が縛る（イメージを持つのはランナーだけ。「#6 へ渡すこと」） | — |
+| 9 | (1) 資源: 合成の出力の DB の用意の関数が `VpcConfig` を持たず、`Timeout` と `MaximumEventAgeInSeconds` が `DB_PREP_TIMING` の値で、役割が Data API の 4 つの操作だけを許し、クラスタが Data API を有効にする（`DbPrepFunction`・`ProgressDb` の合成のテスト）。(2) SQL: 用意の手順と差し替えを `SqlExecutor` の `pg` の実装で PostgreSQL のサービスコンテナに打つテスト（`provisionProject`・`rotateRole`・`terminateRoleConnections`・`claimPrepRun`）と、`createDataApiExecutor` が同じ文を `ExecuteStatement` へ渡すテスト（SDK のクライアントを差し替える）。(3) 時間の関係: `DB_PREP_TIMING` の単体テストで、待ち行列の最大の年齢＋関数の時間切れ＋Data API の無通信の巻き戻り 3 分が作成の時間切れより短い（540 < 900） | `VpcConfig` を足す・Data API を外す・`rds-data:*` に広げる・関数の時間切れか最大の年齢を定数と違う値にする・和が作成の時間切れ以上になる値にする・用意の手順の文を `ExecuteStatement` へ渡さないと落ちる。旧い条件 9（イメージ）は #6 へ移した |
 | 8 | 詳細設計があり、全体の設計の直しがイメージの置き場（決定 87）と、DB の用意の Data API の関数への移し（決定 15）の 2 件だけ（設計 Pull Request の差分で `docs/design/` の変更がこの 2 件に収まることを読む） | — |
 | 10 | `platform.md` の決定 87 がランナーのイメージを自前の ECR へ push してダイジェストで引く形で、ほかの行がそれに合う（設計 Pull Request のレビューで読む） | — |
 | 決定 15 | 合成の出力の DB の用意の関数が VPC の外で、時間切れ 5 分・非同期の呼び出しの再試行 0 回・待ち行列の最大の年齢 60 秒。役割は Data API の 4 つの操作と 2 種類の秘密の器の読み取りだけ。クラスタは Data API を有効にする。関数の手順は `pg` の実装で I10 と差し替えを照らす | 再試行を 1 以上にする・VPC に入れる・権限を広げる・Data API を外すと落ちる |
