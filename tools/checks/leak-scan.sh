@@ -97,9 +97,11 @@ finish() {
     fi
     exit 1
   fi
-  # 警告と誤りの段を見る。色の制御の列を外してから、段の語を 1 語として照らす（名前は出さない）
+  # 警告と誤りの段を見る。色の制御の列を外してから、段の語を 1 語として照らす（名前は出さない）。
+  # grep -q は当たった所で読むのをやめ、続きを書く sed が SIGPIPE で落ちて pipefail が当たりを打ち消すので、
+  # -q を使わずに末尾まで読ませ、当たった行は捨てる
   local skipped=false
-  if [[ -s "$raw_log" ]] && sed $'s/\x1b\\[[0-9;]*m//g' "$raw_log" | grep -Eq '(^| )(WRN|ERR|FTL)( |$)'; then
+  if [[ -s "$raw_log" ]] && sed $'s/\x1b\\[[0-9;]*m//g' "$raw_log" | grep -E '(^| )(WRN|ERR|FTL)( |$)' >/dev/null; then
     skipped=true
   fi
   local findings

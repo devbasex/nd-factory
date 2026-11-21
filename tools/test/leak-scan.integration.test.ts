@@ -438,7 +438,7 @@ describe("履歴の探し", () => {
  * 診断にファイルの名前を載せる偽の gitleaks を置いた PATH を返す（v8.30.1 の dir は読めないファイルの診断などに名前を載せる。
  * 実物で起こす条件は実行の環境に依るので、出力の扱いだけを偽の実行ファイルで確かめる）
  */
-function fakeGitleaksPath(diagnostic: string, stderrLine = `stderr ${diagnostic}`): string {
+function fakeGitleaksPath(diagnostic: string, stderrLine = `stderr ${diagnostic}`, trailingLines = 0): string {
   const bin = tempDir("leak-fake-bin-");
   const body = [
     "#!/usr/bin/env bash",
@@ -446,6 +446,7 @@ function fakeGitleaksPath(diagnostic: string, stderrLine = `stderr ${diagnostic}
     'while (($# > 0)); do if [[ "$1" == --report-path ]]; then report="$2"; shift 2; else shift; fi; done',
     `echo "stdout ${diagnostic}"`,
     `printf '%s\\n' '${stderrLine}' >&2`,
+    `for ((i = 0; i < ${trailingLines}; i++)); do echo "filler line $i of the scan log, no level word here" >&2; done`,
     "printf '[]' >\"$report\"",
     "exit 0",
   ].join("\n");
@@ -496,6 +497,19 @@ describe("読めずに飛ばした対象", () => {
       expect(shown.output).toContain(SKIP_MESSAGE);
     }, TIMEOUT);
   }
+
+  it("警告の後にパイプの容量を超える出力が続いても、当たり無しとして通さない", () => {
+    const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    const root = makeTree({ "a.md": "中身\n" });
+    initRepo(root);
+    commitAll(root, "first");
+    // 1 行が約 50 バイトで 1 万行（約 500KB）。パイプの容量（Linux の既定は 64KiB）を超える
+    const env = { ...process.env, PATH: fakeGitleaksPath("中身", skipLine(`docs/${realWord}.md`), 10000) };
+    const result = scan(root, ["dir", ND_CONFIG], { paths: false, env });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(SKIP_MESSAGE);
+    expect(result.output).not.toContain(realWord);
+  }, TIMEOUT);
 
   // root は権限によらず読めるので、実物の gitleaks で飛ばさせられない
   it.skipIf(process.getuid?.() === 0)("dir の探しで、読めないファイルとディレクトリがあれば実物の gitleaks でも失敗する", () => {
