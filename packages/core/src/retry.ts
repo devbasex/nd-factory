@@ -10,8 +10,18 @@ export type FailureClass = "retryable" | "conflict" | "not_found" | "rejected" |
 // 408 は callHttp が繰り返す状態（RETRY_STATUS_CODES）と揃える。使い切った 408 は相手が断ったのでなく時間切れ
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
-// ky の時間切れとネットワークの誤り・AbortSignal.timeout の時間切れ・AWS SDK の呼びすぎ
-const RETRYABLE_NAMES = new Set(["TimeoutError", "NetworkError", "ThrottlingException", "ProvisionedThroughputExceededException", "TransactionConflict"]);
+// ky の時間切れとネットワークの誤り・AbortSignal.timeout の時間切れ・AWS SDK の呼びすぎ。
+// 呼びすぎは HTTP の状態が 400 のもの（DynamoDB の RequestLimitExceeded など）があり、状態では retryable にならないため名前で見る
+const RETRYABLE_NAMES = new Set([
+  "TimeoutError",
+  "NetworkError",
+  "ThrottlingException",
+  "ThrottledException",
+  "ProvisionedThroughputExceededException",
+  "RequestLimitExceeded",
+  "TooManyRequestsException",
+  "TransactionConflict",
+]);
 const CONFLICT_NAMES = new Set(["ConditionalCheckFailedException"]);
 const NOT_FOUND_NAMES = new Set(["ResourceNotFoundException"]);
 const REJECTED_NAMES = new Set(["ValidationException", "AccessDeniedException"]);
@@ -26,6 +36,9 @@ function classOfStatus(status: number): FailureClass {
   if (status === 409) return "conflict";
   if (status === 404) return "not_found";
   if (RETRYABLE_STATUS.has(status)) return "retryable";
+  // 3xx は callHttp が転送に従わずに返す応答（redirect: "manual"）。同じ要求を繰り返しても同じ応答のため rejected にし、
+  // 転送先（location）へ送り直すか・304 を済みとみなすかは呼び手が状態と頭書きを読んで決める
+  if (status >= 300 && status < 400) return "rejected";
   if (status === 501 || (status >= 400 && status < 500)) return "rejected";
   return "unknown";
 }
@@ -34,10 +47,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
 
-// TransactWriteItems の取り消しのうち、ほかのトランザクションとの衝突（SDK はこれを繰り返さない）
-function isTransactionConflict(e: Record<string, unknown>): boolean {
+// TransactWriteItems の取り消しの理由のうち、code を持つものがあるか
+function hasCancellationReason(e: Record<string, unknown>, code: string): boolean {
   const reasons = e["CancellationReasons"];
-  return e["name"] === "TransactionCanceledException" && Array.isArray(reasons) && reasons.some((r) => isRecord(r) && r["Code"] === "TransactionConflict");
+  return e["name"] === "TransactionCanceledException" && Array.isArray(reasons) && reasons.some((r) => isRecord(r) && r["Code"] === code);
+}
+
+// AWS SDK の例外が持つ応答の HTTP の状態（$metadata.httpStatusCode）
+function awsStatusOf(e: Record<string, unknown>): number | undefined {
+  const metadata = e["$metadata"];
+  if (!isRecord(metadata)) return undefined;
+  const status = metadata["httpStatusCode"];
+  return typeof status === "number" && Number.isInteger(status) ? status : undefined;
 }
 
 function hasNetworkCode(e: unknown): boolean {
@@ -56,12 +77,16 @@ export function classifyFailure(e: unknown): FailureClass {
   if (!isRecord(e)) return "unknown";
   const name = e["name"];
   if (typeof name === "string") {
-    if (RETRYABLE_NAMES.has(name) || isTransactionConflict(e)) return "retryable";
-    if (CONFLICT_NAMES.has(name)) return "conflict";
+    // ほかのトランザクションとの衝突（SDK はこれを繰り返さない）は retryable、条件の外れは ConditionalCheckFailedException と同じ conflict
+    if (RETRYABLE_NAMES.has(name) || hasCancellationReason(e, "TransactionConflict")) return "retryable";
+    if (CONFLICT_NAMES.has(name) || hasCancellationReason(e, "ConditionalCheckFailed")) return "conflict";
     if (NOT_FOUND_NAMES.has(name)) return "not_found";
     if (REJECTED_NAMES.has(name)) return "rejected";
   }
   if (hasNetworkCode(e)) return "retryable";
+  // 名前の集合に無い AWS SDK の例外は、応答の HTTP の状態で分ける（再試行を使い切った InternalServerError・ServiceUnavailable は 5xx で retryable）
+  const awsStatus = awsStatusOf(e);
+  if (awsStatus !== undefined) return classOfStatus(awsStatus);
   // 応答の物（Response・OutboundResult）の状態
   const status = e["status"];
   if (typeof status === "number" && Number.isInteger(status)) return classOfStatus(status);

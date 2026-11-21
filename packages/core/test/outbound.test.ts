@@ -268,13 +268,18 @@ describe("callHttp", () => {
     expect(result).toEqual({ status: 204, headers: {}, body: null, class: "ok" });
   });
 
-  it("転送に自動で従わず、307 は Location を付けた結果で返す（http: の転送先へ本文を送り直さない）", async () => {
-    const { calls, fetch } = fakeFetch(() => new Response(null, { status: 307, headers: { location: "http://api.example.com/v1/issues" } }));
-    const result = await settle(callHttp(post(), "http-github", { log: logs().log, clock: createClock(), fetch }));
+  it.each([
+    ["冪等でない POST の 307", post(), 307],
+    ["冪等な GET の 301", get(), 301],
+    ["冪等な GET の 304", get(), 304],
+  ])("転送に自動で従わず繰り返さない。%s は Location を付けた rejected の結果で返し、ログは転送に従わずに返したと書く（http: の転送先へ本文を送り直さない）", async (_why, req, status) => {
+    const { calls, fetch } = fakeFetch(() => new Response(null, { status, headers: { location: "http://api.example.com/v1/issues" } }));
+    const { log, records } = logs();
+    const result = await settle(callHttp(req, "http-github", { log, clock: createClock(), fetch }));
     expect(calls).toHaveLength(1);
     expect(calls[0]?.redirect).toBe("manual");
-    expect(result).toMatchObject({ status: 307, headers: { location: "http://api.example.com/v1/issues" } });
-    expect(result.class).not.toBe("ok");
+    expect(result).toEqual({ status, headers: { location: "http://api.example.com/v1/issues" }, body: null, class: "rejected" });
+    expect(records()).toMatchObject([{ level: "warn", msg: "外への呼び出しが 3xx を返し、転送に従わずに返した", status, class: "rejected" }]);
   });
 
   it("http: の URL は送る前に止まる", async () => {
