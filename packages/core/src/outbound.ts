@@ -128,16 +128,24 @@ function parseBody(response: Response, text: string): unknown {
 // 本文の読み取りの期限切れの印
 const BODY_TIMED_OUT = Symbol("body timed out");
 
-// 本文を期限の中で読み切る。期限を過ぎたら読み手を取り消して流れを止め、印を返す。読み取りの誤り（接続の切断など）はそのまま投げる
-async function readBodyWithin(response: Response, ms: number): Promise<string | typeof BODY_TIMED_OUT> {
-  if (response.body === null) return "";
-  const reader = response.body.getReader();
+// 試行ごとの期限。ky の timeout と同じく、試行の fetch を呼んだ時点から ms で切れる。
+// 本文の読み取りは、頭書きを待った時間を引いた残りの中で行う（頭書きと本文の合計が timeout_ms を超えない）
+type AttemptDeadline = { expired: Promise<typeof BODY_TIMED_OUT>; clear: () => void };
+
+function startAttemptDeadline(ms: number): AttemptDeadline {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<typeof BODY_TIMED_OUT>((resolve) => {
     timer = setTimeout(() => resolve(BODY_TIMED_OUT), ms);
     // 全体の期限で ky が先に切った後もこの待ちは残るため、プロセスの終わりを引き止めない
     timer.unref?.();
   });
+  return { expired, clear: () => clearTimeout(timer) };
+}
+
+// 本文を試行の期限の中で読み切る。期限を過ぎたら読み手を取り消して流れを止め、印を返す。読み取りの誤り（接続の切断など）はそのまま投げる
+async function readBodyWithin(response: Response, expired: Promise<typeof BODY_TIMED_OUT>): Promise<string | typeof BODY_TIMED_OUT> {
+  if (response.body === null) return "";
+  const reader = response.body.getReader();
   const decoder = new TextDecoder();
   const read = (async () => {
     let text = "";
@@ -147,27 +155,23 @@ async function readBodyWithin(response: Response, ms: number): Promise<string | 
       text += decoder.decode(value, { stream: true });
     }
   })();
-  try {
-    const out = await Promise.race([read, expired]);
-    if (out === BODY_TIMED_OUT) {
-      read.catch(() => undefined);
-      // 写し（clone）の取り消しは、元の流れも取り消されるまで決着しないため待たない。元の流れは ky が取り消す
-      reader.cancel().catch(() => undefined);
-    }
-    return out;
-  } finally {
-    clearTimeout(timer);
+  const out = await Promise.race([read, expired]);
+  if (out === BODY_TIMED_OUT) {
+    read.catch(() => undefined);
+    // 写し（clone）の取り消しは、元の流れも取り消されるまで決着しないため待たない。元の流れは ky が取り消す
+    reader.cancel().catch(() => undefined);
   }
+  return out;
 }
 
-// detail.md の callHttp の手順 (3)。2xx の本文を ky の再試行の中（afterResponse）で、要求ごとの期限（方針の timeout_ms。全体の期限は ky が掛ける）の中で読み切る。
+// detail.md の callHttp の手順 (3)。2xx の本文を ky の再試行の中（afterResponse）で、その試行の期限（方針の timeout_ms から頭書きまでの時間を引いた残り。全体の期限は ky が掛ける）の中で読み切る。
 // 本文の時間切れと読み取りの誤りは、冪等な要求なら ky.retry で残りの回数を使って繰り返し、冪等でない要求なら（2xx を受けたため届いている）繰り返さずに TimeoutError・NetworkError で返す
-function readBodyInRetry(req: OutboundRequest, policy: HttpRetryPolicy): AfterResponseHook {
+function readBodyInRetry(req: OutboundRequest, attemptDeadline: () => AttemptDeadline): AfterResponseHook {
   return async ({ request, response }) => {
     if (!response.ok) return undefined;
     let failure: Error;
     try {
-      const text = await readBodyWithin(response, policy.timeout_ms);
+      const text = await readBodyWithin(response, attemptDeadline().expired);
       if (text !== BODY_TIMED_OUT) {
         return new Response(text === "" ? null : text, { status: response.status, statusText: response.statusText, headers: response.headers });
       }
@@ -195,6 +199,14 @@ export async function callHttp(req: OutboundRequest, policyName: HttpPolicyName,
   const policy = httpPolicyOf(policyName);
   const started = deps.clock.epochMs();
   let retries = 0;
+  // 試行ごとの期限は fetch を呼んだ時点で掛け直す。ky は試行ごとに fetch を呼ぶ
+  let deadline: AttemptDeadline | undefined;
+  const baseFetch = deps.fetch ?? ((input: Request, init?: RequestInit) => globalThis.fetch(input, init));
+  const fetchWithDeadline = (input: Request, init?: RequestInit): Promise<Response> => {
+    deadline?.clear();
+    deadline = startAttemptDeadline(policy.timeout_ms);
+    return baseFetch(input, init);
+  };
   // ログは相手の種類・方法・状態・時間・分類だけ。URL・頭書き・本文は出さない
   const summary = (status: number, cls: OutboundResult["class"]) => ({
     policy: policyName,
@@ -209,9 +221,10 @@ export async function callHttp(req: OutboundRequest, policyName: HttpPolicyName,
     ...kyOptionsOf(req, policy),
     ...(req.headers === undefined ? {} : { headers: req.headers }),
     ...bodyOptions(req.body),
-    ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
+    fetch: fetchWithDeadline,
     hooks: {
-      afterResponse: [readBodyInRetry(req, policy)],
+      // afterResponse は fetch の後にだけ呼ばれるため、期限は必ずある
+      afterResponse: [readBodyInRetry(req, () => deadline ?? startAttemptDeadline(policy.timeout_ms))],
       beforeRetry: [
         ({ error, retryCount }) => {
           retries = retryCount;
@@ -235,6 +248,8 @@ export async function callHttp(req: OutboundRequest, policyName: HttpPolicyName,
     const error = unwrapForced(thrown);
     result = failureResult(error);
     lastRetriable = req.idempotent || (error instanceof Error && retryWhenNotDelivered({ error }));
+  } finally {
+    deadline?.clear();
   }
   if (result.class === "ok") deps.log.info("外への呼び出しが済んだ", summary(result.status, result.class));
   // 繰り返した回数が正でも、最後の失敗が繰り返す対象の外（冪等でない要求の 408・500・502・503・504・時間切れ）なら使い切ったと書かない

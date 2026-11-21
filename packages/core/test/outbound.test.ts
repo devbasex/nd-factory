@@ -262,6 +262,45 @@ describe("callHttp", () => {
     expect(result).toMatchObject({ status: 200, body: { ok: true }, class: "ok" });
   });
 
+  // 頭書きを afterHead ミリ秒後に、本文をさらに body ミリ秒後に返す応答
+  function slow(afterHead: number, body: number): () => Promise<Response> {
+    return () =>
+      new Promise((resolve) =>
+        setTimeout(() => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const stream = new ReadableStream<Uint8Array>({
+            start: (c) => {
+              timer = setTimeout(() => {
+                c.enqueue(new TextEncoder().encode('{"slow":true}'));
+                c.close();
+              }, body);
+            },
+            // 期限で取り消されたら本文を送らない
+            cancel: () => clearTimeout(timer),
+          });
+          resolve(new Response(stream, { status: 200, headers: { "content-type": "application/json" } }));
+        }, afterHead),
+      );
+  }
+
+  it.each([
+    ["冪等な要求は時間切れとして繰り返す", get(), 2, { status: 200, body: { ok: true }, class: "ok" }],
+    ["冪等でない要求は繰り返さず時間切れで返す", post(), 1, { status: 0, body: null, class: "retryable" }],
+  ])("頭書きと本文の合計が要求ごとの期限（10 秒）を超えると、%s", async (_why, req, attempts, expected) => {
+    // http-github の timeout_ms は 10 秒。頭書きに 9 秒・本文に 9 秒かかる試行は期限を超える
+    const { calls, fetch } = fakeFetch([slow(9_000, 9_000), json(200, { ok: true })]);
+    const result = await settle(callHttp(req, "http-github", { log: logs().log, clock: createClock(), fetch }));
+    expect(calls).toHaveLength(attempts);
+    expect(result).toMatchObject(expected);
+  });
+
+  it("頭書きと本文の合計が要求ごとの期限の中なら、その本文を返す", async () => {
+    const { calls, fetch } = fakeFetch([slow(4_000, 4_000)]);
+    const result = await settle(callHttp(get(), "http-github", { log: logs().log, clock: createClock(), fetch }));
+    expect(calls).toHaveLength(1);
+    expect(result).toMatchObject({ status: 200, body: { slow: true }, class: "ok" });
+  });
+
   it("204 の空の本文は null で返す", async () => {
     const { fetch } = fakeFetch(() => new Response(null, { status: 204 }));
     const result = await settle(callHttp(get(), "http-github", { log: logs().log, clock: createClock(), fetch }));
