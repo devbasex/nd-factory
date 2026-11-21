@@ -7,6 +7,7 @@
 | 置き場 | 中身 |
 | --- | --- |
 | `packages/contracts/` | 形の正本。設定のファイル・API の経路・画面の設定の値・設置のコマンドの終了コードの形を zod で持ち、JSON Schema と見本と文書の表を作る |
+| `packages/core/` | 横断の部品（時計・ID・伏せ字・ログなど）。`packages/contracts/` だけに依存し、`apps/*` が使う。画面が使うモジュールは `node:` の組み込みを読まない。中身は [詳細設計](docs/design/detail.md) |
 | `apps/api/` | API の経路（Lambda） |
 | `apps/web/` | 画面（React と TypeScript、Vite で束ねる）と e2e |
 | `infra/` | AWS CDK のスタック（アプリのスタック・反映のパイプライン）と設置のコマンド |

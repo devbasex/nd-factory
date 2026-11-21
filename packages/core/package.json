@@ -1,0 +1,20 @@
+{
+  "name": "@nd-factory/core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./clock": "./src/clock.ts",
+    "./ids": "./src/ids.ts",
+    "./redact": "./src/redact.ts",
+    "./log": "./src/log.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@nd-factory/contracts": "*",
+    "@noble/hashes": "2.4.0",
+    "pino": "10.4.0",
+    "uuid": "14.0.3"
+  }
+}

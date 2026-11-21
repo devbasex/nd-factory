@@ -56,6 +56,28 @@ describe("checkExamples", () => {
   });
 
   it.each([
+    ["最終の組がすべて数字の UUID", { note: `ntc_01935b4e-0000-7000-8000-123456789013` }],
+    ["接頭辞の無い UUID", { note: "01935b4e-0000-7000-8000-210987654321" }],
+    ["メンション", { note: "@acme/factory" }],
+    ["版の付いた包み", { note: "pkg@1.2.3" }],
+    ["末尾の句読点", { note: "ops@example.com." }],
+    ["下位の域名", { note: "ops@mail.example.com" }],
+    ["repo@ref", { note: "factory@main" }],
+  ])("%s は作り物の値の決まりに当たらない", (_label, value) => {
+    expect(checkExamples([withExamples(value)])).toEqual([]);
+  });
+
+  it.each([
+    ["UUID の隣の 12 桁", { note: "01935b4e-0000-7000-8000-000000000000 acct 210987654321" }, "123456789012"],
+    ["文の中の作り物でないメール", { note: "連絡は ops@corp.test まで。" }, "example.com"],
+    ["作り物の域名に似た域名", { note: "ops@example.com.evil.test" }, "example.com"],
+  ])("%s は問題が出る", (_label, value, needle) => {
+    const problems = checkExamples([withExamples(value)]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]?.problem).toContain(needle);
+  });
+
+  it.each([
     ["作り物でないメール", { note: "someone@corp.test" }, ["someone", "corp.test"]],
     ["12 桁の別の数", { note: "acct 210987654321" }, ["210987654321"]],
     ["形に合わない値", { note: "a" + "1".repeat(3), budget: { amount_minor: "210987654321", currency: "USD" } }, ["210987654321"]],
