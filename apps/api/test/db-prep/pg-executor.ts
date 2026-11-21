@@ -208,6 +208,9 @@ export type TestDatabase = {
   name: string;
   // 接続を開く。既定は使い捨てのデータベースへ、接続の値の役割で
   connect(database?: string, credentials?: Credentials): Promise<Client>;
+  // 使い捨てのデータベースへ user で接続を始める。サーバーがパスワードを求めると password を呼び、その戻りを待つ間は
+  // 認証の途中で止まる（SCRAM ではサーバーが検証子を読んだ後）。connected は接続が成り立つか落ちると決まる
+  connectGated(user: string, password: () => Promise<string>): { client: Client; connected: Promise<void> };
   // 管理のデータベース（postgres）を使い捨てのデータベースへ読み替える SqlExecutor
   executor(): PgExecutor;
   // superuser でない管理の役割（CREATEDB・CREATEROLE・pg_signal_backend。Aurora の管理の役割に似せる）で打つ SqlExecutor。
@@ -269,6 +272,19 @@ export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>):
     const db: TestDatabase = {
       name,
       connect,
+      connectGated(user, password) {
+        const url = new URL(urlFor(name));
+        const client = new Client({
+          host: url.hostname,
+          port: Number(url.port || 5432),
+          database: name,
+          user,
+          password,
+        });
+        client.on("error", () => undefined);
+        clients.push(client);
+        return { client, connected: client.connect().then(() => undefined) };
+      },
       executor() {
         const ex = createPgExecutor((database) => connect(database === ADMIN_DATABASE ? name : database));
         executors.push(ex);

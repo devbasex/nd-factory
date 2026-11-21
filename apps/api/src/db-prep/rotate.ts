@@ -66,7 +66,24 @@ const OLD_SESSIONS =
   " WHERE r.role_name = :role_name AND s.pid <> pg_backend_pid() AND s.backend_start < r.old_conn_cutoff";
 // 終了のシグナルを 1 つの文で送るだけで待たない（timeout 0。0 より大きい待ちは呼び出しごとに掛かり、積み重なる。LIB22）
 const SIGNAL_OLD = `SELECT count(*) FILTER (WHERE pg_terminate_backend(s.pid, 0))::int AS signalled${OLD_SESSIONS}`;
-const REMAINING_OLD = `SELECT count(*)::int AS remaining${OLD_SESSIONS}`;
+// 起動の途中の接続は pg_stat_activity に載らない（PostgreSQL 16 は認証と起動の処理を終えてから載せる）。SCRAM の認証は
+// 交換の始めに検証子を読むため、確定の前に読み始めた接続は、確定の後に古いパスワードで認証を終えうる。
+// 起動の処理は認証の前に取引を始めて自分の仮想の取引番号の鎖を取り、pg_stat_activity に載った後に確定して放す。
+// そのため確定の後のある時点で鎖を持つ pid の集まりは、その時点で古い検証子を持って起動の途中にある接続をすべて含む
+const VXID_HOLDERS =
+  "SELECT coalesce(string_agg(DISTINCT l.pid::text, ','), '')::text AS holders FROM pg_catalog.pg_locks l" +
+  " WHERE l.locktype = 'virtualxid' AND l.granted AND l.pid IS NOT NULL AND l.pid <> pg_backend_pid()";
+// 境の時刻より前に始まって載っている接続の数と、起動の途中と見た pid（:starting。コンマ区切り）のうちまだ載っていないもの。
+// 2 つは同じ文で同じ写しを読む。鎖の読みはこの文より前に打つ（鎖を放す前に必ず載るため、後で読む写しに載るか終わっている）
+const REMAINING_OLD =
+  `SELECT (SELECT count(*)::int${OLD_SESSIONS}) AS remaining,` +
+  " (SELECT coalesce(string_agg(u.pid::text, ','), '') FROM unnest(string_to_array(CAST(:starting AS text), ',')::int[]) AS u(pid)" +
+  " WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity a WHERE a.pid = u.pid))::text AS starting";
+
+function pidList(raw: unknown, what: string): string[] {
+  if (typeof raw !== "string" || !/^(\d+(,\d+)*)?$/.test(raw)) throw new Error(`${what}を読めなかった`);
+  return raw === "" ? [] : raw.split(",");
+}
 
 type TxOpts = { database: string; transactionId: string };
 
@@ -138,7 +155,8 @@ export async function rotateRole(sql: SqlExecutor, project: ProjectIdent & { pas
 
 // rotateRole の確定の後に、別のトランザクションで同じ鎖を取り、境の時刻より前に始まった役割の接続を切る。
 // 記した番号が n より大きければ何も切らない。境の時刻が空なら記す。切りと読み直しは切り始めから 1 つの期限を共にし、
-// 期限を過ぎても読み直しを 1 回打ってから、その数を返す（1 以上なら呼ぶ側が connections_remain にする）
+// 期限を過ぎても読み直しを 1 回打ってから、その数を返す（1 以上なら呼ぶ側が connections_remain にする）。
+// 数には、確定の前に古い検証子を読んで起動の途中にある接続も入れる（0 を返した後に古いパスワードの接続が成り立たないように）
 export async function terminateRoleConnections(
   sql: SqlExecutor,
   role: string,
@@ -164,16 +182,28 @@ export async function terminateRoleConnections(
     // 一覧を読む前にも写しを捨てる
     await sql.execute(CLEAR_SNAPSHOT, undefined, opts);
     await sql.execute(SIGNAL_OLD, roleParam, opts);
+    // 起動の途中と見た pid。最初の読みで決め、以後は載ったか終わったものを外していく（後から起動した接続は新しい検証子を読む）
+    let starting: string[] | undefined;
     for (;;) {
       // 期限を過ぎていても、読み直しを 1 回打ってから決める
+      const [held] = await sql.execute(VXID_HOLDERS, undefined, opts);
+      const holders = pidList(held?.holders, "起動の途中の接続");
+      // 鎖を放した pid は、載ったか終わったもの。載ったものは境の時刻と比べる側で数える
+      starting = starting === undefined ? holders : starting.filter((pid) => holders.includes(pid));
       await sql.execute(CLEAR_SNAPSHOT, undefined, opts);
-      const [row] = await sql.execute(REMAINING_OLD, roleParam, opts);
-      const remaining = row?.remaining;
-      if (typeof remaining !== "number") throw new Error("残りの接続の数を読めなかった");
+      const [row] = await sql.execute(REMAINING_OLD, [...roleParam, { name: "starting", value: starting.join(",") }], opts);
+      const visible = row?.remaining;
+      if (typeof visible !== "number") throw new Error("残りの接続の数を読めなかった");
+      starting = pidList(row?.starting, "起動の途中の接続");
+      // 起動の途中の接続は役割が分からないため、古い検証子を持ちうるものとして残りに数える
+      const remaining = visible + starting.length;
       if (remaining === 0) return { kind: "done", remaining };
       const left = deadline - now();
       if (left <= 0) return { kind: "done", remaining };
       await sleep(Math.min(pollMs, left));
+      // 待つ間に起動を終えて載った古い接続にも、シグナルを送る
+      await sql.execute(CLEAR_SNAPSHOT, undefined, opts);
+      await sql.execute(SIGNAL_OLD, roleParam, opts);
     }
   });
 }

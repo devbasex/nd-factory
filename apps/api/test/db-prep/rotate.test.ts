@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { escapeIdentifier } from "pg";
+import { type Client, escapeIdentifier } from "pg";
 import { describe, expect, it } from "vitest";
 import { type TerminateOptions, rotateRole, terminateRoleConnections } from "../../src/db-prep/rotate.ts";
 import { ADMIN_DATABASE, type Row, type SqlExecutor } from "../../src/db-prep/sql-executor.ts";
@@ -31,23 +31,36 @@ type FakeState = {
   signalled?: number;
   // 切りの文が呼ばれたときに走らせる（時計を進めるなど）
   onSignal?: () => void;
+  // 仮想の取引番号の鎖を持つ pid の読みが、呼ばれるたびに返す値。尽きたら最後の値を返し続ける（既定は空）
+  holders?: string[];
+  // 起動の途中と見た pid のうち、まだ pg_stat_activity に載っていないもの。渡された :starting の pid から選ぶ（既定はどれも載った）
+  stillStarting?: (starting: string[]) => string[];
 };
 
 function fakeDb(state: FakeState = {}): FakeSqlExecutor {
   const fake = new FakeSqlExecutor();
   let reads = 0;
-  fake.respond = (sql): Row[] => {
+  let holderReads = 0;
+  fake.respond = (sql, params): Row[] => {
     if (sql.includes("AS present")) return [{ present: state.tablePresent ?? true }];
     if (sql.includes("AS recorded")) return state.recorded ? [state.recorded] : [];
     if (sql.includes("AS signalled")) {
       state.onSignal?.();
       return [{ signalled: state.signalled ?? 0 }];
     }
+    if (sql.includes("AS holders")) {
+      const seq = state.holders ?? [""];
+      const h = seq[Math.min(holderReads, seq.length - 1)];
+      holderReads += 1;
+      return [{ holders: h ?? "" }];
+    }
     if (sql.includes("AS remaining")) {
       const seq = state.remaining ?? [0];
       const n = seq[Math.min(reads, seq.length - 1)];
       reads += 1;
-      return [{ remaining: n ?? 0 }];
+      const raw = String(params?.find((p) => p.name === "starting")?.value ?? "");
+      const given = raw === "" ? [] : raw.split(",");
+      return [{ remaining: n ?? 0, starting: (state.stillStarting?.(given) ?? []).join(",") }];
     }
     if (sql.includes("AS cleared")) return [{ cleared: 1 }];
     if (sql.includes("AS locked")) return [{ locked: 1 }];
@@ -264,19 +277,66 @@ describe("terminateRoleConnections（作り物の SqlExecutor）", () => {
     for (const i of reads) expect(s[i - 1]).toContain("pg_stat_clear_snapshot()");
   });
 
-  it("切りの文は pg_terminate_backend(pid, 0) の 1 回で、接続の数（1 本・10 本）で呼ぶ回数が変わらない", async () => {
+  it("切りの文は pg_terminate_backend(pid, 0) を読みごとに 1 回で、接続の数（1 本・10 本）で呼ぶ回数が変わらない", async () => {
     const counts: number[] = [];
     for (const signalled of [1, 10]) {
       const fake = fakeDb({ recorded: current, signalled, remaining: [signalled, 0] });
       await terminateRoleConnections(fake, PROJECT.role, 3, fakeClock().options());
       const signals = fake.statements().filter((x) => x.includes("pg_terminate_backend"));
-      expect(signals).toHaveLength(1);
+      // 最初の切りと、1 回の待ちの後の切り
+      expect(signals).toHaveLength(2);
       expect(signals[0]).toContain("pg_terminate_backend(s.pid, 0)");
       // 境の時刻より前に始まったその役割の接続だけ
       expect(signals[0]).toContain("s.backend_start < r.old_conn_cutoff");
       counts.push(fake.calls.length);
     }
     expect(counts[0]).toBe(counts[1]);
+  });
+
+  it("起動の途中の接続（鎖を持ち pg_stat_activity に無い pid）が残る間は 0 を返さず、残りに数える", async () => {
+    // 最初の読みで 101・102 が鎖を持ち、101 は載っている。102 は 3 回目の読みまでに鎖を放す
+    const fake = fakeDb({
+      recorded: current,
+      holders: ["101,102", "102", "200"],
+      stillStarting: (given) => given.filter((pid) => pid === "102"),
+    });
+    const clock = fakeClock();
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options({ pollMs: 500 }))).toEqual({ kind: "done", remaining: 0 });
+    expect(clock.sleeps).toEqual([500, 500]);
+    const ex = executes(fake);
+    const reads = ex.filter((c) => c.sql.includes("AS remaining")).map((c) => c.params?.find((p) => p.name === "starting")?.value);
+    // 後から鎖を取った 200 は足さない（確定の後に起動した接続は新しい検証子を読む）
+    expect(reads).toEqual(["101,102", "102", ""]);
+    // 鎖の読みは、残りの読みの前の写しを捨てるより前に打つ
+    const s = fake.statements();
+    for (const [i, x] of s.entries()) {
+      if (x.includes("AS remaining")) {
+        expect(s[i - 1]).toContain("pg_stat_clear_snapshot()");
+        expect(s[i - 2]).toContain("AS holders");
+      }
+    }
+  });
+
+  it("起動の途中の接続が期限まで残れば、その数を残りに足して返す", async () => {
+    const fake = fakeDb({ recorded: current, remaining: [1], holders: ["101,102"], stillStarting: (given) => given });
+    const clock = fakeClock();
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options())).toEqual({ kind: "done", remaining: 3 });
+    expect(fake.calls.at(-1)).toEqual({ kind: "commit", transactionId: "tx-1" });
+  });
+
+  it("鎖を持つ pid と起動の途中の pid が読めない形なら投げて巻き戻す", async () => {
+    for (const bad of [{ holders: null }, { holders: "1,x" }]) {
+      const fake = fakeDb({ recorded: current });
+      const inner = fake.respond;
+      fake.respond = (sql, params) => (sql.includes("AS holders") ? [bad] : inner(sql, params));
+      await expect(terminateRoleConnections(fake, PROJECT.role, 3, fakeClock().options())).rejects.toThrow();
+      expect(fake.calls.at(-1)).toEqual({ kind: "rollback", transactionId: "tx-1" });
+    }
+    const fake = fakeDb({ recorded: current });
+    const inner = fake.respond;
+    fake.respond = (sql, params) => (sql.includes("AS remaining") ? [{ remaining: 0, starting: null }] : inner(sql, params));
+    await expect(terminateRoleConnections(fake, PROJECT.role, 3, fakeClock().options())).rejects.toThrow();
+    expect(fake.calls.at(-1)).toEqual({ kind: "rollback", transactionId: "tx-1" });
   });
 
   it("1 回目の読み直しが 1、2 回目が 0 なら 0 を返す。待ちは pollMs", async () => {
@@ -390,6 +450,31 @@ async function recordedSeq(db: TestDatabase, role: string): Promise<{ seq: numbe
   }
 }
 
+// 古いパスワードで接続を始め、サーバーが検証子を読んで認証の途中にある所で止める。release で古いパスワードを渡して再開する
+async function gatedOldConnection(db: TestDatabase, r: TestRole): Promise<{ release(): void; connected: Promise<boolean>; client: Client }> {
+  let release = (): void => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let asked = (): void => undefined;
+  const inAuth = new Promise<void>((resolve) => {
+    asked = resolve;
+  });
+  const { client, connected } = db.connectGated(r.role, async () => {
+    asked();
+    await gate;
+    return r.password;
+  });
+  const settled = connected.then(
+    () => true,
+    () => false,
+  );
+  // パスワードを求められない（trust の認証）なら、この試しは成り立たない
+  const timer = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("パスワードを求められなかった")), 5_000));
+  await Promise.race([inAuth, timer]);
+  return { release, connected: settled, client };
+}
+
 // 関数の差し替えの段（パスワードを書く → 古い接続を切る）
 async function rotateAndTerminate(sql: SqlExecutor, r: TestRole, seq: number): Promise<unknown> {
   const rotated = await rotateRole(sql, { ...r, seq });
@@ -456,6 +541,49 @@ describePg("terminateRoleConnections（PostgreSQL）", () => {
       // 管理の役割の接続は切らない
       const admin = await db.connect();
       expect(await alive(admin)).toBe(true);
+    });
+  });
+
+  it("認証の途中で差し替えをまたいだ古いパスワードの接続も、残り 0 を返す前に切る", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      const r = await newRole(db);
+      // サーバーは古い検証子を読んで、クライアントの証明を待っている（pg_stat_activity にはまだ載らない）
+      const old = await gatedOldConnection(db, r);
+      try {
+        expect(await rotateRole(sql, { ...r, password: newPassword(), seq: 1 })).toMatchObject({ kind: "applied" });
+        // 切りと最初の読み直しの後に、古いパスワードで認証を終えさせる
+        const result = await terminateRoleConnections(sql, r.role, 1, {
+          pollMs: 50,
+          sleep: async (ms) => {
+            old.release();
+            await new Promise((resolve) => setTimeout(resolve, ms));
+          },
+        });
+        expect(result).toEqual({ kind: "done", remaining: 0 });
+        // 待たずに返った場合も、ここで認証を終えさせてから確かめる。成り立っていても、もう切られている
+        old.release();
+        if (await old.connected) expect(await alive(old.client)).toBe(false);
+      } finally {
+        old.release();
+      }
+    });
+  });
+
+  it("認証の途中の古いパスワードの接続が期限まで終わらなければ、残りに数える", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      const r = await newRole(db);
+      const old = await gatedOldConnection(db, r);
+      try {
+        expect(await rotateRole(sql, { ...r, password: newPassword(), seq: 1 })).toMatchObject({ kind: "applied" });
+        const result = await terminateRoleConnections(sql, r.role, 1, { deadlineMs: 300, pollMs: 50 });
+        expect(result.kind).toBe("done");
+        expect(result.kind === "done" && result.remaining).toBeGreaterThanOrEqual(1);
+      } finally {
+        old.release();
+        await old.connected;
+      }
     });
   });
 
