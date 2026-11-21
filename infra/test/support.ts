@@ -40,7 +40,7 @@ export function resources(template: Template): Resources {
 }
 
 // 時間で費用が掛かる資源の種類。どれか 1 つでもあれば費用の前提が崩れる
-export const HOURLY_COST_TYPES = [
+const HOURLY_COST_TYPES = [
   "AWS::EC2::NatGateway",
   "AWS::ECS::Service",
   "AWS::ElasticLoadBalancingV2::LoadBalancer",

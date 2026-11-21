@@ -82,13 +82,13 @@ flowchart TB
 | # | 欠け | なぜ要るか |
 | --- | --- | --- |
 | K2-1 | 操作の定義に機能（F1〜F20 の配列）を持たせる（全体の設計の操作の一覧の「機能」の列） | 往復のテストが「どの操作にも無い機能」を落とす |
-| K2-2 | 画面が呼ぶ生成した呼び出しは、利用者向けの操作ごとに 1 つの書き出しにする。画面は `/v1/` の経路を書かず、この書き出しだけを呼ぶ。画面がまだ無い操作は、操作の定義の項目（画面を作る課題の番号）で示し、生成がその書き出しに JSDoc の `@screenPending` を付ける | 画面が使わない操作を knip が使われない書き出しとして落とし（`@screenPending` は knip の標準の `tags` で外す）、表に無い操作の呼び出しは型の検査が落とす |
-| K2-3 | 操作の表・JSON Schema・OpenAPI・MCP の道具の一覧・HTTP の経路の登録を `packages/contracts` の書き出しから読め、利用者向けの操作と機械向けの経路を分けて読める。`apps/api` の振り分けと `infra/` の API Gateway の定義は、経路をこの登録からだけ読む | 往復のテストと ESLint の経路の直書きの規則 |
+| K2-2 | 画面が呼ぶ生成した呼び出しは、利用者向けの操作ごとに 1 つの書き出しにする。画面は `/v1/` の経路を書かず、この書き出しだけを呼ぶ。生成先は `apps/web/src/generated/` で、画面はそこを相対のパスで import する（`packages/contracts` の `exports` に載せない。入口にした書き出しを knip が既定で照らさないため）。生成した呼び出しも画面の src として ESLint の経路の直書きの規則を受けるので、経路を `/v1/...` の文字として書き出さず、K2-3 の経路の登録の書き出しを import して読む。生成した呼び出しのテストは書いてよいが、画面の入口から呼ばない書き出しはテストが import していても使われないものとして落ちる（`npm run knip` が `apps/web` を production のモードでも照らす）。画面がまだ無い操作は、操作の定義の項目（画面を作る課題の番号）で示し、生成がその書き出しに JSDoc の `@screenPending` を付ける。画面がまだ一つも無い段階や、画面から参照の無い生成したファイルでも保留中の操作だけなら通るよう、生成を置く Pull Request で `knip.jsonc` の `apps/web` の `entry` に `src/generated/**/*.ts!` を足す（生成したファイルを production の入口にし、使われないファイルとして数えない。`includeEntryExports` で書き出しは照らし続ける。生成先が空のうちは knip が当たらない入口として誤りにするので、生成先と同じ Pull Request で足す） | 画面が使わない操作を knip が使われない書き出しとして落とし（`@screenPending` は knip の標準の `tags` で外す）、表に無い操作の呼び出しは型の検査が落とす。生成先があるのに `entry` の行が無いと `knip-config.test.ts` が落ちる |
+| K2-3 | 操作の表・JSON Schema・OpenAPI・MCP の道具の一覧・HTTP の経路の登録を `packages/contracts` の書き出しから読め、利用者向けの操作と機械向けの経路を分けて読める。`apps/api` の振り分けと `infra/` の API Gateway の定義と、`apps/web/src/generated/` の生成した呼び出し（K2-2）は、経路をこの登録からだけ読む | 往復のテストと ESLint の経路の直書きの規則 |
 | K2-4 | 日時の項目の名前を `_at` で終え、金額は `amount_minor` と `currency` の組にする | I15 の形を名前で見分ける |
 | K2-5 | 要素と結果の形に、JSON Schema に表せない制約（変換・独自の検査）を使わない | 往復のテストが食い違いとして落とす |
 | K2-6 | NDF の契約の使い方のデータ（受ける組・使う口・渡す環境変数・読むファイルと項目・区間の報告から読む値と項目）と、ランナーが NDF を起こす前に通す呼び出しの判定と、区間の報告の読み取りの関数を `packages/contracts` に置く。置いた Pull Request で照合の定数 `CONTRACT_USE_REQUIRED` を真にする | F23 の照らす相手（決定 7）。真にした後は、書き出しが消えると照合が失敗する |
 
-#29 へ渡す欠け: 料金プランの名前を形の正本の閉じた語の集まりとして、料金プランの値を `packages/contracts/data/` のデータとして、それぞれ 1 つの書き出しで置き、同じ Pull Request で `eslint.config.js` の `PLAN_EXPORT_REQUIRED` を真にする（以後、名前の書き出しが読めないと lint が失敗する）。#6 へ渡す欠け: ランナーは NDF を起こす前に形の正本の呼び出しの判定を通し、区間の報告を形の正本の読み取りの関数で読み、組み立てた呼び出しが判定に通ることと拒まれた呼び出しで NDF を起こさないことをテストで示す（決定 7）。
+#29 へ渡す欠け: 料金プランの名前を形の正本の閉じた語の集まりとして、料金プランの値を `packages/contracts/data/plans.json` のデータとして置き、両方を書き出し `@nd-factory/contracts/plans`（`packages/contracts/package.json` の `exports` の `./plans` から `./src/plans.ts`）の 1 つで出し、同じ Pull Request で `eslint.config.js` の `PLAN_EXPORT_REQUIRED` を真にする（以後、名前の書き出しが読めないと lint が失敗する）。別の名前や置き場を採るときは、同じ Pull Request で `.dependency-cruiser.cjs` の `PLAN_VALUE_FILES` と `eslint.config.js` の `PLAN_EXPORT`・`tools/test/deps-config.test.ts` の作り物の木を実際の配置に合わせる。`deps-config.test.ts` は `eslint.config.js` が書き出す `PLAN_EXPORT` から `exports` の鍵を読むので、ESLint と同じ書き出しを辿る（合わせないと、名前に `plan` を含む `packages/contracts` のファイルか、その鍵の行き先が実際に読み込む値のファイルが規則の外にあることで `deps-config.test.ts` が落ちる。`PLAN_EXPORT_REQUIRED` を真にした後は、鍵が `exports` に無いことでも落ちる）。#6 へ渡す欠け: ランナーは NDF を起こす前に形の正本の呼び出しの判定を通し、区間の報告を形の正本の読み取りの関数で読み、組み立てた呼び出しが判定に通ることと拒まれた呼び出しで NDF を起こさないことをテストで示す（決定 7）。
 
 ## 決定の記録
 

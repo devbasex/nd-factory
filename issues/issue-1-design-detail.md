@@ -66,7 +66,7 @@ nd-factory/
 | `apps/*` | `@typescript-eslint/no-restricted-imports`（`allowTypeImports`） | `@aws-sdk/*`・`node:http`・`http`・`node:https`・`https`・`uuid`・`node:console`・`console`（Node.js が受け付ける `node:` を付けない表記も落とす） | 外部の呼び出し・条件つきの書き込み・操作の記録の書き手・ID・ログと伏せ字 |
 | `apps/*` | `@typescript-eslint/no-restricted-imports`（`node:crypto`・`crypto` の `importNames`）と `no-restricted-syntax`（動的な `import()`） | `node:crypto`（`crypto`）の名前空間の import・既定の import・動的な `import()`・`export * from`・`export * as … from` を丸ごと落とし、名前つきの import と名前つきの再書き出し（`export { … } from`）は `randomUUID`・`randomBytes`・`randomFill`・`randomFillSync`（渡したバッファを乱数で埋める）・`randomInt`（乱数の整数を返す）・`randomUUIDv7`・`getRandomValues`・`generatePrime`・`generatePrimeSync`（乱数で素数を作る）・`webcrypto`（`webcrypto.randomUUID` などを持つ）の名前だけを落とす。実行中の Node.js の `node:crypto` の書き出しから乱数の関数の名前を拾って照らすテストを置き、版が上がって増えた名前を落とし忘れない（`importNames` に `default` と合わせて並べる）。型だけの import と、`subtle`（`SubtleCrypto` で乱数の関数を持たない。`subtle.digest` などに使う）や `createHash` などほかの名前の名前つきの import・名前つきの再書き出し（`export { createHash } from "node:crypto"`）は落とさない。モジュールの値を持たせないので、移した先を追わずに済む | ID と冪等の鍵 |
 | `apps/web/src/**` | `no-restricted-syntax` | 料金プランの名前と同じ文字列（JSX の属性の値と `JSXText` を含む）。名前は #29 の書き出しから読み、無ければこの選び方を作らない | I8（画面） |
-| `apps/web/src/**`・`apps/api/src/**`・`infra/lib/**` | `no-restricted-syntax` | `/v1/` を含む文字列とテンプレートの文字列（経路は形の正本の登録の書き出しからだけ読む。K2-2・K2-3） | I14（画面の呼び出し・HTTP の経路の登録） |
+| `apps/web/src/**`・`apps/api/src/**`・`infra/lib/**` | `no-restricted-syntax` | `/v1/` を含む文字列とテンプレートの文字列（経路は形の正本の登録の書き出しからだけ読む。K2-2・K2-3）。生成した画面の呼び出し（`apps/web/src/generated/`）も対象で、生成は経路を登録の書き出しから読む | I14（画面の呼び出し・HTTP の経路の登録） |
 | `apps/web/**` の外の `*.tsx` | `no-restricted-syntax` の `Program` | ファイルそのもの（1 ファイル 1 件） | 言語と書き方の決まりの画面の行（決定 140） |
 
 - すべての塊に `linterOptions: { reportUnusedDisableDirectives: "error" }` を置く（決定 9）。骨組みのコードの今の当たりは、当たる行の前に `// eslint-disable-next-line <規則> -- #2 が横断の部品へ移す` の形（`#4` の行は「#4 が置き換える」）で外す。外す行は「今の姿」の 5 つのファイルの当たる行だけで、実装で ESLint を打って決める
@@ -76,7 +76,7 @@ nd-factory/
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| 各塊（ESLint の API の `lintText` に置き場のパスを渡す） | 表の行ごとに、違反の文字列で誤りが出る | 掛けない置き場（`packages/core`・`infra/`（経路の行を除く）・`tools/`・`apps/*/test`）で出ない。型だけの `@aws-sdk/*` の import と `new Date(0)` は出ない。画面の `*.tsx` の JSX の属性と本文でも出る | 違反を直した行に除外の注釈が残ると、使われない注釈の誤りが出る |
+| 各塊（ESLint の API の `lintText` に置き場のパスを渡す） | 表の行ごとに、違反の文字列で誤りが出る | 掛けない置き場（`packages/core`・`infra/`（経路の行を除く）・`tools/`・`apps/*/test`）で出ない。型だけの `@aws-sdk/*` の import と `new Date(0)` は出ない。画面の `*.tsx` の JSX の属性と本文でも出る。`apps/web/src/generated/` に置いた、経路の登録の書き出しから経路を読む生成した呼び出しの見本は誤りが 0 件で、経路を文字のまま書き出した見本は経路の行で 1 件 | 違反を直した行に除外の注釈が残ると、使われない注釈の誤りが出る |
 
 ## dependency-cruiser の設定
 
@@ -91,11 +91,12 @@ nd-factory/
 | `apps-do-not-import-each-other` | `^apps/([^/]+)/` | `^apps/` のうち自分の app の外（`$1` を使う） |
 | `apps-do-not-import-infra-or-tools` | `^apps/` | `^infra/`・`^tools/` |
 | `web-uses-browser-core-only` | `^apps/web/` | `^packages/core/src/` のうち `clock`・`ids`・`redact`・`log` の外 |
-| `infra-does-not-import-apps` | `^infra/` | `^apps/` |
+| `infra-depends-on-contracts-only` | `^infra/` | `^packages/core/`・`^apps/`・`^tools/`（全体の設計の依存の表で `infra` が依るのは `packages/contracts` だけ） |
 | `tools-depends-on-contracts-only` | `^tools/` | `^packages/core/`・`^apps/`・`^infra/` |
 | `react-only-in-web` | `apps/web/` の外 | `react`・`react-dom`・`@vitejs/plugin-react` |
-| `plan-values-only-in-usage-limit` | `packages/core/src/usage-limit*` と `packages/contracts/` の外 | 料金プランの値のデータと、それを読む書き出しのファイル（#29 が置く。公開の名前の import も相対のパスの import も、解決したファイルで照らす） |
+| `plan-values-only-in-usage-limit` | `packages/core/src/usage-limit*` と `packages/contracts/` の外 | 料金プランの値のデータ `packages/contracts/data/plans.json` と、それを読む書き出しのファイル `packages/contracts/src/plans.ts`（`@nd-factory/contracts/plans`。#29 が置く。公開の名前の import も相対のパスの import も、解決したファイルで照らす） |
 
+- 料金プランの値のファイルの名前は `PLAN_VALUE_FILES` に固定する。`deps-config.test.ts` はリポジトリの `packages/contracts` のうち名前に `plan` を含むファイルと、料金プランの書き出しの `exports` の鍵の行き先と、行き先から dependency-cruiser で辿って実際に読み込む値のファイル（`packages/contracts` の JSON と、そこへ至る途中のモジュール。名前によらない）が `PLAN_VALUE_FILES` に合うことを照らし、#29 が別の名前や置き場で置いたときに落とす。鍵は `eslint.config.js` が書き出す `PLAN_EXPORT`（`@nd-factory/contracts/<鍵>`）から読み、ESLint と同じ書き出しを辿る。`eslint.config.js` の `PLAN_EXPORT_REQUIRED` が偽（#29 の前）の間は鍵が無ければ照らさずに通し、真にした後は鍵が無いと落ちる。名前に `plan` を含まない置き場（`data/pricing.json`）へ値を移した作り物の木と、公開の名前を `@nd-factory/contracts/pricing` に変えた作り物の木で落ちることを確かめる
 - 今の当たりは、試しの規則で 0 件だった（設計文書の LIB4）。当たれば、検査を足す Pull Request で直すか、dependency-cruiser の標準の除外（規則の `pathNot`）に課題の番号を `comment` に添えて外す
 
 ### 単体テストの観点（`tools/test/deps-config.test.ts`）
@@ -156,7 +157,7 @@ nd-factory/
 
 満たす決定: 設計の決定 4・8、受け入れ条件 5・12
 
-`knip.jsonc`: `workspaces` に `.`・`packages/*`・`apps/*`・`infra`・`tools` を置き、ワークスペースごとの入口（Lambda の起点・画面の起点・設置のコマンド・検査の CLI・設定のファイル）と `treatConfigHintsAsErrors: true` を書く。`npm run knip`（`knip --no-progress`）を `check` のジョブで打つ。生成した画面の呼び出しのファイルは入口にしない（使われない書き出しを報告させるため。K2-2）。画面がまだ無い操作の書き出しは、生成が付ける JSDoc の `@screenPending` を knip の標準の `tags: ["-screenPending"]` で外す。
+`knip.jsonc`: `workspaces` に `.`・`packages/*`・`apps/*`・`infra`・`tools` を置き、ワークスペースごとの入口（Lambda の起点・画面の起点・設置のコマンド・検査の CLI・設定のファイル）と `treatConfigHintsAsErrors: true` を書く。`npm run knip`（`knip --no-progress && knip --no-progress --production --workspace apps/web`）を `check` のジョブで打つ。2 つ目の実行は画面の入口からの参照だけで数え、テストだけが import する生成した呼び出しを落とす（通常のモードはテストからの参照も使用に数えるため。K2-2）。テストのために書き出す画面のものは、knip の標準の JSDoc の `@internal` を付けて production の実行から外す（今は `apps/web/src/runtime-config.ts` の `RuntimeConfigError`）。生成は `@internal` を付けない。生成した画面の呼び出しのファイルは `apps/web/src/generated/` に置き、`package.json` の `exports` に載せない（K2-2）。入口のファイルの書き出しも照らすよう、`apps/web` のワークスペースに `includeEntryExports: true` を置く。画面がまだ無い操作の書き出しは、生成が付ける JSDoc の `@screenPending` を knip の標準の `tags: ["-screenPending"]` で外す。タグは書き出しにしか効かず、画面から参照の無い生成したファイル（画面がまだ一つも無い段階や、操作ごとに生成したファイル）は使われないファイルとして落ちるので、生成を置く #2 の Pull Request で `apps/web` の `entry` に `src/generated/**/*.ts!` を足す。末尾の `!` で production の実行でも入口になり、ファイルは使われないものに数えず、書き出しは `includeEntryExports` で照らし続ける（保留中でない使われない書き出しと、テストだけが呼ぶ書き出しは、参照の無いファイルでも落ちる）。生成先が空のうちに足すと knip が当たらない入口（`entry-empty`）として誤りにするので、今は置かない。`knip-config.test.ts` は、リポジトリに `apps/web/src/generated/` があることと `entry` にこの行があることが揃うことを照らす。
 
 - 今の当たり（使われない開発の依存 `infra/package.json` の `esbuild`、使われない書き出し 4 件）は、検査を足す Pull Request で直す。CDK が実行の時に読む `esbuild` のように直せないものだけを `ignoreDependencies` に置き、`knip.jsonc` の行の注に理由と課題の番号を書く
 
@@ -164,7 +165,7 @@ nd-factory/
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `knip.jsonc`（一時の木にワークスペースの形を組み、設定を写して knip を子のプロセスで打つ） | 揃った木で当たり 0 件 | 入口から使う書き出しは当たらない | 使われない書き出し・使われない依存・どこからも読まれないファイルをそれぞれ 1 つ足すと当たる。使われない `ignoreDependencies` の行で誤りになる |
+| `knip.jsonc`（一時の木にワークスペースの形を組み、設定を写して knip を子のプロセスで打つ） | 揃った木で当たり 0 件 | 入口から使う書き出しは当たらない | 使われない書き出し・使われない依存・どこからも読まれないファイルをそれぞれ 1 つ足すと当たる。`apps/web/src/generated/` の `@screenPending` の無い使われない呼び出しは、`apps/web` の `exports` に載せても当たる（`includeEntryExports` を外した設定では当たらない）。テストだけが import する生成した呼び出しは、スクリプト `knip` のとおりに打つと当たる（通常のモードだけでは当たらない）。`entry` に `src/generated/**/*.ts!` を足した設定で、すべての操作が `@screenPending` で画面から参照の無い生成したファイルはスクリプト `knip` で当たり 0 件（行の無い設定では使われないファイルとして当たる）、参照の無いファイルの `@screenPending` の無い書き出しとテストだけが呼ぶ書き出しは当たる。リポジトリの生成先の有無と `entry` の行の有無が食い違うと落ちる。使われない `ignoreDependencies` の行で誤りになる |
 
 ## zizmor の設定と CI の定義のテスト
 

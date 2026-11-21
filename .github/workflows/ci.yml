@@ -28,6 +28,10 @@ jobs:
       - run: npm ci
       - name: lint・型検査・生成物の差・単体テストとスタックのテスト
         run: npm run check
+      - name: 置き場の間の依存の向き
+        run: npm run deps-check
+      - name: 使っていないファイル・書き出し・依存
+        run: npm run knip
 
   synth:
     runs-on: ubuntu-24.04
