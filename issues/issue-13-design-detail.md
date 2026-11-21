@@ -50,7 +50,7 @@ docs/operations/settings.md・setup.md
 | `infra/lib/app-stack.ts` | 変更 | 4 つの部品を組み、AZ を `Fn::GetAZs` から返し、利用者の表に PITR を付ける | 上の 4 つ | `AppStack` | `availabilityZones`（新設の getter）・`constructor`（変更） |
 | `infra/lib/pipeline-stack.ts` | 変更 | 反映のアクションを特権にし、`image-publishing` を引き受けられるようにする | — | `PipelineStack` | `constructor`（変更） |
 | `infra/setup/missing-settings.ts` | 新設 | 足りない設定の一覧を集めて出す | `aws-reader` | モジュール | `MISSING_CHECKS`・`collectMissingSettings`・`printMissingSettings` |
-| `infra/setup/gc.ts` | 新設 | 古い資産の片付け | `nd-setup` の型 | モジュール | `gcConfirmValue`・`checkGcConfirm`・`parseGcPrint`・`gcCliArgs`・`runGc` |
+| `infra/setup/gc.ts` | 新設 | 古い資産の片付け | `nd-setup` の型 | モジュール | `gcConfirmValue`・`checkGcConfirmTarget`・`checkGcConfirmCounts`・`parseGcPrint`・`gcCliArgs`・`runGc` |
 | `packages/contracts/data/exit-codes.json` | 変更 | 終了コード 9 `GC_BUSY` を足す（`setup.md` の表は生成） | — | — | — |
 | `infra/setup/aws-reader.ts` | 変更 | コスト配分タグ・組織・AZ・スタックの更新の状態を読む | AWS SDK（Cost Explorer・Organizations・EC2・CloudFormation） | モジュール | `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount`・`readStackActivity`（新設） |
 | `infra/setup/nd-setup.ts` | 変更 | `gc` の引数と振り分け・`diff` の最後に一覧を出す | 上の 2 つ | モジュール | `parseArgs`・`runDiff`・`mainSetup`・`defaultDeps`（変更） |
@@ -215,8 +215,9 @@ docs/operations/settings.md・setup.md
 | `parseArgs` | 同上 | 変更 | 戻り値に `GcArgs` を足す | `gc --profile <p> [--confirm <値>] [--rollback-buffer-days <日数>]` を読む。日数は 1〜365 の整数（既定 30） |
 | `readStackActivity` | `infra/setup/aws-reader.ts` | 新設 | `(target: Target) => Promise<{ name: string; status: string; lastUpdated: Date }[]>` | `ListStacks` で消えていないスタックの名前・状態・最後の更新の時刻を読む |
 | `mainSetup` | 同上 | 変更 | 変えない | `gc` を `runGc` へ振り分ける |
-| `gcConfirmValue` | `infra/setup/gc.ts` | 新設 | `(target: Target, days: number, isolated: { images: number; files: number }, issuedAt: Date) => string` | `<要約値 12 桁>:<発行の時刻（UTC、`yyyymmddThhmmZ`）>` を作る。要約値はアカウント・リージョン・猶予の日数・使われていない資産の 2 つの数・発行の時刻から作る |
-| `checkGcConfirm` | 同上 | 新設 | `(value: string, target: Target, days: number, isolated: { images: number; files: number }, now: Date) => "ok" \| "mismatch" \| "expired" \| "changed"` | 値から発行の時刻を読み、今の条件で要約値を作り直して比べる。60 分を過ぎれば `expired`。アカウント・リージョン・日数が同じで数だけが違えば `changed`、ほかの違いは `mismatch` |
+| `gcConfirmValue` | `infra/setup/gc.ts` | 新設 | `(target: Target, days: number, isolated: { images: number; files: number }, issuedAt: Date) => string` | `<条件の要約値 8 桁>-<数の要約値 8 桁>:<発行の時刻（UTC、`yyyymmddThhmmZ`）>` を作る。条件の要約値はアカウント・リージョン・猶予の日数・発行の時刻から作り、数の要約値は条件の要約値と使われていない資産の 2 つの数から作る。2 つに分けるのは、`print` を打つ前に対象と猶予を照らし、`print` の後に数だけを照らすため |
+| `checkGcConfirmTarget` | 同上 | 新設 | `(value: string, target: Target, days: number, now: Date) => "ok" \| "mismatch" \| "expired"` | 値の形を読み、発行の時刻と今の対象・日数で条件の要約値を作り直して比べる。形が違うか条件の要約値が違えば `mismatch`。合っていて発行から 60 分を過ぎていれば `expired`。数は読まない（`print` の前に打つ） |
+| `checkGcConfirmCounts` | 同上 | 新設 | `(value: string, isolated: { images: number; files: number }) => "ok" \| "changed"` | `checkGcConfirmTarget` が `ok` を返した値について、今の数で数の要約値を作り直して比べる。違えば `changed`（対象と猶予は既に合っているため、違いは数の変化だけによる） |
 | `parseGcPrint` | 同上 | 新設 | `(output: string) => { images: number; files: number }` | `print` の出力から使われていない資産の数を読む。固定の版の CLI はファイル（S3）・イメージ（ECR）の順に、それぞれ最後に `[100.00%] … files scanned: <数> assets (…) eligible for deletion.` を出す。CLI の語は「消せる」だが数は猶予の内を含む使われていない資産で、設置のコマンドは「使われていない資産」と言い換えて示す。読めなければ投げる（CLI の版の変化。`gc-cli.test.ts` が出力の形も照らす） |
 | `gcCliArgs` | 同上 | 新設 | `(mode: "print" \| "full", target: Target, days: number) => string[]` | `cdk gc aws://<アカウント>/<リージョン> --unstable=gc --type=all --action=<mode> --rollback-buffer-days=<日数> --created-buffer-days=1 --confirm=<print なら false、full なら true> --profile <profile>` |
 | `runGc` | 同上 | 新設 | `(a: GcArgs, deps: SetupDeps) => Promise<number>` | 下の「`runGc` の手順」 |
@@ -233,11 +234,12 @@ docs/operations/settings.md・setup.md
 | 段 | 確認の値なし | 確認の値あり |
 | --- | --- | --- |
 | 1 | profile を解く | profile を解く。`isTty()` が偽なら 2 で止まる（CLI の確かめが既定の答えで消すため） |
-| 2 | 更新の途中のスタックがあれば名前を示して 9 で止まる | `checkGcConfirm` の結果が `mismatch` か `expired` なら CLI を呼ばずに 7 で止まる（`expired` は「1 段目から打ち直す」と示す） |
+| 2 | 更新の途中のスタックがあれば名前を示して 9 で止まる | `checkGcConfirmTarget` で対象と猶予と期限を照らす。`mismatch` か `expired` なら CLI を呼ばずに 7 で止まる（`mismatch` は「アカウント・リージョン・猶予の日数のどれかが 1 段目と違う」、`expired` は「1 段目から打ち直す」と示す）。資産の数はここでは読まない |
 | 3 | `print` を打ち、`parseGcPrint` で数を読む | 更新の途中のスタックがあれば 9 で止まる |
-| 4 | 「使われていない資産: イメージ <数>・ファイル <数>（猶予の内のものを含む。消える数ではない）」「戻しの猶予: <日数> 日・作った日の猶予: 1 日」「猶予を満了して消す資産の数は、確認の値つきで打つと CLI が一まとまりごとに示し、答えを求める」「確認の値: <値>（<時刻> まで有効）」を示して 0 で終わる | `print` を打ち、数を `checkGcConfirm` で照らす。`changed` なら、今の数と新しい確認の値を示して 7 で止まる（何も消していない） |
-| 5 | — | `gc` の開始の時刻を控え、`full` を `--confirm=true` で打つ。CLI の確かめの問いと答えは端末へそのまま通す |
-| 6 | — | `readStackActivity` を読み直し、更新の途中のスタックか、最後の更新が開始の時刻より後のスタックがあれば、名前と「その反映が終わった後に `diff` から打ち直す（消えた資産を発行し直す）」を示す。終了コードは CLI のとおり |
+| 4 | 「使われていない資産: イメージ <数>・ファイル <数>（猶予の内のものを含む。消える数ではない）」「戻しの猶予: <日数> 日・作った日の猶予: 1 日」「猶予を満了して消す資産の数は、確認の値つきで打つと CLI が一まとまりごとに示し、答えを求める」「確認の値: <値>（<時刻> まで有効）」を示して 0 で終わる | `print` を打ち、`parseGcPrint` で読んだ数を `checkGcConfirmCounts` で照らす。`changed` なら、今の数と新しい確認の値を示して 7 で止まる（何も消していない） |
+| 5 | — | `readStackActivity` を読み直し、更新の途中のスタックがあれば名前を示して `full` を呼ばずに 9 で止まる（段 3 の照らしと `print` の間に始まった更新を拾う。何も消していない） |
+| 6 | — | `gc` の開始の時刻を控え、`full` を `--confirm=true` で打つ。CLI の確かめの問いと答えは端末へそのまま通す |
+| 7 | — | `readStackActivity` を読み直し、更新の途中のスタックか、最後の更新が開始の時刻より後のスタックがあれば、名前と「その反映が終わった後に `diff` から打ち直す（消えた資産を発行し直す）」を示す。終了コードは CLI のとおり |
 
 ### 異常系の処理
 
@@ -245,10 +247,10 @@ docs/operations/settings.md・setup.md
 | --- | --- | --- | --- | --- | --- | --- |
 | `readCostAllocationTags` | 読めない | 権限が無い・組織の制限 | SDK の例外 | 「確かめられない」の 1 行で続ける | 一覧の 1 行。終了コードは変えない | 何も書いていない。再実行できる |
 | `runGc` | profile を解けない | 資格情報・リージョンが無い | `resolveProfile` | 止める | 今の `diff` と同じ文と終了コード | 再実行できる |
-| `runGc` | 確認の値が違う | 別のアカウント・猶予の日数を変えた | `gcConfirmValue` との比べ | CLI を呼ばずに止める | 確認の値が違うと示し、今の `deploy` と同じ終了コード | 何も消していない |
-| `runGc` | 確認の値が古い | 発行から 60 分を過ぎた・以前に得た値の使い回し | `checkGcConfirm` の `expired` | CLI を呼ばずに止める | 1 段目から打ち直すと示し、7 | 何も消していない |
-| `runGc` | 使われていない資産が変わった | 1 段目の後に反映か削除があった | `checkGcConfirm` の `changed` | `full` を呼ばずに止める | 今の数と新しい確認の値を示し、7 | 何も消していない。新しい値で打ち直す |
-| `runGc` | 更新の途中のスタックがある | 反映・戻し・変更セットの待ち | `readStackActivity` | CLI を呼ばずに止める | スタックの名前を示し、9 | 何も消していない。反映が終わった後に打ち直す |
+| `runGc` | 確認の値が違う | 別のアカウント・リージョン・猶予の日数を変えた・値の形が違う | `checkGcConfirmTarget` の `mismatch`（`print` の前） | CLI を呼ばずに止める | 確認の値が違うと示し、今の `deploy` と同じ終了コード | 何も消していない |
+| `runGc` | 確認の値が古い | 発行から 60 分を過ぎた・以前に得た値の使い回し | `checkGcConfirmTarget` の `expired`（`print` の前） | CLI を呼ばずに止める | 1 段目から打ち直すと示し、7 | 何も消していない |
+| `runGc` | 使われていない資産が変わった | 1 段目の後に反映か削除があった | `checkGcConfirmCounts` の `changed`（`print` の後） | `full` を呼ばずに止める | 今の数と新しい確認の値を示し、7 | 何も消していない。新しい値で打ち直す |
+| `runGc` | 更新の途中のスタックがある | 反映・戻し・変更セットの待ち | `readStackActivity`（段 3 と、`full` の直前の段 5） | CLI か `full` を呼ばずに止める | スタックの名前を示し、9 | 何も消していない。反映が終わった後に打ち直す |
 | `runGc` | 端末でない | CI・パイプ・リダイレクト | `isTty` | 止める | 「端末から打つ」と示し、2 | 何も消していない |
 | `runGc` | 設置する人が CLI の問いに `n` を答えた | — | CLI の終了 | 止める | CLI の出力をそのまま流し、`EXIT.BUILD` | 答える前の一まとまりは消えている。打ち直しで残りを示し直す |
 | `runGc` | CLI が 0 以外で終わる | 権限・引数の変化・網 | 終了コード | 止める | CLI の出力をそのまま流し、`EXIT.BUILD` | タグを付けた分は残る。次の打ち直しで続く |
@@ -261,7 +263,8 @@ docs/operations/settings.md・setup.md
 | `readGetAzsCount` | 既定のサブネットが 3 つの AZ にあれば 3 | 既定のサブネットが 1 つの AZ にだけあれば、使える AZ が 3 つでも 1。既定のサブネットが無ければ使える AZ の数 | — |
 | `runDiff` | 出力の最後に一覧の欄 | — | 足りない設定があっても終了コード 0 |
 | `parseArgs` | `gc` の 3 つの形 | 日数 1・365 は通り 0・366 は落ちる | `--profile` が無い |
-| `runGc` | 確認の値なしで `print` だけを打つ・同じ確認の値で `full` を `--confirm=true` で打つ | 発行から 60 分ちょうどは通り 60 分 1 秒は `expired` | 違う確認の値で CLI を呼ばない・同じ条件で以前に得た値（発行の時刻が古い）で `full` を呼ばない・数が変わると `full` を呼ばずに新しい値を示す・更新の途中のスタック（`UPDATE_IN_PROGRESS`・`REVIEW_IN_PROGRESS`）があると 9 で CLI を呼ばない・端末でないと 2・`full` の後に開始より後に更新したスタックがあると打ち直しを示す・CLI の失敗で `EXIT.BUILD` |
+| `checkGcConfirmTarget`・`checkGcConfirmCounts` | 同じ対象・日数・数で `ok` | 発行から 60 分ちょうどは通り 60 分 1 秒は `expired` | 日数かアカウントが違えば数を渡さずに `mismatch`・形の壊れた値で `mismatch`・対象と日数が同じで数だけが違えば `changed` |
+| `runGc` | 確認の値なしで `print` だけを打つ・同じ確認の値で `full` を `--confirm=true` で打つ | — | 違う確認の値で CLI を（`print` も）呼ばない・同じ条件で以前に得た値（発行の時刻が古い）で `full` を呼ばない・数が変わると `full` を呼ばずに新しい値を示す・更新の途中のスタック（`UPDATE_IN_PROGRESS`・`REVIEW_IN_PROGRESS`）があると 9 で CLI を呼ばない・段 3 の照らしの後、`print` の間に更新が始まると（2 回目の `readStackActivity` が `UPDATE_IN_PROGRESS` を返す）9 で `full` を呼ばない・端末でないと 2・`full` の後に開始より後に更新したスタックがあると打ち直しを示す・CLI の失敗で `EXIT.BUILD` |
 | `parseGcPrint` | 固定の版の `print` の出力の見本から 2 つの数を読む | 0 件 | 形の違う出力で投げる |
 | `gc-cli.test.ts` | 固定の版の `cdk gc --help` に `gcCliArgs` が使う 6 つの引数がある。`parseGcPrint` が読む出力の形と、確かめの問いの文（「猶予を満了して消す数」を示す）が固定の版の CLI にある | — | 引数の名前・出力の形・問いの文が変わると落ちる |
 
