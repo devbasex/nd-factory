@@ -109,6 +109,14 @@ describe("ProgressDb", () => {
     });
   });
 
+  it("サブネットのグループはクラスタの子の論理 ID のまま残り、変えると既設のクラスタが置き換えになる", () => {
+    const groups = ofType(template, "AWS::RDS::DBSubnetGroup");
+    expect(groups.map(([id]) => id)).toEqual([expect.stringMatching(/^ProgressDbClusterSubnets[0-9A-F]{8}$/)]);
+    const [groupId] = groups[0]!;
+    template.hasResource("AWS::RDS::DBSubnetGroup", { DeletionPolicy: "Retain", UpdateReplacePolicy: "Retain" });
+    template.hasResourceProperties("AWS::RDS::DBCluster", { DBSubnetGroupName: { Ref: groupId } });
+  });
+
   it("最大 ACU は設定の上限の 16 まで受ける", () => {
     buildDb(16).hasResourceProperties("AWS::RDS::DBCluster", {
       ServerlessV2ScalingConfiguration: { MinCapacity: 0, MaxCapacity: 16, SecondsUntilAutoPause: 300 },

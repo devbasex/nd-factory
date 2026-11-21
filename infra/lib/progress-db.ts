@@ -38,13 +38,6 @@ export class ProgressDb extends Construct {
       removalPolicy: RemovalPolicy.RETAIN,
     });
 
-    const subnetGroup = new SubnetGroup(this, "Subnets", {
-      description: "nd-factory progress DB",
-      vpc: props.network.vpc,
-      vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED },
-      removalPolicy: RemovalPolicy.RETAIN,
-    });
-
     // 残したクラスタの管理の役割を、スタックを消した後も同じ器から読めるようにする。
     // クラスタの識別子とこの器の名前は固定のため、残したまま同じ設定で作り直すと名前が衝突する。
     // 作り直す前に消す手順は docs/operations/setup.md の「アプリのスタックを消した後に作り直す」にある
@@ -64,13 +57,20 @@ export class ProgressDb extends Construct {
       serverlessV2AutoPauseDuration: Duration.seconds(PROGRESS_DB_AUTO_PAUSE_SECONDS),
       credentials: Credentials.fromSecret(secret, PROGRESS_DB_ADMIN_USER),
       vpc: props.network.vpc,
-      subnetGroup,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED },
       securityGroups: [props.network.dbSecurityGroup],
       storageEncrypted: true,
       enableDataApi: true,
       deletionProtection: true,
       removalPolicy: RemovalPolicy.RETAIN,
     });
+
+    // サブネットのグループはクラスタが自ら作る子（論理 ID は ProgressDb/Cluster/Subnets）のまま使う。
+    // 別の構成子に作り替えると論理 ID が変わり、DBSubnetGroupName の変更でクラスタの置き換えを求め、
+    // 固定の識別子を持つ既設のクラスタの更新が失敗する。削除方針は子へ直に当てる
+    const subnets = this.cluster.node.findChild("Subnets");
+    if (!(subnets instanceof SubnetGroup)) throw new Error("進行表の DB のサブネットのグループがクラスタの子に無い");
+    subnets.applyRemovalPolicy(RemovalPolicy.RETAIN);
 
     // クラスタへ結んだ器（接続先の値も持つ）を渡す
     const attached = this.cluster.secret;
