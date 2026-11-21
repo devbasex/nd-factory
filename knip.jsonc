@@ -27,6 +27,9 @@
       "ignoreDependencies": ["esbuild"]
     },
     // 参照の検査の CLI（ルートのスクリプト ref-check）は knip が拾う
-    "tools": {}
+    "tools": {
+      // 結合のテストが起こす npm の外の実行ファイル。ci.yml の leak-check・workflow-audit が固定の版を置く（#1）
+      "ignoreBinaries": ["gitleaks", "zizmor"]
+    }
   }
 }

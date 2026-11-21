@@ -14,7 +14,7 @@ const KNIP_BIN = join(ROOT, "node_modules", "knip", "bin", "knip.js");
 // knip の 1 回の実行は数秒かかる
 const KNIP_TIMEOUT = 120_000;
 
-type WorkspaceConfig = { entry?: string[]; ignoreDependencies?: string[]; includeEntryExports?: boolean };
+type WorkspaceConfig = { entry?: string[]; ignoreDependencies?: string[]; ignoreBinaries?: string[]; includeEntryExports?: boolean };
 type KnipConfig = { treatConfigHintsAsErrors?: boolean; tags?: string[]; workspaces: Record<string, WorkspaceConfig> };
 
 /** knip.jsonc を読む（注釈つきの JSON を TypeScript の読み手で解く） */
@@ -83,7 +83,7 @@ function write(root: string, path: string, content: string): void {
   writeFileSync(join(root, path), content);
 }
 
-/** 設定の入口と除外に合わせた木を組む。入口のファイルを置き、除外する依存を package.json に載せる */
+/** 設定の入口と除外に合わせた木を組む。入口のファイルを置き、除外する依存と、除外する実行ファイルを打つスクリプトを package.json に載せる */
 function buildTree({ config, manifest = (_d, m) => m, files = {} }: Tree): string {
   const root = mkdtempSync(join(tmpdir(), "knip-config-"));
   trees.push(root);
@@ -92,7 +92,12 @@ function buildTree({ config, manifest = (_d, m) => m, files = {} }: Tree): strin
     const wsConfig = config.workspaces[ws.dir] ?? {};
     const ignored = Object.fromEntries((wsConfig.ignoreDependencies ?? []).map((d) => [d, "0.0.0"]));
     const base: Record<string, unknown> = { name: `@nd-factory/${ws.dir.split("/").at(-1)}`, private: true, type: "module", ...ws.manifest };
-    const withIgnored = { ...base, devDependencies: { ...(base.devDependencies as object | undefined), ...ignored } };
+    const binaries = Object.fromEntries((wsConfig.ignoreBinaries ?? []).map((b) => [`uses-${b}`, `${b} --version`]));
+    const withIgnored = {
+      ...base,
+      devDependencies: { ...(base.devDependencies as object | undefined), ...ignored },
+      ...(Object.keys(binaries).length > 0 ? { scripts: { ...(base.scripts as object | undefined), ...binaries } } : {}),
+    };
     write(root, join(ws.dir, "package.json"), JSON.stringify(manifest(ws.dir, withIgnored)));
     // 生成した画面の呼び出しの入口は、木の生成したファイルが当たる
     for (const entry of (wsConfig.entry ?? []).filter((e) => !(ws.dir === "apps/web" && e === GENERATED_ENTRY))) {
