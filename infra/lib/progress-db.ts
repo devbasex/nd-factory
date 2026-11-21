@@ -21,6 +21,7 @@ export const PROGRESS_DB_PARAMETERS = {
   "rds.force_ssl": "1",
   log_parameter_max_length: "0",
   log_parameter_max_length_on_error: "0",
+  "rds.restrict_password_commands": "1",
 };
 
 export type ProgressDbProps = { network: Network; maxAcu: number; names: AppResourceNames };
@@ -40,7 +41,12 @@ export class ProgressDb extends Construct {
     // Aurora PostgreSQL 16 は rds.force_ssl の既定が 0 で、TLS でない接続を受けてしまう。
     // 文のログに引数の値を書かない（既定 -1 は全部書く）。DB の用意の関数は役割のパスワードの検証子を引数で渡し、
     // 0 であることを読んで照らしてから送る。log_parameter_max_length は SUSET で管理の役割はセッションで変えられないため、
-    // クラスタの側で置く（apps/api/src/db-prep/role-password.ts）
+    // クラスタの側で置く（apps/api/src/db-prep/role-password.ts）。
+    // パスワードの変更を rds_password の役割（rds_superuser の管理の役割は既定で持つ）に限る。PostgreSQL は役割が自分の
+    // パスワードを変えることを許すため、限らないと、差し替えの確定から古い接続を切るまでの間に移す元の接続が自分の役割の
+    // パスワードを変え、境の時刻の後に開いた接続が切られず、結んだ版と DB のパスワードが合わないまま保留が下りうる。
+    // 静的なパラメータで、既にあるクラスタでは書き込みのインスタンスを再起動するまで効かない。スタックは再起動せず、差し替えが
+    // 実効値を読んで照らす（apps/api/src/db-prep/rotate.ts。再起動の手順は docs/operations/setup.md の「進行表の DB のパスワードの変更の禁止」）
     const parameterGroup = new ParameterGroup(this, "Parameters", {
       engine,
       description: "nd-factory progress DB",

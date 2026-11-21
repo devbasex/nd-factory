@@ -26,6 +26,8 @@ export type PrepTarget = {
 // 強い整合で読み（認可もそのプロジェクトに限る）、その行の用意の ID が渡した値と同じかを返す。readTarget は同じ読み方で
 // 1 回読み、名前と版の ID を、同じ行の用意の ID と差し替えの番号と一緒に返す。record は用意の ID・
 // 差し替えの番号・版の ID が今の値と合うときだけ書く条件つきの書き込みで、合わなければ書かずに mismatch を返す
+// 差し替えで保留を下ろせる結果は applied か recorded_seq = n の rotation_superseded だけ。recorded_seq > n の
+// rotation_superseded と failed は、条件が合っても保留を残す（前者は結んだ版を AWSCURRENT へ移していない）
 export type PrepCompletionPort = {
   isCurrent(projectId: string, prepId: string): Promise<boolean>;
   readTarget(projectId: string): Promise<PrepTarget>;

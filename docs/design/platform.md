@@ -856,6 +856,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | `us-west-2` などの単価 | 見込みは `us-east-1` の単価で出した | 設置する人がリージョンの単価の頁で読む |
 | パスワードを含む文の DB の側のログ | スタックがクラスタのパラメータで置く `log_parameter_max_length`・`log_parameter_max_length_on_error` の 0 が、Data API の接続の `current_setting` で 0 と読めること（`log_parameter_max_length` は SUSET で、Aurora の管理の役割（superuser でない）はセッションで変えられないため、関数は置かずに読んで照らす。0 でなければ、また pgAudit が引数の値か役割の文を書く設定なら、関数は検証子を送らずに止まり、用意と差し替えが通らない）。役割のパスワードの文が成功したときと失敗したときの両方で、`log_statement` を `all` にしても Aurora の PostgreSQL のログに平文も検証子も残らないこと（関数は平文を文にも引数にも載せず、検証子を文の本文に載せない。#13 の設計の決定 17） | 作り物のパスワードで文を成功させ、また失敗させ、ログのファイルを読む実測（#44） |
 | 時間切れの後の DB への働き | 関数が Data API のトランザクションの中で排他の鎖を持ったまま時間切れになった後、3 分のうちにトランザクションが巻き戻って鎖が外れること・送っていた文が 45 秒のうちに取り消されること（決定 96） | 予行の環境で関数の時間切れを短くして鎖を持たせ、`pg_locks` を読む実測（#44） |
+| プロジェクトの役割のパスワードの変更の禁止 | クラスタのパラメータ `rds.restrict_password_commands` = 1 の下で、プロジェクトの役割が自分の役割へ打つ `ALTER ROLE … PASSWORD` が拒まれ、管理の役割の差し替え（用意の手順の 6）が通ること（[データの用意の手順](data.md#用意の手順)・[Aurora のパスワードの管理](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Appendix.PostgreSQL.CommonDBATasks.RestrictPasswordMgmt.html)） | 反映した環境の Aurora へ両方の役割で接続する実測（#44） |
 | `ALTER ROLE` と advisory lock の同じトランザクション | パスワードの変更と差し替えの番号の書き込みを 1 つの Data API のトランザクションで確定できること（決定 95） | 反映した環境の Aurora へ接続する実測（#44） |
 | ECR のライフサイクルの規則の残し方 | push の新しい版を残す数だけ残し、それより古い版だけを消すこと | 反映した環境でライフサイクルの規則の試し（preview）を読む（#13） |
 | 画面の周りの部品の React 19 への対応 | 国際化・PWA・テストの部品のうち使うものが React 19 で動くこと（決定 140） | #12 で部品を選ぶときに、各部品の対応の版を読み、単体テストで確かめる |

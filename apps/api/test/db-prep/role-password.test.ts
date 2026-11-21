@@ -88,6 +88,18 @@ describe("pgAudit の設定の読み", () => {
   });
 });
 
+// 0 の確かめが通る行（pgAudit・auto_explain・pg_stat_statements・rds.restrict_password_commands が無い）
+const SAFE_ROW: Row = {
+  normal: "0",
+  on_error: "0",
+  print_plan: "off",
+  print_parse: "off",
+  print_rewritten: "off",
+  explain_min_duration: null,
+  audit_log: null,
+  audit_parameter: null,
+};
+
 describe("prepareRolePassword（作り物の SqlExecutor）", () => {
   it("検証子を引数で渡し、同じトランザクションで DO を打つ。平文と検証子はどの文の本文にも無い", async () => {
     const fake = new FakeSqlExecutor();
@@ -107,6 +119,9 @@ describe("prepareRolePassword（作り物の SqlExecutor）", () => {
     expect(ex[0]!.sql).toContain("current_setting('auto_explain.log_min_duration', true)");
     expect(ex[0]!.sql).toContain("current_setting('pgaudit.log', true)");
     expect(ex[0]!.sql).toContain("current_setting('pgaudit.log_parameter', true)");
+    expect(ex[0]!.sql).toContain("current_setting('rds.restrict_password_commands', true)");
+    expect(ex[0]!.sql).toContain("pg_has_role(current_user, r.oid, 'MEMBER')");
+    expect(ex[0]!.sql).toContain("r.rolname = 'rds_password'");
     expect(ex[0]!.params).toBeUndefined();
     expect(ex[1]!.sql).toContain("set_config('nd_prep.role_verifier', CAST(:verifier AS text), true)");
     expect(ex[1]!.params).toEqual([{ name: "verifier", value: expect.stringMatching(/^SCRAM-SHA-256\$4096:/) }]);
@@ -154,6 +169,47 @@ describe("prepareRolePassword（作り物の SqlExecutor）", () => {
       await expect(prepareRolePassword(ROLE, PASSWORD, "alter")(fake, opts)).rejects.toThrow("検証子を送らずに止めた");
       expect(fake.statements()).toHaveLength(1);
       expect(JSON.stringify(fake.calls)).not.toContain("SCRAM-SHA-256");
+    }
+  });
+
+  it("rds.restrict_password_commands が有効で管理の役割が rds_password を持たない（役割が無いも含む）なら、検証子を送らずに投げる", async () => {
+    for (const restrict of ["on", "1", "true", " ON "]) {
+      for (const member of [false, null]) {
+        const fake = new FakeSqlExecutor();
+        fake.respond = (sql) =>
+          sql.includes("current_setting('log_parameter_max_length')") ? [{ ...SAFE_ROW, restrict_password: restrict, has_rds_password: member }] : [];
+        const opts = { database: ADMIN_DATABASE, transactionId: "tx-1" };
+        await expect(prepareRolePassword(ROLE, PASSWORD, "alter")(fake, opts)).rejects.toThrow("rds_password");
+        expect(fake.statements()).toHaveLength(1);
+        expect(JSON.stringify(fake.calls)).not.toContain("SCRAM-SHA-256");
+      }
+    }
+  });
+
+  it("rds.restrict_password_commands の値が読めない形なら、検証子を送らずに投げる", async () => {
+    for (const restrict of [1, true, "maybe"]) {
+      const fake = new FakeSqlExecutor();
+      fake.respond = (sql) =>
+        sql.includes("current_setting('log_parameter_max_length')") ? [{ ...SAFE_ROW, restrict_password: restrict, has_rds_password: true }] : [];
+      const opts = { database: ADMIN_DATABASE, transactionId: "tx-1" };
+      await expect(prepareRolePassword(ROLE, PASSWORD, "alter")(fake, opts)).rejects.toThrow("rds.restrict_password_commands");
+      expect(fake.statements()).toHaveLength(1);
+    }
+  });
+
+  it("rds.restrict_password_commands が有効で rds_password を持つとき・無効のとき・設定が無いとき（Aurora の外）は検証子を送る", async () => {
+    const extras: Row[] = [
+      { restrict_password: "on", has_rds_password: true },
+      { restrict_password: "off", has_rds_password: null },
+      { restrict_password: null, has_rds_password: null },
+      {},
+    ];
+    for (const extra of extras) {
+      const fake = new FakeSqlExecutor();
+      fake.respond = (sql) => (sql.includes("current_setting('log_parameter_max_length')") ? [{ ...SAFE_ROW, ...extra }] : []);
+      const opts = { database: ADMIN_DATABASE, transactionId: "tx-1" };
+      await prepareRolePassword(ROLE, PASSWORD, "alter")(fake, opts);
+      expect(fake.statements()).toHaveLength(3);
     }
   });
 

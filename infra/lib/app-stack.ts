@@ -21,13 +21,14 @@ import { BucketDeployment, Source } from "aws-cdk-lib/aws-s3-deployment";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import type { Construct } from "constructs";
 import { CostWatch } from "./cost-watch.ts";
-import { appResourceNames, applyTags, loginDomainUrl } from "./naming.ts";
+import { DbPrepFunction } from "./db-prep-function.ts";
+import { appResourceNames, applyTags, loginDomainUrl, secretName } from "./naming.ts";
 import { Network } from "./network.ts";
 import { ProgressDb } from "./progress-db.ts";
 import { TaskPlatform } from "./tasks.ts";
 
 // アプリのスタック: 利用者プール・画面の配信・API・利用者の表・画面の設定の値と、
-// ネットワーク・進行表の DB・ECS のクラスタ・費用の見張り。
+// ネットワーク・進行表の DB・DB の用意の関数・ECS のクラスタ・費用の見張り。
 // 戻り先の URL が配信の名前を要り、画面の設定の値がすべてを要るため、1 つのスタックに置く。
 // 承認する人が 1 つの差分と確認の値で読めるよう、インフラの資源も同じスタックに置く
 
@@ -47,8 +48,9 @@ export class AppStack extends Stack {
   readonly network: Network;
   // #6 のランナーのタスクの定義と RunTask の値が使う
   readonly tasks: TaskPlatform;
-  // DB の用意の関数（U7）が使う
   readonly progressDb: ProgressDb;
+  // #6 が呼ぶ権限と、終わりの記録の口の DynamoDB の権限（grantCompletionAccess）を足す
+  readonly dbPrep: DbPrepFunction;
   readonly costWatch: CostWatch;
 
   constructor(scope: Construct, id: string, props: AppStackProps) {
@@ -186,6 +188,11 @@ export class AppStack extends Stack {
     this.network = new Network(this, "Network", { cidr: infra.vpcCidr, names });
     this.tasks = new TaskPlatform(this, "Tasks", { network: this.network, names });
     this.progressDb = new ProgressDb(this, "ProgressDb", { network: this.network, maxAcu: infra.maxAcu, names });
+    this.dbPrep = new DbPrepFunction(this, "DbPrep", {
+      db: this.progressDb,
+      names,
+      secretPrefix: `${secretName(s, "progress-db")}/`,
+    });
     this.costWatch = new CostWatch(this, "CostWatch", {
       budgetUsd: infra.budgetUsd,
       budgetScope: infra.budgetScope,

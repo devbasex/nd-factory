@@ -158,8 +158,22 @@ DB の用意の関数は、プロジェクトの役割のパスワードを SCRA
 | `log_parameter_max_length_on_error` | `0`（失敗のログに引数の値を書かない） | スタックがクラスタのパラメータの群で置き、関数もトランザクションの中だけで置く |
 | `pgaudit.log_parameter` | 無いか `off` | pgAudit を使うときに、クラスタのパラメータの群か役割の設定で守る |
 | `pgaudit.log` | 無いか、`role` を含まない（`all` も `role` を含む。`all, -role` は通る） | 同上。役割の文は本文に検証子を持つため |
+| `rds.restrict_password_commands` | 有効なら、管理の役割が `rds_password` の役割を持つ（パスワードを書く文をその役割に限るため） | スタックがクラスタのパラメータの群で `1` に置く。管理の役割はクラスタの master の利用者で、`rds_superuser` として `rds_password` を既定で持つ |
 
 クラスタのパラメータの群をスタックの外で書き換えて上の値から外すと、次の用意か差し替えで止まる。
+
+### 進行表の DB のパスワードの変更の禁止
+
+スタックはクラスタのパラメータの群で `rds.restrict_password_commands` を `1` に置き、プロジェクトの役割が自分のパスワードを変えられないようにする（[データの用意の手順](../design/data.md#用意の手順)）。このパラメータは静的で、群に置いただけでは動いているクラスタに効かず、書き込みのインスタンスを再起動して初めて効く（[Aurora のパスワードの管理](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Appendix.PostgreSQL.CommonDBATasks.RestrictPasswordMgmt.html)）。DB の用意の関数は差し替えの SQL を打つ前に実効値を読み、`off` なら何も書かずに止まる（差し替えが通らず、保留が残る）。
+
+- 初めての反映で作るクラスタは、作るときからこの群で起動するため、再起動は要らない
+- 既にあるクラスタ（この値を持たない版のスタックで作ったもの・群をスタックの外で書き換えたもの）は、この値を持つ版を反映した後（設置のコマンドの `deploy` か反映のパイプライン）に、次の順で書き込みのインスタンスを再起動して実効値を確かめる。スタックは再起動しない。各コマンドの末尾には、反映した先の `--profile <profile> --region <region>` を付ける（例では「…」と略す）
+
+1. 書き込みのインスタンスと群の反映の状態を読む: `aws rds describe-db-clusters --db-cluster-identifier <prefix>-<environment>-progress-db --query 'DBClusters[0].DBClusterMembers[?IsClusterWriter].[DBInstanceIdentifier,DBClusterParameterGroupStatus]' …`。状態が `pending-reboot` なら 2 へ進む。`in-sync` でも 3 で実効値を確かめる
+2. 書き込みのインスタンスを再起動し、使えるまで待つ: `aws rds reboot-db-instance --db-instance-identifier <1 の名前> …` の後に `aws rds wait db-instance-available --db-instance-identifier <1 の名前> …`。再起動の間は進行表の DB へ接続できないため、ホステッドのレーンが動いていない時間に打つ
+3. 1 を打ち直して状態が `in-sync` であることを読み、実効値を読む: `aws rds-data execute-statement --resource-arn <クラスタの ARN> --secret-arn <管理の役割の秘密の器の ARN> --database postgres --sql "SHOW rds.restrict_password_commands" …` が `on` を返すことを確かめる。一時停止の後は `DatabaseResumingException` が返るため、間を置いて打ち直す。`off` なら群の値がスタックの値と合っているかを確かめて 2 から打ち直す
+
+実効値が `on` になるまで、プロジェクトの役割のパスワードの差し替えを始めない（始めても関数が止まり、保留が残る）。
 
 ## アプリのスタックを消した後に作り直す
 
