@@ -35,6 +35,20 @@ function tagFilter(tags: CostWatchProps["tags"]): CfnBudget.ExpressionProperty {
   };
 }
 
+// 予算のサービスに、このアカウントの予算からトピックへの発行だけを許す文
+function budgetsPublishStatement(stack: Stack, topic: Topic): PolicyStatement {
+  return new PolicyStatement({
+    sid: "AllowBudgetsPublish",
+    principals: [new ServicePrincipal("budgets.amazonaws.com")],
+    actions: ["SNS:Publish"],
+    resources: [topic.topicArn],
+    conditions: {
+      StringEquals: { "aws:SourceAccount": stack.account },
+      ArnLike: { "aws:SourceArn": stack.formatArn({ service: "budgets", region: "", resource: "*" }) },
+    },
+  });
+}
+
 export class CostWatch extends Construct {
   readonly topic: Topic;
   readonly topicPolicy: TopicPolicy;
@@ -50,18 +64,7 @@ export class CostWatch extends Construct {
 
     // 予算のサービスに、このアカウントの予算からの発行だけを許す
     this.topicPolicy = new TopicPolicy(this, "TopicPolicy", { topics: [this.topic] });
-    this.topicPolicy.document.addStatements(
-      new PolicyStatement({
-        sid: "AllowBudgetsPublish",
-        principals: [new ServicePrincipal("budgets.amazonaws.com")],
-        actions: ["SNS:Publish"],
-        resources: [this.topic.topicArn],
-        conditions: {
-          StringEquals: { "aws:SourceAccount": stack.account },
-          ArnLike: { "aws:SourceArn": stack.formatArn({ service: "budgets", region: "", resource: "*" }) },
-        },
-      }),
-    );
+    this.topicPolicy.document.addStatements(budgetsPublishStatement(stack, this.topic));
 
     this.budget = new CfnBudget(this, "Budget", {
       budget: {
