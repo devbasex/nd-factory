@@ -57,8 +57,11 @@ function fakeDb(state: FakeState = {}): FakeSqlExecutor {
       const seq = state.oldSessions ?? [0];
       const n = seq[Math.min(oldReads, seq.length - 1)] ?? 0;
       oldReads += 1;
-      return [{ remaining: n }];
+      // 起動の途中と見た pid は無い（どれも載った）
+      return [{ remaining: n, starting: "" }];
     }
+    // 起動の途中の接続（仮想の取引番号の鎖を持つ pid）は無い
+    if (sql.includes("AS holders")) return [{ holders: "" }];
     if (sql.includes("AS remaining") && sql.includes("pg_database d WHERE d.datname")) {
       const names = String(params?.find((p) => p.name === "names")?.value ?? "").split(",");
       return [{ remaining: 0, found: names.length }];
