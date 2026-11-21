@@ -54,6 +54,8 @@ const alnum = (length: number) => pick("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN
 
 /** 架空の AWS のアカウント ID（許可の値に合わない 12 桁） */
 const fakeAccount = () => fake(() => digits(12), /^[0-9]{12}$/);
+/** 架空の語（`nd` と小文字 10 字） */
+const fakeWord = () => fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
 /** 架空の token（gitleaks の既定の規則 `github-pat` の形だけ合わせたもの） */
 const fakeToken = () => fake(() => `${"ghp"}_${alnum(36)}`, /^ghp_[0-9A-Za-z]{36}$/);
 
@@ -159,7 +161,7 @@ const ENDPOINTS: [() => string, string][] = [
 function leakTree(realWord: string) {
   const account = fakeAccount();
   const arnAccount = fakeAccount();
-  const role = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+  const role = fakeWord();
   const bucket = fake(() => `nd-${lower(12)}`, /^[a-z0-9-]+$/);
   const resources = [fake(() => `vpc-${hex(17)}`, /^vpc-[0-9a-f]{17}$/), fake(() => `sg-${hex(8)}`, /^sg-[0-9a-f]{8}$/)];
   const endpoints = ENDPOINTS.map(([resource, service]) =>
@@ -186,7 +188,7 @@ const ND_RULES_BY_FILE = {
 
 describe("nd-factory の規則（.gitleaks.toml）", () => {
   it("架空の値を docs/ に置いた木で、.gitleaks.toml の規則がそれぞれ当たる", () => {
-    const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    const realWord = fakeWord();
     const root = makeTree(leakTree(realWord).files);
     const result = scan(root, ["dir", ND_CONFIG]);
     expect(result.status).toBe(1);
@@ -194,7 +196,7 @@ describe("nd-factory の規則（.gitleaks.toml）", () => {
   }, TIMEOUT);
 
   it("重ねた設定では .gitleaks.toml の規則に加えて、重ねた規則の語が当たる", () => {
-    const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    const realWord = fakeWord();
     const root = makeTree(leakTree(realWord).files);
     const result = scan(root, ["dir", overlayConfig(realWord)]);
     expect(result.status).toBe(1);
@@ -202,7 +204,7 @@ describe("nd-factory の規則（.gitleaks.toml）", () => {
   }, TIMEOUT);
 
   it("報告と標準出力・標準エラーに当てた値が現れない", () => {
-    const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    const realWord = fakeWord();
     const { files, values } = leakTree(realWord);
     const root = makeTree(files);
     const result = scan(root, ["dir", overlayConfig(realWord)]);
@@ -214,7 +216,7 @@ describe("nd-factory の規則（.gitleaks.toml）", () => {
   }, TIMEOUT);
 
   it("--paths を渡さなければ、ファイルの名前に入った秘密の値を記録と報告に出さず、名前の順の番号に替える", () => {
-    const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    const realWord = fakeWord();
     const root = makeTree({
       [`docs/${realWord}.md`]: `環境の名前 ${realWord} の行\n`,
       "docs/account.md": `アカウント ${fakeAccount()}\n`,
@@ -234,9 +236,9 @@ describe("nd-factory の規則（.gitleaks.toml）", () => {
   }, TIMEOUT);
 
   it("1 つの行に別の規則の値が並んでも、どの当たりの出力にも行の残りが現れない", () => {
-    const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    const realWord = fakeWord();
     const account = fakeAccount();
-    const role = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    const role = fakeWord();
     const vpc = fake(() => `vpc-${hex(17)}`, /^vpc-[0-9a-f]{17}$/);
     const values = [account, role, vpc, realWord];
     const root = makeTree({ "docs/line.md": `役割 arn:aws:iam::${account}:role/${role} 資源 ${vpc} 名前 ${realWord}\n` });
@@ -370,7 +372,7 @@ describe("履歴の探し", () => {
   it("git の探しの出力と報告に、当たったコミットの本文が現れない", () => {
     const root = makeTree({ "docs/a.md": "はじめ\n" });
     initRepo(root);
-    const subject = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    const subject = fakeWord();
     write(root, "docs/a.md", `はじめ\nアカウント ${fakeAccount()}\n`);
     commitAll(root, `add ${subject}`);
     const result = scan(root, ["git", ND_CONFIG]);
@@ -441,7 +443,7 @@ function fakeGitleaksPath(diagnostic: string, stderrLine = `stderr ${diagnostic}
 describe("gitleaks の生の出力", () => {
   for (const mode of ["dir", "git"] as const) {
     it(`${mode} の探しで、--paths を渡さなければ gitleaks の標準出力と標準エラーに載ったファイルの名前を出さない`, () => {
-      const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+      const realWord = fakeWord();
       const { root } = makeRepo({ "a.md": "中身\n" }, "first");
       const env = { ...process.env, PATH: fakeGitleaksPath(`docs/${realWord}.md`) };
       const hidden = scan(root, [mode, ND_CONFIG], { paths: false, env });
@@ -465,7 +467,7 @@ const SKIP_MESSAGE = "leak-scan: gitleaks が警告か誤りを出した";
 describe("読めずに飛ばした対象", () => {
   for (const mode of ["dir", "git"] as const) {
     it(`${mode} の探しで、gitleaks が警告を出して 0 で終えても、当たり無しとして通さず、ファイルの名前を出さない`, () => {
-      const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+      const realWord = fakeWord();
       const { root } = makeRepo({ "a.md": "中身\n" }, "first");
       const env = { ...process.env, PATH: fakeGitleaksPath("中身", skipLine(`docs/${realWord}.md`)) };
       const hidden = scan(root, [mode, ND_CONFIG], { paths: false, env });
@@ -479,7 +481,7 @@ describe("読めずに飛ばした対象", () => {
   }
 
   it("警告の後にパイプの容量を超える出力が続いても、当たり無しとして通さない", () => {
-    const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    const realWord = fakeWord();
     const { root } = makeRepo({ "a.md": "中身\n" }, "first");
     // 1 行が約 50 バイトで 1 万行（約 500KB）。パイプの容量（Linux の既定は 64KiB）を超える
     const env = { ...process.env, PATH: fakeGitleaksPath("中身", skipLine(`docs/${realWord}.md`), 10000) };
