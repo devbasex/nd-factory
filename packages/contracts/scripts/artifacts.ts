@@ -7,7 +7,7 @@ import type { DummyDoc } from "../src/client.ts";
 import { SECRET_SHAPES } from "../src/data.ts";
 import { PREFIX_SHAPE } from "../src/settings.ts";
 import { isPending, itemReasonsOf, MAX_ITEMS, type OperationDef, resultSchemaOf, type Shape } from "../src/operation.ts";
-import { ITEM_REASONS, type ReasonDef, REQUEST_REASONS } from "../src/reasons.ts";
+import { ITEM_REASONS, problemSchema, type ReasonDef, REQUEST_REASONS } from "../src/reasons.ts";
 import { AWS_ACCOUNT_ID, itemsArray } from "../src/values.ts";
 
 // 操作の表から生成物を組む（設計の「生成物」の表）。どの関数も値を返すだけで、書くのは generate.ts
@@ -41,13 +41,6 @@ const FAKE_MAIL = `ops@${FAKE_MAIL_DOMAIN}`;
 const FAKE_PREFIX = "acme";
 // 境目の見本の文字列の元の長さの下限。形に上限がある文字列は、その上限まで伸ばしてから切り詰める
 const EDGE_TEXT_LENGTH = 1024;
-
-// 要求全体の誤りの本文（RFC 9457 の形。title・detail を持たず、拡張の reason に理由のコードを置く）
-const problemBody = z.strictObject({
-  type: z.literal("about:blank"),
-  status: z.int(),
-  reason: z.enum(REQUEST_REASONS.map((r) => r.code) as [string, ...string[]]),
-});
 
 function shapeSchema(shape: Shape): z.ZodType {
   return isPending(shape) ? shape.schema : shape;
@@ -121,7 +114,7 @@ function sameAsJsonSchema(ctx: { zodSchema: z.core.$ZodType; jsonSchema: Record<
 
 // 受け口 user の操作の OpenAPI 3.1.1。要素と結果の形は .meta({ id }) の名前で components.schemas に出る
 export function buildOpenApi(ops: readonly OperationDef[]): OpenApiDoc {
-  const problem = problemBody.meta({ id: "problem" });
+  const problem = problemSchema.meta({ id: "problem" });
   const paths: Record<string, unknown> = {};
   for (const op of ops) {
     if (op.endpoint !== "user") continue;

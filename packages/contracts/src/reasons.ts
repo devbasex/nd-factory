@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // 理由のコードの共通の集まり。操作ごとのコードは操作の定義の reasons に足す（docs/design/api.md の「誤りの形」）
 
 export type ReasonStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 503;
@@ -42,3 +44,20 @@ export const ITEM_REASONS = [
   { code: "in_progress", status: 409, when: "idempotency" },
   { code: "not_applied", status: 409, when: "all_or_nothing" },
 ] as const satisfies readonly ReasonDef[];
+
+// 要求全体の誤りの本文（RFC 9457 の形。title・detail を持たず、拡張の reason に理由のコードを置く）。
+// 生成物（openapi.json の problem）と呼び出しの口の検証が同じ形を使う
+export const problemSchema = z.strictObject({
+  type: z.literal("about:blank"),
+  status: z.int(),
+  reason: z.enum(REQUEST_REASONS.map((r) => r.code) as [RequestReasonCode, ...RequestReasonCode[]]),
+});
+
+export type RequestReasonCode = (typeof REQUEST_REASONS)[number]["code"];
+
+const REQUEST_STATUS = new Map<string, number>(REQUEST_REASONS.map((r) => [r.code, r.status]));
+
+// problem の本文の status と reason が理由の表の組か
+export function isRequestReasonPair(reason: string, status: number): boolean {
+  return REQUEST_STATUS.get(reason) === status;
+}

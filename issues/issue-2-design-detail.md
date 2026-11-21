@@ -368,7 +368,7 @@ infra/
 
 - `createOperationClient`
   - 事前条件: `items` は 1 個以上で、`ItemOf<N>` の形（型で縛る）
-  - 事後条件: 戻り値は `{ ok: true; results: ResultOf<N>[] }`（要求と同じ数・同じ順）か、要求全体の誤り `{ ok: false; status; reason }`（problem の本文）。応答が結果の zod に合わなければ `{ ok: false; status: 0; reason: "response_invalid" }` を返し、例外を投げない
+  - 事後条件: 戻り値は `{ ok: true; results: ResultOf<N>[] }`（要求と同じ数・同じ順）か、要求全体の誤り `{ ok: false; status; reason }`（problem の本文）。要求全体の誤りとして受けるのは、HTTP の状態が 200 でなく、本文が生成物の problem と同じ形（`problemSchema`。`type: "about:blank"`・`status`・要求全体の理由のコードの `reason` だけを持つ）で、本文の `status` が HTTP の状態と同じで、`status` と `reason` が `REQUEST_REASONS` の組のときだけである。そうでない非 200 の応答（中継が返した 502 の本文など）は `response_invalid` にする。応答が結果の zod に合わなければ `{ ok: false; status: 0; reason: "response_invalid" }` を返し、例外を投げない
   - 副作用: `transport` の副作用だけ
 - `createDummyTransport`
   - 事前条件: `items` は 1 個以上（`createOperationClient` が縛る）
@@ -387,7 +387,7 @@ infra/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `createOperationClient` | 偽の送り手の応答を型つきの結果で返す | 要素 1 個と上限ちょうど | 結果の形に合わない応答で `response_invalid`、problem の本文で要求全体の誤り |
+| `createOperationClient` | 偽の送り手の応答を型つきの結果で返す | 要素 1 個と上限ちょうど | 結果の形に合わない応答で `response_invalid`、problem の本文で要求全体の誤り。非 200 の本文が problem の形でない・表に無い理由・本文の `status` が HTTP の状態と違う・`status` と `reason` が表の組でないときは `response_invalid` |
 | `createDummyTransport` | 場面ごとに `normal`・`empty`・`failures`・404 を要素ごとに 1 件ずつ返し、`createOperationClient` を通して結果の zod に合う | 要素 1 個の `normal` は 1 件（見本 3 件を返さない）、要素 5 個の `normal` は見本を順に回して 5 件。要素 1 個の `error` は 1 件、`list` の要素 2 個の `empty` は空の一覧 2 件、`create` の `empty` は `normal` と同じ（`examples.empty` を書いた `create` はその値）。要素 1 個と上限ちょうどで件数が要求と同じ | 形の未定の操作・`failures` が 0 件の操作の `error` は要求全体の `unavailable` の 503 |
 
 ## 横断の部品
