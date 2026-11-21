@@ -222,6 +222,31 @@ describe("rotateRole（作り物の SqlExecutor）", () => {
     }
   });
 
+  it("パスワードの変更の禁止（rds.restrict_password_commands）の実効値が無効か読めなければ、番号を読む前に何も書かずに投げる。番号 = n の呼び直しも同じ", async () => {
+    for (const value of ["off", "0", 1, "maybe"]) {
+      for (const recorded of [{ recorded: 2, cutoff_recorded: true }, { recorded: 3, cutoff_recorded: true }]) {
+        const fake = fakeDb({ recorded });
+        const base = fake.respond;
+        fake.respond = (sql, params) => (sql.includes("AS restrict_password") ? [{ restrict_password: value }] : base(sql, params));
+        await expect(rotateRole(fake, { ...PROJECT, password: PASSWORD, seq: 3 })).rejects.toThrow("rds.restrict_password_commands");
+        const s = fake.statements();
+        expect(s[0]).toContain("nd-rotate:");
+        expect(s[1]).toContain("current_setting('rds.restrict_password_commands', true)");
+        expect(s).toHaveLength(2);
+        expect(fake.calls.some((c) => c.kind === "commit")).toBe(false);
+      }
+    }
+  });
+
+  it("パスワードの変更の禁止の実効値が有効か、設定が無い（Aurora の外）なら差し替えへ進む", async () => {
+    for (const row of [{ restrict_password: "on" }, { restrict_password: null }]) {
+      const fake = fakeDb({ recorded: { recorded: 2, cutoff_recorded: true } });
+      const base = fake.respond;
+      fake.respond = (sql, params) => (sql.includes("AS restrict_password") && !sql.includes("log_parameter_max_length") ? [row] : base(sql, params));
+      expect(await rotateRole(fake, { ...PROJECT, password: PASSWORD, seq: 3 })).toEqual({ kind: "applied", recorded: 3 });
+    }
+  });
+
   it("記した番号の行が読めない形なら書かずに投げる", async () => {
     const fake = fakeDb();
     fake.respond = (sql) => (sql.includes("AS recorded") ? [{ recorded: "3", cutoff_recorded: true }] : sql.includes("AS present") ? [{ present: true }] : []);

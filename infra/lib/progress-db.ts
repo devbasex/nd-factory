@@ -44,7 +44,9 @@ export class ProgressDb extends Construct {
     // クラスタの側で置く（apps/api/src/db-prep/role-password.ts）。
     // パスワードの変更を rds_password の役割（rds_superuser の管理の役割は既定で持つ）に限る。PostgreSQL は役割が自分の
     // パスワードを変えることを許すため、限らないと、差し替えの確定から古い接続を切るまでの間に移す元の接続が自分の役割の
-    // パスワードを変え、境の時刻の後に開いた接続が切られず、結んだ版と DB のパスワードが合わないまま保留が下りうる
+    // パスワードを変え、境の時刻の後に開いた接続が切られず、結んだ版と DB のパスワードが合わないまま保留が下りうる。
+    // 静的なパラメータで、既にあるクラスタでは書き込みのインスタンスを再起動するまで効かない。スタックは再起動せず、差し替えが
+    // 実効値を読んで照らす（apps/api/src/db-prep/rotate.ts。再起動の手順は docs/operations/setup.md の「進行表の DB のパスワードの変更の禁止」）
     const parameterGroup = new ParameterGroup(this, "Parameters", {
       engine,
       description: "nd-factory progress DB",

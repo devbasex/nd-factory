@@ -1,6 +1,6 @@
 import { PROGRESS_DB_IDENT_SHAPE } from "@nd-factory/contracts/db-prep";
 import type { ProjectIdent } from "./provision.ts";
-import { prepareRolePassword } from "./role-password.ts";
+import { passwordCommandsRestriction, prepareRolePassword } from "./role-password.ts";
 import { ADMIN_DATABASE, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
 
 // 差し替えの結果。recorded は確定の後に記された番号（applied なら渡した番号）
@@ -95,6 +95,12 @@ const REMAINING_OLD =
   " (SELECT coalesce(string_agg(u.pid::text, ','), '') FROM unnest(string_to_array(CAST(:starting AS text), ',')::int[]) AS u(pid)" +
   " WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity a WHERE a.pid = u.pid))::text AS starting";
 
+// プロジェクトの役割が自分のパスワードを変えられないこと（rds.restrict_password_commands）の実効値。静的なパラメータで、
+// 既にあるクラスタではパラメータの群に置いても書き込みのインスタンスを再起動するまで効かない（docs/operations/setup.md）。
+// 効かないまま差し替えると、確定から古い接続を切るまでの間に移す元の接続が自分のパスワードを変え、境の時刻の後に開いた
+// 接続が切られずに保留が下りうる（I17）。Aurora の外では NULL になる
+const RESTRICT_PASSWORD = "SELECT current_setting('rds.restrict_password_commands', true) AS restrict_password";
+
 // サーバーの認証の時間切れ（秒）。起動の途中の接続は、認証をこの時間の内に終えるか、サーバーに切られる
 const AUTH_TIMEOUT = "SELECT setting::int AS auth_timeout_s FROM pg_catalog.pg_settings WHERE name = 'authentication_timeout'";
 
@@ -104,6 +110,15 @@ function pidList(raw: unknown, what: string): string[] {
 }
 
 type TxOpts = { database: string; transactionId: string };
+
+// 無効か読めなければ投げる。設定が無い（Aurora の外）は通す
+async function assertPasswordCommandsRestricted(sql: SqlExecutor, opts: TxOpts): Promise<void> {
+  const [row] = await sql.execute(RESTRICT_PASSWORD, undefined, opts);
+  const restriction = passwordCommandsRestriction(row?.restrict_password);
+  if (restriction === "off" || restriction === "unreadable") {
+    throw new Error("rds.restrict_password_commands が効いていない（パラメータの群で 1 に置き、書き込みのインスタンスを再起動する）");
+  }
+}
 
 async function authTimeoutMs(sql: SqlExecutor, opts: TxOpts): Promise<number> {
   const [row] = await sql.execute(AUTH_TIMEOUT, undefined, opts);
@@ -168,6 +183,8 @@ export async function rotateRole(sql: SqlExecutor, project: ProjectIdent & { pas
   return inTransaction(sql, async (opts) => {
     // 鎖は確定か巻き戻しまで持つ
     await sql.execute(ROTATE_LOCK, roleParam, opts);
+    // 番号を読む前に照らす。記した番号 = n の呼び直し（パスワードを書かずに切りと移しへ進む道）も、照らしが通らなければ止める
+    await assertPasswordCommandsRestricted(sql, opts);
     await ensureTable(sql, opts);
     const got = await readSeq(sql, roleParam, opts);
     if (got !== undefined && got.recorded > project.seq) return { kind: "superseded_greater", recorded: got.recorded };
