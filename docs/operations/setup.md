@@ -122,6 +122,30 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 - パイプラインのスタックを初めて反映した後は、GitHub との接続を有効にし、承認を拒む方針を AI の主体へ付けて確かめるまで、起点のブランチへ push しない（[pipeline-approval.md](pipeline-approval.md)）
 - 設定を変えるときの手順は [settings.md](settings.md) にある
 
+## アプリのスタックを消した後に作り直す
+
+データを失わないため、アプリのスタックを消しても次の資源は消えずに残る（CloudFormation の `DeletionPolicy` と `UpdateReplacePolicy` が `Retain`）。
+
+| 資源 | 名前 | 同じ接頭辞と環境で作り直すとき |
+| --- | --- | --- |
+| 進行表の DB のクラスタと書き手 | `<prefix>-<environment>-progress-db`（書き手の名前は CloudFormation が付ける） | クラスタの名前が衝突する |
+| 進行表の DB の管理の役割の秘密の器 | `<prefix>/<environment>/progress-db-admin` | 名前が衝突する |
+| 利用者の表 | `<prefix>-<environment>-accounts` | 名前が衝突する |
+| DB のパラメーターのグループとサブネットのグループ・出口の無い 2 つのサブネット・DB の SG・VPC | 名前は CloudFormation が付ける（SG と VPC の名前は VPC ごとに別） | 衝突しない。残ったクラスタが使う間は消せないため、クラスタと一緒に残す |
+| 画面の置き場・利用者プール | 名前は CloudFormation が付ける（利用者プールの名前は重なってよい） | 衝突しない |
+
+名前は設定の接頭辞と環境から決まり、変える口を持たない。名前が衝突する資源を残したまま同じ設定で `deploy` を打つと、作成が失敗して CloudFormation が戻す（終了コード 8）。作り直す前に、残った資源を次の順で消す。データが要るときは、各段の退避を先に取る。
+
+1. 書き手とクラスタの名前を読む: `aws rds describe-db-clusters --db-cluster-identifier <prefix>-<environment>-progress-db --query 'DBClusters[0].DBClusterMembers[].DBInstanceIdentifier'`
+2. クラスタの削除の保護を外す: `aws rds modify-db-cluster --db-cluster-identifier <prefix>-<environment>-progress-db --no-deletion-protection --apply-immediately`
+3. 書き手を消す: `aws rds delete-db-instance --db-instance-identifier <1 の名前>`。消え終わるまで待つ（`aws rds wait db-instance-deleted --db-instance-identifier <1 の名前>`）
+4. クラスタを消す: `aws rds delete-db-cluster --db-cluster-identifier <prefix>-<environment>-progress-db --final-db-snapshot-identifier <スナップショットの名前>`。退避が要らなければ `--final-db-snapshot-identifier` の代わりに `--skip-final-snapshot` を渡す
+5. 管理の役割の秘密の器を消す: `aws secretsmanager delete-secret --secret-id <prefix>/<environment>/progress-db-admin --force-delete-without-recovery`。回復の期間を置くと、その間は同じ名前で作れない
+6. 利用者の表を消す: 退避が要れば `aws dynamodb create-backup --table-name <prefix>-<environment>-accounts --backup-name <名前>` を先に打ち、`aws dynamodb delete-table --table-name <prefix>-<environment>-accounts`
+7. 残った DB のグループ・サブネット・SG・VPC は、クラスタが消えた後に消せる。消さなくても作り直しは衝突しないが、VPC はリージョンごとの数の上限（既定 5）に数えられる
+
+退避したスナップショットやバックアップを新しいスタックの資源へ戻す手順は、まだこの文書に無い。
+
 ## 終了コード
 
 0 と 8 のほかは、AWS へ何も書いていない。そのため 2〜7 で止まったときは、表の意味の原因を直して同じコマンドを打ち直せばよい。7 で止まったときは置き場か profile が `diff` のときと違うため、`diff` から打ち直し、新しい差分を読んでから `deploy` を打つ。8 は書いた後に CloudFormation が戻した状態である。

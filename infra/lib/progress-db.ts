@@ -45,7 +45,9 @@ export class ProgressDb extends Construct {
       removalPolicy: RemovalPolicy.RETAIN,
     });
 
-    // 残したクラスタの管理の役割を、スタックを消した後も同じ器から読めるようにする
+    // 残したクラスタの管理の役割を、スタックを消した後も同じ器から読めるようにする。
+    // クラスタの識別子とこの器の名前は固定のため、残したまま同じ設定で作り直すと名前が衝突する。
+    // 作り直す前に消す手順は docs/operations/setup.md の「アプリのスタックを消した後に作り直す」にある
     const secret = new DatabaseSecret(this, "AdminSecret", {
       username: PROGRESS_DB_ADMIN_USER,
       secretName: props.names.progressDbAdminSecret,
