@@ -158,6 +158,35 @@ describe("defineOperation", () => {
   ])("型を外して渡した成功の結果が %s なら投げる", (_why, result) => {
     expect(() => defineOperation(base({ result: result as unknown as ResultShape }))).toThrow(OperationDefinitionError);
   });
+
+  it.each<[string, string, z.ZodType]>([
+    ["item を欠く", "sprints.get", z.strictObject({ ok: z.literal(true) })],
+    ["item を省ける", "sprints.get", z.strictObject({ ok: z.literal(true), item: sprint.optional() })],
+    ["reason を持つ", "sprints.get", z.strictObject({ ok: z.literal(true), item: sprint, reason: z.string() })],
+    ["余分なキーを持つ", "sprints.get", z.strictObject({ ok: z.literal(true), item: sprint, note: z.string() })],
+    ["list でない操作が一覧の封筒", "sprints.get", okList(sprint)],
+    ["list の操作が要素の封筒", "sprints.list", okItem(sprint)],
+    ["一覧が next_cursor を欠く", "sprints.list", z.strictObject({ ok: z.literal(true), items: z.array(sprint) })],
+    ["一覧の items が配列でない", "sprints.list", z.strictObject({ ok: z.literal(true), items: sprint, next_cursor: z.string().nullable() })],
+    ["一覧の next_cursor が null を許さない", "sprints.list", z.strictObject({ ok: z.literal(true), items: z.array(sprint), next_cursor: z.string() })],
+    [
+      "一覧が status を持つ",
+      "sprints.list",
+      z.strictObject({ ok: z.literal(true), items: z.array(sprint), next_cursor: z.string().nullable(), status: z.number() }),
+    ],
+  ])("成功の結果の封筒が %s なら投げる", (_why, name, result) => {
+    expect(() => defineOperation(base({ name, result: result as unknown as ResultShape }))).toThrow(OperationDefinitionError);
+  });
+
+  it("受け口 user でない経路は決まったキーに値を足せ、失敗の要素のキーは置けない", () => {
+    const runner = { name: "runner.answers.list", endpoint: "runner", features: [], delegationKind: null } as const;
+    const added = z.strictObject({ ok: z.literal(true), items: z.array(sprint), next_cursor: z.string().nullable(), delivered_seqs: z.array(z.number()) });
+    expect(defineOperation(base({ ...runner, result: added as unknown as ResultShape })).route).toBe("/v1/runner/answers/list");
+    const withReason = z.strictObject({ ok: z.literal(true), items: z.array(sprint), next_cursor: z.string().nullable(), reason: z.string() });
+    expect(() => defineOperation(base({ ...runner, result: withReason as unknown as ResultShape }))).toThrow(OperationDefinitionError);
+    const noItems = z.strictObject({ ok: z.literal(true), delivered_seqs: z.array(z.number()) });
+    expect(() => defineOperation(base({ ...runner, result: noItems as unknown as ResultShape }))).toThrow(OperationDefinitionError);
+  });
 });
 
 describe("pendingShape", () => {

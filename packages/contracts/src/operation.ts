@@ -109,13 +109,37 @@ function checkReasons(name: string, reasons: readonly ReasonDef[]): void {
   }
 }
 
-// 成功の結果が ok: true の strict な封筒かを照らす。型の制約を as で外した定義も、ここで落とす
-function checkResult(name: string, result: ResultShape): void {
+// 失敗の要素だけが持つキー。成功の封筒には置かない
+const FAILURE_KEYS = ["status", "reason", "fields"] as const;
+
+// 成功の結果が ok: true の strict な封筒かを照らす。型の制約を as で外した定義も、ここで落とす。
+// 封筒のキーは docs/design/api.md の「本文は配列」に合わせる。list の操作は ok・items・next_cursor、ほかは ok・item。
+// 受け口 user は封筒をこのキーだけにする。受け口 user でない経路は応答に足す値を文書が持つ（runner の answers.list の delivered_seqs など）ため、
+// 決まったキーを必ず持ち、失敗の要素のキーを持たないことだけを照らす
+function checkResult(name: string, verb: string, endpoint: Endpoint, result: ResultShape): void {
   if (isPending(result)) return;
   if (!(result instanceof z.ZodObject)) fail(name, "成功の結果は okItem・okList の封筒で書く");
-  const ok: unknown = result.shape["ok"];
+  const shape: Record<string, unknown> = result.shape;
+  const ok = shape["ok"];
   if (!(ok instanceof z.ZodLiteral) || ok.values.size !== 1 || !ok.values.has(true)) fail(name, "成功の結果の封筒は ok を z.literal(true) で持つ");
   if (!(result.def.catchall instanceof z.ZodNever)) fail(name, "成功の結果の封筒は strictObject で組む");
+
+  const required = verb === "list" ? ["ok", "items", "next_cursor"] : ["ok", "item"];
+  for (const key of required) {
+    const field = shape[key];
+    if (!(field instanceof z.ZodType) || field.safeParse(undefined).success) fail(name, `成功の結果の封筒は ${key} を必ず持つ`);
+  }
+  if (verb === "list") {
+    if (!(shape["items"] instanceof z.ZodArray)) fail(name, "一覧の成功の結果の items は配列で持つ");
+    const cursor = shape["next_cursor"];
+    if (!(cursor instanceof z.ZodNullable) || !(cursor.unwrap() instanceof z.ZodString)) fail(name, "一覧の成功の結果の next_cursor は文字列か null で持つ");
+  }
+  const keys = Object.keys(shape);
+  for (const key of FAILURE_KEYS) if (keys.includes(key)) fail(name, `成功の結果の封筒に失敗の要素のキーを置かない: ${key}`);
+  if (endpoint === "user") {
+    const extra = keys.filter((k) => !required.includes(k));
+    if (extra.length > 0) fail(name, `成功の結果の封筒は ${required.join("・")} だけを持つ: ${extra.join("・")}`);
+  }
 }
 
 // 印を照らし、HTTP の経路と既定の値を足した定義を返す。印が食い違えば投げる（モジュールの読み込みで落ちる）
@@ -146,7 +170,7 @@ export function defineOperation<N extends string, I extends Shape, R extends Res
   if (!needsDelegation && delegationKind !== null) fail(def.name, "委任から呼べない操作は委任の種類を持たない");
   if (verb !== "list" && order !== null) fail(def.name, "並びは list の操作だけが持つ");
   checkReasons(def.name, reasons);
-  checkResult(def.name, def.result);
+  checkResult(def.name, verb, endpoint, def.result);
 
   return {
     name: def.name,
