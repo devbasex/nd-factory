@@ -3,17 +3,19 @@
 # gitleaks のすべての実行はこのスクリプトを通す（leak-check のジョブと tools/test/leak-scan.integration.test.ts）。
 # gitleaks の除外（値の行の gitleaks:allow・.gitleaksignore・前の報告）を効かなくし、当たりを規則・ファイル・行・コミットだけで出す。
 # 当たった行の残り・コミットの本文・作者は出さない（同じ行の別の秘密や、伏せた値の前後が記録に残るため）。
+# ファイルの名前も秘密の値を含み得るので、--paths を渡さなければ file-<番号>（名前の順の通し番号）に替えて出す。
 # 今のディレクトリを探す木の根として打つ。
 #
-# 使い方: leak-scan.sh <dir|git> <設定> [--range <範囲>] [--report <報告のファイル>]
+# 使い方: leak-scan.sh <dir|git> <設定> [--range <範囲>] [--report <報告のファイル>] [--paths]
 #   dir: 今の木を探す。git: 履歴を探す（--range を渡せばその範囲。マージのコミットの差分を含める）
 #   設定: 必ず渡す。省くと gitleaks は探す木の根の .gitleaks.toml を読み、既定の規則が抜けるため
 #   --report: 当たりを JSON で書く先（探す木の外に置く）。項目は RuleID・File・StartLine・EndLine・Commit だけ
+#   --paths: File に実際のファイルの名前を出す。手元で当たりの場所を引くときだけ渡す（CI のジョブは渡さない）
 # 終了コード: 0 当たり無し、1 当たりがある・gitleaks が失敗した、2 引数の誤り・除外のファイルがある
 set -euo pipefail
 
 usage() {
-  echo "leak-scan: 使い方: leak-scan.sh <dir|git> <設定> [--range <範囲>] [--report <報告のファイル>]" >&2
+  echo "leak-scan: 使い方: leak-scan.sh <dir|git> <設定> [--range <範囲>] [--report <報告のファイル>] [--paths]" >&2
   exit 2
 }
 
@@ -35,10 +37,12 @@ shift 2
 
 range=""
 report=""
+paths=false
 while (($# > 0)); do
   case "$1" in
     --range) [[ $# -ge 2 ]] || usage; range="$2"; shift 2 ;;
     --report) [[ $# -ge 2 ]] || usage; report="$2"; shift 2 ;;
+    --paths) paths=true; shift ;;
     *) usage ;;
   esac
 done
@@ -74,6 +78,7 @@ args=(
 )
 
 # 報告から規則・ファイル・行・コミットだけを取り出し、記録へ出し、--report があればそこへ書く。
+# --paths が無ければ、ファイルの名前を名前の順の file-<番号> に替える（名前に入った秘密の値を記録と報告に残さない）。
 # gitleaks の終了コードを受け、報告を読めなければ 1 で終える
 finish() {
   local status="$1"
@@ -82,7 +87,10 @@ finish() {
     exit 1
   fi
   local findings
-  findings="$(jq '[.[] | {RuleID, File, StartLine, EndLine, Commit}]' "$raw_report")"
+  findings="$(jq --argjson paths "$paths" '
+    ([.[].File] | unique) as $files
+    | [.[] | {RuleID, File, StartLine, EndLine, Commit}]
+    | if $paths then . else map(.File as $f | .File = "file-\(($files | index($f)) + 1)") end' "$raw_report")"
   jq -r '.[] | "leak-scan: 当たり \(.RuleID) \(.File):\(.StartLine)" + (if .Commit == "" then "" else " \(.Commit)" end)' <<<"$findings"
   if [[ -n "$report" ]]; then
     printf '%s\n' "$findings" >"$report"
@@ -91,6 +99,9 @@ finish() {
   count="$(jq 'length' <<<"$findings")"
   if ((count > 0)); then
     echo "leak-scan: 当たり ${count} 件" >&2
+    if [[ "$paths" == false ]]; then
+      echo "leak-scan: ファイルの名前は伏せた。手元で同じ引数に --paths を足して打つと出る" >&2
+    fi
     exit 1
   fi
   exit "$status"

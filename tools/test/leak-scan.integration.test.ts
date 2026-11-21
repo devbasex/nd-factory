@@ -121,10 +121,14 @@ function overlayConfig(pattern: string): string {
   return path;
 }
 
-/** スクリプトを子のプロセスで打ち、報告を木の外の一時のファイルに受ける */
-function scan(cwd: string, args: string[]): ScanResult {
+/**
+ * スクリプトを子のプロセスで打ち、報告を木の外の一時のファイルに受ける。
+ * 規則とファイルの組を照らすため既定で `--paths` を渡す（CI のジョブは渡さない。伏せる側は `paths: false` で確かめる）
+ */
+function scan(cwd: string, args: string[], { paths = true }: { paths?: boolean } = {}): ScanResult {
   const reportPath = join(tempDir("leak-report-"), "report.json");
-  const result = spawnSync("bash", [SCRIPT, ...args, "--report", reportPath], { cwd, encoding: "utf8" });
+  const extra = paths ? ["--paths"] : [];
+  const result = spawnSync("bash", [SCRIPT, ...args, ...extra, "--report", reportPath], { cwd, encoding: "utf8" });
   const reportText = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : null;
   const findings = reportText === null ? [] : (JSON.parse(reportText) as Finding[]);
   return { status: result.status, output: `${result.stdout}${result.stderr}`, reportText, findings };
@@ -209,6 +213,26 @@ describe("nd-factory の規則（.gitleaks.toml）", () => {
     const shown = `${result.output}${result.reportText ?? ""}`;
     expect(values.filter((value) => shown.includes(value))).toEqual([]);
     expect(result.output).toContain("leak-scan: 当たり nd-aws-arn docs/arn.md:1");
+    expect([...new Set(result.findings.flatMap((f) => Object.keys(f)))].sort()).toEqual(REPORT_KEYS);
+  }, TIMEOUT);
+
+  it("--paths を渡さなければ、ファイルの名前に入った秘密の値を記録と報告に出さず、名前の順の番号に替える", () => {
+    const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    const root = makeTree({
+      [`docs/${realWord}.md`]: `環境の名前 ${realWord} の行\n`,
+      "docs/account.md": `アカウント ${fakeAccount()}\n`,
+    });
+    const result = scan(root, ["dir", overlayConfig(realWord)], { paths: false });
+    expect(result.status).toBe(1);
+    const shown = `${result.output}${result.reportText ?? ""}`;
+    expect(shown).not.toContain(realWord);
+    expect(shown).not.toContain("docs/");
+    expect(result.findings.map((f) => [f.RuleID, f.File, f.StartLine]).sort()).toEqual([
+      ["nd-aws-account-id", "file-1", 1],
+      ["nd-real-value", "file-2", 1],
+    ]);
+    expect(result.output).toContain("leak-scan: 当たり nd-real-value file-2:1");
+    expect(result.output).toContain("--paths");
     expect([...new Set(result.findings.flatMap((f) => Object.keys(f)))].sort()).toEqual(REPORT_KEYS);
   }, TIMEOUT);
 
