@@ -1,4 +1,4 @@
-import { idOf, type IdKind } from "@nd-factory/contracts/ids";
+import { ID_KINDS, idOf, type IdKind } from "@nd-factory/contracts/ids";
 import { parse, v4, v7 } from "uuid";
 import type { Clock } from "./clock.ts";
 
@@ -18,7 +18,11 @@ function randomSeq(): number {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0) >>> 1;
 }
 
+const KINDS: ReadonlySet<string> = new Set(ID_KINDS);
+
+// 集合に無い頭の ID は parseId がいつも null を返すため作らない（型の外から来た値も実行の時に照らす）
 export function newId<K extends IdKind>(kind: K, clock: Clock): Id<K> {
+  if (!KINDS.has(kind)) throw new TypeError(`ID の頭の集まりに無い種類: ${String(kind)}`);
   const now = clock.epochMs();
   if (now > state.msecs) {
     state.msecs = now;

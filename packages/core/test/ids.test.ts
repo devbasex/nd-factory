@@ -55,10 +55,10 @@ describe("newId", () => {
     expect(msecsOf(second)).toBe(later);
   });
 
-  it("集合に無い種類は型で弾く", () => {
+  it("集合に無い種類は型で弾き、型の外から来ても実行の時に投げる", () => {
     const clock = fixedClock(Date.UTC(2026, 10, 21, 0, 0, 6));
     // @ts-expect-error ID の頭の集まりに無い種類
-    expect(() => newId("nope", clock)).not.toThrow();
+    expect(() => newId("nope", clock)).toThrow(TypeError);
   });
 });
 
