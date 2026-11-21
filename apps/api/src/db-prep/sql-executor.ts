@@ -31,9 +31,12 @@ export type SqlExecutor = {
 export const ADMIN_DATABASE = "postgres";
 
 // 再開の待ちとして繰り返す例外の名前。ほかの例外は 1 回で投げる
-// 繰り返してよい前提: DatabaseResumingException は、一時停止した DB へ文を届ける前に Data API が要求を取り消したことを示す
-// （「A request was cancelled because the Aurora Serverless v2 DB instance was paused」。文は打たれていない）。
-// そのため CREATE DATABASE・CREATE ROLE のような繰り返せない文でも、打ち直して 2 回打たれることは無い。
+// 繰り返してよい前提（推測。#44 で確かめる）: DatabaseResumingException の時は、文が DB で打たれていない。
+// 文書は「A request was cancelled because the Aurora Serverless v2 DB instance was paused」と、一時停止のため要求が
+// 取り消されたことだけを言い、文が DB へ届いていないことまでは書いていない。止まった DB が文を受けられないことからの推測である。
+// 推測が外れて打たれた文を打ち直すと、CREATE DATABASE・CREATE ROLE のような繰り返せない文は「既にある」で落ちる。
+// 用意の手順は既にあれば作らない作りで何度打っても同じ結果になるため（docs/design/data.md の用意の手順）、外れたときに起きるのは
+// その回の sql_failed で、次の開始か呼び直しが同じ手順を打ち直して終える（2 重の作成や壊れた状態は残らない）。
 // 届いた後の失敗（通信の切れ・時間切れ・5xx）は打たれたかが分からないため、ここへ足さない。SDK の側の再試行も止める（createRdsDataClient）
 // https://docs.aws.amazon.com/rdsdataservice/latest/APIReference/API_ExecuteStatement.html#API_ExecuteStatement_Errors
 export const RESUME_WAIT_ERRORS: readonly string[] = ["DatabaseResumingException"];
@@ -217,7 +220,7 @@ export function createDataApiExecutor(opts: {
         includeResultMetadata: true,
         continueAfterTimeout: false,
       });
-      // トランザクションの外の文は再開の待ちだけを打ち直す（文は打たれていない。RESUME_WAIT_ERRORS の前提）。
+      // トランザクションの外の文は再開の待ちだけを打ち直す（文は打たれていないと推測する。RESUME_WAIT_ERRORS の前提）。
       // トランザクションの中の文は繰り返さない。呼ぶ側が rollback して失敗にする
       const out = o.transactionId === undefined ? await withResumeWait(() => send(command), retry) : await send(command);
       return parseRecords(out.records, out.columnMetadata);
