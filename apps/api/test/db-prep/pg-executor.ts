@@ -244,7 +244,8 @@ async function open(database: string, credentials?: Credentials): Promise<Client
   return client;
 }
 
-// テストごとに使い捨てのデータベースを作り、終えたら接続ごと消す
+// テストごとに使い捨てのデータベースを作り、終えたら接続ごと消す。PUBLIC は接続できない（接続の値の役割と、
+// 明示して CONNECT を与えた役割だけが繋げる）
 export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>): Promise<T> {
   const name = `nd_test_${randomBytes(6).toString("hex")}`;
   const admin = await open(adminDatabaseOfUrl());
@@ -255,7 +256,11 @@ export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>):
   // 管理の役割は、作った役割より後に消す
   const admins: string[] = [];
   try {
-    await admin.query(`CREATE DATABASE ${escapeIdentifier(name)}`);
+    // 用意の手順は、接続を許すほかのデータベースで PUBLIC が CONNECT を持つと止まる。並んで走るほかのテストの
+    // 使い捨てのデータベースも PUBLIC へ接続を開かないように、接続を許さずに作って外してから許す
+    await admin.query(`CREATE DATABASE ${escapeIdentifier(name)} WITH ALLOW_CONNECTIONS false`);
+    await admin.query(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier(name)} FROM PUBLIC`);
+    await admin.query(`ALTER DATABASE ${escapeIdentifier(name)} WITH ALLOW_CONNECTIONS true`);
     const connect = async (database: string = name, credentials?: Credentials): Promise<Client> => {
       const c = await open(database, credentials);
       clients.push(c);

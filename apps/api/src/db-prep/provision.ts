@@ -218,6 +218,13 @@ const PUBLIC_DATABASE_GRANTS =
   "SELECT count(*) FILTER (WHERE pg_catalog.has_database_privilege('public', d.oid, 'CONNECT')" +
   " OR pg_catalog.has_database_privilege('public', d.oid, 'TEMPORARY'))::int AS remaining, count(*)::int AS found" +
   " FROM pg_catalog.pg_database d WHERE d.datname = ANY (string_to_array(:names, ','))";
+// 渡した名前のほかで、接続を許し、PUBLIC が CONNECT を持つデータベースの数。渡すのは手順の 1 が外して読み直す
+// postgres・template1 と、手順の 3 が外して読み直すプロジェクトのデータベース。ほかのデータベース（ほかのプロジェクトのもの、
+// 別の経路で作られたもの）で PUBLIC が CONNECT を持てば、これから作る役割もそこへ接続できる。
+// 接続を許さないデータベース（作成の途中のほかのプロジェクトのもの・template0）は誰も接続できないため数えない
+const OTHER_PUBLIC_DATABASES =
+  "SELECT count(*)::int AS exposed FROM pg_catalog.pg_database d WHERE d.datallowconn" +
+  " AND NOT (d.datname = ANY (string_to_array(:names, ','))) AND pg_catalog.has_database_privilege('public', d.oid, 'CONNECT')";
 // PUBLIC がまだ表か列のどれかを読めるカタログの数（表の権限の取り消しは同じ種類の列の権限も外す）
 const PUBLIC_CATALOG_READS =
   "SELECT count(*)::int AS remaining FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace" +
@@ -265,6 +272,12 @@ async function assertPublicDatabaseRevoked(
   if (got.remaining !== 0 || got.found !== names.length) throw new Error("PUBLIC からデータベースの接続を外せなかった");
 }
 
+// 渡した名前のほかの、接続を許すデータベースで PUBLIC が CONNECT を持てば投げる（読めない形も投げる）
+async function assertNoOtherPublicDatabase(sql: SqlExecutor, names: readonly string[]): Promise<void> {
+  const [row] = await sql.execute(OTHER_PUBLIC_DATABASES, [{ name: "names", value: names.join(",") }], ADMIN);
+  if (row?.exposed !== 0) throw new Error("ほかのデータベースで PUBLIC が接続を持つ");
+}
+
 // 手順の 5。シグナルを送り、対象が消えたことを期限の内で読み直す。期限を過ぎても残れば投げる
 async function terminateOthers(sql: SqlExecutor, params: SqlParam[], options: ProvisionOptions): Promise<void> {
   const deadlineMs = options.deadlineMs ?? 15_000;
@@ -286,7 +299,8 @@ async function terminateOthers(sql: SqlExecutor, params: SqlParam[], options: Pr
 
 // docs/design/data.md の用意の手順の 1〜6。何度打っても、最後に渡したパスワードで同じ結果になる。
 // パスワードの平文は SQL の文にも引数にも載せず、SCRAM-SHA-256 の検証子を文に載せる（失敗した文は DB の側のログに書かれうるため）。
-// 取り消した権限は読み直して照らし、残っていれば役割に接続を与える前に投げる
+// 取り消した権限は読み直して照らし、残っていれば役割に接続を与える前に投げる。
+// ほかのデータベースで PUBLIC が CONNECT を持つときも、何も作らずに投げる
 export async function provisionProject(
   sql: SqlExecutor,
   project: ProjectIdent & { password: string },
@@ -306,6 +320,9 @@ export async function provisionProject(
     await sql.execute(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier(name)} FROM PUBLIC`, undefined, ADMIN);
   }
   await assertPublicDatabaseRevoked(sql, SYSTEM_DATABASES, ADMIN);
+  // ほかのデータベースの PUBLIC の CONNECT は外さずに止める（ほかのプロジェクトや別の経路のデータベースの権限を書き換えない）。
+  // 残したまま進むと、6 で作る役割がそこへ接続できる
+  await assertNoOtherPublicDatabase(sql, [...SYSTEM_DATABASES, project.database]);
 
   // 2. 権限を整えるまで誰も接続できないように作る。CREATE DATABASE はトランザクションの中で打てないため自動の確定で打つ
   if (!(await readFlag(sql, DATABASE_EXISTS, "found", dbParam, ADMIN))) {

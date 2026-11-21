@@ -92,6 +92,7 @@ describePg("scramVerifier（PostgreSQL）", () => {
       db.dropRoleLater(role);
       const password = fakePassword();
       await admin.query(`CREATE ROLE ${escapeIdentifier(role)} LOGIN PASSWORD ${escapeLiteral(scramVerifier(password))}`);
+      await admin.query(`GRANT CONNECT ON DATABASE ${escapeIdentifier(db.name)} TO ${escapeIdentifier(role)}`);
 
       const client = await db.connect(db.name, { user: role, password });
       const who = await client.query<{ u: string }>("SELECT current_user::text AS u");

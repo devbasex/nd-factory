@@ -33,6 +33,8 @@ type FakeState = {
   // 取り消しの後の読み直しで、PUBLIC に残る権限の数（PUBLIC_DATABASE_GRANTS・PUBLIC_CATALOG_READS）
   publicDatabaseRemaining?: number;
   publicCatalogRemaining?: number;
+  // 手順の 1 で読む、渡した名前のほかの接続を許すデータベースで PUBLIC が CONNECT を持つものの数（OTHER_PUBLIC_DATABASES）
+  publicOtherDatabases?: number;
   // 手順の 5 の残りの読みが、呼ばれるたびに返す数。尽きたら最後の数を返し続ける
   remainingSessions?: number[];
 };
@@ -52,6 +54,7 @@ function fakeDb(state: FakeState = {}): FakeSqlExecutor {
       reads += 1;
       return [{ remaining: n ?? 0 }];
     }
+    if (sql.includes("AS exposed")) return [{ exposed: state.publicOtherDatabases ?? 0 }];
     if (sql.includes("AS signalled")) return [{ signalled: 0 }];
     if (sql.includes("AS present")) return [{ present: state.tablePresent ?? true }];
     if (sql.includes("FROM nd_prep.bindings")) return state.bindings ?? [];
@@ -276,6 +279,7 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
       at('REVOKE CONNECT, TEMPORARY ON DATABASE "postgres" FROM PUBLIC'),
       at('REVOKE CONNECT, TEMPORARY ON DATABASE "template1" FROM PUBLIC'),
       at("has_database_privilege('public'"),
+      at("AS exposed"),
       at("CREATE DATABASE"),
       at(`REVOKE CONNECT, TEMPORARY ON DATABASE ${db} FROM PUBLIC`),
       at(`ALTER DATABASE ${db} WITH ALLOW_CONNECTIONS true`),
@@ -334,6 +338,20 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
     await expect(provisionProject(fake, { ...PROJECT, password: PASSWORD })).rejects.toThrow();
     expect(fake.statements().some((x) => x.includes("ALLOW_CONNECTIONS true"))).toBe(false);
     expect(fake.calls.at(-1)?.kind).toBe("rollback");
+  });
+
+  it("ほかの接続を許すデータベースで PUBLIC が CONNECT を持てば、何も作らず接続を与えずに投げる。照らしから外すのは 1 と 3 で外すものだけ", async () => {
+    const fake = fakeDb({ publicOtherDatabases: 1 });
+    await expect(provisionProject(fake, { ...PROJECT, password: PASSWORD })).rejects.toThrow("ほかのデータベースで PUBLIC が接続を持つ");
+    expect(fake.statements().some((x) => x.startsWith("CREATE") || x.startsWith("ALTER") || x.startsWith("GRANT"))).toBe(false);
+    const check = fake.calls.find((c) => c.kind === "execute" && c.sql.includes("AS exposed"));
+    expect(check).toMatchObject({ database: ADMIN_DATABASE, transactionId: undefined });
+    expect(check?.kind === "execute" && check.params).toEqual([{ name: "names", value: ["postgres", "template1", PROJECT.database].join(",") }]);
+    // 読めない形も投げる
+    const unreadable = fakeDb();
+    unreadable.respond = ((inner) => (sql, params) => (sql.includes("AS exposed") ? [] : inner(sql, params)))(unreadable.respond);
+    await expect(provisionProject(unreadable, { ...PROJECT, password: PASSWORD })).rejects.toThrow();
+    expect(unreadable.statements().some((x) => x.startsWith("GRANT"))).toBe(false);
   });
 
   it("取り消しの読み直しで見つかるデータベースの数が足りなければ投げる", async () => {
@@ -639,6 +657,25 @@ describePgDisposable("provisionProject（PostgreSQL）", () => {
     await withTestDatabase(async (db) => {
       const sql = skip(await db.nonSuperuserExecutor(), (s) => s.includes("TO CURRENT_USER WITH SET TRUE"));
       await expect(prepare(sql, newProject(db, "a"))).rejects.toThrow();
+    });
+  });
+
+  it("B のデータベースに PUBLIC の CONNECT が戻っていれば、A の用意を役割を作らずに止め、A の役割は B へ接続できない", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      const b = newProject(db, "b");
+      expect(await prepare(sql, b)).toBe("bound");
+      const admin = await db.connect();
+      await admin.query(`GRANT CONNECT ON DATABASE ${escapeIdentifier(b.database)} TO PUBLIC`);
+      const a = newProject(db, "a");
+      await expect(prepare(sql, a)).rejects.toThrow("ほかのデータベースで PUBLIC が接続を持つ");
+      expect((await admin.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [a.role])).rows).toHaveLength(0);
+      expect((await admin.query("SELECT 1 FROM pg_database WHERE datname = $1", [a.database])).rows).toHaveLength(0);
+      // B の PUBLIC を外し直せば、A の打ち直しが用意を終え、A の役割は B へ接続できない
+      await admin.query(`REVOKE CONNECT ON DATABASE ${escapeIdentifier(b.database)} FROM PUBLIC`);
+      expect(await prepare(sql, a)).toBe("retry");
+      expect(await canConnect(db, a.database, a)).toBe(true);
+      expect(await canConnect(db, b.database, a)).toBe(false);
     });
   });
 
