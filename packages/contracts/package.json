@@ -10,7 +10,8 @@
     "./values": "./src/values.ts",
     "./ids": "./src/ids.ts",
     "./tokens": "./src/tokens.ts",
-    "./reasons": "./src/reasons.ts"
+    "./reasons": "./src/reasons.ts",
+    "./operation": "./src/operation.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."
