@@ -30,6 +30,7 @@ nd-factory/
     ├── package.json                       依存 @nd-factory/contracts・ajv・ajv-formats・yaml
     ├── tsconfig.json                      checks/src を含める
     ├── checks/src/ndf-contract-check.ts * NDF の契約の照合（CLI）
+    ├── checks/leak-scan.sh              * gitleaks の 1 回の探し（除外を効かなくする。`leak-check` のジョブと結合のテストが打つ）
     └── test/
         ├── ndf-contract-check.test.ts   *
         ├── contracts-round-trip.test.ts *  形の正本の往復と I14 の表の照らし
@@ -123,11 +124,22 @@ nd-factory/
 1. `actions/checkout`（`fetch-depth: 0`・`persist-credentials: false`）
 2. 環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の版の linux の資産を取り、`sha256sum` を `GITLEAKS_SHA256` と直接比べ、一致したときだけ展開して `PATH` へ置く（配布元のチェックサムのファイルと比べない。固定にならないため）
 3. 実際の値の規則を重ねる: 秘密 `LEAK_CHECK_PATTERN` があれば、一時のディレクトリに `[extend] path = "<リポジトリ>/.gitleaks.toml"` と規則 `nd-real-value`（`regex` に秘密の正規表現を `'''` で囲んで置く）の 2 つだけを持つ設定を書く。無ければ `.gitleaks.toml` をそのまま使い、`LEAK_CHECK_REQUIRE_PATTERN` が `1` で同じリポジトリの枝からの実行（参照の検査と同じ式。fork の Pull Request は秘密を受けないので必須にしない）なら手順を失敗にする
-4. 今の木を 2 回探す: `gitleaks dir . --redact=100 --no-banner --exit-code 1`（既定の規則）と、同じ引数に `--config <設定>`（nd-factory の規則）。依存を入れる前なので、追跡していないファイルは木に無い
-5. Pull Request では、分岐点（`git merge-base <base.sha> <head.sha>`）から head までのコミットを、同じ 2 つで `gitleaks git . --log-opts="<分岐点>..<head.sha>"` で探す
+4. 今の木を 2 回探す: `tools/checks/leak-scan.sh dir`（既定の規則）と `tools/checks/leak-scan.sh dir <設定>`（nd-factory の規則）。依存を入れる前なので、追跡していないファイルは木に無い
+5. Pull Request では、分岐点（`git merge-base <base.sha> <head.sha>`）から head までのコミットを、同じ 2 つで `tools/checks/leak-scan.sh git <設定か無し> --range "<分岐点>..<head.sha>"` で探す
 6. 一時の設定のファイルを消す。`LEAK_CHECK_PATTERN` は手順の環境変数でだけ渡し、ほかの手順に渡さない
 
-- 当たりは gitleaks の出力のまま（規則・ファイル・行・伏せた秘密）。正当な当たりは gitleaks の標準の除外（値の行の `gitleaks:allow` か `.gitleaksignore`）に、注か理由を添えて置く。今の木は既定の規則で当たり 0 件（設計文書の LIB1）
+`tools/checks/leak-scan.sh`（`<dir|git> [設定] [--range <範囲>]`）は、gitleaks の除外を効かなくして 1 回探す。gitleaks のすべての実行はこのスクリプトを通す（ジョブの手順に `gitleaks` を直に書かない）。
+
+| 除外 | 効かなくする方法 |
+| --- | --- |
+| 値の行の `gitleaks:allow` | 引数 `--ignore-gitleaks-allow` |
+| `--gitleaks-ignore-path`（既定は `.`）の `.gitleaksignore` | 引数 `--gitleaks-ignore-path <空の一時のディレクトリ>` |
+| 探す木の根の `.gitleaksignore` | gitleaks は引数によらず、探す木の根の `.gitleaksignore` を読む（v8.30.1 の `cmd/root.go`）。スクリプトは探す前に `git ls-files --error-unmatch .gitleaksignore` と `test -e .gitleaksignore` を照らし、どちらかで在れば、名前を示して探さずに失敗する |
+| 前の報告（`--baseline-path`） | 渡さない |
+
+打つ引数は `gitleaks <dir . | git . --log-opts="<範囲>"> --redact=100 --no-banner --exit-code 1 --ignore-gitleaks-allow --gitleaks-ignore-path <空> [--config <設定>]` で、空の一時のディレクトリは終わりに消す。
+
+- 当たりは gitleaks の出力のまま（規則・ファイル・行・伏せた秘密）。正当な当たりは、`.gitleaks.toml` の `[[allowlists]]` に、理由と課題の番号の注を添えて足す（設定の変更なのでレビューで見える）。値の行の注と除外のファイルでは外せない。今の木は既定の規則で当たり 0 件（設計文書の LIB1）
 
 ## knip の設定
 
@@ -168,7 +180,7 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | --- | --- | --- | --- |
 | `loadWorkflows`・`triggersPullRequest`・`jobNames`・`checkNames` | 2 つのワークフローを読み、Pull Request で起動するものを選ぶ | `on: pull_request`・`on: [pull_request]`・`on:` の下の鍵の 3 つの書き方。鍵と同じ `name` | 解けない YAML で失敗する。鍵が宣言と同じでも `name` を上書きしたジョブ・行列のジョブは宣言と合わない。片方のワークフローにだけ資格情報の語・`id-token: write` を足すと当たる |
 | `permissionBlocks` | 今のワークフローで違反 0 件 | ジョブの `permissions: { contents: read }` は通る | ジョブに `pull-requests: write`・`write-all` を足すと場所つきで当たる |
-| `leak-scan.integration.test.ts`（gitleaks を起こす。`leak-check` のジョブで打つ） | 作り物の値だけの一時の木で当たり 0 件 | 作り物の UUID・置き場所の記号・13 桁の数で当たらない。`package-lock.json` の名前のファイルに置いた許可の値に合わない 12 桁も当たる（既定の全体の許可が効かない） | 実行の時に生成した架空の値（許可の値に合わず検出の規則に合う 12 桁・ARN・S3 の ARN・端点・token）と、重ねた規則の語を `docs/` の下に置くと当たり、報告に値が現れない。途中のコミットで足して消した値が `git` の探しで当たる |
+| `leak-scan.integration.test.ts`（`tools/checks/leak-scan.sh` を子のプロセスで打ち、gitleaks を起こす。`leak-check` のジョブで打つ） | 作り物の値だけの一時の木で当たり 0 件 | 作り物の UUID・置き場所の記号・13 桁の数で当たらない。`package-lock.json` の名前のファイルに置いた許可の値に合わない 12 桁も当たる（既定の全体の許可が効かない） | 実行の時に生成した架空の値（許可の値に合わず検出の規則に合う 12 桁・ARN・S3 の ARN・端点・token）と、重ねた規則の語を `docs/` の下に置くと当たり、報告に値が現れない。途中のコミットで足して消した値が `git` の探しで当たる。値の行に `gitleaks:allow` を付け、その当たりの指紋を書いた `.gitleaksignore` を木の根と `--gitleaks-ignore-path` の既定の置き場に置いても、`dir` と `git` の両方で検出する（`.gitleaksignore` が根に在れば名前を示して失敗し、`gitleaks:allow` だけなら当たる） |
 | `workflow-audit.integration.test.ts`（zizmor を起こす。`workflow-audit` のジョブで打つ） | 今のワークフローを写した木で当たり 0 件 | — | 書き込みの権限・`persist-credentials` を外した取得・枝の名前で参照した動作で当たる |
 
 `leak-scan.integration.test.ts` が当てる値は、すべて実行の時に生成した架空の値にする（乱数の 12 桁・架空の ARN と端点・形だけ合わせた token・重ねた規則の語）。生成した値が許可の値（`123456789012` など）に合わず、検出の規則に合うことをテストの中で確かめてから木に置く。実在のアカウント・資源・端点の値と有効な token は使わず、値をリポジトリにも置かない（ソースには組み立ての手順だけを書く）。
