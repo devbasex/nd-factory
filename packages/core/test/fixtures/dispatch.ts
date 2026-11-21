@@ -106,10 +106,38 @@ export const loginsDelete = defineOperation({
   idempotencyKey: true,
   item: z.strictObject({ cognito_sub: z.string().min(1), idempotency_key: idempotencyKey }),
   result: okItem(z.strictObject({ cognito_sub: z.string() })),
+  // 最後のログインは外せない（操作の契約にある失敗の結果）
+  reasons: [{ code: "last_login", status: 409, when: "always" }],
   owner: "#2",
 });
 
-export const DISPATCH_OPERATIONS = [notesGet, notesCreate, notesRename, notesImport, notesPurge, sessionsCreate, sessionsDelete, loginsDelete];
+// 全部か無かで冪等の鍵を持つ（要素は 3 つまで）
+export const notesBulk = defineOperation({
+  name: "notes.bulk",
+  features: ["F3"],
+  access: "write",
+  delegationKind: "run",
+  allOrNothing: { maxItems: 3 },
+  idempotencyKey: true,
+  auditKeys: ["project_id"],
+  item: z.strictObject({ project_id: project, title: z.string().min(1), idempotency_key: idempotencyKey }),
+  result: okItem(z.strictObject({ title: z.string() })),
+  owner: "#2",
+});
+
+// 成功の item が形に無い鍵を除く（z.object）読む操作
+export const notesPeek = defineOperation({
+  name: "notes.peek",
+  features: ["F3"],
+  access: "read",
+  delegationKind: "read",
+  auditKeys: ["project_id"],
+  item: z.strictObject({ project_id: project }),
+  result: okItem(z.object({ title: z.string() })),
+  owner: "#2",
+});
+
+export const DISPATCH_OPERATIONS = [notesGet, notesCreate, notesRename, notesImport, notesPurge, sessionsCreate, sessionsDelete, loginsDelete, notesBulk, notesPeek];
 
 type Note = { project_id: string; title: string; version?: number };
 
@@ -136,6 +164,10 @@ export const noteHandlers: Record<string, Handler> = {
     };
   },
   "notes.import": putNote,
+  "notes.bulk": putNote,
+  async "notes.peek"() {
+    return { result: { ok: true, item: { title: "acme", secret_column: "internal" } }, writes: [] };
+  },
   async "notes.purge"(item) {
     const note = item as Note;
     return { result: { ok: true, item: { project_id: note.project_id } }, writes: [] };

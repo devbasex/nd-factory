@@ -6,11 +6,12 @@ import { actorOfCreatedUser, appendAudit, auditItem, type AuditActor, type Audit
 import { authenticate, idempotencyPrincipalKey, SESSIONS_DELETE, type Principal } from "../auth/authenticate.ts";
 import { authorize, type ItemAuthz, type ProjectId } from "../authorize.ts";
 import { AuditAppendOnlyError, cond, TRANSACT_MAX_ITEMS, WriteSpecError, WriteUnavailableError, writeAtomically, type ConflictRule, type TransactItem, type WriteOutcome } from "../conditional-write.ts";
-import { claimIdempotency, settleIdempotency, type IdempotencyClaimInput, type ItemResult } from "../idempotency.ts";
+import type { StoredRow } from "../db.ts";
+import { claimIdempotency, idempotencyKeyOf, settleIdempotency, type IdempotencyClaimInput, type ItemResult } from "../idempotency.ts";
 import { newId, type Id } from "../ids.ts";
 import type { Logger } from "../log.ts";
 import { bodyFaultOf, canonicalJson, problem } from "./http.ts";
-import type { AllowedAuthz, DispatchDeps, DispatchResult, Handler, HandlerOutput, OperationCall, Problem } from "./types.ts";
+import type { AllowedAuthz, DispatchDeps, DispatchResult, Handler, HandlerOutput, OperationCall, Problem, WriteConflict } from "./types.ts";
 
 export { readHttpCall, writeHttpResponse } from "./http.ts";
 export type * from "./types.ts";
@@ -38,8 +39,8 @@ class Halt extends Error {
 
 const halt = (status: number, reason: string): Halt => new Halt(problem(status, reason));
 
-// 要約の行に書く、要求の中で決まったこと
-type Seen = { principal: Principal | null; createdUserId: Id<"usr"> | null; items: readonly unknown[]; authz: readonly ItemAuthz[] };
+// 要約の行に書く、要求の中で決まったこと。authz は要求の要素と同じ番号（形の誤りの要素は undefined）
+type Seen = { principal: Principal | null; createdUserId: Id<"usr"> | null; items: readonly unknown[]; authz: readonly (ItemAuthz | undefined)[] };
 
 type Request = {
   readonly call: OperationCall;
@@ -110,17 +111,31 @@ function summaryTargets(op: OperationDef | null, items: readonly unknown[]): Rec
 }
 
 // 見られたプロジェクトが 1 つに決まるときだけ、その区切りに置く
-function soleProject(authz: readonly ItemAuthz[]): ProjectId | null {
-  const ids = new Set(authz.flatMap((a) => (a.decision === "allow" && a.projectId !== null ? [a.projectId] : [])));
+function soleProject(authz: readonly (ItemAuthz | undefined)[]): ProjectId | null {
+  const ids = new Set(authz.flatMap((a) => (a?.decision === "allow" && a.projectId !== null ? [a.projectId] : [])));
   return ids.size === 1 ? ([...ids][0] ?? null) : null;
+}
+
+// 要約の行の対象と結果。プロジェクトの区切りに置くときは、そのプロジェクトで許された要素だけから組む（そのプロジェクトを読める人へ、
+// 許されなかった要素の対象の ID と結果を見せない）。主体の区切りに置くときは、主体が送った要素のすべて
+function summaryFields(req: Request, result: DispatchResult): Pick<AuditEntry, "targetIds" | "projectId" | "result" | "itemIndex"> {
+  const { seen } = req;
+  const projectId = soleProject(seen.authz);
+  if (projectId === null) return { targetIds: summaryTargets(req.op, seen.items), projectId, result: summaryResult(result), itemIndex: null };
+  const shown = seen.items.flatMap((_, i) => {
+    const a = seen.authz[i];
+    return a?.decision === "allow" && a.projectId === projectId ? [i] : [];
+  });
+  const items = shown.map((i) => seen.items[i]);
+  const visible: DispatchResult = result.kind === "items" ? { kind: "items", items: shown.flatMap((i) => (result.items[i] === undefined ? [] : [result.items[i]])) } : result;
+  return { targetIds: summaryTargets(req.op, items), projectId, result: summaryResult(visible), itemIndex: null };
 }
 
 // 要約の行を書いてから返す。書けなければ 503 audit_unavailable で値を返さない。既に 503 の結果は書けなくてもそのまま
 async function finish(req: Request, result: DispatchResult): Promise<DispatchResult> {
   const { seen } = req;
-  const fields = { targetIds: summaryTargets(req.op, seen.items), projectId: soleProject(seen.authz), result: summaryResult(result), itemIndex: null };
   try {
-    await appendAudit(req.deps.db, entryOf(req, actorOf(req, seen.principal, seen.createdUserId), fields), req.op, req.deps.clock);
+    await appendAudit(req.deps.db, entryOf(req, actorOf(req, seen.principal, seen.createdUserId), summaryFields(req, result)), req.op, req.deps.clock);
     return result;
   } catch (error) {
     req.log.error("要約の記録の行を書けない", { error: errorName(error) });
@@ -146,49 +161,59 @@ function requesterGuards(op: OperationDef, principal: Principal): TransactItem[]
   ];
 }
 
-// 確定の組み立て。件ごとに、どの要素のどの役の件かを持つ（外れた件を要素の結果へ戻すため）
+// 確定の組み立て。件ごとに、どの要素のどの役の件かを持つ（外れた件を要素の結果へ戻すため）。
+// 同じ行を指す件は 1 件にまとめるため、1 つの件が複数の持ち手を持つ
 
-type Handled = { readonly result: ItemResult; readonly writes: readonly TransactItem[]; readonly claim: IdempotencyClaimInput | null; readonly authz: AllowedAuthz; readonly item: unknown; readonly createdUserId: Id<"usr"> | null };
+type Handled = {
+  readonly result: ItemResult;
+  readonly writes: readonly TransactItem[];
+  readonly conflicts: readonly (WriteConflict | undefined)[];
+  readonly claim: IdempotencyClaimInput | null;
+  readonly authz: AllowedAuthz;
+  readonly item: unknown;
+  readonly createdUserId: Id<"usr"> | null;
+};
 
 type Part = { readonly element: number; readonly writes: readonly TransactItem[]; readonly audit: TransactItem; readonly settle: TransactItem | null };
 
-// guarded は要求元の照らしの件か、要求元の条件を足した件
-type Slot = { readonly element: number | null; readonly role: "write" | "audit" | "settle" | "guard"; readonly writeIndex: number; readonly guarded: boolean };
+// guarded は要求元の照らしの持ち手
+type Owner = { readonly element: number | null; readonly role: "write" | "audit" | "settle" | "guard"; readonly writeIndex: number; readonly guarded: boolean; readonly onConflict: ConflictRule };
 
 const sameRow = (a: TransactItem, b: TransactItem): boolean => a.table === b.table && a.key.pk === b.key.pk && a.key.sk === b.key.sk;
 
-function partOf(req: Request, principal: Principal, op: OperationDef, element: number, h: Handled, writes: readonly TransactItem[]): Part {
-  const entry = entryOf(req, actorOf(req, principal, h.createdUserId), { targetIds: record(h.item), projectId: h.authz.projectId, result: itemAuditResult(h.result), itemIndex: element });
-  return { element, writes, audit: auditItem(entry, op, req.deps.clock), settle: h.claim === null ? null : settleIdempotency(h.claim, h.result, op, req.deps.clock) };
+function partOf(req: Request, principal: Principal, op: OperationDef, element: number, h: Handled, result: ItemResult, writes: readonly TransactItem[]): Part {
+  const entry = entryOf(req, actorOf(req, principal, h.createdUserId), { targetIds: record(h.item), projectId: h.authz.projectId, result: itemAuditResult(result), itemIndex: element });
+  return { element, writes, audit: auditItem(entry, op, req.deps.clock), settle: h.claim === null ? null : settleIdempotency(h.claim, result, op, req.deps.clock) };
 }
 
-// ハンドラーの書き込みが要求元の照らしと同じ行を指すときは件を足さず、その書き込みの条件に要求元の条件を AND で足す（同じ行を 2 回指せない）
-function compose(parts: readonly Part[], guards: readonly TransactItem[]): { items: TransactItem[]; slots: Slot[] } {
+// 同じ行を指す件は 2 回指せないため 1 件にまとめる。書かない照らし（check）は、同じ行の照らしか書き込みの条件へ AND で足す
+// （要求元の照らしと同じ行を指す logins.delete の書き込み・全部か無かで要素ごとに同じプロジェクトの行を照らす repositories.add）。
+// まとめた件が外れたら、その件のすべての持ち手が外れたとする。書き込みどうしが同じ行を指すのは組み方の誤りで、writeAtomically が断つ
+function compose(parts: readonly Part[], guards: readonly TransactItem[]): { items: TransactItem[]; slots: Owner[][] } {
   const items: TransactItem[] = [];
-  const slots: Slot[] = [];
-  const rest = [...guards];
-  for (const part of parts) {
-    part.writes.forEach((write, writeIndex) => {
-      const at = rest.findIndex((guard) => sameRow(guard, write));
-      const guard = at < 0 ? undefined : rest.splice(at, 1)[0];
-      items.push(guard === undefined ? write : { ...write, condition: cond.and(write.condition, guard.condition) });
-      slots.push({ element: part.element, role: "write", writeIndex, guarded: guard !== undefined });
-    });
-    items.push(part.audit);
-    slots.push({ element: part.element, role: "audit", writeIndex: -1, guarded: false });
-    if (part.settle !== null) {
-      items.push(part.settle);
-      slots.push({ element: part.element, role: "settle", writeIndex: -1, guarded: false });
+  const slots: Owner[][] = [];
+  const add = (item: TransactItem, owner: Owner): void => {
+    const at = items.findIndex((existing) => sameRow(existing, item) && (existing.op === "check" || item.op === "check"));
+    const existing = at < 0 ? undefined : items[at];
+    if (existing === undefined) {
+      items.push(item);
+      slots.push([{ ...owner, onConflict: item.onConflict }]);
+      return;
     }
+    const base = existing.op === "check" ? item : existing;
+    items[at] = { ...base, condition: cond.and(base.condition, base === item ? existing.condition : item.condition) };
+    slots[at]?.push({ ...owner, onConflict: item.onConflict });
+  };
+  for (const part of parts) {
+    part.writes.forEach((write, writeIndex) => add(write, { element: part.element, role: "write", writeIndex, guarded: false, onConflict: write.onConflict }));
+    add(part.audit, { element: part.element, role: "audit", writeIndex: -1, guarded: false, onConflict: part.audit.onConflict });
+    if (part.settle !== null) add(part.settle, { element: part.element, role: "settle", writeIndex: -1, guarded: false, onConflict: part.settle.onConflict });
   }
-  for (const guard of rest) {
-    items.push(guard);
-    slots.push({ element: null, role: "guard", writeIndex: -1, guarded: true });
-  }
+  for (const guard of guards) add(guard, { element: null, role: "guard", writeIndex: -1, guarded: true, onConflict: guard.onConflict });
   return { items, slots };
 }
 
-// 確定。届かないときは記録の行を含むため 503 audit_unavailable。組み方の誤り（記録の表の書き換え・件の数の越え）と表が断った失敗は 503 unavailable
+// 確定。届かないときは記録の行を含むため 503 audit_unavailable。組み方の誤り（記録の表の書き換え・件の数の越え・同じ行の書き込みの重なり）と表が断った失敗は 503 unavailable
 async function commit(req: Request, items: readonly TransactItem[]): Promise<WriteOutcome> {
   try {
     return await writeAtomically(req.deps.db, items, req.log);
@@ -199,26 +224,33 @@ async function commit(req: Request, items: readonly TransactItem[]): Promise<Wri
   }
 }
 
-type Failed = { readonly slot: Slot; readonly onConflict: ConflictRule };
-
-function failedOf(outcome: Extract<WriteOutcome, { ok: false }>, slots: readonly Slot[]): Failed[] {
-  return outcome.failed.flatMap((f) => {
-    const slot = slots[f.index];
-    return slot === undefined ? [] : [{ slot, onConflict: f.onConflict }];
-  });
+function failedOf(outcome: Extract<WriteOutcome, { ok: false }>, slots: readonly (readonly Owner[])[]): Owner[] {
+  return outcome.failed.flatMap((f) => slots[f.index] ?? []);
 }
 
-// 1 つの要素の外れた件を結果へ訳す。要求元の照らし（足した条件を含む）を先に当て、残りはハンドラーが並べた件の順の最初の理由。
+type Verdict = { readonly kind: "result"; readonly result: ItemResult } | { readonly kind: "existing"; readonly writeIndex: number };
+
+// 1 つの要素の外れた件を結果へ訳す。要求元の照らし（同じ行へまとめた件を含む）を先に当て、残りはハンドラーが並べた件の順の最初の理由
+// （ハンドラーが conflicts に操作の契約の失敗の結果を置いた件はその結果、ほかは onConflict の version_mismatch・state_mismatch）。
 // 記録の行が外れたら 503 audit_unavailable、済みの行だけが外れたら（借りを失った）409 in_progress。
-// どの外れた書き込みも return_existing なら、それを外して確定し直す（retry）
-function verdictOf(req: Request, failed: readonly Failed[]): ItemResult | "retry" {
-  if (failed.some((f) => f.slot.guarded)) return failure(409, "state_mismatch");
-  if (failed.some((f) => f.slot.role === "audit")) throw halt(503, "audit_unavailable");
-  const own = failed.filter((f) => f.slot.role === "write").sort((a, b) => a.slot.writeIndex - b.slot.writeIndex);
-  if (own.length === 0) return failure(409, "in_progress");
+// 外れた書き込みがどれも return_existing なら、最初の件の既にある行から結果を組む（existing）
+function verdictOf(req: Request, failed: readonly Owner[], conflicts: readonly (WriteConflict | undefined)[]): Verdict {
+  const result = (r: ItemResult): Verdict => ({ kind: "result", result: r });
+  if (failed.some((f) => f.guarded)) return result(failure(409, "state_mismatch"));
+  if (failed.some((f) => f.role === "audit")) throw halt(503, "audit_unavailable");
+  const own = failed.filter((f) => f.role === "write").sort((a, b) => a.writeIndex - b.writeIndex);
+  const first = own[0];
+  if (first === undefined) return result(failure(409, "in_progress"));
   const decisive = own.find((f) => f.onConflict !== "return_existing");
-  if (decisive === undefined) return "retry";
-  if (decisive.onConflict === "version_mismatch" || decisive.onConflict === "state_mismatch") return failure(409, decisive.onConflict);
+  if (decisive === undefined) {
+    const conflict = conflicts[first.writeIndex];
+    if (conflict !== undefined && "existing" in conflict) return { kind: "existing", writeIndex: first.writeIndex };
+    req.log.error("既にある行から結果を組む手立ての無い return_existing の件が外れた", {});
+    throw halt(503, "unavailable");
+  }
+  const conflict = conflicts[decisive.writeIndex];
+  if (conflict !== undefined && "result" in conflict) return result(conflict.result);
+  if (decisive.onConflict === "version_mismatch" || decisive.onConflict === "state_mismatch") return result(failure(409, decisive.onConflict));
   req.log.error("ハンドラーの書き込みの条件が外れた", { failed: own.map((f) => f.onConflict) });
   throw halt(503, "unavailable");
 }
@@ -244,10 +276,22 @@ function checkTime(req: Request): void {
   }
 }
 
-type Ctx = { readonly req: Request; readonly principal: Principal; readonly sessionRevokedAt: string | null; readonly op: OperationDef; readonly handler: Handler };
+// taken は全部か無かの操作で、この要求が借りた冪等の鍵を集める（確定しなかったときに手放すため）
+type Ctx = { readonly req: Request; readonly principal: Principal; readonly sessionRevokedAt: string | null; readonly op: OperationDef; readonly handler: Handler; readonly taken: IdempotencyClaimInput[] };
 
-function checkOutput(c: Ctx, output: HandlerOutput | undefined): HandlerOutput {
-  const valid = output !== null && typeof output === "object" && Array.isArray(output.writes) && resultSchemaOf(c.op).safeParse(output.result).success;
+// 要素の結果を操作の結果の形で照らし、照らした値（形に無い鍵を除いた値）を返す。合わなければ 503 unavailable
+function resultOf(c: Ctx, value: unknown): ItemResult {
+  const parsed = resultSchemaOf(c.op).safeParse(value);
+  if (!parsed.success) {
+    c.req.log.error("ハンドラーの結果が操作の形に合わない", {});
+    throw halt(503, "unavailable");
+  }
+  return parsed.data as ItemResult;
+}
+
+function checkOutput(c: Ctx, output: HandlerOutput | undefined): HandlerOutput & { readonly conflicts: readonly (WriteConflict | undefined)[] } {
+  const conflicts: unknown = output?.conflicts ?? [];
+  const valid = output !== null && typeof output === "object" && Array.isArray(output.writes) && Array.isArray(conflicts) && conflicts.length <= output.writes.length;
   if (!valid || output === undefined) {
     c.req.log.error("ハンドラーの戻り値が操作の形に合わない", {});
     throw halt(503, "unavailable");
@@ -256,7 +300,36 @@ function checkOutput(c: Ctx, output: HandlerOutput | undefined): HandlerOutput {
     c.req.log.error("読む操作のハンドラーが書き込みを返した", {});
     throw halt(503, "unavailable");
   }
-  return output;
+  const checked = (conflicts as unknown[]).map((conflict): WriteConflict | undefined => {
+    if (conflict === undefined) return undefined;
+    const r = record(conflict);
+    if (typeof r["existing"] === "function") return { existing: r["existing"] as (row: StoredRow | null) => ItemResult };
+    if ("result" in r) {
+      const result = resultOf(c, r["result"]);
+      if (!result.ok) return { result };
+    }
+    c.req.log.error("ハンドラーの外れたときの結果が失敗の結果でない", {});
+    throw halt(503, "unavailable");
+  });
+  return { ...output, result: resultOf(c, output.result), conflicts: checked };
+}
+
+// 要求の中で同期に外へ働きかける直前の要求元の照らし。照らしの 2 件だけを打ち、外れたら false（docs/design/data.md の「要求の中で同期に外へ働きかける操作」）
+// 表に届かないときの 503 は控えておき、ハンドラーが例外を握っても dispatch が要求全体の 503 にする
+type RequesterCheck = { failed: boolean; halted: Halt | null };
+
+async function checkRequesterOf(c: Ctx, state: RequesterCheck): Promise<boolean> {
+  const guards = requesterGuards(c.op, c.principal);
+  if (guards.length === 0) return true;
+  let outcome: WriteOutcome;
+  try {
+    outcome = await commit(c.req, guards);
+  } catch (error) {
+    if (error instanceof Halt) state.halted = error;
+    throw error;
+  }
+  if (!outcome.ok) state.failed = true;
+  return outcome.ok;
 }
 
 // 1 つの要素の、形 → 見えない・人だけの要素・役割（authorize が決めた）→ 冪等の鍵 → ハンドラー
@@ -280,41 +353,74 @@ async function prepare(c: Ctx, index: number, parsed: ParsedItem, authz: ItemAut
     if (claimed.kind === "replay") return claimed.result;
     if (claimed.kind === "in_progress") return failure(409, "in_progress");
     if (claimed.kind === "reused") return failure(422, "idempotency_key_reused");
+    c.taken.push(claim);
   }
 
+  const requester: RequesterCheck = { failed: false, halted: null };
   let output: HandlerOutput | undefined;
   try {
-    output = await c.handler(parsed.value, { principal, authz, clock: req.deps.clock, db: req.deps.db, sessionRevokedAt: c.sessionRevokedAt });
+    output = await c.handler(parsed.value, {
+      principal,
+      authz,
+      clock: req.deps.clock,
+      db: req.deps.db,
+      sessionRevokedAt: c.sessionRevokedAt,
+      checkRequester: () => checkRequesterOf(c, requester),
+    });
   } catch (error) {
+    if (error instanceof Halt) throw error;
     req.log.error("ハンドラーが想定しない例外を投げた", { error: errorName(error) });
     throw halt(503, "unavailable");
   }
+  if (requester.halted !== null) throw requester.halted;
+  // 外へ働きかける前の照らしが外れた要素は、ハンドラーの戻り値によらず何も確定しない
+  if (requester.failed) return failure(409, "state_mismatch");
   const checked = checkOutput(c, output);
   const createdUserId = principal.kind === "newcomer" ? (checked.createdUserId ?? null) : null;
-  return { result: checked.result, writes: checked.writes, claim, authz, item: parsed.value, createdUserId };
+  return { result: checked.result, writes: checked.writes, conflicts: checked.conflicts, claim, authz, item: parsed.value, createdUserId };
 }
 
 const isHandled = (p: ItemResult | Handled): p is Handled => "writes" in p && "claim" in p;
+
+// return_existing の件の既にある行を強い整合で読み、ハンドラーの組み方で今回の結果にする
+async function existingResult(c: Ctx, h: Handled, writeIndex: number): Promise<ItemResult> {
+  const write = h.writes[writeIndex];
+  const conflict = h.conflicts[writeIndex];
+  if (write === undefined || conflict === undefined || !("existing" in conflict)) throw halt(503, "unavailable");
+  let value: unknown;
+  try {
+    value = conflict.existing(await c.req.deps.db.get(write.table, write.key, true));
+  } catch (error) {
+    c.req.log.error("既にある行から結果を組めない", { error: errorName(error) });
+    throw halt(503, "unavailable");
+  }
+  return resultOf(c, value);
+}
 
 // 要素ごとの確定。状態を書かず冪等の鍵も押さえていない要素は、要約の行だけに残す
 async function settleElement(c: Ctx, index: number, h: Handled): Promise<ItemResult> {
   const { req, principal, op } = c;
   if (op.access === "read" || (h.writes.length === 0 && h.claim === null)) return h.result;
-  if (h.createdUserId !== null) req.seen.createdUserId = h.createdUserId;
   const guards = requesterGuards(op, principal);
-  let writes = h.writes;
-  // return_existing の外れを外した確定し直しは 1 回だけ
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const { items, slots } = compose([partOf(req, principal, op, index, h, writes)], guards);
-    const outcome = await commit(req, items);
-    if (outcome.ok) return h.result;
-    const failed = failedOf(outcome, slots);
-    const verdict = verdictOf(req, failed);
-    if (verdict !== "retry") return verdict;
-    const dropped = new Set(failed.map((f) => f.slot.writeIndex));
-    writes = writes.filter((_, i) => !dropped.has(i));
+  const { items, slots } = compose([partOf(req, principal, op, index, h, h.result, h.writes)], guards);
+  const outcome = await commit(req, items);
+  if (outcome.ok) {
+    // 要約の主体は利用者を作ったトランザクションが確定してから替える
+    if (h.createdUserId !== null) req.seen.createdUserId = h.createdUserId;
+    return h.result;
   }
-  req.log.error("同じ行の既にある書き込みを外しても確定できない", {});
+  const verdict = verdictOf(req, failedOf(outcome, slots), h.conflicts);
+  if (verdict.kind === "result") return verdict.result;
+
+  // 既にある行（同じレーンの同じ連番の事象など）: その行に当たる結果を返す。付随する状態の書き込みは確定せず、
+  // 要素の記録の行と冪等の鍵の済みの行（と要求元の照らし）だけを確定する
+  const result = await existingResult(c, h, verdict.writeIndex);
+  const replay: Handled = { ...h, createdUserId: null };
+  const again = compose([partOf(req, principal, op, index, replay, result, [])], guards);
+  const second = await commit(req, again.items);
+  if (second.ok) return result;
+  const last = verdictOf(req, failedOf(second, again.slots), []);
+  if (last.kind === "result") return last.result;
   throw halt(503, "unavailable");
 }
 
@@ -328,8 +434,38 @@ async function eachItem(c: Ctx, parsed: readonly ParsedItem[], authz: readonly (
   return results;
 }
 
-// 全部か無か: すべての要素の書き込みを 1 つの writeAtomically に集め（要求元の照らしは 1 回）、要素の失敗が 1 つでもあれば確定しない
+// 全部か無かで確定しなかったとき、この要求が借りた冪等の鍵を手放す。持ち主が自分で借りたままの行だけを消す（取り直された行・済みの行は残す）。
+// 手放せなかった鍵は借りの期限の後に取り直せるため、要求の結果は変えない
+async function releaseTaken(c: Ctx): Promise<void> {
+  for (const claim of c.taken.splice(0)) {
+    const item: TransactItem = {
+      table: "idempotency",
+      op: "delete",
+      key: idempotencyKeyOf(claim),
+      condition: cond.and(cond.eq("state", "leased"), cond.eq("owner_request_id", claim.requestId), cond.eq("fingerprint", claim.fingerprint)),
+      onConflict: "fail",
+    };
+    try {
+      await writeAtomically(c.req.deps.db, [item], c.req.log);
+    } catch (error) {
+      c.req.log.warn("確定しなかった要素の冪等の鍵の借りを手放せない", { error: errorName(error) });
+    }
+  }
+}
+
+// 全部か無か: すべての要素の書き込みを 1 つの writeAtomically に集め（要求元の照らしは 1 回）、要素の失敗が 1 つでもあれば確定しない。
+// 確定しなければ（要素の失敗・件の数の越え・条件の外れ・確定の失敗）、借りた冪等の鍵を手放し、直した送り直しが in_progress や idempotency_key_reused にならないようにする
 async function allOrNothing(c: Ctx, parsed: readonly ParsedItem[], authz: readonly (ItemAuthz | undefined)[]): Promise<ItemResult[]> {
+  let committed = false;
+  try {
+    const results = await allOrNothingOnce(c, parsed, authz, () => (committed = true));
+    return results;
+  } finally {
+    if (!committed) await releaseTaken(c);
+  }
+}
+
+async function allOrNothingOnce(c: Ctx, parsed: readonly ParsedItem[], authz: readonly (ItemAuthz | undefined)[], onCommitted: () => void): Promise<ItemResult[]> {
   const { req, principal, op } = c;
   const prepared: (ItemResult | Handled)[] = [];
   for (const [index, item] of parsed.entries()) {
@@ -340,24 +476,32 @@ async function allOrNothing(c: Ctx, parsed: readonly ParsedItem[], authz: readon
   const notApplied = failure(409, "not_applied");
   if (results.some((r) => !r.ok)) return results.map((r) => (r.ok ? notApplied : r));
 
-  const parts = prepared.flatMap((p, index) => (isHandled(p) && (p.writes.length > 0 || p.claim !== null) ? [partOf(req, principal, op, index, p, p.writes)] : []));
-  if (parts.length === 0) return results;
+  const parts = prepared.flatMap((p, index) => (isHandled(p) && (p.writes.length > 0 || p.claim !== null) ? [partOf(req, principal, op, index, p, p.result, p.writes)] : []));
+  if (parts.length === 0) {
+    onCommitted();
+    return results;
+  }
   const { items, slots } = compose(parts, requesterGuards(op, principal));
   if (items.length > TRANSACT_MAX_ITEMS) {
     req.log.error("全部か無かの書き込みが 1 つのトランザクションに収まらない", { count: items.length });
     throw halt(503, "unavailable");
   }
   const outcome = await commit(req, items);
-  if (outcome.ok) return results;
+  if (outcome.ok) {
+    onCommitted();
+    return results;
+  }
   const failed = failedOf(outcome, slots);
-  if (failed.some((f) => f.slot.role === "audit")) throw halt(503, "audit_unavailable");
+  if (failed.some((f) => f.role === "audit")) throw halt(503, "audit_unavailable");
   // 要求元の照らしの件が外れたら、どの要素も 409 state_mismatch
-  if (failed.some((f) => f.slot.element === null)) return results.map(() => failure(409, "state_mismatch"));
+  if (failed.some((f) => f.guarded)) return results.map(() => failure(409, "state_mismatch"));
   return results.map((_, element) => {
-    const mine = failed.filter((f) => f.slot.element === element);
-    if (mine.length === 0) return notApplied;
-    const verdict = verdictOf(req, mine);
-    return verdict === "retry" ? failure(409, "state_mismatch") : verdict;
+    const mine = failed.filter((f) => f.element === element);
+    const p = prepared[element];
+    if (mine.length === 0 || p === undefined || !isHandled(p)) return notApplied;
+    const verdict = verdictOf(req, mine, p.conflicts);
+    // 全部か無かでは既にある行の結果を返さない（ほかの要素とともに確定しない）
+    return verdict.kind === "result" ? verdict.result : failure(409, "state_mismatch");
   });
 }
 
@@ -370,6 +514,8 @@ async function run(req: Request): Promise<DispatchResult> {
   const { call, deps, op } = req;
   // 受けた方法が POST でない・受け口と操作の受け口の食い違い（MCP の受け口は利用者向けの操作を呼ぶ）
   const expected = call.endpoint === "mcp" ? "user" : call.endpoint;
+  // 表に無い HTTP の経路（操作の名前は空で、記録の行の操作は null）
+  if (call.fault?.status === 404) return finish(req, problem(404, null));
   if (call.fault?.status === 405 || (op !== null && op.endpoint !== expected)) return finish(req, problem(405, null));
 
   // 認証。MCP の tools/call は serveMcp が決めた主体のまま続ける
@@ -409,9 +555,9 @@ async function run(req: Request): Promise<DispatchResult> {
   if ("reject" in decision) return finish(req, problem(403, decision.reject));
   const authz: (ItemAuthz | undefined)[] = parsed.map(() => undefined);
   valid.forEach((v, i) => (authz[v.index] = decision.items[i]));
-  req.seen.authz = decision.items;
+  req.seen.authz = authz;
 
-  const c: Ctx = { req, principal, sessionRevokedAt, op, handler };
+  const c: Ctx = { req, principal, sessionRevokedAt, op, handler, taken: [] };
   try {
     const results = op.allOrNothing === null ? await eachItem(c, parsed, authz) : await allOrNothing(c, parsed, authz);
     return await finish(req, { kind: "items", items: results });

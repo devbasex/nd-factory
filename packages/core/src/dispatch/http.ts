@@ -9,14 +9,54 @@ export function problem(status: number, reason: string | null): Problem {
   return { kind: "problem", status, reason };
 }
 
-// キーの順によらない JSON（同じ対象の重なりと冪等の鍵の fingerprint に使う）
+// キーの順によらない JSON（同じ対象の重なりと冪等の鍵の fingerprint に使う）。
+// 本文は JSON.parse を通ればどれだけ深くても受けるため、再帰せずに積みで書き出す（深い入れ子でスタックを使い切らない）
+type Piece = { readonly value: unknown } | { readonly text: string };
+
 export function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  const entries = Object.entries(value)
-    .filter(([, v]) => v !== undefined)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
+  const out: string[] = [];
+  const stack: Piece[] = [{ value }];
+  for (let piece = stack.pop(); piece !== undefined; piece = stack.pop()) {
+    if ("text" in piece) {
+      out.push(piece.text);
+      continue;
+    }
+    const v = piece.value;
+    if (v === null || typeof v !== "object") {
+      out.push(JSON.stringify(v) ?? "null");
+      continue;
+    }
+    // 積みは後から出すため、書き出す順の逆に積む
+    const parts: Piece[] = [];
+    if (Array.isArray(v)) {
+      parts.push({ text: "[" });
+      v.forEach((element: unknown, i) => {
+        if (i > 0) parts.push({ text: "," });
+        parts.push({ value: element });
+      });
+      parts.push({ text: "]" });
+    } else {
+      const entries = Object.entries(v)
+        .filter(([, e]) => e !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      parts.push({ text: "{" });
+      entries.forEach(([k, e], i) => {
+        parts.push({ text: `${i > 0 ? "," : ""}${JSON.stringify(k)}:` });
+        parts.push({ value: e });
+      });
+      parts.push({ text: "}" });
+    }
+    for (let i = parts.length - 1; i >= 0; i -= 1) stack.push(parts[i] as Piece);
+  }
+  return out.join("");
+}
+
+// 同じ対象かを比べる値。冪等の鍵は要素の送り直しを見分ける値で対象を指さないため、冪等の鍵を持つ操作では除いて比べる
+// （同じリポジトリの追加・同じログインの外しを別の鍵で 2 回指す要求を、ハンドラーを呼ぶ前に断つ）
+function targetOf(item: unknown, op: OperationDef | null): unknown {
+  if (op?.idempotencyKey !== true || item === null || typeof item !== "object" || Array.isArray(item)) return item;
+  const { idempotency_key: _key, ...rest } = item as Record<string, unknown>;
+  return rest;
 }
 
 // 本文の検査の順: 配列でない → 空 → 数の上限 → 同じ対象の重なり（JSON でないは読む所で先に見る）。
@@ -28,7 +68,7 @@ export function bodyFaultOf(items: unknown, op: OperationDef | null): BodyFaultR
   if (items.length > max) return "too_many_items";
   const seen = new Set<string>();
   for (const item of items) {
-    const key = canonicalJson(item);
+    const key = canonicalJson(targetOf(item, op));
     if (seen.has(key)) return "duplicate_item";
     seen.add(key);
   }
@@ -72,18 +112,19 @@ function readBody(event: HttpEvent): BodyRead {
   }
 }
 
-// HTTP の経路は形の正本の操作の表だけで引く。表に無い経路は 404、経路の頭の受け口と操作の受け口の食い違いは 405 で、振り分けへ渡さない。
-// 方法と本文の誤りは呼び出しの fault に入れ、dispatch が記録の行とともに返す（405 は認証の前、400 は認証の後）。
+// HTTP の経路は形の正本の操作の表だけで引く。表に無い経路（404）・経路の頭の受け口と操作の受け口の食い違い（405）・方法と本文の誤りは
+// 呼び出しの fault に入れ、dispatch が要約の記録の行とともに返す（404・405 は認証の前、400 は認証の後）。表に無い経路の操作の名前は空にする。
 // remainingMs は起点が渡す関数の残り時間の読み手（context.getRemainingTimeInMillis）
+// 戻り値の型は詳細設計の形（OperationCall | Problem）のまま。要求全体の誤りも記録の行を残すため、今はいつも呼び出しを返す
 export function readHttpCall(event: HttpEvent, remainingMs: () => number): OperationCall | Problem {
   const op = operationByRoute(event.rawPath);
-  if (op === undefined) return problem(404, null);
   const endpoint = endpointOfPath(event.rawPath);
-  if (op.endpoint !== endpoint) return problem(405, null);
   const token = bearerOf(event);
-  const base = { endpoint, channel: channelOf(endpoint, token), operation: op.name, token, requestId: event.requestContext.requestId, remainingMs };
+  const base = { endpoint, channel: channelOf(endpoint, token), operation: op?.name ?? "", token, requestId: event.requestContext.requestId, remainingMs };
   const withFault = (fault: RequestFault): OperationCall => ({ ...base, items: [], fault });
 
+  if (op === undefined) return withFault({ status: 404, reason: null });
+  if (op.endpoint !== endpoint) return withFault({ status: 405, reason: null });
   if (event.requestContext.http.method.toUpperCase() !== "POST") return withFault({ status: 405, reason: null });
   const body = readBody(event);
   if (!body.ok) return withFault({ status: 400, reason: "body_not_json" });

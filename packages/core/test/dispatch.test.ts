@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AuthDeps, DelegationRecord, Principal } from "../src/auth/authenticate.ts";
 import type { ScopeReader } from "../src/authorize.ts";
 import { createClock } from "../src/clock.ts";
-import { updateIfVersion, type TransactItem } from "../src/conditional-write.ts";
+import { cond, putIfAbsent, updateIfVersion, type TransactItem } from "../src/conditional-write.ts";
 import { DISPATCH_RESERVE_MS, dispatch, readHttpCall, type DispatchDeps, type DispatchResult, type Handler, type HttpEvent, type OperationCall } from "../src/dispatch/dispatch.ts";
 import { createLogger } from "../src/log.ts";
 import { DISPATCH_OPERATIONS, NOTE_KEY, noteHandlers } from "./fixtures/dispatch.ts";
@@ -346,7 +346,7 @@ describe("dispatch: 本文は配列（I12・受け入れ条件 5）", () => {
     const { table, deps } = setup({ delegation: delegationRecord() });
     const read = readHttpCall(httpEvent("/v1/notes/get", '{"a": 1}', DELEGATION_TOKEN), () => 10_000);
     // 経路は形の正本の表で引くため、作り物の操作の経路は 404。呼び出しを作り物の操作の名前へ置き替える
-    expect(read).toEqual(problem(404, null));
+    expect(read).toMatchObject({ operation: "", fault: { status: 404, reason: null } });
     const real = readHttpCall(httpEvent("/v1/projects/get", '{"a": 1}', DELEGATION_TOKEN), () => 10_000);
     if ("kind" in real) throw new Error("呼び出しに読めない");
     const result = await dispatch({ ...real, operation: "notes.get" }, deps);
@@ -582,6 +582,175 @@ describe("dispatch: 全部か無か", () => {
       { ok: false, status: 409, reason: "state_mismatch" },
     ]);
     expect(table.rows("sprints")).toHaveLength(1);
+  });
+});
+
+describe("dispatch: ハンドラーの外へ働きかける前の照らし・外れたときの結果・既にある行", () => {
+  it("外へ働きかける直前の要求元の照らしが外れたら、働きかけずに 409 state_mismatch で何も確定しない", async () => {
+    const { table, deps } = setup();
+    const called: string[] = [];
+    const external: Handler = async (item, ctx) => {
+      if (!(await ctx.checkRequester())) return { result: { ok: false, status: 409, reason: "state_mismatch" }, writes: [] };
+      called.push("cognito");
+      return noteHandlers["logins.delete"]!(item, ctx);
+    };
+    const handlers = { ...noteHandlers, "logins.delete": external };
+    const ok = await dispatch(call("logins.delete", [{ cognito_sub: OTHER_SUB, idempotency_key: IDEM_1 }]), { ...deps, handlers });
+    expect(itemsOf(ok)).toEqual([{ ok: true, item: { cognito_sub: OTHER_SUB } }]);
+    expect(called).toEqual(["cognito"]);
+    expect(shapeOf(table.transactions.find((t) => t.every((i) => i.op === "check")) ?? [])).toEqual(["users:check", "users:check"]);
+
+    revoke(table);
+    // 照らしの後に外へ働きかけたつもりでも、照らしが外れた要素はハンドラーの戻り値によらず確定しない
+    const ignoring: Handler = async (item, ctx) => {
+      await ctx.checkRequester();
+      return noteHandlers["logins.delete"]!(item, ctx);
+    };
+    table.seed("users", bindingRow(OTHER_SUB));
+    const before = table.transactions.length;
+    const ng = await dispatch(call("logins.delete", [{ cognito_sub: OTHER_SUB, idempotency_key: IDEM_2 }]), { ...deps, handlers: { ...noteHandlers, "logins.delete": ignoring } });
+    expect(itemsOf(ng)).toEqual([{ ok: false, status: 409, reason: "state_mismatch" }]);
+    expect(table.row("users", { pk: `COGNITO#${OTHER_SUB}`, sk: "COGNITO" })).toBeDefined();
+    expect(table.transactions.slice(before).filter((t) => t.some((i) => i.table === "users" && i.op !== "check"))).toEqual([]);
+  });
+
+  it("書き込みが外れたら、ハンドラーが置いた操作の契約の失敗の結果を返し、要求元の照らしの外れを先に当てる", async () => {
+    const userKey = { pk: `USER#${OWNER}`, sk: "USER" };
+    const lastLogin: Handler = async (item) => ({
+      result: { ok: true, item: { cognito_sub: (item as { cognito_sub: string }).cognito_sub } },
+      writes: [{ table: "users", op: "update", key: userKey, update: [{ kind: "increment", path: "login_count", by: -1 }], condition: cond.ge("login_count", 2), onConflict: "fail" }],
+      conflicts: [{ result: { ok: false, status: 409, reason: "last_login" } }],
+    });
+    const a = setup();
+    a.table.seed("users", { ...userKey, schema_version: 1, version: 1, login_count: 1 });
+    const handlers = { ...noteHandlers, "logins.delete": lastLogin };
+    const one = await dispatch(call("logins.delete", [{ cognito_sub: OTHER_SUB, idempotency_key: IDEM_1 }]), { ...a.deps, handlers });
+    expect(one).toEqual({ kind: "items", items: [{ ok: false, status: 409, reason: "last_login" }] });
+
+    const b = setup();
+    b.table.seed("users", { ...userKey, schema_version: 1, version: 1, login_count: 1 });
+    revoke(b.table);
+    const two = await dispatch(call("logins.delete", [{ cognito_sub: OTHER_SUB, idempotency_key: IDEM_1 }]), { ...b.deps, handlers });
+    expect(itemsOf(two)).toEqual([{ ok: false, status: 409, reason: "state_mismatch" }]);
+  });
+
+  it("操作の契約に無い外れたときの結果は 503 unavailable", async () => {
+    const wrong: Handler = async (item, ctx) => ({ ...(await noteHandlers["notes.create"]!(item, ctx)), conflicts: [{ result: { ok: false, status: 409, reason: "last_login" } }] });
+    const { deps } = setup({ handlers: { ...noteHandlers, "notes.create": wrong } });
+    await expect(dispatch(call("notes.create", [{ project_id: P_A, title: "x", idempotency_key: IDEM_1 }]), deps)).resolves.toEqual(problem(503, "unavailable"));
+  });
+
+  it("全部か無かで要素ごとに同じ行を照らす件は 1 件にまとめ、外れたらその行を照らした要素のすべてへ戻す", async () => {
+    const projectRow = { pk: `PROJECT#${P_A}`, sk: "PROJECT" };
+    const withProject: Handler = async (item, ctx) => {
+      const out = await noteHandlers["notes.import"]!(item, ctx);
+      return { ...out, writes: [{ table: "projects", op: "check", key: projectRow, condition: cond.eq("state", "active"), onConflict: "state_mismatch" }, ...out.writes] };
+    };
+    const handlers = { ...noteHandlers, "notes.import": withProject };
+    const items = [
+      { project_id: P_A, title: "one" },
+      { project_id: P_A, title: "two" },
+    ];
+    const ok = setup({ handlers });
+    ok.table.seed("projects", { ...(ok.table.row("projects", projectRow) ?? projectRow), state: "active" });
+    expect(itemsOf(await dispatch(call("notes.import", items), ok.deps))).toEqual([
+      { ok: true, item: { title: "one" } },
+      { ok: true, item: { title: "two" } },
+    ]);
+    expect(shapeOf(stateWrites(ok.table)[0] ?? []).filter((s) => s === "projects:check")).toHaveLength(1);
+
+    const ng = setup({ handlers });
+    ng.table.seed("projects", { ...(ng.table.row("projects", projectRow) ?? projectRow), state: "archived" });
+    expect(itemsOf(await dispatch(call("notes.import", items), ng.deps))).toEqual([
+      { ok: false, status: 409, reason: "state_mismatch" },
+      { ok: false, status: 409, reason: "state_mismatch" },
+    ]);
+    expect(ng.table.rows("sprints")).toHaveLength(0);
+  });
+
+  it("全部か無かで確定しなければ、借りた冪等の鍵を手放し、直した送り直しの要素は in_progress にも 422 にもならない", async () => {
+    const { table, deps } = setup();
+    const items = [
+      { project_id: P_A, title: "one", idempotency_key: IDEM_1 },
+      { project_id: P_A, title: "two", idempotency_key: IDEM_2 },
+    ];
+    table.seed("sprints", { pk: `PROJECT#${P_A}`, sk: "NOTE#two", schema_version: 1, version: 1, title: "two" });
+    const first = await dispatch(call("notes.bulk", items), deps);
+    expect(itemsOf(first)).toEqual([
+      { ok: false, status: 409, reason: "not_applied" },
+      { ok: false, status: 409, reason: "state_mismatch" },
+    ]);
+    expect(table.rows("idempotency")).toHaveLength(0);
+    const fixed = [items[0], { ...items[1], title: "three" }];
+    const second = await dispatch(call("notes.bulk", fixed, { requestId: "req-2" }), deps);
+    expect(itemsOf(second)).toEqual([
+      { ok: true, item: { title: "one" } },
+      { ok: true, item: { title: "three" } },
+    ]);
+  });
+
+  it("return_existing の件が外れたら既にある行の結果を返し、付随する状態の書き込みを確定しない", async () => {
+    const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
+    const event: Handler = async (item) => {
+      const note = item as { project_id: string; title: string };
+      return {
+        result: { ok: true, item: { title: note.title } },
+        writes: [
+          putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: note.title }, onConflict: "return_existing" }),
+          updateIfVersion({ table: "sprints", key: NOTE_KEY(P_A), version: 1, set: { title: note.title }, onConflict: "version_mismatch" }),
+        ],
+        conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }) }],
+      };
+    };
+    const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
+    table.seed("sprints", { ...eventKey, schema_version: 1, version: 1, title: "stored" });
+    table.seed("sprints", { ...NOTE_KEY(P_A), schema_version: 1, version: 1, title: "before" });
+    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
+    expect(itemsOf(result)).toEqual([{ ok: true, item: { title: "stored" } }]);
+    expect(table.row("sprints", NOTE_KEY(P_A))).toMatchObject({ title: "before", version: 1 });
+    expect(table.rows("idempotency")[0]).toMatchObject({ state: "settled", result: { ok: true, item: { title: "stored" } } });
+  });
+
+  it("結果の形に無い鍵は応答に残さない", async () => {
+    const { deps } = setup();
+    expect(itemsOf(await dispatch(call("notes.peek", [{ project_id: P_A }]), deps))).toEqual([{ ok: true, item: { title: "acme" } }]);
+  });
+});
+
+describe("dispatch: 要約の行", () => {
+  it("プロジェクトの区切りに置く要約は、そのプロジェクトで許された要素の対象と結果だけを持つ", async () => {
+    const { table, deps } = setup();
+    const result = await dispatch(call("notes.get", [{ project_id: P_A }, { project_id: P_B }]), deps);
+    expect(itemsOf(result)[1]).toEqual({ ok: false, status: 404, reason: "not_found" });
+    const summary = summaryRows(table)[0];
+    expect(String(summary?.["pk"])).toContain(P_A);
+    expect(JSON.stringify(summary)).not.toContain(P_B);
+    expect(summary).toMatchObject({ result: { outcome: "ok", status: 200, reasons: [] } });
+  });
+
+  it("利用者を作るトランザクションが外れたら、要約は作られなかった利用者の区切りに置かない", async () => {
+    const userKey = { pk: `USER#${CREATED}`, sk: "USER" };
+    const create: Handler = async () => ({
+      result: { ok: true, item: { user_id: CREATED } },
+      writes: [putIfAbsent({ table: "users", item: { ...userKey, schema_version: 1, version: 1 }, onConflict: "state_mismatch" })],
+      createdUserId: CREATED,
+    });
+    const { table, deps } = setup({ handlers: { ...noteHandlers, "sessions.create": create } });
+    table.seed("users", { ...userKey, schema_version: 1, version: 1 });
+    const newcomer: Principal = { kind: "newcomer", login: { cognitoSub: "acme-new", username: "acme-new", sessionId: "jti-new", idp: "google", subject: "s", authTime: AUTH_TIME } };
+    const result = await dispatch(call("sessions.create", [{ idempotency_key: IDEM_1 }], { principal: newcomer }), deps);
+    expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "state_mismatch" }]);
+    expect(summaryRows(table).map((r) => (r["actor"] as Record<string, unknown>)["kind"])).toEqual(["newcomer"]);
+    expect(JSON.stringify(summaryRows(table))).not.toContain(CREATED);
+  });
+
+  it("表に無い HTTP の経路は 404 を返す前に、操作の無い要約の行を 1 件書く", async () => {
+    const { table, deps } = setup();
+    const read = readHttpCall(httpEvent("/v1/nothing", "[]", HUMAN_TOKEN), () => 10_000);
+    if ("kind" in read) throw new Error("呼び出しに読めない");
+    expect(await dispatch(read, deps)).toEqual(problem(404, null));
+    expect(summaryRows(table)).toHaveLength(1);
+    expect(summaryRows(table)[0]).toMatchObject({ operation: "", result: { outcome: "rejected", status: 404 } });
   });
 });
 

@@ -472,7 +472,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | `AuditEntry` | `audit.ts` | `auditId`・`requestId`・`at`・`actor`・`channel`・`operation`・`targetIds`・`projectId`・`result`・`itemIndex`。`actor` は主体の種類と当たる ID だけを持つ記録の主体で、`Principal` から作る。`newcomer` は `{kind: "newcomer"}`（ID も `CognitoLogin` の値も持たない）にし、`sessions.create` の初回で利用者を作った要素と要約は `{kind: "human", userId: <作った利用者の ID>}` に入れ替える（[detail.md の `auditItem`](../docs/design/detail.md#関数の仕様)） |
 | `OperationCall` | `dispatch/types.ts` | `endpoint`・`channel`・`operation`・`token`・`principal?`・`items`・`requestId`・`mcpClientName?`・`remainingMs` |
 | `DispatchDeps` | `dispatch/types.ts` | `operations`・`handlers`・`scope`・`auth`・`db`・`clock`・`log` |
-| `Handler` | `dispatch/types.ts` | `(item, ctx: { principal; authz: ItemAuthz; clock; db }) => Promise<{ result; writes: TransactItem[] }>` |
+| `Handler` | `dispatch/types.ts` | `(item, ctx: { principal; authz: ItemAuthz; clock; db; sessionRevokedAt; checkRequester }) => Promise<{ result; writes: TransactItem[]; conflicts?; createdUserId? }>`。`checkRequester` は要求の中で同期に外へ働きかける操作が働きかける直前に呼ぶ要求元の照らし（[data.md の人の書き込みの要求元の照らし](../docs/design/data.md#人の書き込みの要求元の照らし)）で、外れたら `false` を返し、ハンドラーは働きかけずに返す（`dispatch` は戻り値によらず要素を 409 `state_mismatch` にして何も確定しない）。`conflicts` は `writes` と同じ番号の件が外れたときの結果で、`{ result }`（操作の契約にある失敗の結果。最後のログイン・`already_linked`・`link_invalid` など）か、`onConflict` が `return_existing` の件の `{ existing: (row) => result }`（既にある行から今回の結果を組む。`dispatch` は付随する状態の書き込みを確定せず、要素の記録の行と冪等の鍵の済みの行だけを確定する）。無い件は `onConflict` の `version_mismatch`・`state_mismatch` を要素の 409 にする |
 | `TableNames` | `db.ts` | 表の用途（`users`・`teams`・…・`idempotency`）から実際の表の名前への対応。値は起点が環境変数から渡す |
 
 ### 単体テストの観点（detail.md に足すもの）

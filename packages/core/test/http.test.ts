@@ -1,5 +1,7 @@
 import { operationByName } from "@nd-factory/contracts/operations";
 import { describe, expect, it } from "vitest";
+import { bodyFaultOf } from "../src/dispatch/http.ts";
+import { notesCreate } from "./fixtures/dispatch.ts";
 import { readHttpCall, writeHttpResponse, type DispatchResult, type HttpEvent, type OperationCall } from "../src/dispatch/dispatch.ts";
 
 // HTTP の要求の読みと応答の書き。経路は形の正本の操作の表で引く。AWS には触れない（要求は HTTP API のペイロードの形式 2.0 の作り物）
@@ -88,13 +90,25 @@ describe("readHttpCall", () => {
     expect(read({ body }).fault).toEqual({ status: 400, reason: "duplicate_item" });
   });
 
+  it("冪等の鍵を持つ操作は、冪等の鍵だけが違う要素を同じ対象の重なりにする", () => {
+    const one = { project_id: P_A, title: "a", idempotency_key: "0193a1b2-0000-7000-8000-000000000001" };
+    expect(bodyFaultOf([one, { ...one, idempotency_key: "0193a1b2-0000-7000-8000-000000000002" }], notesCreate)).toBe("duplicate_item");
+    expect(bodyFaultOf([one, { ...one, title: "b", idempotency_key: "0193a1b2-0000-7000-8000-000000000002" }], notesCreate)).toBeNull();
+  });
+
   it("POST でない方法は 405 を fault に持つ（dispatch が記録の行とともに返す）", () => {
     expect(read({ method: "GET" }).fault).toEqual({ status: 405, reason: null });
   });
 
-  it("操作の表に無い経路は振り分けへ渡さず 404", () => {
-    expect(readHttpCall(event({ path: "/v1/projects" }), remaining)).toEqual({ kind: "problem", status: 404, reason: null });
-    expect(readHttpCall(event({ path: "/v1/runner/projects/get" }), remaining)).toEqual({ kind: "problem", status: 404, reason: null });
+  it("操作の表に無い経路は操作の名前を空にして 404 を fault に持つ（dispatch が記録の行とともに返す）", () => {
+    expect(read({ path: "/v1/projects" })).toMatchObject({ operation: "", items: [], fault: { status: 404, reason: null } });
+    expect(read({ path: "/v1/runner/projects/get" })).toMatchObject({ endpoint: "runner", operation: "", fault: { status: 404, reason: null } });
+  });
+
+  it("深く入れ子の本文でも投げずに読む", () => {
+    const deep = `[${"[".repeat(20_000)}${"]".repeat(20_000)}]`;
+    expect(read({ body: deep }).fault).toBeUndefined();
+    expect(read({ body: `[${deep.slice(1, -1)},${deep.slice(1, -1)}]` }).fault).toEqual({ status: 400, reason: "duplicate_item" });
   });
 
   it("Authorization の無い要求は token を null で読む", () => {

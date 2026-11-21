@@ -4,7 +4,7 @@ import type { AuthDeps, AuthEndpoint, Principal } from "../auth/authenticate.ts"
 import type { ItemAuthz, ScopeReader } from "../authorize.ts";
 import type { Clock } from "../clock.ts";
 import type { TransactItem } from "../conditional-write.ts";
-import type { Db } from "../db.ts";
+import type { Db, StoredRow } from "../db.ts";
 import type { ItemResult } from "../idempotency.ts";
 import type { Id } from "../ids.ts";
 import type { Logger } from "../log.ts";
@@ -20,8 +20,9 @@ export type CallEndpoint = Exclude<AuthEndpoint, "github">;
 // 要求全体の誤りの理由のうち、本文で決まるもの（readHttpCall の検査の順）
 export type BodyFaultReason = "body_not_json" | "body_not_array" | "body_empty" | "too_many_items" | "duplicate_item";
 
-// readHttpCall が見つけた要求全体の誤り。dispatch が記録の行とともに返す（405 は認証の前、400 は認証の後）。405 は理由のコードを持たない
-export type RequestFault = { readonly status: 400; readonly reason: BodyFaultReason } | { readonly status: 405; readonly reason: null };
+// readHttpCall が見つけた要求全体の誤り。dispatch が記録の行とともに返す（404・405 は認証の前、400 は認証の後）。404・405 は理由のコードを持たない。
+// 404 は表に無い HTTP の経路で、呼び出しの操作の名前は空（記録の行の操作は null）
+export type RequestFault = { readonly status: 400; readonly reason: BodyFaultReason } | { readonly status: 404 | 405; readonly reason: null };
 
 export type OperationCall = {
   readonly endpoint: CallEndpoint;
@@ -53,12 +54,27 @@ export type HandlerContext = {
   readonly db: Db;
   // authenticate の sessionRevokedAt（sessions.delete で取り消しの行があったときだけその revoked_at、ほかは null）
   readonly sessionRevokedAt: string | null;
+  // 要求の中で同期に外へ働きかける操作（logins.delete の Cognito の呼び出し・notification_targets.test の送信）が、働きかける直前に呼ぶ要求元の照らし
+  // （docs/design/data.md の「人の書き込みの要求元の照らし」の「要求の中で同期に外へ働きかける操作」）。照らしの 2 件だけのトランザクションを打ち、
+  // 外れたら false を返す。false のときハンドラーは外へ働きかけずに返し、dispatch はハンドラーの戻り値によらず要素を 409 state_mismatch にして何も確定しない。
+  // 照らしの要らない主体と操作では打たずに true。表に届かなければ要求全体の 503 unavailable
+  readonly checkRequester: () => Promise<boolean>;
 };
+
+// 書き込みの件が外れたときの要素の結果。result は操作の契約にある失敗の結果（logins.delete の最後のログイン・logins.create の already_linked など）。
+// existing は onConflict が return_existing の件で、既にある行（強い整合で読んだ行。読んだ時に無ければ null）から今回の結果を組む
+export type WriteConflict = { readonly result: ItemResult } | { readonly existing: (row: StoredRow | null) => ItemResult };
 
 // ハンドラーは状態を自分で書かない。要素の結果と組んだ書き込み（putIfAbsent・updateIfVersion・usageAddItem の戻り値）を返す。
 // 要求元の照らし（人の書き込み）は dispatch が足すため、ハンドラーは要求元の行を照らさない。
+// conflicts は writes と同じ番号の件が外れたときの結果（無い件は onConflict の version_mismatch・state_mismatch を要素の 409 にする）。
 // createdUserId は sessions.create の初回で利用者を作った要素だけが返し、記録の主体をその利用者の人にする（audit の actorOfCreatedUser）
-export type HandlerOutput = { readonly result: ItemResult; readonly writes: readonly TransactItem[]; readonly createdUserId?: Id<"usr"> };
+export type HandlerOutput = {
+  readonly result: ItemResult;
+  readonly writes: readonly TransactItem[];
+  readonly conflicts?: readonly (WriteConflict | undefined)[];
+  readonly createdUserId?: Id<"usr">;
+};
 
 // 要素は操作の形の正本で検証した後の値
 export type Handler = (item: unknown, ctx: HandlerContext) => Promise<HandlerOutput>;
