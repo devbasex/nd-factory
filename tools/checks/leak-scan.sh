@@ -6,6 +6,8 @@
 # ファイルの名前も秘密の値を含み得るので、--paths を渡さなければ file-<番号>（名前の順の通し番号）に替えて出す。
 # gitleaks の標準出力と標準エラー（読めないファイルの診断などにファイルの名前が載る）は一時のファイルに受け、
 # --paths を渡さなければ出さない（出すのは終了コードと整形した当たりだけ）。
+# gitleaks は読めないファイルやディレクトリを警告だけで飛ばし、ほかに当たりが無ければ 0 で終えるので、
+# 生の出力に警告か誤りの段（WRN・ERR・FTL）があれば、固定の文言で知らせて 1 で終える（探し漏れを通さない）。
 # 今のディレクトリを探す木の根として打つ。
 #
 # 使い方: leak-scan.sh <dir|git> <設定> [--range <範囲>] [--report <報告のファイル>] [--paths]
@@ -13,7 +15,7 @@
 #   設定: 必ず渡す。省くと gitleaks は探す木の根の .gitleaks.toml を読み、既定の規則が抜けるため
 #   --report: 当たりを JSON で書く先（探す木の外に置く）。項目は RuleID・File・StartLine・EndLine・Commit だけ
 #   --paths: File に実際のファイルの名前を出し、gitleaks の生の出力も標準エラーへ出す。手元で当たりの場所を引くときだけ渡す（CI のジョブは渡さない）
-# 終了コード: 0 当たり無し、1 当たりがある・gitleaks が失敗した、2 引数の誤り・除外のファイルがある
+# 終了コード: 0 当たり無し、1 当たりがある・gitleaks が失敗した・gitleaks が警告か誤りを出した（読めずに飛ばした対象がある）、2 引数の誤り・除外のファイルがある
 set -euo pipefail
 
 usage() {
@@ -95,6 +97,11 @@ finish() {
     fi
     exit 1
   fi
+  # 警告と誤りの段を見る。色の制御の列を外してから、段の語を 1 語として照らす（名前は出さない）
+  local skipped=false
+  if [[ -s "$raw_log" ]] && sed $'s/\x1b\\[[0-9;]*m//g' "$raw_log" | grep -Eq '(^| )(WRN|ERR|FTL)( |$)'; then
+    skipped=true
+  fi
   local findings
   findings="$(jq --argjson paths "$paths" '
     ([.[].File] | unique) as $files
@@ -104,6 +111,12 @@ finish() {
   if [[ -n "$report" ]]; then
     printf '%s\n' "$findings" >"$report"
   fi
+  if [[ "$skipped" == true ]]; then
+    echo "leak-scan: gitleaks が警告か誤りを出した。読めずに飛ばした対象があり得るので、当たり無しとして通さない" >&2
+    if [[ "$paths" == false ]]; then
+      echo "leak-scan: gitleaks の出力はファイルの名前を含み得るので伏せた。手元で同じ引数に --paths を足して打つと出る" >&2
+    fi
+  fi
   local count
   count="$(jq 'length' <<<"$findings")"
   if ((count > 0)); then
@@ -111,6 +124,9 @@ finish() {
     if [[ "$paths" == false ]]; then
       echo "leak-scan: ファイルの名前は伏せた。手元で同じ引数に --paths を足して打つと出る" >&2
     fi
+    exit 1
+  fi
+  if [[ "$skipped" == true ]]; then
     exit 1
   fi
   exit "$status"
