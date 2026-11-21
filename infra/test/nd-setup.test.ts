@@ -35,6 +35,7 @@ type FakeOptions = {
   currentBootstrap?: number | null;
   profileError?: boolean;
   target?: Target;
+  azs?: number;
 };
 
 type Fake = { deps: SetupDeps; calls: Call[]; out: string[]; err: string[] };
@@ -78,6 +79,15 @@ function fake(o: FakeOptions = {}): Fake {
     },
     async readBootstrapVersion() {
       return o.currentBootstrap === undefined ? 30 : o.currentBootstrap;
+    },
+    async readCostAllocationTags(_target, keys) {
+      return Object.fromEntries(keys.map((k) => [k, "Active" as const]));
+    },
+    async readOrganizationManager() {
+      return { member: false, managementAccount: null };
+    },
+    async readGetAzsCount() {
+      return o.azs ?? 3;
     },
     files: defaultFiles,
     digest: assemblyDigest,
@@ -184,6 +194,44 @@ describe("runDiff", () => {
     const stacks = JSON.parse(readFileSync(join(out, STACKS_FILE), "utf8")) as { stacks: string[] };
     expect(stacks.stacks).toEqual(["app", "pipeline"]);
     expect(confirmFrom(f)).toBe(confirmValue(await assemblyDigest(out), TARGET, ["app", "pipeline"]));
+  });
+
+  it("出力の最後に足りない設定の欄を出す", async () => {
+    const f = fake();
+    await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const head = f.out.indexOf("足りない設定:");
+    expect(head).toBeGreaterThan(f.out.findIndex((l) => l.startsWith("確認の値: ")));
+    // 作り物の設定は Google のクライアントの ID と運用の知らせの宛先を持たない
+    const rows = f.out.slice(head + 1);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((l) => l.startsWith("  - "))).toBe(true);
+    expect(rows.join("\n")).toContain("Google のクライアントの ID が無い");
+    expect(rows.join("\n")).toContain("ops.notify_emails");
+  });
+
+  it("足りない設定があっても終了コードは 0 で、AWS へ書かない", async () => {
+    const f = fake({ azs: 1 });
+    const code = await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    expect(code).toBe(EXIT.OK);
+    expect(writes(f)).toBe(0);
+    expect(f.out.join("\n")).toContain("Fn::GetAZs が返す AZ が 1 つ");
+  });
+
+  it("足りない設定の照らしが投げても終了コードは 0 で、確かめられない行を出す", async () => {
+    const f = fake();
+    f.deps.readOrganizationManager = async () => {
+      throw new Error("壊れた");
+    };
+    f.deps.readCostAllocationTags = async () => ({ "app-prefix": "Inactive", "app-env": "Active" });
+    const code = await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    expect(code).toBe(EXIT.OK);
+    expect(f.out.join("\n")).toContain("を確かめられない（Error: 壊れた）");
+  });
+
+  it("差分が失敗すれば足りない設定の欄を出さない", async () => {
+    const f = fake({ diffCode: 1 });
+    await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    expect(f.out.some((l) => l.startsWith("足りない設定"))).toBe(false);
   });
 
   it("合成は作り物でない profile の主体とリージョンを合成へ渡す", async () => {

@@ -61,6 +61,31 @@ npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> 
 | 戻り先の URL | `app` を選んだときだけ。Google のクライアントに登録する URL（例 `https://acme-test-login.auth.us-west-2.amazoncognito.com/oauth2/idpresponse`）。使い方は [idp-and-apps.md](idp-and-apps.md) にある |
 | 確認の値 | 下の「確認の値」の形。`deploy` に渡す |
 | 次に打つコマンド | 確認の値を入れた `deploy` のコマンド |
+| 足りない設定 | 出力の最後の欄。反映の前に直すとよい設定を 1 件 1 行で示し、無ければ「足りない設定: 無し」を出す。下の「足りない設定」にある |
+
+## 足りない設定
+
+`diff` は出力の最後に「足りない設定」の欄を出す。足りない設定があっても反映はでき、終了コードは 0 のまま変わらない。反映の前に直すかは設置する人が決める。欄を作るために AWS を読むだけで、AWS へは書かない。
+
+| 行 | 出るとき | 直し方 |
+| --- | --- | --- |
+| Google のクライアントの ID が無い | 設定のファイルに `login.google.client_id` が無い | 画面はログインの設定を待つ。[idp-and-apps.md](idp-and-apps.md) の順でクライアントを作り、`client_id` を書いて `diff` と `deploy` を打ち直す |
+| コスト配分タグが有効でない | `budget.scope` が `tags`（既定）で、タグ `app-prefix`・`app-env` のどれかが有効でない | 有効になるまで予算は 0 を数え続け、予算の知らせは鳴らない。行が示す先（組織に入っていなければこのアカウントの請求の画面、組織のメンバーなら組織の管理のアカウント）で有効にする。有効にできなければ `budget.scope` を `account` にする（[settings.md](settings.md)） |
+| コスト配分タグが有効かを確かめられない | タグの状態を読めない | 行が示す次の操作に従う。組織に入っていなければ `ce:ListCostAllocationTags` を許した profile で打ち直し、組織のメンバーなら組織の管理のアカウントへ有効化を頼むか `budget.scope` を `account` にする |
+| 運用の知らせの宛先が空 | 設定のファイルの `ops.notify_emails` が無いか空 | 宛先のメールを書く。無いと予算と運用の知らせがどこにも届かない |
+| `Fn::GetAZs` が返す AZ が 2 つ未満 | 既定の VPC の既定のサブネットが 1 つの AZ にだけある | 反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --availability-zone <AZ>`）か、既定のサブネットをすべて消す |
+| `Fn::GetAZs` が返す AZ の数を確かめられない | サブネットか AZ を読めない | 下の許しを持つ profile で打ち直す |
+
+`budget.scope` が `account` のときは、コスト配分タグの行を出さず、タグの状態も読まない。
+
+欄を作るために、`diff` に渡す profile には次の読み取りの許しが要る。無くても `diff` は止まらず、その行が「確かめられない」になる。
+
+| 許し | 読むもの |
+| --- | --- |
+| `ce:ListCostAllocationTags` | コスト配分タグ `app-prefix`・`app-env` の状態 |
+| `organizations:DescribeOrganization` | 組織に入っているかと、組織の管理のアカウント（タグを有効にする先を示すため） |
+| `ec2:DescribeSubnets` | 既定のサブネットのある AZ |
+| `ec2:DescribeAvailabilityZones` | 既定のサブネットが無いときの、使える AZ |
 
 ## 確認の値
 
