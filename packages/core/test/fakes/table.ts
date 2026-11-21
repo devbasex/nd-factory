@@ -8,7 +8,7 @@ import type { Db, KeyCondition, RowKey, StoredRow, TableName } from "../../src/d
 
 type Mutable = Record<string, unknown>;
 
-export type InjectedFailure = "conflict" | "unavailable";
+export type InjectedFailure = "conflict" | "unavailable" | "invalid";
 
 function rowKey(key: RowKey): string {
   return `${key.pk}\u0000${key.sk ?? ""}`;
@@ -176,6 +176,7 @@ export function fakeTable() {
       const failure = failures.shift();
       if (failure === "conflict") throw cancelled(items.map(() => "TransactionConflict"));
       if (failure === "unavailable") throw unavailable();
+      if (failure === "invalid") throw validationError("One or more parameter values were invalid");
       const codes = items.map((item) => (evaluate(item.condition, tableOf(item.table).get(rowKey(item.key))) ? "None" : "ConditionalCheckFailed"));
       if (codes.includes("ConditionalCheckFailed")) throw cancelled(codes);
       // 更新を先に全部組んでから書く（途中の誤りで半端に書かない）
@@ -222,7 +223,7 @@ export function fakeTable() {
     setIndex(table: TableName, index: string, rows: Mutable[]): void {
       indexes.set(`${table}/${index}`, structuredClone(rows));
     },
-    // 次のトランザクションから順に、衝突か届かない失敗を起こす
+    // 次のトランザクションから順に、衝突・届かない失敗・表が断る失敗（ValidationException）を起こす
     failNext(...next: InjectedFailure[]): void {
       failures.push(...next);
     },

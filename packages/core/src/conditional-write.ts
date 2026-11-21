@@ -2,6 +2,7 @@ import { RETRY_POLICIES } from "@nd-factory/contracts/data";
 import pRetry from "p-retry";
 import type { Db, Row, RowKey, TableName } from "./db.ts";
 import type { Logger } from "./log.ts";
+import { classifyFailure } from "./retry.ts";
 
 // 条件つきの書き込み。条件と更新は構造の値（Condition・Update）で組み、DynamoDB の式の文字列へはこのモジュールの
 // expressionsOf だけが書き出す（条件式の組み立てを部品の外に置かない。受け入れ条件 2）。
@@ -55,7 +56,8 @@ export class AuditAppendOnlyError extends Error {
   override name = "AuditAppendOnlyError";
 }
 
-// 再試行の後も表に届かない。呼び手は要求全体の 503（記録の行を含むなら audit_unavailable、含まなければ unavailable）にする
+// 再試行の後も表に届かない（分類が retryable の失敗だけ）。呼び手は要求全体の 503（記録の行を含むなら audit_unavailable、含まなければ unavailable）にする。
+// 表が断った失敗（ValidationException・AccessDeniedException・行の形の誤りなど、再実行しても通らない）はこれに包まず、元の例外のまま投げる
 export class WriteUnavailableError extends Error {
   override name = "WriteUnavailableError";
   readonly includesAudit: boolean;
@@ -339,9 +341,15 @@ export async function writeAtomically(db: Db, items: readonly TransactItem[], lo
     else log?.info("書き込みの条件が外れた", { ...summary, result: "conflict", failed: outcome.failed.map((f) => f.onConflict) });
     return outcome;
   } catch (error) {
-    const includesAudit = items.some((item) => item.table === "audit");
     const name = error instanceof Error ? error.name : "unknown";
-    log?.error("書き込みが表に届かない", { ...summary, result: "unavailable", error: name });
+    const cls = classifyFailure(error);
+    if (cls !== "retryable") {
+      // 届かないのでなく表が断った（または分からない）。再実行しても通らないため「届かない」と言わず、元の例外のまま投げる
+      log?.error(cls === "rejected" ? "書き込みを表が断った" : "書き込みが届かない以外の失敗で止まった", { ...summary, result: "rejected", class: cls, error: name });
+      throw error;
+    }
+    const includesAudit = items.some((item) => item.table === "audit");
+    log?.error("書き込みが表に届かない", { ...summary, result: "unavailable", class: cls, error: name });
     throw new WriteUnavailableError(`書き込みを確定できない（${name}）`, { cause: error, includesAudit });
   }
 }

@@ -182,7 +182,8 @@ nd-factory/
 | `callHttp` | `https:` でない URL | 呼び手の誤り | 送る前の照らし | 止める（例外） | API では 503 `unavailable` とログの error | 直すまで再実行しない |
 | `writeAtomically` | 条件の外れ | 版の違い・状態の違い・既にある行 | `TransactionCanceledException` の件ごとの理由が `ConditionalCheckFailed` | 呼び出し元へ返す（件の番号と `onConflict` の扱い） | 呼び手が要素の 409 `version_mismatch`・`state_mismatch` か、`return_existing` なら前の 1 件の結果にする | 何も書かれていない。読み直して送り直せる |
 | `writeAtomically` | トランザクションどうしの衝突 | 同じ行を同時に書く別の要求 | 件ごとの理由が `TransactionConflict` | `p-retry` で再試行（方針 `dynamodb-transaction`） | 使い切れば要求全体の 503 `unavailable` | 何も書かれていない。再実行できる |
-| `writeAtomically` | 表に届かない | 呼びすぎ・障害・時間切れ | SDK の例外 | 再試行の後に呼び出し元へ返す | 要求全体の 503（記録の行を含むなら `audit_unavailable`、含まなければ `unavailable`） | 何も書かれていない。冪等の鍵で再実行できる |
+| `writeAtomically` | 表に届かない | 呼びすぎ・障害・時間切れ | SDK の例外で、`classifyFailure` が `retryable`（衝突の使い切りを含む） | 再試行の後に呼び出し元へ返す（`WriteUnavailableError`） | 要求全体の 503（記録の行を含むなら `audit_unavailable`、含まなければ `unavailable`） | 何も書かれていない。冪等の鍵で再実行できる |
+| `writeAtomically` | 表が断った | 要求の形の誤り・権限の無さ・行の形の誤り（`ValidationException`・`AccessDeniedException` など） | SDK の例外で、`classifyFailure` が `retryable` でない | 繰り返さず、`WriteUnavailableError` に包まずに元の例外のまま投げる（「届かない」と言わない） | 想定しない失敗として、ハンドラーの外側で要求全体の 503 `unavailable` とログの error（[決定 46](api.md#決定-46-呼び手が送り直すかを決められるよう500-を返さず想定しない失敗を-503-にそろえる)） | 何も書かれていない。直すまで同じ結果で、設計の誤りとしてテストが先に落とす |
 | `writeAtomically` | 件の数が上限を越える | ハンドラーが組んだ書き込みが多すぎる | 送る前の数え | 止める（例外） | 要求全体の 503 `unavailable` とログの error | 設計の誤りで、テストが先に落とす |
 | `writeAtomically`・`Db.transactWrite` | 記録の表の書き換え・削除・上書きを組んだ | 書き手の誤り | 送る前の照らし（記録の表の件が `attribute_not_exists(pk)` の Put でない）。`writeAtomically` を通らない `Db.transactWrite` の呼び出しも、送る境の `createDb` が同じ照らしで止める（既にある鍵への Put は更新と削除の権限を外しても Put の権限で上書きできるため、権限だけに頼らない） | 止める（`AuditAppendOnlyError`。どの件も送らない） | 要求全体の 503 `unavailable` とログの error | 設計の誤りで、テストが先に落とす（I9） |
 | `authenticate` | token が無い・形が違う・署名が違う・期限切れ・取り消し済み・受け口に合わない | 呼び手の誤りか古い token | 種類ごとの照らし | 呼び出し元へ返す（`unauthorized`） | 要求全体の 401 `unauthorized`（理由によらず同じ本文） | 後始末なし。新しい token で再実行できる |
@@ -247,7 +248,7 @@ nd-factory/
 | `judgeUsage` | 時点が「割り当てる」 | 同時に動くレーンの数がプランの数以上なら `concurrency_full`（待てば解ける）。上限なしの行は照らさない |
 | `judgeUsage` | 時点が「区間の境」 | 使った額が上限額以上なら `monthly_cap_reached`（待てば解ける: 上限額を変えるか月が替わる） |
 | `judgeUsage` | 使った額と上限額の通貨が違う | `currency_mismatch`（通さない。換算しない） |
-| `classifyFailure` | 408・429・500・502・503・504・ネットワークの誤り・時間切れ・`ThrottlingException`・`ProvisionedThroughputExceededException`・`TransactionConflict` | `retryable` |
+| `classifyFailure` | 408・429・500・502・503・504・ネットワークの誤り・時間切れ・`ThrottlingException`・`ProvisionedThroughputExceededException`・`RequestLimitExceeded`・`InternalServerError`・`ServiceUnavailable`・`TransactionConflict` | `retryable` |
 | `classifyFailure` | 409・`ConditionalCheckFailedException` | `conflict` |
 | `classifyFailure` | 404・`ResourceNotFoundException` | `not_found` |
 | `classifyFailure` | ほかの 4xx・501・`ValidationException`・`AccessDeniedException` | `rejected` |
@@ -324,7 +325,7 @@ nd-factory/
 | `redact` | 伏せた所を `"[redacted]"` に替えた写し。伏せた鍵の名前が重なれば 2 つ目から `"[redacted]#2"` のように番号を付け、`Set` は配列、`Map` は `[鍵, 値]` の組の配列に写す（項目を黙って落とさない） | 戻り値だけ | 伏せる前の値の一部（頭や長さも残さない） |
 | `callHttp`・`writeAtomically` の再試行 | 繰り返すたびに方針の名前・何回目・分類（`ky` の `beforeRetry` と `p-retry` の `onFailedAttempt` から） | warn | 失敗の文言の中の値（例外の名前と分類だけ） |
 | `callHttp` | 相手の種類（`github`・`idp`・`push`・`slack`・`api`）・方法・状態・時間・分類・繰り返した回数 | info（成功）・warn（再試行・断られた）・error（`retryable` で終わった。最後の失敗が繰り返す対象の外のとき（冪等でない要求の 408・500・502・503・504・時間切れなど。429 を繰り返した後の 503 のように、繰り返した回数が正で回数が残っていても当たる）と、繰り返した回数が 0 のときは「使い切った」でなく「繰り返さずに返した」の文言にする） | URL の問い合わせの部分・頭書き・本文・token |
-| `writeAtomically` | 表の名前・件の数・結果（`ok`・`conflict`・`unavailable`）・外れた件の扱い | info・warn（衝突の再試行）・error（届かない） | 行の値 |
+| `writeAtomically` | 表の名前・件の数・結果（`ok`・`conflict`・`unavailable`・`rejected`）・外れた件の扱い・失敗の分類と例外の名前 | info・warn（衝突の再試行）・error（届かない・表が断った） | 行の値 |
 | `authenticate` | 主体の種類・結果（`ok`・`unauthorized`・`unavailable`）。`unauthorized` の内訳（形・署名・期限・取り消し・受け口）はログにだけ出す | info・warn（依存先の失敗） | token とその要約値・秘密の部分・JWT の中の項目（`sub` 以外の利用者の値） |
 | `authorize` | 操作の名前・要素の数・拒んだ要素の数と理由のコード | info | 見えないプロジェクトの ID・絞る前の数（I2 の件数の出口） |
 | `judgeUsage` | 無し（呼び手のハンドラーが理由のコードを要素の結果と記録に出す） | — | 料金プランの名前で分けた文 |
@@ -385,7 +386,7 @@ nd-factory/
 | `awsClient` | 方針の `retryMode`・回数・時間切れを持つクライアント（クライアントの設定を読んで照らす） | 同じ方針の 2 回目は同じインスタンス。期限を過ぎて流れ続ける本文は期限で `TimeoutError` として切れる（流れの本文を返す呼び出しには使えないことを固める） | 知らない方針の名前は型で弾く |
 | `putIfAbsent` | 条件 `attribute_not_exists(pk)` と扱いを持つ 1 件 | `schema_version` の無い行を型で弾く | 無し |
 | `updateIfVersion` | 版の条件と `version + 1` を持つ 1 件 | `version` が 1・`extra` あり | `set` に `version` を含むと型で弾く |
-| `writeAtomically` | 全件が書かれ `ok` | 1 件と 100 件 | 条件の外れの件の番号と扱いを返す、衝突は再試行、届かないは再試行の後に投げる、101 件で止まる |
+| `writeAtomically` | 全件が書かれ `ok` | 1 件と 100 件 | 条件の外れの件の番号と扱いを返す、衝突は再試行、届かないは再試行の後に `WriteUnavailableError` で投げる、表が断った失敗は元の例外のまま投げる、101 件で止まる |
 | `authenticate` | 人・委任・ランナー・手元のマシン・GitHub・DB の用意のタスクの 6 つが決まる（見回りは HTTP の経路を持たず、認証を通らない） | 期限の 1 秒前と 1 秒後 | 形・署名・期限・取り消し・受け口の違いはすべて同じ `unauthorized`、鍵と表に届かないは `unavailable`、最後に使った時刻を書けなくても続く |
 | `visibleProjectIds` | 人・委任・ランナーの集まり | 委任した人がチームを外れた次の要求で集まりから消える | 読み手の失敗を投げる |
 | `authorize` | 見える要素を `allow` | 見える要素と見えない要素の混ざり・移す途中の名前だけの読み | 見えないは 404、委任の人だけは要求全体の 403、種類の不足は 403、メンバーの持ち主だけの操作は要素の 403、読み手の失敗は投げる |

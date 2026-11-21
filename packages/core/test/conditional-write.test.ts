@@ -195,7 +195,18 @@ describe("writeAtomically", () => {
     expect(error).toBeInstanceOf(WriteUnavailableError);
     expect((error as WriteUnavailableError).includesAudit).toBe(false);
     expect(table.transactions).toHaveLength(1);
-    expect(records().at(-1)).toMatchObject({ level: "error", result: "unavailable", error: "InternalServerError" });
+    expect(records().at(-1)).toMatchObject({ level: "error", msg: "書き込みが表に届かない", result: "unavailable", class: "retryable", error: "InternalServerError" });
+  });
+
+  it("表が断った失敗（ValidationException）は WriteUnavailableError に包まず、元の例外のまま投げる", async () => {
+    const table = fakeTable();
+    const { log, records } = logs();
+    table.failNext("invalid");
+    const error = await writeAtomically(table.db, [put(0)], log).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(WriteUnavailableError);
+    expect(error).toMatchObject({ name: "ValidationException" });
+    expect(table.transactions).toHaveLength(1);
+    expect(records().at(-1)).toMatchObject({ level: "error", msg: "書き込みを表が断った", result: "rejected", class: "rejected", error: "ValidationException" });
   });
 
   it("101 件と 0 件と同じ行の 2 回で止め、送らない", async () => {

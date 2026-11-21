@@ -48,12 +48,15 @@ describe("classifyFailure", () => {
   it.each([
     ["ThrottlingException", "retryable"],
     ["ProvisionedThroughputExceededException", "retryable"],
+    ["RequestLimitExceeded", "retryable"],
+    ["InternalServerError", "retryable"],
+    ["ServiceUnavailable", "retryable"],
     ["TransactionConflict", "retryable"],
     ["ConditionalCheckFailedException", "conflict"],
     ["ResourceNotFoundException", "not_found"],
     ["ValidationException", "rejected"],
     ["AccessDeniedException", "rejected"],
-    ["InternalServerError", "unknown"],
+    ["SerializationException", "unknown"],
   ])("AWS SDK の例外 %s は %s", (name, expected) => {
     expect(classifyFailure(awsError(name))).toBe(expected);
   });
