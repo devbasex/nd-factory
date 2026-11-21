@@ -52,8 +52,9 @@ export type InboundRequest = {
   readonly operation: string;
   // Authorization の Bearer の値。無ければ null
   readonly token: string | null;
-  // GitHub の Webhook だけ: 受けたままの本文と X-Hub-Signature-256 の値
-  readonly rawBody?: string;
+  // GitHub の Webhook だけ: 受けたままの本文のバイト列と X-Hub-Signature-256 の値。
+  // 受け口は本文を文字列に直さずに渡す（API Gateway の isBase64Encoded なら base64 から、そうでなければ UTF-8 でバイト列に戻す）
+  readonly rawBody?: Uint8Array;
   readonly signature?: string | null;
 };
 
@@ -73,12 +74,19 @@ export type DelegationRecord = {
 // 手元のマシンの行の読んだ値（#7）
 export type MachineRecord = { readonly secretSha256: string; readonly expiresAt: string; readonly revokedAt: string | null };
 
-// レーンの行の読んだ値（#6）。終わったレーン・前の世代の token は断つ（I11）
-export type LaneRecord = { readonly projectId: Id<"prj">; readonly generation: number; readonly ended: boolean };
+// レーンの行の読んだ値（#6）。終わったレーン・前の世代の token は断つ（I11）。
+// exchangedGeneration は引き換えの token を使い終えた世代（まだなら null）。世代ごとに持つため、世代を上げても消し直さない
+export type LaneRecord = { readonly projectId: Id<"prj">; readonly generation: number; readonly ended: boolean; readonly exchangedGeneration: number | null };
 
-// プロジェクトの進行表の DB の用意の状態（#13）。consumed は 1 回だけの token のうち使い終えた用途
+// プロジェクトの進行表の DB の用意の状態（#13）。consumed は今の用意（prepId）の 1 回だけの token のうち使い終えた用途
 export type DbPrepUse = "exchange" | "completion";
 export type DbPrepRecord = { readonly prepId: string; readonly inProgress: boolean; readonly consumed: readonly DbPrepUse[] };
+
+// 1 回だけの token（ランナーの引き換え・DB の用意の引き換えと終わりの報告）の使い終えの印:
+// authenticate は読んだ印で使い終えた token を断つだけで、印を書かない（読むだけでは同じ時の 2 つの要求を分けられない）。
+// 1 回だけを守るのはその経路のハンドラーで、返す値の書き込みと同じ writeAtomically に、印の無いときだけ印を付ける条件つきの書き込みを入れる
+// （ランナー: exchangedGeneration が token の世代でないときだけ token の世代にする。DB の用意: consumed にその用途が無く prepId が同じときだけ足す）。
+// 条件に外れたら、authenticate の外れと同じ 401 unauthorized を返し、値を返さない
 
 // 行の読み手（ポート）。どれも表の本体を強い整合で読む。中身は行の持ち主の子が書く（core から apps へ依存しない）
 export type AuthReaders = {
@@ -120,7 +128,7 @@ function isExpired(iso: string, nowMs: number): boolean {
 
 async function human(token: string, deps: AuthDeps): Promise<Outcome> {
   if (deps.cognito === null) return unauthorized("endpoint");
-  const checked = await deps.cognito(token);
+  const checked = await deps.cognito(token, deps.clock.epochMs());
   if (!checked.ok) return checked;
   const userId = await deps.readers.userOfSubject(checked.value.sub);
   return userId === null ? unauthorized("unknown_principal") : ok({ kind: "human", userId });
@@ -182,6 +190,8 @@ async function runner(token: string, operation: string, deps: AuthDeps): Promise
   const generation = runnerClaims.generation;
   const lane = await deps.readers.lane(laneId);
   if (lane === null || lane.ended || lane.generation !== generation || lane.projectId !== projectId) return unauthorized("state");
+  // 引き換えの token は引き換えた時点で断つ（印を付けるのは引き換えのハンドラー。上の「使い終えの印」）
+  if (claims["token_use"] === "exchange" && lane.exchangedGeneration === generation) return unauthorized("state");
   return ok({ kind: "runner", laneId, projectId, generation });
 }
 
@@ -203,7 +213,7 @@ async function dbPrep(token: string, operation: string, deps: AuthDeps): Promise
   if (prepClaims === null || projectId === null) return unauthorized("shape");
   const prepId = prepClaims.sub;
   const prep = await deps.readers.dbPrep(projectId);
-  // 進行表の DB が作成中か差し替えの途中で、token の用意が今の用意と合い、その用途をまだ使っていない（1 回だけ）
+  // 進行表の DB が作成中か差し替えの途中で、token の用意が今の用意と合い、その用途をまだ使っていない（1 回だけ。印を付けるのはハンドラー。上の「使い終えの印」）
   if (prep === null || !prep.inProgress || prep.prepId !== prepId || prep.consumed.includes(use)) return unauthorized("state");
   return ok({ kind: "db_prep", projectId, prepId });
 }

@@ -78,11 +78,12 @@ export function secretMatches(secret: string, expectedSha256Hex: string): boolea
 // GitHub の Webhook の署名（X-Hub-Signature-256: sha256=<16 進>）を、本文の HMAC-SHA256 と一定時間で比べる
 const GITHUB_SIGNATURE = /^sha256=([0-9a-f]{64})$/;
 
-export function webhookSignatureMatches(rawBody: string, secret: string, signature: string | null): boolean {
+// 本文はバイト列のまま受ける。文字列に直すと不正な UTF-8 が置換文字に化け、正当な署名でも合わなくなる
+export function webhookSignatureMatches(rawBody: Uint8Array, secret: string, signature: string | null): boolean {
   const matched = signature === null ? null : GITHUB_SIGNATURE.exec(signature);
   const hex = matched?.[1];
   if (hex === undefined) return false;
-  const expected = createHmac("sha256", secret).update(rawBody, "utf8").digest();
+  const expected = createHmac("sha256", secret).update(rawBody).digest();
   return timingSafeEqual(expected, Buffer.from(hex, "hex"));
 }
 
@@ -137,12 +138,14 @@ export function dbPrepClaimsOf(claims: SignedClaims): DbPrepTokenClaims | null {
   return parsed.success ? parsed.data : null;
 }
 
-// Cognito の access token の照らし。aws-jwt-verify の Cognito の検証で、署名（kid の公開鍵）・発行元・client_id・token_use・期限を照らす。
+// Cognito の access token の照らし。aws-jwt-verify の Cognito の検証で、署名（kid の公開鍵）・発行元・client_id・token_use を照らす。
+// 期限（exp。必須）と nbf は、ほかの token と同じく authenticate の注入した時計（nowMs）で照らす。aws-jwt-verify も exp・nbf がある
+// ときだけ実時刻で照らすが、本番の注入した時計は実時刻のため同じ判定になる（テストは実時刻を注入した時計に揃える）。
 // 公開鍵の控えは組み込みの SimpleJwksCache と SimplePenaltyBox を既定のまま使い、取り手 SimpleFetcher には方針 http-idp-keys の
 // responseTimeout だけを渡す（決定 17。全体の設計の決定 48）。控えは実行環境ごとに 1 つで、起点が 1 回だけ作る
 export type CognitoConfig = { readonly userPoolId: string; readonly clientId: string };
 
-export type CognitoCheck = (token: string) => Promise<CheckResult<{ readonly sub: string }>>;
+export type CognitoCheck = (token: string, nowMs: number) => Promise<CheckResult<{ readonly sub: string }>>;
 
 export type CognitoCheckOptions = {
   // テストだけが差し替える（本番は SimpleFetcher のまま）
@@ -172,11 +175,18 @@ function causeOf(error: unknown): string {
 export function createCognitoCheck(config: CognitoConfig, options: CognitoCheckOptions = {}): CognitoCheck {
   const fetcher = options.fetcher ?? new SimpleFetcher({ defaultRequestOptions: { responseTimeout: IDP_KEYS_POLICY.response_timeout_ms } });
   const verifier = CognitoJwtVerifier.create({ userPoolId: config.userPoolId, tokenUse: "access", clientId: config.clientId }, { jwksCache: new SimpleJwksCache({ fetcher }) });
-  return async (token) => {
+  return async (token, nowMs) => {
     try {
       const payload = await verifier.verify(token);
       const sub = payload.sub;
       if (typeof sub !== "string" || sub.length === 0) return unauthorized("shape");
+      // aws-jwt-verify は exp が無ければ期限を照らさないため、有限の数の exp を必須にする
+      const exp: unknown = payload.exp;
+      if (typeof exp !== "number" || !Number.isFinite(exp)) return unauthorized("shape");
+      if (exp * 1000 <= nowMs) return unauthorized("expired");
+      const nbf: unknown = payload.nbf;
+      if (nbf !== undefined && (typeof nbf !== "number" || !Number.isFinite(nbf))) return unauthorized("shape");
+      if (typeof nbf === "number" && nbf * 1000 > nowMs) return unauthorized("expired");
       return { ok: true, value: { sub } };
     } catch (error) {
       if (isUnavailable(error)) return { ok: false, reason: "unavailable", cause: causeOf(error) };

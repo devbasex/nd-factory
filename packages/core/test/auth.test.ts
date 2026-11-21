@@ -1,7 +1,7 @@
 import { FetchError } from "aws-jwt-verify/error";
 import type { Fetcher } from "aws-jwt-verify/https";
 import { createHash, createHmac, generateKeyPairSync, randomBytes, sign, type KeyObject } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   authenticate,
   createCognitoCheck,
@@ -17,10 +17,20 @@ import {
 import { createClock } from "../src/clock.ts";
 import { createLogger } from "../src/log.ts";
 
-// IdP と表には触れない。Cognito の公開鍵は差し替えた取り手が返し、鍵と token はテストの中で作った作り物にする
+// IdP と表には触れない。Cognito の公開鍵は差し替えた取り手が返し、鍵と token はテストの中で作った作り物にする。
+// 時刻は注入した時計の NOW に揃える（aws-jwt-verify が実時刻でも照らすため、実時刻も NOW に止める）
 
 const NOW = Date.parse("2026-11-21T03:04:05.000Z");
 const clock = createClock(() => NOW);
+const NOW_SEC = NOW / 1000;
+
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 const id = <K extends string>(kind: K, n: number) => `${kind}_01890a5d-ac96-774b-bcce-${n.toString(16).padStart(12, "0")}` as `${K}_${string}`;
 
@@ -50,8 +60,8 @@ const otherRsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const JWKS = { keys: [{ ...rsa.publicKey.export({ format: "jwk" }), kid: "kid-1", alg: "RS256", use: "sig" }] };
 
 function cognitoToken(over: Record<string, unknown> = {}, opts: { key?: KeyObject; kid?: string } = {}): string {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const payload = { sub: "cognito-sub-1", iss: ISSUER, client_id: CLIENT, token_use: "access", iat: nowSec, exp: nowSec + 600, ...over };
+  const payload: Record<string, unknown> = { sub: "cognito-sub-1", iss: ISSUER, client_id: CLIENT, token_use: "access", iat: NOW_SEC, exp: NOW_SEC + 600, ...over };
+  for (const [k, v] of Object.entries(payload)) if (v === undefined) delete payload[k];
   const input = `${b64({ alg: "RS256", kid: opts.kid ?? "kid-1", typ: "JWT" })}.${b64(payload)}`;
   return `${input}.${sign("RSA-SHA256", Buffer.from(input), opts.key ?? rsa.privateKey).toString("base64url")}`;
 }
@@ -78,8 +88,8 @@ function signedToken(payload: Record<string, unknown>, key: KeyObject = ed.priva
   return `${input}.${sign(null, Buffer.from(input), key).toString("base64url")}`;
 }
 
-const laneClaims = (over: Record<string, unknown> = {}) => ({ aud: "lane", token_use: "lane", sub: LANE, project_id: PROJECT, generation: 2, exp: NOW / 1000 + 3600, ...over });
-const prepClaims = (over: Record<string, unknown> = {}) => ({ aud: "db_prep", token_use: "exchange", sub: PREP, project_id: PROJECT, exp: NOW / 1000 + 600, ...over });
+const laneClaims = (over: Record<string, unknown> = {}) => ({ aud: "lane", token_use: "lane", sub: LANE, project_id: PROJECT, generation: 2, exp: NOW_SEC + 3600, ...over });
+const prepClaims = (over: Record<string, unknown> = {}) => ({ aud: "db_prep", token_use: "exchange", sub: PREP, project_id: PROJECT, exp: NOW_SEC + 600, ...over });
 
 // 読み手の作り物
 
@@ -180,7 +190,11 @@ describe("authenticate: 人（Cognito の access token）", () => {
   });
 
   it.each([
-    ["期限切れ", cognitoToken({ exp: Math.floor(Date.now() / 1000) - 1 })],
+    ["期限切れ", cognitoToken({ exp: NOW_SEC - 1 })],
+    ["期限の時刻ちょうど", cognitoToken({ exp: NOW_SEC })],
+    ["exp が無い", cognitoToken({ exp: undefined })],
+    ["exp が文字列", cognitoToken({ exp: String(NOW_SEC + 600) })],
+    ["nbf が先", cognitoToken({ nbf: NOW_SEC + 60 })],
     ["別のクライアント", cognitoToken({ client_id: "other-client" })],
     ["id token", cognitoToken({ token_use: "id" })],
     ["別の発行元", cognitoToken({ iss: "https://cognito-idp.us-west-2.amazonaws.com/us-west-2_OTHER" })],
@@ -191,6 +205,14 @@ describe("authenticate: 人（Cognito の access token）", () => {
   ])("%s は理由によらず同じ unauthorized", async (_label, token) => {
     const { deps } = setup();
     await expect(authenticate(req("user", token), deps)).resolves.toEqual(UNAUTHORIZED);
+  });
+
+  it("期限の 1 秒前は通り、期限は注入した時計で照らす", async () => {
+    const { deps } = setup();
+    await expect(authenticate(req("user", cognitoToken({ exp: NOW_SEC + 1 })), deps)).resolves.toMatchObject({ ok: true });
+    // 実時刻では期限の前でも、注入した時計で期限を過ぎていれば断る
+    const later = { ...deps, clock: createClock(() => NOW + 2000) };
+    await expect(authenticate(req("user", cognitoToken({ exp: NOW_SEC + 1 })), later)).resolves.toEqual(UNAUTHORIZED);
   });
 
   it("公開鍵を取れないときは unavailable で、unauthorized にしない", async () => {
@@ -204,6 +226,14 @@ describe("authenticate: 人（Cognito の access token）", () => {
     const { deps } = setup({}, { fetcher });
     await expect(authenticate(req("mcp", cognitoToken()), deps)).resolves.toEqual(UNAUTHORIZED);
     expect(fetcher.calls).toHaveLength(0);
+  });
+
+  it("受け口 mcp の登録の token は行を読まずに unauthorized", async () => {
+    const f = machineFixture();
+    const { deps } = setup({ machine: f.record });
+    const spy = vi.spyOn(deps.readers, "machine");
+    await expect(authenticate(req("mcp", f.token), deps)).resolves.toEqual(UNAUTHORIZED);
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("Cognito の設定の無い環境は人の token を断つ", async () => {
@@ -302,6 +332,9 @@ describe("authenticate: 手元のマシン", () => {
       [req("machine", f.token), { ...f.record, expiresAt: iso(NOW) }],
       [req("machine", `ndfm_${TEAM}.${MACHINE}.${newSecret()}`), f.record],
       [req("user", f.token), f.record],
+      [req("mcp", f.token), f.record],
+      [req("machine", signedToken(laneClaims())), f.record],
+      [req("machine", cognitoToken()), f.record],
     ];
     for (const [request, record] of cases) {
       await expect(authenticate(request, setup({ machine: record }).deps)).resolves.toEqual(UNAUTHORIZED);
@@ -310,7 +343,7 @@ describe("authenticate: 手元のマシン", () => {
 });
 
 describe("authenticate: ランナー", () => {
-  const lane: LaneRecord = { projectId: PROJECT, generation: 2, ended: false };
+  const lane: LaneRecord = { projectId: PROJECT, generation: 2, ended: false, exchangedGeneration: 1 };
 
   it("レーンの token で、終わっていない同じ世代のレーンのランナーに決まる", async () => {
     await expect(authenticate(req("runner", signedToken(laneClaims()), "runner.events.create"), setup({ lane }).deps)).resolves.toEqual({
@@ -326,6 +359,17 @@ describe("authenticate: ランナー", () => {
     await expect(authenticate(req("runner", signedToken(laneClaims()), "runner.exchanges.create"), setup({ lane }).deps)).resolves.toEqual(UNAUTHORIZED);
   });
 
+  it("引き換えの token はその世代で引き換えた後は unauthorized で、レーンの token は通る", async () => {
+    const exchanged = { ...lane, exchangedGeneration: 2 };
+    await expect(authenticate(req("runner", signedToken(laneClaims({ token_use: "exchange" })), "runner.exchanges.create"), setup({ lane: exchanged }).deps)).resolves.toEqual(UNAUTHORIZED);
+    await expect(authenticate(req("runner", signedToken(laneClaims()), "runner.events.create"), setup({ lane: exchanged }).deps)).resolves.toMatchObject({ ok: true });
+  });
+
+  it("検証の鍵の無い環境は unauthorized", async () => {
+    const { deps } = setup({ lane });
+    await expect(authenticate(req("runner", signedToken(laneClaims()), "runner.events.create"), { ...deps, signingKey: null })).resolves.toEqual(UNAUTHORIZED);
+  });
+
   it("期限の 1 秒前は通り、1 秒後は unauthorized", async () => {
     await expect(authenticate(req("runner", signedToken(laneClaims({ exp: NOW / 1000 + 1 }))), setup({ lane }).deps)).resolves.toMatchObject({ ok: true });
     await expect(authenticate(req("runner", signedToken(laneClaims({ exp: NOW / 1000 - 1 }))), setup({ lane }).deps)).resolves.toEqual(UNAUTHORIZED);
@@ -338,6 +382,7 @@ describe("authenticate: ランナー", () => {
     ["宛先の違い", signedToken(laneClaims({ aud: "db_prep" })), lane],
     ["EdDSA でない", signedToken(laneClaims(), ed.privateKey, "none"), lane],
     ["無いレーン", signedToken(laneClaims()), null],
+    ["別のプロジェクトのレーン", signedToken(laneClaims()), { ...lane, projectId: id("prj", 7) }],
   ])("%s は unauthorized", async (_label, token, record) => {
     await expect(authenticate(req("runner", token, "runner.events.create"), setup({ lane: record }).deps)).resolves.toEqual(UNAUTHORIZED);
   });
@@ -366,10 +411,30 @@ describe("authenticate: DB の用意のタスク", () => {
     await expect(authenticate(req("db_prep", token, "db_prep.exchanges.create"), setup({ prep: { ...prep, inProgress: false } }).deps)).resolves.toEqual(UNAUTHORIZED);
     await expect(authenticate(req("db_prep", token, "db_prep.exchanges.create"), setup({ prep: { ...prep, prepId: "prep-acme-2" } }).deps)).resolves.toEqual(UNAUTHORIZED);
   });
+
+  it("終わりの報告の token は使い終えた後は unauthorized で、引き換えの使い終えには引きずられない", async () => {
+    const completion = signedToken(prepClaims({ token_use: "completion" }));
+    await expect(authenticate(req("db_prep", completion, "db_prep.completions.create"), setup({ prep: { ...prep, consumed: ["exchange"] } }).deps)).resolves.toMatchObject({ ok: true });
+    await expect(authenticate(req("db_prep", completion, "db_prep.completions.create"), setup({ prep: { ...prep, consumed: ["exchange", "completion"] } }).deps)).resolves.toEqual(UNAUTHORIZED);
+  });
+
+  it("token のプロジェクトと読んだ行が食い違えば unauthorized", async () => {
+    const token = signedToken(prepClaims());
+    const { deps } = setup({ prep });
+    const spy = vi.spyOn(deps.readers, "dbPrep").mockImplementation(async (projectId) => (projectId === PROJECT ? prep : null));
+    await expect(authenticate(req("db_prep", signedToken(prepClaims({ project_id: id("prj", 7) })), "db_prep.exchanges.create"), deps)).resolves.toEqual(UNAUTHORIZED);
+    await expect(authenticate(req("db_prep", token, "db_prep.exchanges.create"), deps)).resolves.toMatchObject({ ok: true });
+    expect(spy.mock.calls).toEqual([[id("prj", 7)], [PROJECT]]);
+  });
+
+  it("検証の鍵の無い環境は unauthorized", async () => {
+    const { deps } = setup({ prep });
+    await expect(authenticate(req("db_prep", signedToken(prepClaims()), "db_prep.exchanges.create"), { ...deps, signingKey: null })).resolves.toEqual(UNAUTHORIZED);
+  });
 });
 
 describe("authenticate: GitHub", () => {
-  const body = '{"action":"opened"}';
+  const body = Buffer.from('{"action":"opened"}');
   const signature = `sha256=${createHmac("sha256", "acme-webhook-secret").update(body).digest("hex")}`;
 
   it("本文の HMAC-SHA256 が合えば GitHub に決まり、Authorization を読まない", async () => {
@@ -377,9 +442,15 @@ describe("authenticate: GitHub", () => {
     await expect(authenticate(request, setup().deps)).resolves.toEqual({ ok: true, principal: { kind: "github" } });
   });
 
+  it("UTF-8 として正しくない本文もバイト列のまま照らす", async () => {
+    const raw = Buffer.from([0x7b, 0xff, 0xfe, 0x7d]);
+    const sig = `sha256=${createHmac("sha256", "acme-webhook-secret").update(raw).digest("hex")}`;
+    await expect(authenticate({ endpoint: "github", operation: "", token: null, rawBody: raw, signature: sig }, setup().deps)).resolves.toEqual({ ok: true, principal: { kind: "github" } });
+  });
+
   it("署名が違う・無い・秘密が無いと unauthorized", async () => {
     const base: InboundRequest = { endpoint: "github", operation: "", token: null, rawBody: body, signature };
-    await expect(authenticate({ ...base, rawBody: `${body} ` }, setup().deps)).resolves.toEqual(UNAUTHORIZED);
+    await expect(authenticate({ ...base, rawBody: Buffer.concat([body, Buffer.from(" ")]) }, setup().deps)).resolves.toEqual(UNAUTHORIZED);
     await expect(authenticate({ ...base, signature: null }, setup().deps)).resolves.toEqual(UNAUTHORIZED);
     await expect(authenticate(base, setup({}, { webhookSecret: null }).deps)).resolves.toEqual(UNAUTHORIZED);
   });

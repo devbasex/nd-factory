@@ -225,13 +225,13 @@ nd-factory/
 | `dispatch` | 書く操作の要素で、ハンドラーが書き込みを返した | 書き込み・`auditItem` の要素の行・`settleIdempotency` を 1 つの `writeAtomically` で確定する |
 | `dispatch` | 読む操作 | ハンドラーの値を集め、`appendAudit` が成功してから返す |
 | `dispatch` | 全部か無かの印のある操作 | すべての要素の書き込みを 1 つの `writeAtomically` に集め、要素の失敗が 1 つでもあれば確定しない |
-| `authenticate` | 受け口 `user` で、token が 3 つの部分の JWT | Cognito の access token として、`aws-jwt-verify` の Cognito の検証（決定 48・LIB41）で署名（`kid` の公開鍵、RS256）・発行元・`client_id`・`token_use` が `access`・期限を照らす。公開鍵の控えは組み込みの `SimpleJwksCache` と `SimplePenaltyBox` を既定のまま使い、取り手 `SimpleFetcher` に方針 `http-idp-keys` の `responseTimeout` だけを渡す。通れば人 |
+| `authenticate` | 受け口 `user` で、token が 3 つの部分の JWT | Cognito の access token として、`aws-jwt-verify` の Cognito の検証（決定 48・LIB41）で署名（`kid` の公開鍵、RS256）・発行元・`client_id`・`token_use` が `access` を照らし、期限（`exp` は必須）と `nbf` はほかの token と同じく注入した時計で照らす。公開鍵の控えは組み込みの `SimpleJwksCache` と `SimplePenaltyBox` を既定のまま使い、取り手 `SimpleFetcher` に方針 `http-idp-keys` の `responseTimeout` だけを渡す。通れば人 |
 | `authenticate` | 受け口 `user` か `mcp` で、token が `ndfd_` で始まる | 委任として、中の利用者と委任の ID で行を強い整合で読み、秘密の部分の SHA-256 を一定時間で比べ、期限と取り消しを照らす。入口は受け口で `API` か `MCP` |
 | `authenticate` | 受け口 `mcp` で、token が JWT | `unauthorized` |
-| `authenticate` | 受け口 `runner` | Ed25519 の JWT で宛先「レーン」。引き換えの HTTP の経路だけ引き換えの token、ほかはレーンの token。レーンの行が終わっていないことと世代の番号を照らす |
+| `authenticate` | 受け口 `runner` | Ed25519 の JWT で宛先「レーン」。引き換えの HTTP の経路だけ引き換えの token、ほかはレーンの token。レーンの行が終わっていないことと世代の番号とプロジェクトを照らし、引き換えの token はレーンの行がその世代を引き換え済みと記していれば `unauthorized`。`authenticate` は読んで断るだけで、1 回だけを守るのは引き換えのハンドラーが返す値と同じ `writeAtomically` に入れる条件つきの書き込み（その世代を引き換え済みと記していないときだけ記す）。条件に外れれば値を返さずに `unauthorized` |
 | `authenticate` | 受け口 `machine` で、token が `ndfm_` で始まる | 中のチームとマシンの ID で行を強い整合で読み、要約を一定時間で比べ、取り消しと期限を照らす |
-| `authenticate` | 受け口 `github` | `Authorization` を読まず、本文の HMAC-SHA256 を秘密の器の値と一定時間で比べる |
-| `authenticate` | 受け口 `db_prep` | Ed25519 の JWT で宛先「DB の用意」。引き換えの HTTP の経路だけ引き換えの token、終わりの報告の HTTP の経路だけ終わりの報告の token。どちらも 1 回だけで、そのプロジェクトの進行表の DB が作成中か差し替えの途中であることを照らす |
+| `authenticate` | 受け口 `github` | `Authorization` を読まず、本文の HMAC-SHA256 を秘密の器の値と一定時間で比べる。本文は受けたままのバイト列で受け、受け口が文字列に直さない（API Gateway の base64 の本文は base64 から戻す） |
+| `authenticate` | 受け口 `db_prep` | Ed25519 の JWT で宛先「DB の用意」。引き換えの HTTP の経路だけ引き換えの token、終わりの報告の HTTP の経路だけ終わりの報告の token。どちらも 1 回だけで、そのプロジェクトの進行表の DB が作成中か差し替えの途中で、token の用意の ID が今の用意と合い、その用途を使い終えていないことを照らす。`authenticate` は読んで断るだけで、1 回だけを守るのは各経路のハンドラーが返す値と同じ `writeAtomically` に入れる条件つきの書き込み（同じ用意で、その用途を使い終えたと記していないときだけ記す）。条件に外れれば値を返さずに `unauthorized` |
 | `authenticate` | Cognito の JWT の `kid` が控えに無い | 組み込みの控えが公開鍵を取り直す（同じ時の取り直しは 1 つにまとまる）。取り直しても無ければ `unauthorized` で、その後は `SimplePenaltyBox` の待ち（既定 10 秒）が過ぎるまで同じ IdP の取り直しを待たせる |
 | `authenticate` | ランナーと DB の用意のタスクの JWT（Ed25519） | `aws-jwt-verify` を通さない。`node:crypto` の `verify` で、秘密の器から起動のときに 1 回読んだ nd-factory 自身の検証の鍵と照らす。IdP の鍵の取得は起きない |
 | `authorize` | 主体が人 | 見える集まり = 席を持つチームの今の割り当て。役割は席の役割 |
