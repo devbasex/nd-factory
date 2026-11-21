@@ -630,6 +630,6 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | --- | --- | --- |
 | 操作の一覧と画面と MCP の対応・HTTP の経路の登録の照らし | `generated/mcp-tools.json`・`generated/routes.json`・`OPERATIONS` の `features` | 生成物を読んで対応の検査を作り、CI の必須のチェックへ載せる |
 | 形の往復 | `operations-roundtrip.test.ts`（CI の `check` で走る） | 必須のチェックに `check` が載っていることを CI の定義のテストで照らす（今のまま） |
-| 境界の検査 | `packages/core` の `exports` のエントリポイントの一覧と、置き場の外で直に使わないもの（[土台の表](../docs/design/platform.md#横断の部品の置き場の基準)） | `apps/` の実行の時のコードを探す検査を作る。画面が import してよいエントリポイントは `clock`・`ids`・`redact`・`log` |
+| 境界の検査 | `packages/core` の `exports` のエントリポイントの一覧と、置き場の外で直に使わないもの（[プラットフォームの表](../docs/design/platform.md#横断の部品の置き場の基準)） | `apps/` の実行の時のコードを探す検査を作る。画面が import してよいエントリポイントは `clock`・`ids`・`redact`・`log` |
 | 漏れの検査 | `data/secret-shapes.json` | 同じデータを読む |
 | 骨組みの経路 | `PUT /v1/users` は操作の表に無い | #4 が消すまで、経路の登録の照らしでこの 1 本を受け持つ子 #4 の印つきで外す |

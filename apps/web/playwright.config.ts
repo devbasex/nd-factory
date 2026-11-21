@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// 画面の e2e。ビルドした配信物を vite preview で出し、利用者プールと API は試験の中で網の手前で差し替える
+// 画面の e2e。ビルドした配信物を vite preview で出し、利用者プールと API は試験の中でネットワークの手前で差し替える
 const PORT = 4173;
 
 export default defineConfig({

@@ -14,7 +14,7 @@
 
 ## 誰が・どんな場面で困るか
 
-- 画面の土台（#12）と機能の画面の子は、操作の表から作る型とダミーデータが無いと、API の中身の前に画面を作り切れない（Value 2 の順が守れない）
+- 画面の共通の仕組み（#12）と機能の画面の子は、操作の表から作る型とダミーデータが無いと、API の中身の前に画面を作り切れない（Value 2 の順が守れない）
 - 各コンテキストの子（#4〜#8・#11・#29）は、操作の定義を書く枠・認可の判定・操作の記録の書き手・条件つきの書き込みが無いと、同じ処理を入口ごとに書き、I2 と I9 の守りが入口の数だけ散る
 - 各コンテキストの子は、表の列と索引が決まっていないと、同じ表を読む別の子と列の名前と型が食い違う
 
@@ -28,7 +28,7 @@
 | Value 9 割り当てたチームにだけ見せる | 認可の判定を横断の部品の 1 か所に置く |
 | Value 4・Value 7 | 操作の記録の書き手とログの伏せ字を 1 か所に置き、秘密と個人情報の値を残さない |
 
-機能一覧の行は持たない（F1〜F20 の土台）。受け持つ不変条件は次の 4 つである。
+機能一覧の行は持たない（F1〜F20 のプラットフォーム）。受け持つ不変条件は次の 4 つである。
 
 | # | 中身 |
 | --- | --- |
@@ -60,7 +60,7 @@
 
 - 各コンテキストのモジュール（利用者とチーム・プロジェクト・実行の制御ほか）の関数と、操作ごとの要素の項目・型・理由のコード（#4・#5・#6・#7・#8・#11・#13・#29。全体の設計の [操作の一覧](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#操作の一覧) の受け持つ子の表）
 - MCP の受け口の関数と MCP の SDK（#11。上の「要求から変えたこと」）
-- `PUT /v1/users` の `sessions.create` への置き換えと、API の関数を `api-fn` にまとめて表と HTTP の経路を縦の切れ端のスタックへ入れること（#4）
+- `PUT /v1/users` の `sessions.create` への置き換えと、API の関数を `api-fn` にまとめて表と HTTP の経路をアプリのスタックへ入れること（#4）
 - 検査そのもの（境界の検査・操作の一覧と画面と MCP の対応・依存の向き・漏れの検査。#1）
 - 料金プランの値の集合（#29）
 - 表の移しの関数の資源（Lambda）と起こし方。最初に形の版を上げる子が足す（今の行はどれも版 1 で、移すものが無い）
@@ -127,7 +127,7 @@
 | 項目 | 参照先 / 決めたこと |
 | --- | --- |
 | プロジェクト構造 | `AGENTS.md` の「リポジトリの形」と [詳細設計のモジュールの置き場](https://github.com/devbasex/nd-factory/blob/main/docs/design/detail.md#クラスと関数の構造)。形の正本は `packages/contracts/`、横断の部品は `packages/core/`、API の起点は `apps/api/src/entries/` |
-| コーディング規約 | [土台の文書の言語と書き方の決まり](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#言語と書き方の決まり) |
+| コーディング規約 | [プラットフォームの文書の言語と書き方の決まり](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#言語と書き方の決まり) |
 | テスト戦略 | 横断の部品は単体テスト（時計と依存を注入し、DynamoDB は偽の表）、生成は生成物の差と往復のテスト、表と HTTP の経路を作る部品は合成の出力のテストで担保する |
 
 ## 境界
@@ -136,14 +136,14 @@
 | --- | --- |
 | 常に行う | 形を変えたら `npm run generate` を打って生成物を同じ変更でコミットする。例・見本・テストに作り物の値だけを使う |
 | 確認してから行う | 依存のライブラリの足し（設計承認ゲートで見る）。骨組みの `PUT /v1/users` の振る舞いの変更（しない） |
-| 行わない | 操作ごとの要素の形を受け持つ子の代わりに決める。縦の切れ端のスタックへ表と HTTP の経路を入れる。生成物を手で直す |
+| 行わない | 操作ごとの要素の形を受け持つ子の代わりに決める。アプリのスタックへ表と HTTP の経路を入れる。生成物を手で直す |
 
 ## 設計への参照
 
 - [全体の設計: 不変条件](https://github.com/devbasex/nd-factory/blob/main/docs/design/overview.md#不変条件)・[テスト設計](https://github.com/devbasex/nd-factory/blob/main/docs/design/overview.md#テスト設計)
 - [API と MCP: 呼び出しの規約](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#呼び出しの規約)・[値の形](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#値の形)・[操作の一覧](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#操作の一覧)・[認可](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#認可)・[操作の記録](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#操作の記録)・[形の正本](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#形の正本)
 - [詳細設計: 関数の仕様](https://github.com/devbasex/nd-factory/blob/main/docs/design/detail.md#関数の仕様)・[異常系の処理](https://github.com/devbasex/nd-factory/blob/main/docs/design/detail.md#異常系の処理)・[既存の部品の再利用](https://github.com/devbasex/nd-factory/blob/main/docs/design/detail.md#既存の部品の再利用)
-- [土台: 状態の置き場](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#状態の置き場)・[横断の部品と定数の置き場](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#横断の部品と定数の置き場)
+- [プラットフォーム: 状態の置き場](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#状態の置き場)・[横断の部品と定数の置き場](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#横断の部品と定数の置き場)
 - [データ: 表と鍵](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#表と鍵)・[テーブル定義](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#テーブル定義)・[形の版と移し方](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#形の版と移し方)
 - [画面: ダミーデータで作り切る段](https://github.com/devbasex/nd-factory/blob/main/docs/design/screens.md#ダミーデータで作り切る段)
 - [開発の計画: 子の一覧（K2）](https://github.com/devbasex/nd-factory/blob/main/docs/design-process/issue-24/plan.md#子の一覧)・[横断の部品が引き継ぐもの](https://github.com/devbasex/nd-factory/blob/main/docs/design-process/issue-24/plan.md#横断の部品が引き継ぐもの)

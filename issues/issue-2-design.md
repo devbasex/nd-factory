@@ -115,7 +115,7 @@ graph TB
 | 横断の部品 | `packages/core/`（新設） | detail.md の 13 のモジュールのうち、`dispatch` の MCP の 5 つの関数を除くすべて |
 | API の起点 | `apps/api/src/entries/`（新設） | `api-fn`（HTTP の振り分け）と `migrate`（表の移し）の起点。反映は #4 と、最初に形の版を上げる子 |
 | 骨組みの API の関数 | `apps/api/src/users-handler.ts`・`user-store.ts` | 時計・ログ・クライアントの生成・条件つきの書き込み・失敗の分類を横断の部品へ移す。振る舞いは変えない |
-| CDK の部品 | `infra/lib/service-table.ts`・`infra/lib/api-routes.ts`（新設） | 表の仕様から表と索引を、HTTP の経路の登録から経路を作る部品。縦の切れ端のスタックには入れない |
+| CDK の部品 | `infra/lib/service-table.ts`・`infra/lib/api-routes.ts`（新設） | 表の仕様から表と索引を、HTTP の経路の登録から経路を作る部品。アプリのスタックには入れない |
 
 ## 入出力のコントラクト
 
@@ -287,7 +287,7 @@ flowchart LR
 
 ### 決定 8: 表を書く子が同じ列と索引で表を作れるよう、表の仕様を形の正本に置き、表と索引の資源は表を最初に書く子が `ServiceTable` の部品で作る
 
-- **質問**: 19 の行の列と 3 つの索引を決めた後、DynamoDB の表と索引の資源をどの子が縦の切れ端のスタックへ入れるか
+- **質問**: 19 の行の列と 3 つの索引を決めた後、DynamoDB の表と索引の資源をどの子がアプリのスタックへ入れるか
 - **選んだ案**: 表の仕様を `packages/contracts/src/tables.ts` に置く。仕様は名前の末尾・鍵・索引・TTL の列・上書きか追記かを持つ。`infra/lib/service-table.ts` の部品がそれを読んで表と索引を作る。部品は合成の出力のテストで確かめ、スタックへ入れるのは表を最初に書く子にする
 
 | 表を最初に書く子 | スタックへ入れる表 |
@@ -321,7 +321,7 @@ flowchart LR
 ### 決定 11: 骨組みの振る舞いを変えずに境界の検査を通すため、`PUT /v1/users` の関数を今のまま残して中を横断の部品へ移し、新しい振り分けの起点は反映しない
 
 - **質問**: 「`PUT /v1/users` の置き換えの振り分けはこの子」を、どこまで行うか
-- **選んだ案**: 新しい起点 `apps/api/src/entries/api-fn.ts`（`readHttpCall` → `dispatch` → `writeHttpResponse`）を作り、テストで確かめる。反映している関数 `users-api` のエントリポイント（`users-handler.ts`）は、今の経路と応答の形のまま残す。その中の時計・ログ・クライアントの生成・条件つきの書き込み・失敗の分類を横断の部品へ移す。`api-fn` を縦の切れ端へ入れて `PUT /v1/users` を消すのは #4 が `sessions.create` と一緒に行う
+- **選んだ案**: 新しい起点 `apps/api/src/entries/api-fn.ts`（`readHttpCall` → `dispatch` → `writeHttpResponse`）を作り、テストで確かめる。反映している関数 `users-api` のエントリポイント（`users-handler.ts`）は、今の経路と応答の形のまま残す。その中の時計・ログ・クライアントの生成・条件つきの書き込み・失敗の分類を横断の部品へ移す。`api-fn` をアプリのスタックへ入れて `PUT /v1/users` を消すのは #4 が `sessions.create` と一緒に行う
 - **採らなかった案**: この課題で `api-fn` を反映し、`PUT /v1/users` を `api-fn` の中の古い分岐で残す案は、操作の表に無い経路を振り分けに持ち込む（I14）。#4 の置き換えと同じ関数も 2 回作り変える
 - **代償**: #4 が反映するまで、新しい起点は反映した環境で動かない
 - 根拠: Value 2 / Value 8（MVV 版 1）

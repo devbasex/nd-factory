@@ -30,7 +30,7 @@ describe("loadRuntimeConfig", () => {
     );
   });
 
-  it("網の失敗は例外", async () => {
+  it("ネットワークの失敗は例外", async () => {
     const fetchFn = vi.fn(async () => {
       throw new TypeError("network");
     });
