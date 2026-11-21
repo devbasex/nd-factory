@@ -72,7 +72,7 @@ describe("claimIdempotency", () => {
     const { clock } = clockAt(T0);
     await claimIdempotency(table.db, claim(), clock);
     const result = { ok: true, item: { sprint_id: "spr_01890a5d-ac96-774b-bcce-b302099a8057" } };
-    expect(await writeAtomically(table.db, [settleIdempotency(claim(), result, clock)])).toEqual({ ok: true });
+    expect(await writeAtomically(table.db, [settleIdempotency(claim(), result, NO_ONCE_ONLY, clock)])).toEqual({ ok: true });
     expect(await claimIdempotency(table.db, claim({ requestId: "req-2" }), clock)).toEqual({ kind: "replay", result });
   });
 
@@ -80,7 +80,7 @@ describe("claimIdempotency", () => {
     const table = fakeTable();
     const { clock, set } = clockAt(T0);
     await claimIdempotency(table.db, claim(), clock);
-    await writeAtomically(table.db, [settleIdempotency(claim(), { ok: true, item: {} }, clock)]);
+    await writeAtomically(table.db, [settleIdempotency(claim(), { ok: true, item: {} }, NO_ONCE_ONLY, clock)]);
     set(T0 + IDEMPOTENCY_TTL_SECONDS * 1000);
     expect(await claimIdempotency(table.db, claim({ requestId: "req-2", fingerprint: "b".repeat(64) }), clock)).toEqual({ kind: "fresh" });
     const row = table.row("idempotency", idempotencyKeyOf(claim()));
@@ -108,35 +108,45 @@ describe("claimIdempotency", () => {
   });
 });
 
+// 1 回だけ返す値を持たない操作と、item.token を 1 回だけ返す操作
+const NO_ONCE_ONLY = { onceOnly: [] };
+const ISSUES_TOKEN = { onceOnly: ["item.token"] };
+
 describe("settleIdempotency", () => {
   it("済みの行と要素の結果を書く 1 件を返す", async () => {
     const table = fakeTable();
     const { clock } = clockAt(T0);
     await claimIdempotency(table.db, claim(), clock);
-    const item = settleIdempotency(claim(), { ok: false, status: 409, reason: "state_mismatch" }, clock);
+    const item = settleIdempotency(claim(), { ok: false, status: 409, reason: "state_mismatch" }, ISSUES_TOKEN, clock);
     expect(item).toMatchObject({ table: "idempotency", op: "update", key: idempotencyKeyOf(claim()) });
     await writeAtomically(table.db, [item]);
     expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ state: "settled", result: { ok: false, status: 409, reason: "state_mismatch" }, schema_version: 1 });
   });
 
-  it("1 回だけ返す値（token など）は null に替えて控える", async () => {
+  it("操作が定めた 1 回だけ返す値の場所だけを null に替え、ほかの値は控える", async () => {
     const table = fakeTable();
     const { clock } = clockAt(T0);
     await claimIdempotency(table.db, claim({ operation: "delegations.create" }), clock);
     const token = SECRET_SAMPLES["delegation_token"];
-    const result = { ok: true, item: { delegation_id: "dlg_01890a5d-ac96-774b-bcce-b302099a8057", token, note: { secret: "x" }, echoed: token } };
-    await writeAtomically(table.db, [settleIdempotency(claim({ operation: "delegations.create" }), result, clock)]);
+    const result = { ok: true, item: { delegation_id: "dlg_01890a5d-ac96-774b-bcce-b302099a8057", token, token_expires_at: "2026-11-22T03:04:05.678Z", note: { secret: "x" } } };
+    await writeAtomically(table.db, [settleIdempotency(claim({ operation: "delegations.create" }), result, ISSUES_TOKEN, clock)]);
     const stored = table.row("idempotency", idempotencyKeyOf(claim({ operation: "delegations.create" })));
-    expect(stored?.["result"]).toEqual({ ok: true, item: { delegation_id: "dlg_01890a5d-ac96-774b-bcce-b302099a8057", token: null, note: { secret: null }, echoed: null } });
+    // 名前に token を含む token_expires_at や、名前に secret を含む項目は 1 回だけ返す値でないため値のまま
+    expect(stored?.["result"]).toEqual({ ok: true, item: { delegation_id: "dlg_01890a5d-ac96-774b-bcce-b302099a8057", token: null, token_expires_at: "2026-11-22T03:04:05.678Z", note: { secret: "x" } } });
     // 元の結果は変えない（呼び手へは 1 回目だけ値を返す）
     expect(result.item.token).toBe(token);
+  });
+
+  it("一覧の結果は要素ごとに同じ場所を替える", () => {
+    const item = settleIdempotency(claim(), { ok: true, items: [{ token: "a", id: 1 }, { token: "b", id: 2 }] }, { onceOnly: ["items.token"] }, clockAt(T0).clock);
+    expect(item.update).toContainEqual({ kind: "set", path: "result", value: { ok: true, items: [{ token: null, id: 1 }, { token: null, id: 2 }] } });
   });
 
   it("持ち主が違うと条件で外れる", async () => {
     const table = fakeTable();
     const { clock } = clockAt(T0);
     await claimIdempotency(table.db, claim(), clock);
-    const outcome = await writeAtomically(table.db, [settleIdempotency(claim({ requestId: "req-other" }), { ok: true, item: {} }, clock)]);
+    const outcome = await writeAtomically(table.db, [settleIdempotency(claim({ requestId: "req-other" }), { ok: true, item: {} }, NO_ONCE_ONLY, clock)]);
     expect(outcome.ok).toBe(false);
     expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ state: "leased" });
   });

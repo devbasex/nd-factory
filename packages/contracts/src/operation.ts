@@ -43,6 +43,7 @@ export type OperationInput<N extends string, I extends Shape, R extends ResultSh
   ownerOnly?: boolean;
   allOrNothing?: { maxItems: number } | null;
   idempotencyKey?: boolean;
+  onceOnly?: readonly string[];
   item: I;
   result: R;
   reasons?: readonly ReasonDef[];
@@ -68,6 +69,8 @@ export type OperationDef<N extends string = string, I extends Shape = Shape, R e
   readonly ownerOnly: boolean;
   readonly allOrNothing: { readonly maxItems: number } | null;
   readonly idempotencyKey: boolean;
+  // 1 回だけ返す値（委任の token など）の、成功の結果の中の場所（"item.token" の形）。冪等の鍵の 2 回目はこの場所だけを null にする
+  readonly onceOnly: readonly string[];
   readonly item: I;
   readonly result: R;
   readonly reasons: readonly ReasonDef[];
@@ -154,6 +157,34 @@ function checkResult(name: string, verb: string, endpoint: Endpoint, result: Res
   }
 }
 
+const ONCE_ONLY_PATH = new RegExp(`^${SEGMENT}(?:\\.${SEGMENT})*$`);
+
+// 場所の値を受ける形（オブジェクトの和は、その鍵を持つ選択肢のすべて）。配列は要素の形へ下りる
+function schemasAt(schema: z.ZodType, segments: readonly string[]): z.ZodType[] {
+  if (schema instanceof z.ZodArray) return schemasAt(schema.element as z.ZodType, segments);
+  if (schema instanceof z.ZodUnion) return (schema.options as z.ZodType[]).flatMap((o) => schemasAt(o, segments));
+  const [head, ...rest] = segments;
+  if (head === undefined) return [schema];
+  if (!(schema instanceof z.ZodObject)) return [];
+  const field: unknown = (schema.shape as Record<string, unknown>)[head];
+  return field instanceof z.ZodType ? schemasAt(field, rest) : [];
+}
+
+// 1 回だけ返す値の場所は冪等の鍵を持つ操作だけが持ち、2 回目に null へ替えても結果の形に合うよう、場所の形が null を受ける
+function checkOnceOnly(name: string, idempotencyKey: boolean, result: ResultShape, paths: readonly string[]): void {
+  if (paths.length === 0) return;
+  if (!idempotencyKey) fail(name, "1 回だけ返す値の場所は冪等の鍵を持つ操作だけが持つ");
+  if (new Set(paths).size !== paths.length) fail(name, "1 回だけ返す値の場所が重なる");
+  for (const path of paths) {
+    if (!ONCE_ONLY_PATH.test(path)) fail(name, `1 回だけ返す値の場所の形が違う: ${path}`);
+    if (path === "ok") fail(name, "1 回だけ返す値の場所に ok を置かない");
+    if (isPending(result)) continue;
+    const at = schemasAt(result, path.split("."));
+    if (at.length === 0) fail(name, `1 回だけ返す値の場所が成功の結果に無い: ${path}`);
+    if (!at.every((s) => s.safeParse(null).success)) fail(name, `1 回だけ返す値の場所の形は null を受ける: ${path}`);
+  }
+}
+
 // 印を照らし、HTTP の経路と既定の値を足した定義を返す。印が食い違えば投げる（モジュールの読み込みで落ちる）
 export function defineOperation<N extends string, I extends Shape, R extends ResultShape>(def: OperationInput<N, I, R>): OperationDef<N, I, R> {
   const endpoint = def.endpoint ?? "user";
@@ -166,6 +197,7 @@ export function defineOperation<N extends string, I extends Shape, R extends Res
   const idempotencyKey = def.idempotencyKey ?? false;
   const order = def.order ?? null;
   const reasons = def.reasons ?? [];
+  const onceOnly = def.onceOnly ?? [];
 
   if (endpoint === "user" && features.length === 0) fail(def.name, "受け口 user の操作は機能を 1 つ以上持つ");
   if (endpoint !== "user" && features.length > 0) fail(def.name, "受け口 user でない操作は機能を持たない");
@@ -183,6 +215,7 @@ export function defineOperation<N extends string, I extends Shape, R extends Res
   if (verb !== "list" && order !== null) fail(def.name, "並びは list の操作だけが持つ");
   checkReasons(def.name, reasons);
   checkResult(def.name, verb, endpoint, def.result);
+  checkOnceOnly(def.name, idempotencyKey, def.result, onceOnly);
 
   return {
     name: def.name,
@@ -198,6 +231,7 @@ export function defineOperation<N extends string, I extends Shape, R extends Res
     ownerOnly: def.ownerOnly ?? false,
     allOrNothing,
     idempotencyKey,
+    onceOnly,
     item: def.item,
     result: def.result,
     reasons,

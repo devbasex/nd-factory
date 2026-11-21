@@ -83,7 +83,7 @@ API の操作は 1 つの画面に合わせず、エンティティ（スプリ�
 | --- | --- |
 | どこに置くか | 新しいものを作る操作と、外へ働きかける操作（`sprints.create`・`sprints.cancel`・`approvals.answer`・`questions.answer`・`delegations.create`・`machines.create` など）の要素に `idempotency_key`（UUID の形）を必ず持たせる |
 | 何で見分けるか | 主体の利用者・操作の名前・鍵の 3 つの組 |
-| 2 回目 | 24 時間の間、同じ組の 2 回目は 1 回目の要素の結果を返し、状態を変えない。1 回だけ返す値（委任の token など）は 2 回目に `null` にする |
+| 2 回目 | 24 時間の間、同じ組の 2 回目は 1 回目の要素の結果を返し、状態を変えない。1 回だけ返す値（委任の token など）は 2 回目に `null` にする。どの値かは操作ごとに形の正本（`onceOnly`）が場所で決め、その場所の形は `null` を受ける |
 | 中身が違う | 同じ組で要素の中身が違えば 422 `idempotency_key_reused` |
 | 1 回目が途中 | 409 `in_progress`。呼び手は待って同じ要素を送り直す |
 
@@ -544,6 +544,7 @@ classDiagram
         +ownerOnly
         +allOrNothing
         +idempotencyKey
+        +onceOnly
         +item: zod
         +result: zod
         +reasons

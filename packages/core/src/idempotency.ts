@@ -1,5 +1,4 @@
-import { SECRET_SHAPES } from "@nd-factory/contracts/data";
-import { IDEMPOTENCY_TTL_SECONDS } from "@nd-factory/contracts/operation";
+import { IDEMPOTENCY_TTL_SECONDS, type OperationDef } from "@nd-factory/contracts/operation";
 import type { Clock } from "./clock.ts";
 import { cond, putIfAbsent, writeAtomically, type TransactItem } from "./conditional-write.ts";
 import type { Db, RowKey, StoredRow } from "./db.ts";
@@ -107,30 +106,28 @@ export async function claimIdempotency(db: Db, claim: IdempotencyClaimInput, clo
   return decided(taken.ok ? { kind: "fresh" } : { kind: "in_progress" });
 }
 
-// 1 回だけ返す値（token など）を null に替えた写し。秘密の鍵の名前と値の形は redact と同じデータを読む
-const SECRET_KEY_NAMES = SECRET_SHAPES.keyNames;
-const SECRET_VALUE_PATTERNS = SECRET_SHAPES.valuePatterns.map((p) => new RegExp(p.pattern, "u"));
-
-function isOnceOnlyKey(key: string): boolean {
-  const lower = key.toLowerCase();
-  return SECRET_KEY_NAMES.some((name) => lower.includes(name));
+// 1 回だけ返す値を null に替えた写し。場所は操作の定義の onceOnly（"item.token" の形）だけで、ほかの値は形を変えずに控える。
+// 配列は要素ごとに同じ場所を替え、場所が無い結果（失敗の要素など）はそのまま
+function nullAt(value: unknown, segments: readonly string[]): unknown {
+  if (Array.isArray(value)) return value.map((v) => nullAt(v, segments));
+  const [head, ...rest] = segments;
+  if (head === undefined || value === null || typeof value !== "object" || !Object.hasOwn(value, head)) return value;
+  const record = value as Record<string, unknown>;
+  return { ...record, [head]: rest.length === 0 ? null : nullAt(record[head], rest) };
 }
 
-function withoutOnceOnly(value: unknown): unknown {
-  if (typeof value === "string") return SECRET_VALUE_PATTERNS.some((p) => p.test(value)) ? null : value;
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map(withoutOnceOnly);
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, isOnceOnlyKey(key) ? null : withoutOnceOnly(item)]));
+function withoutOnceOnly(result: ItemResult, onceOnly: readonly string[]): ItemResult {
+  return onceOnly.reduce<unknown>((acc, path) => nullAt(acc, path.split(".")), result) as ItemResult;
 }
 
-export function settleIdempotency(claim: IdempotencyClaimInput, result: ItemResult, _clock: Clock): TransactItem {
+export function settleIdempotency(claim: IdempotencyClaimInput, result: ItemResult, op: Pick<OperationDef, "onceOnly">, _clock: Clock): TransactItem {
   return {
     table: "idempotency",
     op: "update",
     key: idempotencyKeyOf(claim),
     update: [
       { kind: "set", path: "state", value: "settled" },
-      { kind: "set", path: "result", value: withoutOnceOnly(result) },
+      { kind: "set", path: "result", value: withoutOnceOnly(result, op.onceOnly) },
       // 書き手の決まり: どの書き換えも schema_version を書き手の版にする
       { kind: "set", path: "schema_version", value: IDEMPOTENCY_SCHEMA_VERSION },
     ],
