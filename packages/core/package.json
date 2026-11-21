@@ -13,7 +13,9 @@
     "./db": "./src/db.ts",
     "./conditional-write": "./src/conditional-write.ts",
     "./auth": "./src/auth/authenticate.ts",
-    "./audit": "./src/audit.ts"
+    "./audit": "./src/audit.ts",
+    "./authorize": "./src/authorize.ts",
+    "./usage-limit": "./src/usage-limit.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."

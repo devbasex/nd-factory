@@ -71,6 +71,13 @@ function hasCancellationCode(e: Record<string, unknown>, codes: ReadonlySet<stri
   );
 }
 
+// 取り消しの理由に一時の失敗（衝突と書き込みの呼びすぎ）があり、断った理由（行の形の誤り・大きさの上限）が無い TransactionCanceledException。
+// SDK はトランザクションの取り消しを繰り返さないため、writeAtomically が p-retry で繰り返す対象にする。
+// 断った理由が並ぶ取り消しは、送り直しても同じ件で断られるため繰り返さない
+export function isRetryableCancellation(e: unknown): boolean {
+  return isRecord(e) && hasCancellationCode(e, RETRYABLE_CANCELLATION_CODES) && !hasCancellationCode(e, REJECTED_CANCELLATION_CODES);
+}
+
 // AWS SDK の例外が持つ応答の状態（$metadata.httpStatusCode）
 function sdkStatusOf(e: Record<string, unknown>): number | undefined {
   const metadata = e["$metadata"];
@@ -95,11 +102,12 @@ export function classifyFailure(e: unknown): FailureClass {
   if (!isRecord(e)) return "unknown";
   const name = e["name"];
   if (typeof name === "string") {
-    // 一時の失敗の取り消しの理由を、断った理由より先に見る（時を置けば通り得る件があれば retryable）
+    // 断った取り消しの理由を、一時の失敗の理由より先に見る（断った件は時を置いても通らず、トランザクションは全件が通るか全件が通らない）
+    if (hasCancellationCode(e, REJECTED_CANCELLATION_CODES)) return "rejected";
     if (RETRYABLE_NAMES.has(name) || hasCancellationCode(e, RETRYABLE_CANCELLATION_CODES)) return "retryable";
     if (CONFLICT_NAMES.has(name)) return "conflict";
     if (NOT_FOUND_NAMES.has(name)) return "not_found";
-    if (REJECTED_NAMES.has(name) || hasCancellationCode(e, REJECTED_CANCELLATION_CODES)) return "rejected";
+    if (REJECTED_NAMES.has(name)) return "rejected";
   }
   if (hasNetworkCode(e)) return "retryable";
   // 名前が集合に無い AWS SDK の例外は応答の状態で分ける（classOfStatus と同じ。429・500・502・503・504 は retryable、501 と 400 でない 3xx・4xx は rejected、ほかの 5xx は unknown）。
