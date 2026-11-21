@@ -573,7 +573,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
     1. `db.scan(table, { limit: MIGRATE_PAGE_SIZE, startKey: cursor, consistent: true })` で 1 ページ読む
     2. ページの行を順に、行ごとに次を行う。行に取りかかる前に残り時間が `MIGRATE_RESERVE_MS` 以下なら、そこで止めて `{ done: false, cursor: <最後に処理を終えた行の鍵> }` を返す（このページでまだ 1 行も終えていなければ、受け取った `cursor` をそのまま返す）
        - `TableSpec.rows` の `skPattern` で行の種類を決める。どれにも当たらない行と、`schema_version` が `previous.version` でない行と、`writeVersion` が `latest.version` でない行の種類（1 段目か、書き手を戻した状態）の行は、書かずに処理を終えたものとする
-       - `readRow` で `latest` の形にし、`writeRow` で `latest` の版の列を作り、`updateIfSchemaVersion`（`from` は `previous.version`、`version` は読んだ行の `version` か `null`）を `writeAtomically` で 1 件だけ確定する。条件が外れたら飛ばして `skipped` を 1 足す（同時に書き手が `latest` で書いたか、行が消えた）。`unavailable` は投げる（起こし直しの前の `cursor` から再び走る）
+       - `readRow` で `latest` の形にし、`writeRow` で `latest` の版の列を作る。読んだ行の列のうち、`writeRow` の戻り値に無く、`pk`・`sk`・`version` でもない列（`latest` の版で消した列）を `remove` に集める。`updateIfSchemaVersion`（`set` は `writeRow` の戻り値、`remove` はその列の名前、`from` は `previous.version`、`version` は読んだ行の `version` か `null`）を `writeAtomically` で 1 件だけ確定する。条件が外れたら飛ばして `skipped` を 1 足す（同時に書き手が `latest` で書いたか、行が消えた）。`unavailable` は投げる（起こし直しの前の `cursor` から再び走る）
        - 処理を終えた行の鍵を「最後に処理を終えた行」として覚える
     3. ページの行を終えたら、`lastKey` が `null` なら `{ done: true, cursor: null }` を返す。でなければ `cursor` を `lastKey` にして 1 へ戻る
   - 事後条件: 返した `cursor` より前（走査の順）の行は、どれも `previous` の版でないか、書き手が同時に書いた行である。返した `cursor` より後の行は 1 行も飛ばしていない。`cursor` を次の呼び出しへ渡すと、その鍵の次の行から読む（DynamoDB の `Scan` の `ExclusiveStartKey` は、返された `LastEvaluatedKey` でなく既にある行の鍵でもその次から読む。偽の `Db` も同じ順と同じ再開をする）
@@ -584,11 +584,11 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `Db.scan` | `packages/core/src/db.ts` | 新設（`Db` に足す） | `(table: TableName, opts: { limit: number; startKey: RowKey \| null; consistent: boolean }) => Promise<{ items: Row[]; lastKey: RowKey \| null }>` | 表を走査の順に 1 ページ読む。`createDb` は `ScanCommand` の `Limit`・`ExclusiveStartKey`・`ConsistentRead` へ渡す。使うのは表の移しだけで、API の要求の処理は使わない |
-| `updateIfSchemaVersion` | `packages/core/src/conditional-write.ts` | 新設 | `(spec: { table: TableName; key: RowKey; from: number; set: Record<string, unknown>; version: number \| null; onConflict: ConflictRule }) => TransactItem` | 行の形の版が `from` のときだけ、行の列を `set` で書き換える書き込みを組む |
+| `updateIfSchemaVersion` | `packages/core/src/conditional-write.ts` | 新設 | `(spec: { table: TableName; key: RowKey; from: number; set: Record<string, unknown>; remove: readonly string[]; version: number \| null; onConflict: ConflictRule }) => TransactItem` | 行の形の版が `from` のときだけ、行の列を `set` で書き換え、`remove` の列を消す書き込みを組む |
 
 - `updateIfSchemaVersion`
-  - 事前条件: `set` は `schema_version` を含み、その値は `from` より大きい。`set` に `pk`・`sk`・`version` を含まない
-  - 事後条件: 戻り値は `attribute_exists(pk) AND schema_version = :from`（`version` が `null` でなければ `AND version = :version` も）を条件にした 1 件。`version` を上げない（中身の意味を変えない書き換えのため。同時に読んだ書き手の `updateIfVersion` を外さない）。行が消えていれば条件が外れ、行を作り直さない
+  - 事前条件: `set` は `schema_version` を含み、その値は `from` より大きい。`set` と `remove` に `pk`・`sk`・`version` を含まない。`remove` は `set` の鍵と重ならず、`schema_version` を含まない
+  - 事後条件: 更新の式は `SET <set の列>` に、`remove` が空でなければ `REMOVE <remove の列>` を続けた 1 つの式で、`SET` と `REMOVE` は同じ条件の下で一緒に効くか一緒に外れる。消した列が索引（GSI）の鍵なら、DynamoDB はその行を索引から外す（`readRow` が列を捨てるだけでは索引に残る）。戻り値は `attribute_exists(pk) AND schema_version = :from`（`version` が `null` でなければ `AND version = :version` も）を条件にした 1 件。`version` を上げない（中身の意味を変えない書き換えのため。同時に読んだ書き手の `updateIfVersion` を外さない）。行が消えていれば条件が外れ、行を作り直さない
   - `version` を持たない行（ログインの組・IdP の主体の一意の行・冪等の鍵・追記だけの行）は `version: null` で使う。追記だけの行は書き手が書き換えず、冪等の鍵の借りから済みへの書き換えは上の書き手の決まりで `schema_version` を書くため、`schema_version` の条件だけで同時の書き込みを見つけられる
 
 ### 内部のデータと定数
@@ -613,8 +613,8 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | --- | --- | --- | --- |
 | `rowCodec` | 版 1 と 2 の組で作れる | `previous` の無い行の種類 | `writeVersion` が 3・`previous.version` が `latest.version - 1` でない・`previous` があって `downgrade` が無い組で投げる |
 | `readRow`・`writeRow` | 1 段目（`latest` 2・`previous` 1・`writeVersion` 1）で、版 1 の行と版 2 の行をどちらも版 2 の形で読み、`writeRow` は版 1 の行を出す。2 段目（`writeVersion` 2）で、同じ 2 つの行を同じに読み、`writeRow` は版 2 の行を出す。書き手を戻した状態（1 段目と同じ値に戻した `RowCodec`）で、2 段目に書いた版 2 の行と版 1 の行をどちらも読み、`writeRow` は版 1 の行を出す。版 1 → `upgrade` → `downgrade` で元の行に戻る | `previous` の無い行の種類（版 1 だけを読む） | 版 0・版 3（`latest` より新しい）・形の違いを拒む。`writeRow` に版の形を外れた値を渡すと投げる |
-| `migrateTable` | 前の版の行が `latest` の版になり、`version` は変わらない。ログインの組（`version` を持たない行）も書き換わる | 残り時間がちょうど予備の時間で、取りかかる前に止まる。ページの途中（100 行のうち 3 行目を終えたところ）で残り時間が尽き、返した `cursor` が 3 行目の鍵で、その `cursor` で再び呼ぶと 4 行目から読み、2 回の呼び出しの後に前の版の行が 1 行も残らない。ページの 1 行目の前で尽きると受け取った `cursor` を返す | 2 回走らせても行が同じ。読んだ後に書き手が `latest` で書いた行と、消えた行を飛ばし、消えた行を作り直さない。`writeVersion` が前の版の行の種類は書き換えない |
-| `updateIfSchemaVersion` | `schema_version` の条件と `attribute_exists(pk)` を持つ 1 件 | `version: null`・`version` あり | `set` に `version` を含むと型で弾く |
+| `migrateTable` | 前の版の行が `latest` の版になり、`version` は変わらない。ログインの組（`version` を持たない行）も書き換わる。`latest` の版で消した列が行から消え、その列を鍵にした索引の引き（偽の `Db` の `queryIndex`）でその行が出なくなる | 残り時間がちょうど予備の時間で、取りかかる前に止まる。ページの途中（100 行のうち 3 行目を終えたところ）で残り時間が尽き、返した `cursor` が 3 行目の鍵で、その `cursor` で再び呼ぶと 4 行目から読み、2 回の呼び出しの後に前の版の行が 1 行も残らない。ページの 1 行目の前で尽きると受け取った `cursor` を返す | 2 回走らせても行が同じ。読んだ後に書き手が `latest` で書いた行と、消えた行を飛ばし、消えた行を作り直さない。`writeVersion` が前の版の行の種類は書き換えない |
+| `updateIfSchemaVersion` | `schema_version` の条件と `attribute_exists(pk)` を持つ 1 件。`remove` の列が `REMOVE` 句に並ぶ | `version: null`・`version` あり・`remove` が空（`REMOVE` 句を持たない） | `remove` が `set` の鍵か `pk`・`sk`・`version`・`schema_version` を含むと投げる。`set` に `version` を含むと型で弾く |
 | `Db.scan`（`createDb`） | 偽のクライアントへ `Limit`・`ExclusiveStartKey`・`ConsistentRead` が渡る | `startKey` が `null` | — |
 
 ## #1 へ渡す欠け
