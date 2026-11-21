@@ -1,4 +1,5 @@
 import type { OperationDef } from "@nd-factory/contracts/operation";
+import { ID_KINDS, UUID_V7_PATTERN } from "@nd-factory/contracts/ids";
 import { REASON_CODE } from "@nd-factory/contracts/reasons";
 import { utcDateTime } from "@nd-factory/contracts/values";
 import type { Principal } from "./auth/authenticate.ts";
@@ -104,13 +105,20 @@ function actorColumns(actor: AuditActor): Record<string, unknown> {
   }
 }
 
-// 許した鍵の値のうち、ID として写せるもの（文字列と文字列の配列）だけ
+// ID の形（<種類の頭>_<UUIDv7>）。許した鍵に個人情報（メールアドレスなど）や本文が入っても写さないよう、鍵に加えて値の形も照らす
+const ID_SHAPE = new RegExp(`^(?:${ID_KINDS.join("|")})_${UUID_V7_PATTERN}$`);
+
+function isIdShaped(value: unknown): value is string {
+  return typeof value === "string" && ID_SHAPE.test(value);
+}
+
+// 許した鍵の値のうち、ID の形の文字列（と、その配列の ID の形の要素）だけ。形の外れた値は写さずに捨てる
 function targetIdsOf(entry: AuditEntry, op: OperationDef | null): string[] {
   if (op === null) return [];
   return op.auditKeys.flatMap((key) => {
     const value = entry.targetIds[key];
-    if (typeof value === "string") return [value];
-    if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string");
+    if (isIdShaped(value)) return [value];
+    if (Array.isArray(value)) return value.filter(isIdShaped);
     return [];
   });
 }

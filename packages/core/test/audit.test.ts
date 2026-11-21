@@ -4,7 +4,7 @@ import type { Principal } from "../src/auth/authenticate.ts";
 import { createClock } from "../src/clock.ts";
 import { putIfAbsent, WriteUnavailableError, writeAtomically } from "../src/conditional-write.ts";
 import { leakedSecrets, SECRET_SAMPLES } from "./fixtures/secrets.ts";
-import { projectsGet, projectsRename } from "./fixtures/operations.ts";
+import { projectsGet, projectsRename, sprintsCreate } from "./fixtures/operations.ts";
 import { fakeTable } from "./fakes/table.ts";
 
 // DynamoDB は呼ばない。記録の行は偽の表へ書き、行の中身を照らす
@@ -103,10 +103,29 @@ describe("auditItem", () => {
     expect(item.item?.["result"]).toEqual({ outcome: "partial", status: 200, reasons: ["not_found"] });
   });
 
-  it("許した鍵の欄に秘密の形の値を入れても伏せる", () => {
+  it("許した鍵の欄に秘密の形の値を入れても写さない", () => {
     const item = auditItem(entry({ targetIds: { project_id: SECRET_SAMPLES["github_app_token"] } }), projectsRename, clock);
     expect(leakedSecrets(JSON.stringify(item))).toEqual([]);
-    expect(item.item?.["target_ids"]).toEqual(["[redacted]"]);
+    expect(item.item?.["target_ids"]).toEqual([]);
+  });
+
+  it.each([
+    ["メールアドレス", "ops@example.com"],
+    ["呼び名", "Taro Yamada"],
+    ["IP アドレス", "203.0.113.7"],
+    ["頭の無い UUIDv7", "01890a5d-ac96-774b-bcce-b302099a8058"],
+    ["集まりに無い頭", "foo_01890a5d-ac96-774b-bcce-b302099a8058"],
+    ["大文字の ID", PROJECT.toUpperCase()],
+  ])("許した鍵の欄に ID の形でない値（%s）を入れても写さない", (_label, value) => {
+    const item = auditItem(entry({ targetIds: { project_id: value } }), projectsRename, clock);
+    expect(JSON.stringify(item.item?.["target_ids"])).not.toContain(value);
+    expect(item.item?.["target_ids"]).toEqual([]);
+  });
+
+  it("許した鍵の配列は ID の形の要素だけを写す", () => {
+    const SPRINT = "spr_01890a5d-ac96-774b-bcce-b302099a805d";
+    const item = auditItem(entry({ targetIds: { project_id: PROJECT, sprint_id: [SPRINT, "ops@example.com", 42] } }), sprintsCreate, clock);
+    expect(item.item?.["target_ids"]).toEqual([PROJECT, SPRINT]);
   });
 
   it("委任のクライアントの名前に秘密の形の値を入れても伏せる", () => {
