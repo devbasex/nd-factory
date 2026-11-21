@@ -376,7 +376,17 @@ function checkReport(files: ContractFiles, use: NdfContractUse, findings: Contra
     const have = shape.material[key];
     if (have !== wanted) shapeFinding(`shape.material.${key} が ${JSON.stringify(wanted)} でない（${JSON.stringify(have ?? null)}）`);
   }
-  report.cases.forEach((sample, index) => {
+  checkReportCases(report.cases, use, path, findings);
+}
+
+/** 5 のうち、`cases` の見本を区間の報告の読み取りへ通し、`result` と `errors` の有無が見本と同じ判定になるかを照らす */
+function checkReportCases(
+  cases: Parsed<"hooks/unattended-report.json">["cases"],
+  use: NdfContractUse,
+  path: string,
+  findings: ContractFinding[],
+): void {
+  cases.forEach((sample, index) => {
     let got: { result: string; errors: readonly string[] };
     try {
       got = use.readReport(sample.text);
