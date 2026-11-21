@@ -8,6 +8,7 @@ export const USER_OPERATIONS = [
   human("sessions.delete", ["F1"], "users.get"),
   read("users.get", ["F1", "F2"]),
   write("users.update", ["F2"], "manage"),
+  human("login_links.create", ["F1"], "users.get", IDEMPOTENT),
   human("logins.create", ["F1"], "users.get", IDEMPOTENT),
   human("logins.delete", ["F1"], "users.get"),
 ] as const;

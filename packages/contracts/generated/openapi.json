@@ -194,6 +194,52 @@
         }
       }
     },
+    "/v1/login_links/create": {
+      "post": {
+        "operationId": "login_links.create",
+        "description": "create login_links",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/login_links.create.item"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "results per item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/login_links.create.result"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "request error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/logins/create": {
       "post": {
         "operationId": "logins.create",
@@ -3061,6 +3107,9 @@
       "users.update.item": {
         "not": {}
       },
+      "login_links.create.item": {
+        "not": {}
+      },
       "logins.create.item": {
         "not": {}
       },
@@ -3294,6 +3343,9 @@
         "not": {}
       },
       "users.update.result": {
+        "not": {}
+      },
+      "login_links.create.result": {
         "not": {}
       },
       "logins.create.result": {
