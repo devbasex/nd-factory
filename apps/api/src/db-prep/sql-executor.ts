@@ -191,7 +191,7 @@ export function createRdsDataClient(options: RdsDataClientOptions = {}): RDSData
   return client;
 }
 
-// 渡されたクライアントが SDK の再試行を止めているかを、最初の要求の前に確かめる。maxAttempts だけを読むと、
+// 渡されたクライアントが SDK の再試行を止めているかを、要求のたびに送る前に確かめる。maxAttempts だけを読むと、
 // maxAttempts: 1 と独自の retryStrategy を持つクライアントが通り、その戦略が文や commit を打ち直せる。
 // そのため作る経路を createRdsDataClient に限り、そこで作っていないクライアントは受けない。作った後に config の
 // 戦略を差し替えたクライアントも受けない（再試行の層は要求のたびに config から戦略を読む）
@@ -215,10 +215,10 @@ export function createDataApiExecutor(opts: {
 }): SqlExecutor {
   const { client, resourceArn, secretArn } = opts;
   const retry = resolveRetry(opts.retry);
-  let checked: Promise<void> | undefined;
+  // 検査は要求のたびに行う。結果を使い回すと、最初の要求の後に config の戦略を差し替えたとき、後の文や commit を
+  // SDK が差し替え後の戦略で打ち直せる（再試行の層は要求のたびに config から戦略を読む）
   const send: RDSDataClient["send"] = async (command: Parameters<RDSDataClient["send"]>[0]) => {
-    checked ??= assertSingleAttempt(client);
-    await checked;
+    await assertSingleAttempt(client);
     return client.send(command);
   };
 

@@ -471,6 +471,20 @@ describe("createRdsDataClient（SDK の再試行）", () => {
     await expect(sql.commit("tx-1")).rejects.toThrow(/差し替えられた/);
     expect(h.count()).toBe(0);
   });
+
+  it("1 回目の commit が送られた後に config の戦略を差し替えると、2 回目は送る前に投げる", async () => {
+    const h = unavailableHandler();
+    const client = createRdsDataClient({ ...base, requestHandler: h });
+    const sql = createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN });
+    // 1 回目は検査を通って送られる（503 で投げる）
+    await expect(sql.commit("tx-1")).rejects.toThrow();
+    expect(h.count()).toBe(1);
+    const strategy = retryingStrategy();
+    (client.config as { retryStrategy: unknown }).retryStrategy = async () => strategy;
+    await expect(sql.commit("tx-2")).rejects.toThrow(/差し替えられた/);
+    await expect(sql.execute("SELECT 1", undefined, { database: ADMIN_DATABASE })).rejects.toThrow(/差し替えられた/);
+    expect(h.count()).toBe(1);
+  });
 });
 
 describe("toRow", () => {
