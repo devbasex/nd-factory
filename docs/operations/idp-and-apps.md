@@ -7,7 +7,7 @@
 | Google の OAuth クライアント | アプリのスタックのログイン（利用者プールの外部の IdP） | アプリのスタックを初めて反映した後 |
 | GitHub の OAuth App | GitHub でのログイン | GitHub のログインを足す変更が入ったとき |
 | GitHub App | リポジトリの読み書き | GitHub の連携を足す変更が入ったとき |
-| GitHub との接続（AWS CodeConnections） | 反映のパイプラインがリポジトリを取る | 反映のパイプラインのスタックを設置し、承認を拒む方針を AI の主体へ付けて確かめた後 |
+| GitHub との接続（AWS CodeConnections） | 反映のパイプラインがリポジトリを取る | 反映のパイプラインのスタックを設置した後 |
 
 ## Google の OAuth クライアント
 
@@ -79,7 +79,6 @@ aws cloudformation describe-stack-events --profile <profile> \
 
 パイプラインのスタックは GitHub との接続を作るが、作った直後の接続は `PENDING` で使えない。
 
-接続を有効にするのは、承認を拒む方針を AI が使う主体へ付け、拒まれることと迂回の操作を持たないことを確かめた後だけにする（[pipeline-approval.md](pipeline-approval.md#承認を拒む方針を-ai-の主体へ付ける)）。有効にした時点から、起点のブランチへの push は誰のものでもパイプラインを動かすため、push を控える約束では、拒否を確かめる前に承認の段へ進む実行を止められない。`PENDING` の間は、push があっても実行は取る段で失敗する。
-
 1. 組織の持ち主が、AWS のコンソールの「CodePipeline > 設定 > 接続」で接続 `<prefix>-<environment>-github` を開き、「保留中の接続を更新」から AWS の接続の App を組織へ入れ、対象のリポジトリを選ぶ
 2. 接続の状態が `AVAILABLE` になったことを確かめる
+3. 承認を拒む方針を AI が使う主体へ付けるまで（[pipeline-approval.md](pipeline-approval.md)）、起点のブランチへ push しない
