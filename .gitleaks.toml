@@ -30,6 +30,11 @@ description = "作り物の UUID の最後の組（docs/design/screens.md の「
 regexTarget = "match"
 regexes = ['''00000000-0000-7000-8000-[0-9]{12}''']
 
+[[rules.allowlists]]
+description = "DB の用意の要素の作り物の ID（packages/contracts/test/db-prep.test.ts の PREP_ID。#13 が足し、main の履歴に残る）"
+regexTarget = "match"
+regexes = ['''00000000-0000-4000-8000-000000000001''']
+
 # _ 1 文字の後ろの 12 桁で、その _ の前も 12 桁のもの（<12 桁>_<12 桁> の後ろの値）。
 # nd-aws-account-id は前の値の後ろの _ を消費するので、後ろの値をこの規則で当てる
 [[rules]]

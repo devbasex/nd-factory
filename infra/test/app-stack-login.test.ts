@@ -1,5 +1,5 @@
 import type { Settings } from "@nd-factory/contracts/settings";
-import { App } from "aws-cdk-lib";
+import { App, CfnElement, Resource } from "aws-cdk-lib";
 import { Template } from "aws-cdk-lib/assertions";
 import { beforeAll, describe, expect, it } from "vitest";
 import { AppStack } from "../lib/app-stack.ts";
@@ -31,10 +31,22 @@ const LOGIN_TYPES = [
   "AWS::SecretsManager::Secret",
 ];
 
+// スタックの直の子の L2 の資源（addLogin が作る）の中の論理 ID。ネットワーク・進行表の DB などの合成の部品
+// （Resource でない Construct）の中の秘密の器は、ログインの資源に数えない
+function directResourceIds(stack: AppStack): Set<string> {
+  const ids = new Set<string>();
+  for (const child of stack.node.children) {
+    if (!Resource.isResource(child)) continue;
+    for (const c of child.node.findAll()) if (CfnElement.isCfnElement(c)) ids.add(stack.getLogicalId(c));
+  }
+  return ids;
+}
+
 function loginIds(b: Built): Record<string, string> {
+  const direct = directResourceIds(b.stack);
   return Object.fromEntries(
     Object.entries(b.resources)
-      .filter(([, r]) => LOGIN_TYPES.includes(r.Type))
+      .filter(([id, r]) => LOGIN_TYPES.includes(r.Type) && direct.has(id))
       .map(([id, r]) => [id, r.Type]),
   );
 }
