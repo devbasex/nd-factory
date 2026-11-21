@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   NDF_CONTRACTS,
   PLANS,
@@ -7,7 +7,12 @@ import {
   readRetryPolicies,
   readSecretShapes,
   RETRY_POLICIES,
+  type AwsRetryPolicy,
+  type HttpRetryPolicy,
+  type JwksRetryPolicy,
+  type RetryPolicyOf,
   SECRET_SHAPES,
+  type TransactionRetryPolicy,
 } from "../src/data.ts";
 
 const SHA = "ed8b036584bec284dfc93a2bb5b988e2385b4f8f297d659399f5d3cb91b520c4";
@@ -45,6 +50,21 @@ describe("RETRY_POLICIES", () => {
     return { ...RETRY_POLICIES, [name]: policy };
   }
 
+  it("名前から種類の形を型で引ける", () => {
+    expectTypeOf(RETRY_POLICIES.dynamodb).toEqualTypeOf<AwsRetryPolicy>();
+    expectTypeOf(RETRY_POLICIES["aws-control"]).toEqualTypeOf<AwsRetryPolicy>();
+    expectTypeOf(RETRY_POLICIES["dynamodb-transaction"]).toEqualTypeOf<TransactionRetryPolicy>();
+    expectTypeOf(RETRY_POLICIES["http-github"]).toEqualTypeOf<HttpRetryPolicy>();
+    expectTypeOf<RetryPolicyOf<"runner-to-api">>().toEqualTypeOf<HttpRetryPolicy>();
+    expectTypeOf<RetryPolicyOf<"http-idp-keys">>().toEqualTypeOf<JwksRetryPolicy>();
+  });
+
+  it("要求の時間切れと全体の期限、待ちの下限と上限は等しくてよい", () => {
+    const raw = withPolicy("http-github", { ...RETRY_POLICIES["http-github"], timeout_ms: 30000, total_timeout_ms: 30000 });
+    raw["dynamodb-transaction"] = { kind: "transaction", retries: 2, min_ms: 1000, max_ms: 1000 };
+    expect(() => readRetryPolicies(raw)).not.toThrow();
+  });
+
   it("今の値は読み直しても同じ", () => {
     expect(readRetryPolicies(structuredClone(RETRY_POLICIES))).toEqual(RETRY_POLICIES);
   });
@@ -59,6 +79,15 @@ describe("RETRY_POLICIES", () => {
     ["種類が無い", withPolicy("http-idp-keys", { response_timeout_ms: 3000 })],
     ["知らない種類", withPolicy("http-idp-keys", { kind: "grpc", response_timeout_ms: 3000 })],
     ["standard でない再試行の型", withPolicy("dynamodb", { kind: "aws", retry_mode: "adaptive", max_attempts: 3, request_timeout_ms: 2000 })],
+    ["名前と種類が合わない（dynamodb に jwks）", withPolicy("dynamodb", { kind: "jwks", response_timeout_ms: 3000 })],
+    ["名前と種類が合わない（dynamodb に http）", withPolicy("dynamodb", RETRY_POLICIES["http-github"])],
+    ["名前と種類が合わない（http-idp-keys に aws）", withPolicy("http-idp-keys", RETRY_POLICIES.dynamodb)],
+    ["名前と種類が合わない（dynamodb-transaction に aws）", withPolicy("dynamodb-transaction", RETRY_POLICIES["aws-control"])],
+    ["待ちの下限が上限を超える", withPolicy("dynamodb-transaction", { kind: "transaction", retries: 2, min_ms: 1001, max_ms: 1000 })],
+    [
+      "要求の時間切れが全体の期限を超える",
+      withPolicy("http-github", { ...RETRY_POLICIES["http-github"], timeout_ms: 30001, total_timeout_ms: 30000 }),
+    ],
   ])("%s で読み込みが投げる", (_why, raw) => {
     expect(() => readRetryPolicies(raw)).toThrow();
   });

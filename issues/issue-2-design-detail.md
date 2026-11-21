@@ -162,7 +162,7 @@ infra/
 | `defineOperation` | `operation.ts` | 新設 | `<N extends string, I extends Shape, R extends SuccessEnvelope \| PendingShape>(def: OperationInput<N, I, R>) => OperationDef<N, I, R>` | 印を照らし、HTTP の経路と既定の値を足した定義を返す |
 | `pendingShape` | `operation.ts` | 新設 | `(owner: `#${number}`) => PendingShape` | どの値も通さない形と、受け持つ子の番号 |
 | `isPending` | `operation.ts` | 新設 | `(shape: ZodType \| PendingShape) => shape is PendingShape` | 形の未定かを返す |
-| `okItem`・`okList` | `operation.ts` | 新設 | `<R extends ZodType>(item: R) => z.ZodObject<{ ok: z.ZodLiteral<true>; item: R }, z.core.$strict>`・`<R extends ZodType>(item: R) => z.ZodObject<{ ok: z.ZodLiteral<true>; items: z.ZodArray<R>; next_cursor: z.ZodNullable<z.ZodString> }, z.core.$strict>` | 成功の要素の結果の封筒（`{ok: true, item}`・`{ok: true, items, next_cursor}`）。`z.strictObject` で組み、封筒の余分なキー（`reason` など）を拒む。既定の `z.object` は余分なキーを落として通すため、`{ok: true, item: <有効な値>, reason: "not_found"}` が成功として通ってしまう。JSON Schema では `additionalProperties: false` になり、往復のテストで Ajv と合否がそろう |
+| `okItem`・`okList` | `operation.ts` | 新設 | `<R extends ItemObjectShape>(item: R) => z.ZodObject<{ ok: z.ZodLiteral<true>; item: R }, z.core.$strict>`（`ItemObjectShape` は `z.ZodObject \| z.ZodUnion<readonly z.ZodObject[]>`。`okItem(z.string())` は型で拒む）・`<R extends ZodType>(item: R) => z.ZodObject<{ ok: z.ZodLiteral<true>; items: z.ZodArray<R>; next_cursor: z.ZodNullable<z.ZodString> }, z.core.$strict>` | 成功の要素の結果の封筒（`{ok: true, item}`・`{ok: true, items, next_cursor}`）。`okItem` の `item` はオブジェクトの形（`z.object` か、どの選択肢もオブジェクトの和）だけを受ける（`docs/design/api.md` の「本文は配列」の `item: {…}`）。`z.strictObject` で組み、封筒の余分なキー（`reason` など）を拒む。既定の `z.object` は余分なキーを落として通すため、`{ok: true, item: <有効な値>, reason: "not_found"}` が成功として通ってしまう。JSON Schema では `additionalProperties: false` になり、往復のテストで Ajv と合否がそろう |
 | `itemFailure` | `operation.ts` | 新設 | `<const RS extends readonly [ReasonDef, ...ReasonDef[]]>(reasons: RS) => ItemFailureSchema<RS>` | 失敗の要素の結果（`{ok: false, status, reason, fields?}`）。渡した `ReasonDef` ごとに `status` と `reason` を `z.literal` で縛ったオブジェクトを 1 つ作り、`reason` を判別の鍵にした和にする |
 | `resultSchemaOf` | `operation.ts` | 新設 | `<Op extends OperationDef>(op: Op) => z.ZodDiscriminatedUnion<[ResultShapeOf<Op>, ItemFailureSchema<ReasonsOf<Op>>], "ok">` | その操作の要素の結果の zod。`z.discriminatedUnion("ok", [op.result, itemFailure(itemReasonsOf(op))])`。`ResultOf<Op>` はこの戻り値の `z.infer` で、成功の側は `z.infer<ResultShapeOf<Op>>`（`PendingShape` を和の選択肢に含まない）。`op.result` が `PendingShape` なら投げる（形の未定の操作は呼び手が `isPending` で先に外す）。戻り値の型は宣言の上で `PendingShape` を外した `ResultShapeOf<Op>` にし、関数の中で `isPending` で外した後の `op.result` をその型として渡す |
 | `itemReasonsOf` | `operation.ts` | 新設 | `<Op extends OperationDef>(op: Op) => ReasonsOf<Op>` | その操作で起きうる要素の理由。`ITEM_REASONS` のうち `when` が操作に当たるもの（`write` は `access` が `write`、`idempotency` は `idempotencyKey`、`all_or_nothing` は `allOrNothing`、`human_only_per_item` は `humanOnly` が `per_item`）に、`op.reasons` を続けた配列。結果の形の `itemFailure`・`generated/reasons.json`・失敗のダミーはどれもこの戻り値から作る |
@@ -176,6 +176,11 @@ infra/
     - `allOrNothing` があって `access` が `read`
     - `humanOnly` が `always` で `mcpRead` が無い
     - `humanOnly` が `never` で `mcpRead` がある
+    - `result` が `PendingShape` でなく、次の成功の封筒の規則のどれかを外れる（`checkResult` が照らす）
+      - `ok` を `z.literal(true)` で持つ `z.strictObject` でない
+      - `verb` が `list` なら `ok`・`items`（配列）・`next_cursor`（文字列か `null`）を必ず持ち、`list` でなければ `ok`・`item` を必ず持って `item` がオブジェクトの形（`z.object` か、オブジェクトだけの和）でない
+      - 受け口 `user` の操作で、封筒が上の決まったキーのほかのキーを持つ（ほかの受け口は文書が応答に足す値を持つため、足したキーを許す）
+      - 封筒が失敗の要素のキー（`status`・`reason`・`fields`）を持つ
   - 副作用: 無し
 - `operations/index.ts` の `OPERATIONS` は全体の設計の操作の一覧の表の順（F1〜F20 の表の上から、続けてランナー・手元のマシン・DB の用意のタスク）に並べる。名前と経路の重なりは読み込みのときに例外を投げる
 
@@ -197,7 +202,7 @@ infra/
 | 10 | `ownerOnly` | 真偽 | 偽 |
 | 11 | `allOrNothing` | `{ maxItems: number } \| null` | `null` |
 | 12 | `idempotencyKey` | 真偽 | 偽 |
-| 13 | `item`・`result` | `item` は zod \| `PendingShape`。`result` は `SuccessEnvelope`（`ok` を `z.literal(true)` で持つ `strictObject`。`okItem`・`okList` が作る） \| `PendingShape` | —。`result` が `ok: true` の strict な封筒でなければ `defineOperation` が投げる（`z.object` と `z.strictObject` は型で見分けられないため、型の制約に加えて実行の時にも照らす） |
+| 13 | `item`・`result` | `item` は zod \| `PendingShape`。`result` は `SuccessEnvelope`（`ok` を `z.literal(true)` で持つ `strictObject`。`okItem`・`okList` が作る） \| `PendingShape` | —。`result` が `ok: true` の strict な封筒でなければ `defineOperation` が投げる（`z.object` と `z.strictObject` は型で見分けられないため、型の制約に加えて実行の時にも照らす）。あわせて、list の封筒は `ok`・`items`・`next_cursor` を、list でなければ `ok`・`item`（オブジェクトの形）を必ず持ち、受け口 `user` はそのキーだけを持ち、どの封筒も失敗の要素のキー（`status`・`reason`・`fields`）を置かない。照らす規則の全部は `defineOperation` の事後条件に書く |
 | 14 | `reasons` | `readonly ReasonDef[]`（操作ごとのコードだけ。`when` は `always`） | `[]`（共通の `ITEM_REASONS` は書かずに `itemReasonsOf` が合わせる）。`ITEM_REASONS` と同じコードを書くと `defineOperation` が投げる |
 | 15 | `auditKeys` | 要素の鍵の名前の配列 | `[]` |
 | 16 | `order` | 文字列 \| `null` | `list` 以外は `null` |
@@ -247,7 +252,7 @@ infra/
 | --- | --- | --- | --- | --- |
 | `ndfContractSet` | `ndf.ts` | 新設 | `z.strictObject({ accepted: z.array(z.strictObject({ version: z.int().min(1), sha256: /^[0-9a-f]{64}$/ })).min(1) })`。重なりは `data.ts` の読みで照らす | 受ける契約の組の集合の形 |
 | `ndfAnswerWord` | `ndf.ts` | 新設 | `z.enum(["approved","rejected","request_changes","retry","finish","cancel"])` | 答えの語（出所: 固定の点の `C/facts/answers.json`） |
-| `RETRY_POLICIES` | `data.ts` | 新設 | `Record<RetryPolicyName, RetryPolicy>` | `data/retry-policies.json` を形で検証して出す |
+| `RETRY_POLICIES` | `data.ts` | 新設 | `RetryPolicies`（名前から種類の形を引く対応表。`dynamodb`・`aws-control` は `AwsRetryPolicy`、`dynamodb-transaction` は `TransactionRetryPolicy`、`http-github`・`http-notify`・`runner-to-api` は `HttpRetryPolicy`、`http-idp-keys` は `JwksRetryPolicy`。`RetryPolicyOf<N>` で引く） | `data/retry-policies.json` を形で検証して出す。名前ごとに種類を 1 つに固定し、名前と `kind` の取り違えを読み込みで拒む。`http` は `timeout_ms <= total_timeout_ms`、`transaction` は `min_ms <= max_ms` も照らす |
 | `SECRET_SHAPES` | `data.ts` | 新設 | `{ keyNames: readonly string[]; valuePatterns: readonly { name: string; pattern: string }[] }` | 秘密の形（`redact` と漏れの検査と生成の照らしが読む） |
 | `NDF_CONTRACTS` | `data.ts` | 新設 | `ndfContractSet` の型 | 受ける組（ランナー（#6）が読む） |
 | `PLANS` | `data.ts` | 新設 | 料金プランの行の配列。この課題は「上限なし」の 1 行だけ | `judgeUsage` が読む |
@@ -268,7 +273,7 @@ infra/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `ndfContractSet` | 今のデータが通る | 組が 1 つ | 空・63 桁・大文字の 16 進・版 0・同じ版の重なり |
-| `RETRY_POLICIES` | 7 つの方針が detail.md の値で、種類ごとの形に合う | — | 鍵の欠け・負の数・種類に無い鍵で読み込みが投げる |
+| `RETRY_POLICIES` | 7 つの方針が detail.md の値で、種類ごとの形に合う | — | 鍵の欠け・負の数・種類に無い鍵・名前と種類が合わない（`dynamodb` に `jwks`・`http-idp-keys` に `aws` など）・`min_ms > max_ms`・`timeout_ms > total_timeout_ms` で読み込みが投げる。型のテストで、名前から引いた方針が種類の形に絞られている |
 | `SECRET_SHAPES` | 値の形の各行に当たる作り物の値と当たらない値の組 | — | 正規表現として読めない行で投げる |
 
 ## 形の正本: 生成
