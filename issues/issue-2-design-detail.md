@@ -1,6 +1,6 @@
 # #2 の詳細設計: 形の正本・横断の部品・API の起点・サービスの表
 
-設計文書 [issue-2-design.md](./issue-2-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。横断の部品の最上位の関数の仕様・異常系・処理の手順・並行と排他・ログ・再利用・テストの観点は全体の詳細設計（[detail.md](../docs/design/detail.md)）が決めており、この文書は写さずに指す。ここに書くのは、detail.md が「#2 が決める」と回したもの（ファイルの単位・型の項目の並び・操作の表の形・生成物の置き場・ダミーデータの作り方・表の列と索引・表の移し）と、この課題が新しく置く関数だけである。
+設計文書 [issue-2-design.md](./issue-2-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。横断の部品の最上位の関数の仕様・異常系・処理の手順・並行と排他・ログ・再利用・テストの観点は全体の詳細設計（[detail.md](../docs/design/detail.md)）が決めており、この文書は写さずに指す。ここに書くのは、detail.md が「#2 が決める」と回したものと、この課題が新しく置く関数だけである。回されたものは、ファイルの単位・型の項目の並び・操作の表の形・生成物の置き場・ダミーデータの作り方・表の列と索引・表の移しである。
 
 ## 地図
 
@@ -80,7 +80,7 @@ infra/
 └── test/service-table.test.ts · api-routes.test.ts  *
 ```
 
-依存の向き: `packages/contracts`（zod だけ）← `packages/core`（contracts・AWS SDK・`uuid`・`aws-jwt-verify`）← `apps/api`。`infra` は `packages/contracts` の `tables.ts` と `generated/routes.json` だけを読み、`packages/core` と `apps/*` を import しない。`apps/web` が使ってよい `core` のモジュールは `clock`・`ids`・`redact`・`log` の 4 つで、この 4 つは `node:` の組み込みと AWS SDK を import しない（`ids` の乱数は `uuid` を通す）。型の関係は [detail.md のクラス図](../docs/design/detail.md#クラスと関数の構造) のまま変えない。
+依存の向き: `packages/contracts`（zod だけ）← `packages/core`（contracts・AWS SDK・`uuid`・`aws-jwt-verify`）← `apps/api`。`infra` は `packages/contracts` の `tables.ts` と `generated/routes.json` だけを読む。`packages/core` と `apps/*` は import しない。`apps/web` が使ってよい `core` のモジュールは `clock`・`ids`・`redact`・`log` の 4 つである。この 4 つは `node:` の組み込みと AWS SDK を import しない（`ids` の乱数は `uuid` を通す）。型の関係は [detail.md のクラス図](../docs/design/detail.md#クラスと関数の構造) のまま変えない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | モジュール | 最上位の関数と定数（新設 / 変更） |
 | --- | --- | --- | --- | --- | --- |
@@ -156,7 +156,11 @@ infra/
 
 - `defineOperation`
   - 事前条件: `name` は `^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$`。受け口が `user` でない操作の名前は `runner.<entity>.<verb>` の形を取らず、経路の表の path から `<受け口>.<entity>.<verb>`（例 `runner.events.create`）にする
-  - 事後条件: `route` は受け口 `user` なら `/v1/<entity>/<verb>`、ほかは `/v1/<受け口>/<entity>/<verb>`。`access` が `read` で `idempotencyKey` が真、`allOrNothing` があって `access` が `read`、`humanOnly` が `always` で `mcpRead` が無い、`humanOnly` が `never` で `mcpRead` がある、のどれかに当たれば例外を投げる（モジュールの読み込みで落ち、`check` の型検査とテストが先に落とす）
+  - 事後条件: `route` は受け口 `user` なら `/v1/<entity>/<verb>`、ほかは `/v1/<受け口>/<entity>/<verb>`。次のどれかに当たれば例外を投げる（モジュールの読み込みで落ち、`check` の型検査とテストが先に落とす）
+    - `access` が `read` で `idempotencyKey` が真
+    - `allOrNothing` があって `access` が `read`
+    - `humanOnly` が `always` で `mcpRead` が無い
+    - `humanOnly` が `never` で `mcpRead` がある
   - 副作用: 無し
 - `operations/index.ts` の `OPERATIONS` は全体の設計の操作の一覧の表の順（F1〜F20 の表の上から、続けてランナー・手元のマシン・DB の用意のタスク）に並べる。名前と経路の重なりは読み込みのときに例外を投げる
 
@@ -257,8 +261,25 @@ infra/
 
 - `checkExamples`
   - 事前条件: 無し
-  - 事後条件: 形があるのに `examples` が無い・見本が `ResultOf` の zod を通らない・見本の文字列に `SECRET_SHAPES` の値の形が当たる・12 桁の数で `123456789012` でないもの・`@` を含む値で域名が `example.com` でないもの、のどれかを問題として返す。`generateArtifacts` は問題が 1 つでもあれば書かずに `GenerateError`（終了コード 2）を投げる
-- `buildMcpTools` の道具の入力の形は `{"type": "object", "properties": {"items": {"type": "array", "minItems": 1, "maxItems": <MAX_ITEMS か allOrNothing.maxItems>}}, "required": ["items"]}` で、要素の形を持たない（[detail.md の `createMcpHandler`](../docs/design/detail.md#関数の仕様)）。出力の形は結果の配列の JSON Schema、注記は `readOnlyHint`（`access` が `read`）・`idempotentHint`（`idempotencyKey`）・`destructiveHint`（動詞が `delete`・`remove`・`cancel`・`revoke`）
+  - 事後条件: 次のどれかを問題として返す。`generateArtifacts` は問題が 1 つでもあれば書かずに `GenerateError`（終了コード 2）を投げる
+    - 形があるのに `examples` が無い
+    - 見本が `ResultOf` の zod を通らない
+    - 見本の文字列に `SECRET_SHAPES` の値の形が当たる
+    - 12 桁の数で `123456789012` でないもの
+    - `@` を含む値で域名が `example.com` でないもの
+- `buildMcpTools` の道具の入力の形は、要素の形を持たない（[detail.md の `createMcpHandler`](../docs/design/detail.md#関数の仕様)）。入力の形は次のとおりである
+
+```json
+{"type": "object", "properties": {"items": {"type": "array", "minItems": 1, "maxItems": <MAX_ITEMS か allOrNothing.maxItems>}}, "required": ["items"]}
+```
+
+- `buildMcpTools` の道具の出力の形は、結果の配列の JSON Schema である。注記は次の条件で付ける
+
+| 注記 | 条件 |
+| --- | --- |
+| `readOnlyHint` | `access` が `read` |
+| `idempotentHint` | `idempotencyKey` |
+| `destructiveHint` | 動詞が `delete`・`remove`・`cancel`・`revoke` |
 
 ### 内部のデータと定数
 
@@ -272,7 +293,7 @@ infra/
 | `generated/dummy/<操作>.json` | `{"operation", "normal": [...], "empty": [...], "edge": [...], "failures": [{"ok": false, "status", "reason"}…]}`。`empty` は `list` で `[{"ok": true, "items": [], "next_cursor": null}]`、`get` で `[{"ok": false, "status": 404, "reason": "not_found"}]`、それ以外は `[]`。`failures` は `reasons` と `ITEM_REASONS` のうちその操作で起きうるもの（読む操作は `version_mismatch` などの書く理由を含めない）ごとに 1 つ |
 | `generated/pending.json` | `[{"operation", "owner"}]` |
 
-理由のコードと HTTP の状態の対応は `reasons.ts` に表で持ち（`not_found` → 404 ほか）、操作ごとのコードは定義の `reasons` の要素に `{code, status}` で書く。
+理由のコードと HTTP の状態の対応は `reasons.ts` に表で持つ（`not_found` → 404 ほか）。操作ごとのコードは、定義の `reasons` の要素に `{code, status}` で書く。
 
 ### 単体テストの観点
 
@@ -288,11 +309,11 @@ infra/
 
 満たす決定: 決定 6・7・13・14、受け入れ条件 2・3・4・5
 
-関数の仕様・異常系・処理の手順・並行と排他・ログ・再利用・単体テストの観点は [detail.md](../docs/design/detail.md) のとおりで、ここでは置き場（ファイル）・型の項目の並び・この課題で足すものだけを書く。MCP の受け口の 5 つの関数（`readMcpCall`・`createMcpHandler`・`createMcpServer`・`serveMcp`・`writeMcpResponse`）と `McpCall` ほかの MCP の型は #11 が `src/dispatch/mcp.ts` に置く（決定 7）。
+関数の仕様・異常系・処理の手順・並行と排他・ログ・再利用・単体テストの観点は [detail.md](../docs/design/detail.md) のとおりで、ここでは置き場（ファイル）・型の項目の並び・この課題で足すものだけを書く。MCP の受け口の 5 つの関数と `McpCall` ほかの MCP の型は、#11 が `src/dispatch/mcp.ts` に置く（決定 7）。5 つは `readMcpCall`・`createMcpHandler`・`createMcpServer`・`serveMcp`・`writeMcpResponse` である。
 
 ### ファイルと exports
 
-| モジュール | ファイル | `exports` の入口 | 関数（detail.md の名前のまま） |
+| モジュール | ファイル | `exports` のエントリポイント | 関数（detail.md の名前のまま） |
 | --- | --- | --- | --- |
 | clock | `src/clock.ts` | `./clock` | `createClock` |
 | ids | `src/ids.ts` | `./ids` | `newId`・`parseId` |
@@ -309,7 +330,16 @@ infra/
 | audit | `src/audit.ts` | `./audit` | `auditItem`・`appendAudit` |
 | dispatch | `src/dispatch/types.ts`・`http.ts`・`dispatch.ts` | `./dispatch` | `readHttpCall`・`dispatch`・`writeHttpResponse` |
 
-`package.json` の依存: `@nd-factory/contracts`・`uuid` 14.0.3（LIB46）・`aws-jwt-verify` 5.2.1（LIB41）・`@aws-sdk/client-dynamodb` と `@aws-sdk/lib-dynamodb`（`apps/api` と同じ 3.1170.0）。`log` の既定の書き先は `process.stdout.write` で、`console.log` を使わない。
+`package.json` の依存は次のとおりである。
+
+| 依存 | 版 |
+| --- | --- |
+| `@nd-factory/contracts` | — |
+| `uuid` | 14.0.3（LIB46） |
+| `aws-jwt-verify` | 5.2.1（LIB41） |
+| `@aws-sdk/client-dynamodb`・`@aws-sdk/lib-dynamodb` | `apps/api` と同じ 3.1170.0 |
+
+`log` の既定の書き先は `process.stdout.write` で、`console.log` を使わない。
 
 ### 関数の仕様（この課題で足すもの）
 
@@ -322,9 +352,9 @@ infra/
 - `dispatch` に足す分岐（[detail.md の処理の手順](../docs/design/detail.md#処理の手順) に無いもの）
   - 操作が形の未定（`isPending`）か、ハンドラーの表に無い: 要求全体の 503 `unavailable` とログの error（操作の名前だけ）。記録の要約の行を 1 件書く
   - 受け口が `user` でない操作を受け口 `user` の経路で引いた（またはその逆）: `readHttpCall` が経路の表で受け口ごとに引くため起きず、起きたら 405
-- `ScopeReader`（決定 14）。中身は表の持ち主の子が `apps/api/src/modules/` に書き（`seatsOf` は #4、`projectsOfTeams`・`projectOfTarget`・`transferTargetOf` は #5、`laneOf` は #6、`isHumanOnlyItem` は #8）、次を満たす。この課題は偽の読み手で `authorize` の側の約束を確かめる
-  - `seatsOf(userId)` は `user-seats` の索引で候補のチームを読み、候補ごとに `db-teams` の `TEAM#<チーム>` / `SEAT#<利用者>` を強い整合で読み直して、在る席だけを返す
-  - `projectsOfTeams(teamIds)` は `team-projects` の索引で候補を読み、候補のプロジェクトの行を強い整合で読み直して、`current_team_id` が席のチームのものだけを返す
+- `ScopeReader`（決定 14）。中身は表の持ち主の子が `apps/api/src/modules/` に書き、次を満たす。`seatsOf` は #4、`laneOf` は #6、`isHumanOnlyItem` は #8 が書く。`projectsOfTeams`・`projectOfTarget`・`transferTargetOf` は #5 が書く。この課題は偽の読み手で `authorize` の側の約束を確かめる
+  - `seatsOf(userId)` は `user-seats` の索引で候補のチームを読む。候補ごとに `db-teams` の `TEAM#<チーム>` / `SEAT#<利用者>` を強い整合で読み直して、在る席だけを返す
+  - `projectsOfTeams(teamIds)` は `team-projects` の索引で候補を読む。候補のプロジェクトの行を強い整合で読み直し、`current_team_id` が席のチームのものだけを返す
   - `projectOfTarget(item)` は要素の対象から、プロジェクトの行を強い整合で読む。`authorize` は要素ごとにこの値で照らし、索引の値だけで通さない
   - 索引の遅れで新しく足した席や割り当てが 1 回の要求で見えないことはある。見えるべきでないものが見えることは無い（迷うときは見せない、Value 9）
 
@@ -395,6 +425,26 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 
 共通の列（`pk`・`sk`・`schema_version`・上書きの行の `version`）は [データの共通の列](../docs/design/data.md#共通の列) のとおりで、ここでは書かない。全体の設計が列を決めた行（プロジェクト・割り当て・レーン・承認の依頼・答えの `ndf_event_seqs`・操作の記録）もそのまま形の正本へ写し、ここでは書かない。閉じた語の集まりは英小文字の識別子で持ち、画面の文言は翻訳のファイルが識別子から作る。
 
+### 関数の仕様
+
+| 関数・定数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `TABLES` | `packages/contracts/src/tables.ts` | 新設 | `Record<TablePurpose, TableSpec>` | 10 の表の仕様 |
+| `ServiceTable` | `infra/lib/service-table.ts` | 新設 | `new ServiceTable(scope, id, { purpose: TablePurpose; names: AppResourceNames })` | 仕様から `TableV2`（要求の数の課金・PITR・`RemovalPolicy.RETAIN`・TTL・索引）を作る |
+| `ApiRoutes` | `infra/lib/api-routes.ts` | 新設 | `new ApiRoutes(scope, id, { api: HttpApi; fn: IFunction; endpoints: readonly Endpoint[] })` | `routes.json` のうち渡した受け口の経路を `POST` で登録する |
+
+`TableSpec` の項目の並び:
+
+| 順 | 項目 | 中身 |
+| --- | --- | --- |
+| 1 | `purpose` | — |
+| 2 | `suffix` | `db-users` ほか |
+| 3 | `partitionKey` | `pk` |
+| 4 | `sortKey` | `sk` か `null` |
+| 5 | `ttlAttribute` | `expire_at` か `null` |
+| 6 | `indexes` | `{name, partitionKey, sortKey, projection}` の配列 |
+| 7 | `rows` | 行の種類の名前と `RowCodec` の配列 |
+
 ### 決めた書き方
 
 | 決まり | 中身 |
@@ -434,7 +484,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | 費用の記録（`db-usage` / `COST#<時刻>#<区間の ID>`） | `project_id`・`sprint_id`・`lane_id`・`segment_id`・`kind`・`quantity`（`{unit: seconds・tokens_in・tokens_out・tokens_cache, value}` の配列）・`amount`（`money`。量だけのものは 0）・`occurred_at` | 追記だけ |
 | 冪等の鍵（`db-idempotency`） | `principal_key`・`operation`・`key`・`fingerprint`・`state`（`leased`・`settled`）・`owner_request_id`・`lease_until`・`result?`・`expire_at` | 借りから済みへ 1 回だけ書き換える（`version` を持たない） |
 
-全体の設計の版の列の一覧（[共通の列](../docs/design/data.md#共通の列)）に載らない行のうち、招待と区間は上書きするため `version` を持ち、ログインの組は作ると消すだけのため持たない。持ち込みのキー（`model_keys.*`）と GitHub App の導入（`github_installations.*`）の行は 19 の行に入っておらず、それぞれ #6 と #5 の詳細設計が置き場と列を決める。
+全体の設計の版の列の一覧（[共通の列](../docs/design/data.md#共通の列)）に載らない行のうち、招待と区間は上書きするため `version` を持ち、ログインの組は作ると消すだけのため持たない。持ち込みのキー（`model_keys.*`）と GitHub App の導入（`github_installations.*`）の行は 19 の行に入っていない。置き場と列は、それぞれ #6 と #5 の詳細設計が決める。
 
 ### 索引
 
@@ -445,16 +495,6 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | `waiting` | `db-decisions` | `wt_pk = PROJECT#<プロジェクト>` / `wt_sk = <waiting_since>#<依頼か問いの ID>` | `kind`（`approval`・`question`）・`sprint_id`・`lane_id`・`gate?`・`category?`・`state` | `state` が `waiting` の依頼と問いだけ（答えるか取り消すと 2 列を消す） | 見えるプロジェクトの待っているもの。古い順（`approvals.list`・`questions.list`・`waiting_counts.get`） |
 
 どの索引も結果整合で、候補を出すだけに使う。認可と確定の照らしは表の本体を強い整合で読む（決定 14）。索引の鍵の 2 列は、元の行を書く同じ `TransactItem` で書く。
-
-### 関数の仕様
-
-| 関数・定数 | 保存先 | 種類 | シグネチャ | 責務 |
-| --- | --- | --- | --- | --- |
-| `TABLES` | `packages/contracts/src/tables.ts` | 新設 | `Record<TablePurpose, TableSpec>` | 10 の表の仕様 |
-| `ServiceTable` | `infra/lib/service-table.ts` | 新設 | `new ServiceTable(scope, id, { purpose: TablePurpose; names: AppResourceNames })` | 仕様から `TableV2`（要求の数の課金・PITR・`RemovalPolicy.RETAIN`・TTL・索引）を作る |
-| `ApiRoutes` | `infra/lib/api-routes.ts` | 新設 | `new ApiRoutes(scope, id, { api: HttpApi; fn: IFunction; endpoints: readonly Endpoint[] })` | `routes.json` のうち渡した受け口の経路を `POST` で登録する |
-
-`TableSpec` の項目の並び: `purpose`・`suffix`（`db-users` ほか）・`partitionKey`（`pk`）・`sortKey`（`sk` か `null`）・`ttlAttribute`（`expire_at` か `null`）・`indexes`（`{name, partitionKey, sortKey, projection}` の配列）・`rows`（行の種類の名前と `RowCodec` の配列）。
 
 ### 単体テストの観点
 
@@ -473,7 +513,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `rowCodec` | `packages/contracts/src/row-codec.ts` | 新設 | `<C, P>(spec: { current: number; schema: ZodType<C>; previous?: { version: number; schema: ZodType<P>; upgrade: (row: P) => C } }) => RowCodec<C>` | 行の種類の今と 1 つ前の版を束ねる |
+| `rowCodec` | `packages/contracts/src/row-codec.ts` | 新設 | `<C, P>(spec: { current: number; schema: ZodType<C>; previous?: { version: number; schema: ZodType<P>; upgrade: (row: P) => C } }) => RowCodec<C>` | 行の種類の今と 1 つ前の版をまとめる |
 | `readRow` | 同上 | 新設 | `<C>(codec: RowCodec<C>, raw: unknown) => ReadRowResult<C>` | 今の版はそのまま、1 つ前の版は引き上げて返し、ほかは拒む |
 | `migrateTable` | `apps/api/src/entries/migrate.ts` | 新設 | `(input: { purpose: TablePurpose; cursor: Cursor \| null }, deps: MigrateDeps) => Promise<{ done: boolean; cursor: Cursor \| null; rewritten: number }>` | 1 つ前の版の行を今の版へ書き換える |
 | `createMigrateHandler` | 同上 | 新設 | `(deps: MigrateDeps) => (event: MigrateEvent, context: Context) => Promise<void>` | `migrateTable` を呼び、終わっていなければ続きの位置を持って自分を非同期で起こし直す |
@@ -513,6 +553,6 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | --- | --- | --- |
 | 操作の一覧と画面と MCP の対応・HTTP の経路の登録の照らし | `generated/mcp-tools.json`・`generated/routes.json`・`OPERATIONS` の `features` | 生成物を読んで対応の検査を作り、CI の必須のチェックへ載せる |
 | 形の往復 | `operations-roundtrip.test.ts`（CI の `check` で走る） | 必須のチェックに `check` が載っていることを CI の定義のテストで照らす（今のまま） |
-| 境界の検査 | `packages/core` の `exports` の入口の一覧と、置き場の外で直に使わないもの（[土台の表](../docs/design/platform.md#横断の部品の置き場の基準)） | `apps/` の実行の時のコードを探す検査を作る。画面が import してよい入口は `clock`・`ids`・`redact`・`log` |
+| 境界の検査 | `packages/core` の `exports` のエントリポイントの一覧と、置き場の外で直に使わないもの（[土台の表](../docs/design/platform.md#横断の部品の置き場の基準)） | `apps/` の実行の時のコードを探す検査を作る。画面が import してよいエントリポイントは `clock`・`ids`・`redact`・`log` |
 | 漏れの検査 | `data/secret-shapes.json` | 同じデータを読む |
 | 骨組みの経路 | `PUT /v1/users` は操作の表に無い | #4 が消すまで、経路の登録の照らしでこの 1 本を受け持つ子 #4 の印つきで外す |
