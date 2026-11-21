@@ -323,6 +323,16 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
         ruleId: CRYPTO_RULE,
       },
       {
+        name: `${source} の既定の import を既定の値に置いた束縛を、分割元の中で別の値を代入した後に読む randomUUID の参照（分割元を先に評価する）`,
+        code: `import provider from "${source}";\nlet c: { randomUUID(): string };\n({ missing: c = provider } = (c = { randomUUID: () => "" }) as { missing?: typeof provider });\nexport const id = c.randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の既定の import を入れ子の分割代入の既定の値に置いた束縛を、後の束縛の既定の値で読む randomUUID の参照`,
+        code: `import provider from "${source}";\nconst { group: { a = provider, id = a.randomUUID() } = {} } = {} as { group?: { a?: typeof provider; id?: string } };\nexport { id };\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
         name: `${source} の動的な import を関数の引数の分割代入の既定の値に置いた default からの randomUUID の参照`,
         code: `const ns = await import("${source}");\nexport function make({ default: c } = ns) {\n  return c.randomUUID();\n}\n`,
         ruleId: CRYPTO_RULE,
@@ -397,6 +407,10 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
       "export const id3 = (provider && fallback).randomUUID();",
       "let d: typeof fallback = provider;",
       "export const id4 = (d &&= fallback).randomUUID() + String(d);",
+      // 分割元の中でモジュールを代入しても、分割代入の束縛の書き込みが後に来る
+      "let e: typeof fallback & { createHash?(a: string): unknown };",
+      '({ local: e } = (e = provider, { local: fallback, h: e.createHash?.("sha256") }));',
+      "export const id5 = e.randomUUID();",
       "",
     ].join("\n");
     for (const path of APP_PATHS) {

@@ -125,7 +125,40 @@ const noCryptoIdRule = {
     const codePathNode = new Map();
     const positions = new Map();
     const current = [];
+
+    // 分割代入は分割元（既定の値つきの束縛の分割は既定の値）を先に評価するが、節を読む順では分割の形が先に来る。
+    // 分割の形の中の出来事は溜めておき、分割元を読んだ後にその順のまま置く。flatRoots は溜めた出来事 → 一番外の分割の形の根
+    const buffers = [];
+    const pendingBuffers = new Map();
+    const flatRoots = new Map();
+    /** 分割元の後に評価する分割の形の根（分割元つきの宣言・代入の左辺・既定の値つきの束縛の左辺の分割の形） */
+    const isReorderedPattern = (node) => {
+      const parent = node.parent;
+      if (parent?.type === "VariableDeclarator") return parent.id === node && parent.init !== null && parent.init !== undefined;
+      return (parent?.type === "AssignmentExpression" || parent?.type === "AssignmentPattern") && parent.left === node;
+    };
+    const enterPattern = (node) => {
+      if (isReorderedPattern(node)) buffers.push({ root: node, codePath: codePathStack.at(-1), events: [] });
+    };
+    const exitPattern = (node) => {
+      if (isReorderedPattern(node) && buffers.at(-1)?.root === node) pendingBuffers.set(node.parent, buffers.pop());
+    };
+    /** 分割元を読み終えた分割代入（宣言・代入・既定の値つきの束縛）の、溜めた分割の形の出来事を置く */
+    const flushPattern = (node) => {
+      const buffer = pendingBuffers.get(node);
+      if (buffer === undefined) return;
+      pendingBuffers.delete(node);
+      buffer.events.forEach(record);
+    };
+
     const record = (node) => {
+      const buffer = buffers.at(-1);
+      if (buffer !== undefined && buffer.codePath === codePathStack.at(-1)) {
+        buffer.events.push(node);
+        // 入れ子の分割の形は外の形へ溜め直すので、最後に溜めた一番外の根が残る
+        flatRoots.set(node, buffer.root);
+        return;
+      }
       const at = [];
       for (const segment of current.at(-1) ?? []) {
         const events = segmentEvents.get(segment);
@@ -160,36 +193,38 @@ const noCryptoIdRule = {
       return null;
     }
 
-    // 分割代入の束縛の書き込みの地点 → その分割元の式（分割元は束縛より先に評価するが、節を読む順では後に来る）
-    const patternSources = new Map();
-
     /**
      * 書き込みの参照の評価が終わる地点（代入の式・宣言の終わり。論理の代入は右辺を評価した道筋の右辺の終わり。
-     * 分割代入と引数の束縛は、その束縛を囲む一番外の既定の値つきの束縛の終わりか、無ければ識別子そのもの。
-     * 後の束縛の既定の値は、先の束縛の書き込みを読める）
+     * 既定の値つきの束縛は既定の値の後、ほかの分割代入と引数の束縛は識別子そのもの。分割の形の出来事は分割元の
+     * 後に置くので、束縛はそれぞれ分割元と既定の値の後に順に書き込み、後の束縛の既定の値は先の束縛を読める）
      */
     function writePosition(identifier) {
-      let key = identifier;
-      for (let node = identifier; node.parent; node = node.parent) {
-        const parent = node.parent;
-        if (parent.type === "VariableDeclarator") {
-          if (parent.id !== node) return identifier;
-          if (node === identifier) return parent;
-          if (parent.init) patternSources.set(key, parent.init);
-          return key;
-        }
-        if (parent.type === "AssignmentExpression") {
-          if (parent.left !== node) return identifier;
-          if (node === identifier) return LOGICAL_ASSIGN.has(parent.operator) ? logicalWriteKey(parent) : parent;
-          patternSources.set(key, parent.right);
-          return key;
-        }
-        if (!["ObjectPattern", "ArrayPattern", "Property", "AssignmentPattern", "RestElement"].includes(parent.type)) {
-          return key;
-        }
-        if (parent.type === "AssignmentPattern" && parent.left === node) key = parent;
+      const parent = identifier.parent;
+      if (parent?.type === "VariableDeclarator" && parent.id === identifier) return parent;
+      if (parent?.type === "AssignmentExpression" && parent.left === identifier) {
+        return LOGICAL_ASSIGN.has(parent.operator) ? logicalWriteKey(parent) : parent;
       }
-      return key;
+      if (parent?.type === "AssignmentPattern" && parent.left === identifier) return parent;
+      return identifier;
+    }
+
+    /**
+     * 溜めて分割元の後に置いた出来事のうち、分割の形の中で評価するかが分かれる地点（既定の値・条件の式の分岐・
+     * 論理の式と論理の代入の右辺・省略できる連鎖）の書き込み。溜めた出来事は分かれ道を持たないので、
+     * この書き込みは届く書き込みを打ち切らない
+     */
+    function isConditionalFlatWrite(event) {
+      const root = flatRoots.get(event);
+      if (root === undefined) return false;
+      if (event.logicalWrite !== undefined) return true;
+      for (let node = event; node !== root && node.parent; node = node.parent) {
+        const parent = node.parent;
+        if (parent.type === "ChainExpression") return true;
+        if (parent.type === "ConditionalExpression" && parent.test !== node) return true;
+        if ((parent.type === "AssignmentPattern" || parent.type === "LogicalExpression") && parent.right === node) return true;
+        if (parent.type === "AssignmentExpression" && parent.right === node && LOGICAL_ASSIGN.has(parent.operator)) return true;
+      }
+      return false;
     }
 
     const contains = (outer, inner) => outer.range[0] <= inner.range[0] && inner.range[1] <= outer.range[1];
@@ -215,15 +250,12 @@ const noCryptoIdRule = {
         }
         // 既定の値つきの分割代入は、同じ識別子に分割元と既定の値の書き込みの参照が同じ地点で並ぶ
         const key = writePosition(ref.identifier);
-        // 分割元の中の読み出しは、その分割代入の書き込みより先に評価する
-        const source = patternSources.get(key);
-        if (source !== undefined && contains(source, readRef.identifier)) continue;
         writesAt.set(key, [...(writesAt.get(key) ?? []), ref]);
       }
-      // 既定の値つきの引数は、呼び出し元が渡した値（INITIAL）も既定の値と同じ地点で書き込む
+      // 既定の値つきの引数（とその分割代入の束縛）は、呼び出し元が渡した値（INITIAL）も既定の値と同じ地点で書き込む
       for (const [key, writes] of writesAt) {
         const inParams = (def) => def.type === "Parameter" && def.node.params.some((param) => contains(param, key));
-        if (key.type === "AssignmentPattern" && variable.defs.some(inParams)) {
+        if (key.range !== undefined && variable.defs.some(inParams)) {
           writes.push(INITIAL);
         }
       }
@@ -234,7 +266,10 @@ const noCryptoIdRule = {
         const events = segmentEvents.get(segment) ?? [];
         for (let i = before - 1; i >= 0; i--) {
           const writes = writesAt.get(events[i]);
-          if (writes !== undefined) return void writes.forEach((ref) => result.add(ref));
+          if (writes !== undefined) {
+            writes.forEach((ref) => result.add(ref));
+            if (!isConditionalFlatWrite(events[i])) return;
+          }
           if (RUNS_OTHER_CODE.has(events[i].type)) addOuter();
         }
         if (segment.prevSegments.length === 0) {
@@ -406,9 +441,20 @@ const noCryptoIdRule = {
       onUnreachableCodePathSegmentStart: startSegment,
       onUnreachableCodePathSegmentEnd: endSegment,
       Identifier: record,
-      "VariableDeclarator:exit": record,
-      "AssignmentExpression:exit": record,
-      "AssignmentPattern:exit": record,
+      ObjectPattern: enterPattern,
+      ArrayPattern: enterPattern,
+      "ObjectPattern:exit": exitPattern,
+      "ArrayPattern:exit": exitPattern,
+      // 分割元を読み終えたので、溜めた分割の形の出来事を置いてから、代入・宣言・束縛の終わりを置く
+      ...Object.fromEntries(
+        ["VariableDeclarator", "AssignmentExpression", "AssignmentPattern"].map((type) => [
+          `${type}:exit`,
+          (node) => {
+            flushPattern(node);
+            record(node);
+          },
+        ]),
+      ),
       // ほかのコードが走り得る地点（ほかの関数の中の書き込みが届き得る）
       ...Object.fromEntries([...RUNS_OTHER_CODE].map((type) => [`${type}:exit`, record])),
       "*:exit"(node) {
