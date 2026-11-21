@@ -1,10 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { randomInt } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
+import { useTempTree, write } from "./support/temp-tree.ts";
 
 // gitleaks の設定（.gitleaks.toml と tools/checks/gitleaks-default.toml）と、除外を効かなくするスクリプト
 // tools/checks/leak-scan.sh が漏れを落とすことを確かめる（#1 の決定 3、受け入れ条件 1・2・3）。
@@ -25,17 +25,7 @@ type Finding = { RuleID: string; File: string; StartLine: number; EndLine: numbe
 const REPORT_KEYS = ["Commit", "EndLine", "File", "RuleID", "StartLine"];
 type ScanResult = { status: number | null; output: string; reportText: string | null; findings: Finding[] };
 
-const temps: string[] = [];
-
-function tempDir(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  temps.push(dir);
-  return dir;
-}
-
-afterEach(() => {
-  for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
+const { tempDir, makeTree } = useTempTree("leak-scan-");
 
 beforeAll(() => {
   const version = spawnSync("gitleaks", ["version"], { encoding: "utf8" });
@@ -67,16 +57,6 @@ const fakeAccount = () => fake(() => digits(12), /^[0-9]{12}$/);
 /** 架空の token（gitleaks の既定の規則 `github-pat` の形だけ合わせたもの） */
 const fakeToken = () => fake(() => `${"ghp"}_${alnum(36)}`, /^ghp_[0-9A-Za-z]{36}$/);
 
-/** 一時の木を作り、ファイルを置く */
-function makeTree(files: Record<string, string>): string {
-  const root = tempDir("leak-scan-");
-  for (const [path, body] of Object.entries(files)) {
-    mkdirSync(dirname(join(root, path)), { recursive: true });
-    writeFileSync(join(root, path), body);
-  }
-  return root;
-}
-
 // CI のランナーは git の利用者の設定を持たないので、作り物の名前とメールを環境変数で渡す
 const GIT_IDENTITY = {
   GIT_AUTHOR_NAME: "acme",
@@ -103,11 +83,6 @@ function commitAll(root: string, message: string): string {
   git(root, "add", "-A");
   git(root, "commit", "-q", "--allow-empty", "-m", message);
   return git(root, "rev-parse", "HEAD");
-}
-
-function write(root: string, path: string, body: string): void {
-  mkdirSync(dirname(join(root, path)), { recursive: true });
-  writeFileSync(join(root, path), body);
 }
 
 /**
