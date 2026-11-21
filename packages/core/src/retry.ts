@@ -28,7 +28,14 @@ const RETRYABLE_NAMES = new Set([
 ]);
 const CONFLICT_NAMES = new Set(["ConditionalCheckFailedException"]);
 const NOT_FOUND_NAMES = new Set(["ResourceNotFoundException"]);
-const REJECTED_NAMES = new Set(["ValidationException", "AccessDeniedException"]);
+// 表が要求を断ったと言い切れる例外。要求の形の誤り・権限の無さ・資格の誤り・項目の集まりの大きさの上限で、再実行しても通らない
+const REJECTED_NAMES = new Set([
+  "ValidationException",
+  "AccessDeniedException",
+  "SerializationException",
+  "ItemCollectionSizeLimitExceededException",
+  "UnrecognizedClientException",
+]);
 
 // Node の fetch と AWS SDK が原因の鎖に置くネットワークの誤りの符号
 const NETWORK_CODES = new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ECONNABORTED", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"]);
@@ -52,12 +59,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // TransactWriteItems の取り消しの理由のうち一時の失敗。ほかのトランザクションとの衝突と、書き込みの呼びすぎ（SDK はトランザクションの取り消しを繰り返さない）
 const RETRYABLE_CANCELLATION_CODES = new Set(["TransactionConflict", "ThrottlingError", "ProvisionedThroughputExceeded", "RequestLimitExceeded"]);
 
-function isRetryableCancellation(e: Record<string, unknown>): boolean {
+// TransactWriteItems の取り消しの理由のうち、表が断ったと言い切れるもの（行の形の誤りと、項目の集まりの大きさの上限）
+const REJECTED_CANCELLATION_CODES = new Set(["ValidationError", "ItemCollectionSizeLimitExceeded"]);
+
+function hasCancellationCode(e: Record<string, unknown>, codes: ReadonlySet<string>): boolean {
   const reasons = e["CancellationReasons"];
   return (
     e["name"] === "TransactionCanceledException" &&
     Array.isArray(reasons) &&
-    reasons.some((r) => isRecord(r) && typeof r["Code"] === "string" && RETRYABLE_CANCELLATION_CODES.has(r["Code"]))
+    reasons.some((r) => isRecord(r) && typeof r["Code"] === "string" && codes.has(r["Code"]))
   );
 }
 
@@ -85,13 +95,14 @@ export function classifyFailure(e: unknown): FailureClass {
   if (!isRecord(e)) return "unknown";
   const name = e["name"];
   if (typeof name === "string") {
-    if (RETRYABLE_NAMES.has(name) || isRetryableCancellation(e)) return "retryable";
+    // 一時の失敗の取り消しの理由を、断った理由より先に見る（時を置けば通り得る件があれば retryable）
+    if (RETRYABLE_NAMES.has(name) || hasCancellationCode(e, RETRYABLE_CANCELLATION_CODES)) return "retryable";
     if (CONFLICT_NAMES.has(name)) return "conflict";
     if (NOT_FOUND_NAMES.has(name)) return "not_found";
-    if (REJECTED_NAMES.has(name)) return "rejected";
+    if (REJECTED_NAMES.has(name) || hasCancellationCode(e, REJECTED_CANCELLATION_CODES)) return "rejected";
   }
   if (hasNetworkCode(e)) return "retryable";
-  // 名前が集合に無い AWS SDK の例外は応答の状態で分ける（5xx・429 は retryable）。
+  // 名前が集合に無い AWS SDK の例外は応答の状態で分ける（classOfStatus と同じ。429・500・502・503・504 は retryable、501 と 400 でない 3xx・4xx は rejected、ほかの 5xx は unknown）。
   // ただし 400 は DynamoDB が一時の失敗にも返す状態のため、名前で分からない 400 は unknown のままにする
   const sdkStatus = sdkStatusOf(e);
   if (sdkStatus !== undefined && sdkStatus !== 400) return classOfStatus(sdkStatus);

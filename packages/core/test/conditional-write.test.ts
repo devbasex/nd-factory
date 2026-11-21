@@ -210,9 +210,21 @@ describe("writeAtomically", () => {
   });
 
   it.each([
+    ["要求の形を断った例外", Object.assign(new Error("bad"), { name: "SerializationException", $metadata: { httpStatusCode: 400 } })],
+    ["取り消しの理由が行の形の誤り", Object.assign(new Error("bad"), { name: "TransactionCanceledException", $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: "None" }, { Code: "ValidationError" }] })],
+  ])("%s は記録の行を含んでも WriteUnavailableError に包まず、元の例外のまま投げる", async (_why, thrown) => {
+    const { log, records } = logs();
+    const db = { transactWrite: async () => Promise.reject(thrown) } as unknown as Parameters<typeof writeAtomically>[0];
+    const audit = putIfAbsent({ table: "audit", item: { pk: "AUDIT#1", sk: "AUDIT", schema_version: 1 }, onConflict: "fail" });
+    const error = await writeAtomically(db, [audit], log).catch((e: unknown) => e);
+    expect(error).toBe(thrown);
+    expect(records().at(-1)).toMatchObject({ level: "error", msg: "書き込みを表が断った", result: "rejected", class: "rejected" });
+  });
+
+  it.each([
     ["取り消しの理由が書き込みの呼びすぎ", Object.assign(new Error("throttled"), { name: "TransactionCanceledException", $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: "None" }, { Code: "ThrottlingError" }] }), "retryable"],
     ["名前の分からない 5xx", Object.assign(new Error("down"), { name: "SomethingUnexpected", $metadata: { httpStatusCode: 503 } }), "retryable"],
-    ["分類できない失敗", Object.assign(new Error("odd"), { name: "SerializationException", $metadata: { httpStatusCode: 400 } }), "unknown"],
+    ["分類できない失敗", Object.assign(new Error("odd"), { name: "SomethingUnexpected", $metadata: { httpStatusCode: 400 } }), "unknown"],
   ])("%s は WriteUnavailableError に包み、記録の行を含むことを運ぶ", async (_why, thrown, cls) => {
     const { log, records } = logs();
     const db = { transactWrite: async () => Promise.reject(thrown) } as unknown as Parameters<typeof writeAtomically>[0];

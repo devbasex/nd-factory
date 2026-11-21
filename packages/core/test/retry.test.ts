@@ -66,7 +66,10 @@ describe("classifyFailure", () => {
     ["ResourceNotFoundException", "not_found"],
     ["ValidationException", "rejected"],
     ["AccessDeniedException", "rejected"],
-    ["SerializationException", "unknown"],
+    ["SerializationException", "rejected"],
+    ["ItemCollectionSizeLimitExceededException", "rejected"],
+    ["UnrecognizedClientException", "rejected"],
+    ["SomethingUnexpected", "unknown"],
   ])("AWS SDK の例外 %s は %s", (name, expected) => {
     expect(classifyFailure(awsError(name))).toBe(expected);
   });
@@ -82,9 +85,19 @@ describe("classifyFailure", () => {
     expect(classifyFailure(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "None" }, { Code: code }] }))).toBe("retryable");
   });
 
+  it.each(["ValidationError", "ItemCollectionSizeLimitExceeded"])("トランザクションの取り消しの理由 %s は rejected", (code) => {
+    expect(classifyFailure(awsError("TransactionCanceledException", { $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: "None" }, { Code: code }] }))).toBe("rejected");
+  });
+
+  it("取り消しの理由に一時の失敗と断った理由が並ぶときは retryable", () => {
+    expect(classifyFailure(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ValidationError" }, { Code: "TransactionConflict" }] }))).toBe("retryable");
+  });
+
   it.each([
     [500, "retryable"],
     [503, "retryable"],
+    [501, "rejected"],
+    [505, "unknown"],
     [429, "retryable"],
     [403, "rejected"],
     [400, "unknown"],

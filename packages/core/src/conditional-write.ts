@@ -57,7 +57,8 @@ export class AuditAppendOnlyError extends Error {
 }
 
 // 再試行の後も表に届かない（分類が rejected でない失敗。retryable と、断ったと言い切れない unknown など）。呼び手は要求全体の 503（記録の行を含むなら audit_unavailable、含まなければ unavailable）にする。
-// 表が断った失敗（分類が rejected。ValidationException・AccessDeniedException など、再実行しても通らない）はこれに包まず、元の例外のまま投げる
+// unknown は届かないのか断ったのか分からず、再実行しても通らないことがある（audit_unavailable の判別を残すための代償）。
+// 表が断った失敗（分類が rejected。ValidationException・SerializationException・取り消しの理由の ValidationError など、再実行しても通らない）はこれに包まず、元の例外のまま投げる
 export class WriteUnavailableError extends Error {
   override name = "WriteUnavailableError";
   readonly includesAudit: boolean;
