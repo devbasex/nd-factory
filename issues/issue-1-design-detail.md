@@ -157,12 +157,12 @@ nd-factory/
 | --- | --- | --- | --- | --- |
 | `loadLeakTerms` | `tools/checks/src/leak-check.ts` | 新設 | `(env: NodeJS.ProcessEnv) => LeakTerms \| null` | `LEAK_CHECK_TERMS` を読み、種類ごとの語の配列を返す。無いか空なら `null` |
 | `buildGitleaksConfig` | 同上 | 新設 | `(shapes: SecretShapes, terms: LeakTerms \| null) => string` | gitleaks の設定（TOML）の中身を組む。既定の規則を残し（`[extend] useDefault = true`）、データの形ごとに規則 `nd-<種類>-<id>`（`regex`・`secretGroup`）を足し、作り物の値・頭・印を規則ごとの許可（`regexTarget = "secret"` の `regexes`）にする。語があれば、種類ごとに大文字と小文字を区別しない規則 `nd-real-<種類>` を本文用（`regex`）とパス用（`path`）の 2 つ足す。語は正規表現の記号を外して入れる |
-| `snapshotTracked` | 同上 | 新設 | `(root: string, dir: string) => Promise<void>` | `git ls-files -z` の追跡しているファイルだけを一時のディレクトリへ写す（依存や生成の出力など、追跡していないファイルを探さないため） |
-| `runGitleaks` | 同上 | 新設 | `(args: GitleaksRun, config: string) => Promise<GitleaksFinding[]>` | gitleaks を `--redact=100 --no-banner --report-format json --report-path <一時のファイル> --exit-code 0` で起こし、設定は環境変数 `GITLEAKS_CONFIG_TOML` で渡す（ファイルに書かない）。`GitleaksRun` は `{ mode: "dir"; target } \| { mode: "git"; repo; range }`。報告の `RuleID`・`File`・`StartLine`・`Commit` だけを読み、`Secret`・`Match` は読まない |
-| `applyAllow` | 同上 | 新設 | `(findings: GitleaksFinding[], allow: LeakAllow[]) => { hits: LeakHit[]; allowFindings: AllowFinding[] }` | 外しの行のパスと規則の当たりは、件数が外しの `count` と等しいときだけ除き、違えばその当たりを残して件数の食い違いを返す。`nd-real-*` の当たりには外しを効かせない |
+| `snapshotTracked` | 同上 | 新設 | `(root: string, scanRoot: string) => Promise<void>` | `git ls-files -z` の追跡しているファイルだけを、一時のディレクトリ `<scanRoot>/tree/` の下へ同じ相対パスで写す（依存や生成の出力など、追跡していないファイルを探さないため）。gitleaks に渡す `<scanRoot>` の直下には何も置かない。gitleaks は探す木の根の `.gitleaksignore` を必ず読むため、追跡している根の `.gitleaksignore` を木の根に来させない |
+| `runGitleaks` | 同上 | 新設 | `(args: GitleaksRun, config: string) => Promise<GitleaksFinding[]>` | gitleaks を `--redact=100 --no-banner --ignore-gitleaks-allow --gitleaks-ignore-path <空の一時のディレクトリ> --report-format json --report-path - --exit-code 0` で起こし、作業のディレクトリ（cwd）も同じ空の一時のディレクトリにする。設定は環境変数 `GITLEAKS_CONFIG_TOML` で渡す（ファイルに書かない）。子の環境からは `GITLEAKS_CONFIG` を除く（gitleaks は `GITLEAKS_CONFIG` を `GITLEAKS_CONFIG_TOML` より先に読むため）。`GitleaksRun` は `{ mode: "dir"; scanRoot } \| { mode: "git"; gitDir; range }`。報告は標準出力からメモリへ受け、ファイルにもディスクにも書かない。解いた報告から `RuleID`・`File`・`StartLine`・`Commit` だけを `GitleaksFinding` へ写し、残り（`Secret`・`Match`・`Message`・`Author`・`Email`・`Fingerprint` など）は写さずに捨てる。`File` はここでリポジトリの相対パス（`/` 区切り）に正規化する（下の「パスの正規化」） |
+| `applyAllow` | 同上 | 新設 | `(findings: GitleaksFinding[], allow: LeakAllow[], scope: "tree" \| "history") => { hits: LeakHit[]; allowFindings: AllowFinding[] }` | 受けるパスは `runGitleaks` が正規化したリポジトリの相対パスで、`LeakAllow.path` とそのまま比べる。`tree`（今の木）では、外しの行のパスと規則の当たりは、件数が外しの `count` と等しいときだけ除き、違えばその当たりを残して件数の食い違いを返す。`history`（履歴）では件数を照らさず、外しの行のパスと規則の組に入る当たりを除く（下の「履歴の当たりと外し」）。どちらでも `nd-real-*` の当たりには外しを効かせない |
 | `maskPath` | 同上 | 新設 | `(path: string, shapes: SecretShapes, terms: LeakTerms \| null) => string` | パスの中の形の当たりと語の当たりの部分を `***` に置き換える。出力と標準エラーに出すパスはすべてこれを通す |
 | `mainLeakCheck` | 同上 | 新設 | `(argv: string[], env: NodeJS.ProcessEnv) => Promise<number>` | 上をつなぎ、当たりを出して終了コードを返す |
-| `secretShapesSchema`・`loadSecretShapes` | `packages/contracts/src/secret-shapes.ts` | 新設 | `z.ZodType`・`() => SecretShapes` | データの形と、データのファイルを読んで照らす読み手 |
+| `secretShapesSchema`・`loadSecretShapes` | `packages/contracts/src/secret-shapes.ts` | 新設 | `z.ZodType`・`() => SecretShapes` | データの形と、データのファイルを読んで照らす読み手。形ごとに、`pattern` が共通の部分の外の書き方（先読み・後読み・後方参照・名前つきの組・行の中の旗）を含まないこと、`new RegExp(pattern, "u")` で作れること、名前の無い組を 1 つ以上持つことを照らし、外れれば形の誤りにする |
 
 - `buildGitleaksConfig`
   - 事前条件: 形の正規表現は gitleaks の正規表現（Go の RE2）で書け、照らす値の部分を 1 つ目の組に持つ
@@ -170,35 +170,41 @@ nd-factory/
   - 副作用: 無し
 - `runGitleaks`
   - 事前条件: `gitleaks` の実行ファイルが `GITLEAKS_BIN` か `PATH` にある
-  - 事後条件: 報告のファイルは読んだ後に消す。gitleaks の標準出力と標準エラーは捨て、終了コードだけを見る（`--exit-code 0` なので、0 以外は道具の誤り）
-  - 副作用: 子のプロセス・一時のファイル
+  - 事後条件: 報告はメモリの中だけで扱い、一時のファイルへ書かない（`--redact=100` が伏せるのは `Secret`・`Match` と行の一部だけで、履歴の報告の `File`・`Message`・`Author`・`Email`・`Fingerprint` は伏せられずに残るため、書き出すとパスやコミットのメッセージの中の秘密の語が一時のファイルに残る）。gitleaks の標準エラーはメモリで受けて捨て（設定の読み込みの誤りは設定の中身、つまり語を標準エラーへ出すため）、終了コードだけを見る（`--exit-code 0` なので、0 以外は道具の誤り）。報告の文字列と解いた値は、写した後に参照を残さない
+  - 黙らせる仕組みを効かせない: 行の注釈 `gitleaks:allow` は `--ignore-gitleaks-allow` で無効にする。`.gitleaksignore` は gitleaks が `--gitleaks-ignore-path`（既定は cwd）と探す木の根の 2 か所から読むので、前者は空の一時のディレクトリを渡し、後者は `dir` では `<scanRoot>` の直下を空にし（`snapshotTracked`）、`git` では探す木を空の一時のディレクトリにして子の環境の `GIT_DIR` で作業の木の git のディレクトリ（`git rev-parse --absolute-git-dir`）を指す（`git log -p` は作業の木のファイルを要さない）。基準の報告（`--baseline-path`）は渡さない。外しは `applyAllow` の件数つきの外しだけになる
+  - パスの正規化: `dir` の報告の `File` は `<scanRoot>/tree/` を頭に持つので、それを外し、区切りを `/` にそろえる。頭が一致しない `File` は道具の誤りとして止める（一時のパスを出さず、外しの照らしを当たり全件へ崩さないため）。`git` の報告の `File` はリポジトリの相対パスなので、区切りだけをそろえる
+  - 副作用: 子のプロセス・一時のディレクトリ（終わりに消す）
 - `mainLeakCheck`
   - 引数: `[--root <作業の木>] [--base <分岐点のコミット>]`。スクリプト `npm run leak-check`
-  - 流れ: `snapshotTracked` で写した木を `dir` で探す。`--base` があれば、続けて `git` で `<分岐点>..HEAD` のコミットの差分を探す（Pull Request の途中のコミットで足して消した値も、Pull Request の上の公開の履歴に残るため）
+  - 流れ: `snapshotTracked` で写した木を `dir` で探し、`applyAllow(…, "tree")` を掛ける。`--base` があれば、続けて `git` で `<分岐点>..<HEAD のコミット>` のコミットの差分を探し、`applyAllow(…, "history")` を掛ける（Pull Request の途中のコミットで足して消した値も、Pull Request の上の公開の履歴に残るため）
+  - 履歴の当たりと外し: 外しの `count` は今の木の当たりの件数で、履歴の報告はコミットごとに足した行の当たりを 1 件ずつ出すので、件数は履歴に掛けない（外したファイルを複数のコミットで触った Pull Request が件数の食い違いで落ちないため）。履歴では、外しの行のパスと規則の組に入る当たりを、その外しが今の木の照らしで件数の食い違いを出していないときだけ除く。食い違いがあれば、その組の履歴の当たりも残す。外しに無いパスか規則の履歴の当たりは `leak-history:` で落ちる。**代償**: 外したパスと規則の組に、途中のコミットで値を足して消すと、履歴では通る（今の木の件数は元に戻っているため）。この組は外しのあるファイルなのでレビューで見る（設計文書の「漏れの検査の外しの粒度」）
   - 副作用: 標準出力に当たりの行（今の木は `leak:<規則>`、履歴は `leak-history:<規則>` と、`<伏せたファイル>:<行>` をタブで区切る。履歴の行はコミットの短い SHA を頭に足す）と要約、標準エラーに誤り。ファイルのパスはどの行でも `maskPath` を通し、git と gitleaks の誤りの文言（パスを含みうる）はそのまま出さずに誤りの種類だけを出す
 
-照らす形（データ `secret-shapes.json` の中身。正規表現はデータが持ち、ここでは何を当たりにするかだけを書く。既知の提供者の token の形は gitleaks の既定の規則が持つので、データには nd-factory に固有の形と、既定の規則に無い形だけを置く）:
+照らす形（データ `secret-shapes.json` の中身。正規表現はデータが持ち、ここでは何を当たりにするかだけを書く）。データは伏せ字（#2）と漏れの検査が同じに読む形の 1 か所で、伏せ字が伏せる値の形（私有鍵の頭・token の頭）もここに置く（設計文書の決定 3・9）。gitleaks の既定の規則は、データの形に足して、データに無い提供者の token も拾う重ねの網として残す。同じ値にデータの規則と既定の規則の両方が当たれば、規則ごとに 1 件ずつ出る:
 
 | 種類 | 当たり | 当たりにしない |
 | --- | --- | --- |
 | `account-id` | 前後が英数字でない 12 桁の数 | 作り物の `123456789012` |
-| `arn` | `arn:` とパーティション（`aws`・`aws-cn`・`aws-us-gov`）で始まり、アカウントの欄が 12 桁で作り物でないもの。アカウントの欄が空の ARN は、資源の名前が英数字で始まり作り物の頭（`acme`）で始まらないもの | 置き場所の記号（`<…>`・`${…}`）の欄 |
+| `arn` | `arn:` とパーティション（`aws`・`aws-cn`・`aws-us-gov`）で始まり、アカウントの欄が 12 桁のもの。アカウントの欄が空の ARN は、資源の名前が英数字で始まるもの | 作り物の 12 桁のアカウントの欄・資源の名前が作り物の頭（`acme`）で始まる・置き場所の記号（`<…>`・`${…}`）の欄。どれも形の正規表現では除かず、`buildGitleaksConfig` が規則ごとの許可（`regexes`）に作り物の値・頭・置き場所の記号を入れて除く（否定の先読みは RE2 で書けないため） |
 | `resource-id` | AWS の資源の ID の頭（`vpc-`・`subnet-`・`sg-`・`i-`・`vol-`・`snap-`・`ami-`・`igw-`・`rtb-`・`eni-`・`nat-`・`eipalloc-`・`lt-`）と 8 か 17 桁の 16 進 | データの作り物の ID の一覧 |
-| `endpoint` | 資源ごとに名前の付く AWS の端点（`*.execute-api.<リージョン>.amazonaws.com`・`*.lambda-url.<リージョン>.on.aws`・`*.cloudfront.net`・`*.auth.<リージョン>.amazoncognito.com`・`*.rds.amazonaws.com`・`*.s3.amazonaws.com` の資源の部分） | 資源の部分が作り物の頭で始まる・置き場所の記号 |
-| `private-key`・`token` | gitleaks の既定の規則（私有鍵の頭・GitHub・AWS・Slack などの token）。既定の規則に無い形（Anthropic の `sk-ant-` など、実装の時に既定の規則の一覧と照らして決める）だけをデータに足す | 値に作り物の印（`EXAMPLE`）を含む（データの作り物の印を、既定の規則にも全体の許可として掛ける） |
+| `endpoint` | 資源ごとに名前の付く AWS の端点（`*.execute-api.<リージョン>.amazonaws.com`・`*.lambda-url.<リージョン>.on.aws`・`*.cloudfront.net`・`*.auth.<リージョン>.amazoncognito.com`・`*.rds.amazonaws.com`・`*.s3.amazonaws.com` の資源の部分） | 資源の部分が作り物の頭で始まる・置き場所の記号（同じく許可で除く） |
+| `private-key` | 私有鍵の頭（`-----BEGIN … PRIVATE KEY-----`） | 値に作り物の印（`EXAMPLE`）を含む |
+| `token` | nd-factory が扱う提供者の token の頭（GitHub の `ghp_`・`github_pat_` など・AWS のアクセスキーの `AKIA`・`ASIA`・Anthropic の `sk-ant-`・Slack の `xox`）。伏せ字が伏せる対象と同じ一覧 | 値に作り物の印を含む（データの作り物の印を、既定の規則にも全体の許可として掛ける） |
 | `real:accounts`・`real:profiles`・`real:environments` | CI の秘密の語のどれか（本文とパス） | — |
+
+`Shape.pattern` は RE2（gitleaks）と JavaScript の `RegExp`（伏せ字）の共通の部分だけで書く。使わないもの: 先読みと後読み（`(?=`・`(?!`・`(?<=`・`(?<!`。RE2 に無い）・後方参照（`\1`・`\k<…>`。RE2 に無い）・名前つきの組（RE2 の `(?P<…>)` と JavaScript の `(?<…>)` で書き方が違う）・行の中の旗（`(?i)` など。JavaScript の `RegExp` は読めない）・所有の量指定と原子の組。大文字と小文字を区別しない形は文字の組（`[Aa]`）で書く。照らす値の部分は名前の無い 1 つ目の組に置く。`nd-real-*` の大文字と小文字の区別なし（`(?i)`）は `buildGitleaksConfig` が語から組む正規表現にだけ付け、データの形には付けない。
 
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `SecretShapes` | 型 `{ value_shapes: Shape[]; infra_shapes: Shape[]; fake: { values: string[]; prefixes: string[]; markers: string[] }; key_names?: string[] }`。`Shape` は `{ id, kind, pattern }`（`pattern` は RE2 で書き、伏せ字（#2）の JavaScript の正規表現としても読めるものに限る） | `packages/contracts/src/secret-shapes.ts` | `key_names` は #2 が足す |
+| `SecretShapes` | 型 `{ value_shapes: Shape[]; infra_shapes: Shape[]; fake: { values: string[]; prefixes: string[]; markers: string[] }; key_names?: string[] }`。`Shape` は `{ id, kind, pattern }`（`pattern` は上の RE2 と JavaScript の共通の部分だけで書く。`loadSecretShapes` が照らす） | `packages/contracts/src/secret-shapes.ts` | `key_names` は #2 が足す |
 | `LeakTerms` | 型 `{ accounts: string[]; profiles: string[]; environments: string[] }` | `tools/checks/src/leak-check.ts` | — |
 | `GitleaksFinding` | 型 `{ rule: string; file: string; line: number; commit?: string }`（報告の `RuleID`・`File`・`StartLine`・`Commit` だけ） | 同上 | — |
 | `LeakAllow` | 型 `{ path: string; rule: string; count: number; reason: string }`（値も値の要約値も持たない。`count` はそのパスのその規則の今の木の当たりの件数） | `tools/checks/data/leak-allow.json` | 空の配列 |
 | `AllowFinding` | 型 `{ path: string; rule: string; expected: number; actual: number }`。件数が増えれば新しい値の混入、減れば外しの残り | `tools/checks/src/leak-check.ts` | — |
 | 作り物の値 | データ | `packages/contracts/data/secret-shapes.json` の `fake` | `123456789012`・`us-west-2`・頭 `acme`・`example.com`・印 `EXAMPLE` |
-| gitleaks の版と要約値 | 設定値 | `.github/workflows/ci.yml` のジョブ `leak-check` の環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256`（この 1 か所だけ） | 8.30.1 と、配布のチェックサムのファイルの `linux_x64.tar.gz` の行 |
+| gitleaks の版と要約値 | 設定値 | `.github/workflows/ci.yml` のジョブ `leak-check` の環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256`（この 1 か所だけ） | 8.30.1 と、その `gitleaks_8.30.1_linux_x64.tar.gz` の sha256。値は版を上げる Pull Request を書く人が、資産を取って `sha256sum` で求め、配布のチェックサムのファイルの行と一致することを確かめてから書く。CI はチェックサムのファイルを取らない |
 | 語を必須にする切り替え | 環境変数 `LEAK_CHECK_REQUIRE_TERMS` | `ci.yml` | 正本のリポジトリの中の実行だけ `1`（参照の検査と同じ式） |
 
 ### 異常系の処理
@@ -211,20 +217,24 @@ nd-factory/
 | `loadSecretShapes` | データの形の誤り | データの書き誤り | 読んだ直後 | 止める | 終了コード 2 | 直して打ち直す |
 | `runGitleaks` | gitleaks が無い・起きない・0 以外で終わる・報告を読めない | 未導入・設定の正規表現の誤り・道具の不具合 | 起動と終了コードと報告の読み込み | 止める | 標準エラーに誤りの種類だけ（gitleaks の出力は出さない）、終了コード 2 | 導入するかデータを直して打ち直す |
 | `snapshotTracked` | git が失敗する・ファイルを読めない | 作業の木でない・消えた・権限 | 子のプロセスの終了コード・読み込み | 止める | 標準エラーに `maskPath` を通したパスと誤りの種類（`ENOENT` などの符号）だけ、終了コード 2 | 打ち直せる |
-| `mainLeakCheck` | 当たりがある | 実際の値か秘密の形の混入 | 探した後 | 呼び出し元へ返す | 当たりの行と件数、終了コード 1 | 混入を消す。履歴の当たりは、Pull Request の枝を作り直して値を含むコミットを外す（検査の外の作業） |
+| `mainLeakCheck` | 当たりがある | 実際の値か秘密の形の混入 | 探した後 | 呼び出し元へ返す | 当たりの行と件数、終了コード 1 | CI で当たった値は、Pull Request の push で既に公開されている。今の木の当たりも履歴の当たりも次の順で扱う（検査の外の作業）。(1) 秘密の値なら、先に値を無効にする（鍵の回転・token と資格情報の失効）。push した値は、枝を作り直しても GitHub の上にコミットの SHA で残り、公開から消えないため、無効にすることだけが値を守る。回転できない値（アカウント ID・資源の ID・端点・profile と環境の名前）は公開されたものとして扱い、持ち主へ知らせ、要るなら GitHub の支援へ残ったコミットの表示の削除を頼む。(2) 混入を消す。履歴の当たりは、Pull Request の枝を作り直して値を含むコミットを外す。(3) 作り物の値なら、作り物の一覧へ足すか外しに理由を書く |
 | `mainLeakCheck` | 外しの件数が合わない | 外したファイルへの同じ規則の値の追加・当たりを直したのに外しが残る | 探した後 | 呼び出し元へ返す | `allow:` の行に伏せたパス・規則・外しの件数と実際の件数、終了コード 1 | 値を消すか、正当なら外しの件数を直す（レビューで見る） |
 
 ### ログと記録の出力
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `mainLeakCheck` | 当たりの規則・伏せたファイル・行（履歴はコミットの短い SHA）と件数、外しの件数の食い違い、照合を飛ばした旨 | 標準出力 | 当たった文字・当たった行の中身・語・語の数・パスの中の当たった部分・組んだ設定 |
+| `mainLeakCheck` | 当たりの規則・伏せたファイル・行（履歴はコミットの短い SHA）と件数、外しの件数の食い違い、照合を飛ばした旨 | 標準出力 | 当たった文字・当たった行の中身・語・語の数・パスの中の当たった部分・組んだ設定・コミットのメッセージ・作者の名前とメール・`Fingerprint` |
 | `mainLeakCheck`・`runGitleaks`・`snapshotTracked` | 誤りの種類と伏せたパス | 標準エラー | gitleaks と子のプロセスの出力と誤りの文言そのもの・パスの中の当たった部分 |
+| `runGitleaks` | 何も書かない | — | gitleaks の報告（標準出力からメモリへ受けるだけで、一時のファイル・CI の成果物・ログのどれにも書かない） |
+
+gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Author`・`Email`・`Fingerprint`（コミット・ファイル・規則・行をつないだ文字列）を伏せない（gitleaks v8.30.1 の `report/finding.go` の `Redact` が触るのは `Line`・`Match`・`Secret` だけ）。そのため伏せは包みの出力の側で行い、出力に出す欄は規則・`maskPath` を通したファイル・行・コミットの短い SHA の 4 つに限る。
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
+| 黙らせる仕組みの止め方 | gitleaks 8.30.1 の `cmd/root.go` の `Detector`（`--ignore-gitleaks-allow` で行の注釈を無効にする。`.gitleaksignore` は `--gitleaks-ignore-path`（既定 `.`）のファイルかその中の `.gitleaksignore` と、探す木の根の `.gitleaksignore` の 3 つを読み、根の分を止める旗は無い）と `initConfig`（設定は `--config`・`GITLEAKS_CONFIG`・`GITLEAKS_CONFIG_TOML`・木の根の `.gitleaks.toml` の順）と `report/finding.go`（`Redact` は `Line`・`Match`・`Secret` だけを触る） | v8.30.1 の源を読んだ（2026-11-21） | 旗で注釈を止め、`.gitleaksignore` は探す木と cwd の置き方で読ませない（`runGitleaks`） |
 | 本文とパスの探し方 | gitleaks 8.30.1 の `dir`・`git`・`--redact`・`GITLEAKS_CONFIG_TOML`・規則ごとの許可 | 配布の実行ファイルをチェックサムで確かめて取り、作り物でない 12 桁と語を含む一時の木を、環境変数で渡した設定（既定の規則に 2 つの規則を足し、`123456789012` を許可）で探した。終了コード 1、報告の `Secret` と `Match` は `REDACTED`、`123456789012` の行は当たらず、報告に値が現れなかった（2026-11-21） | 使う |
 | `loadLeakTerms` | 参照の検査の `loadMatchTerms` | `tools/ref-check/src/ref-check.ts` を読んだ | 語の読み方は同じ形に揃え、関数は共有しない（参照の検査の語の種類と混ぜない、設計の決定 4） |
 
@@ -233,9 +243,14 @@ nd-factory/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `buildGitleaksConfig` | 形ごとと語の種類ごとに規則が 1 つずつでき、既定の規則を残す | 語が `null` で `nd-real-*` を作らない。正規表現の記号を含む語が文字どおりに当たる | — |
-| `applyAllow` | 外しの行のパスと規則で、件数が同じなら当たらない | 外しの無いパスはそのまま当たる | 同じファイルに同じ規則の値を 1 つ足すと当たりと件数の食い違いが出る。当たりを消して外しが残ると件数の食い違いが出る。`nd-real-*` は外しの行のファイルでも当たる |
+| `loadSecretShapes` | 今のデータの形がすべて `new RegExp(pattern, "u")` で作れ、形ごとの見本（テストの中で組む）に当たる | 作り物の値・頭・印の見本は JavaScript の正規表現でも当たる（伏せ字が同じ形で伏せる） | 先読み（`(?!`）・後読み・後方参照・名前つきの組（`(?P<`・`(?<`）・行の中の旗（`(?i)`）を含む形と、組を持たない形で、それぞれ形の誤り |
+| `applyAllow` | `tree` で、外しの行のパスと規則の件数が同じなら当たらない。`history` で、外しの行のパスと規則の組の当たりが、コミットの数に関わらず当たらない | 外しの無いパスはそのまま当たる。パスは正規化した相対パスで比べる（`./` や一時のディレクトリの頭を持つ入力を渡さない。`runGitleaks` の側で正規化する） | `tree` で、同じファイルに同じ規則の値を 1 つ足すと当たりと件数の食い違いが出る。当たりを消して外しが残ると件数の食い違いが出る。`tree` で件数の食い違いを出した外しは、`history` の同じ組の当たりを除かない。`nd-real-*` は `tree` と `history` のどちらでも、外しの行のファイルで当たる |
 | `maskPath` | 当たりの無いパスはそのまま | 語と形の両方を含むパスで両方を伏せる | — |
-| `mainLeakCheck`（実際の gitleaks を起こす結合のテスト） | 種類ごとに当たり（違反の文字列は実行の時に組み立てる）、終了コード 1。無ければ 0 | 作り物の値・置き場所の記号・13 桁の数・16 進の中の 12 桁で当たらない。`docs/` の下のファイルで当たる。追跡していないファイルの値には当たらない。`--base` を渡すと、途中のコミットで足して消した値が `leak-history:` で当たる | 語の形の誤り・必須なのに無い・gitleaks が無いで 2。実際の値をパスに含み本文にも当たりのあるファイルで、標準出力と標準エラーのどちらにも語と当たった文字が現れない |
+| `runGitleaks`（`GITLEAKS_BIN` に偽の実行ファイルを渡す単体のテスト） | 引数に `--ignore-gitleaks-allow`・`--gitleaks-ignore-path <空のディレクトリ>`・`--report-path -`・`--redact=100` があり、子の環境に `GITLEAKS_CONFIG` が無い。偽の実行ファイルが標準出力へ出した報告から 4 つの欄だけが写る | `dir` の `File` の頭 `<scanRoot>/tree/` を外して相対パスにする。`git` の `File` はそのまま | 頭の合わない `File`・JSON でない報告・0 以外の終了コードで止まり、標準エラーに一時のパスも報告の中身も出ない。一時のディレクトリにファイルが残らない |
+| `mainLeakCheck`（`leak-check.integration.test.ts`。実物の gitleaks を起こす結合のテスト） | 種類ごとに当たり（違反の文字列は実行の時に組み立てる）、終了コード 1。無ければ 0 | 作り物の値・置き場所の記号・13 桁の数・16 進の中の 12 桁で当たらない。`docs/` の下のファイルで当たる。追跡していないファイルの値には当たらない。`--base` を渡すと、途中のコミットで足して消した値が `leak-history:` で当たる。外したファイルを 2 つのコミットで触った Pull Request で、外した値が `leak-history:` で落ちない | 語の形の誤り・必須なのに無い・gitleaks が無いで 2。実際の値をパスに含み本文にも当たりのあるファイルで、標準出力と標準エラーのどちらにも語と当たった文字が現れない。コミットのメッセージに語を含む履歴で、出力にも一時のディレクトリにも語が現れない |
+| 黙らせる仕組み（同じ結合のテスト。`dir` と `--base` の `git` の両方で確かめる） | 値の行に `gitleaks:allow` の注釈を付けても当たる。その値の指紋を書いた `.gitleaksignore` を、追跡している木の根（`--root` の作業の木の根）と起動したディレクトリのそれぞれに置いても当たる。追跡している `.gitleaks.toml` に許可を書いても当たる | 件数つきの外しの行は、注釈や `.gitleaksignore` があっても件数どおりに効き、件数が違えば食い違いが出る | `nd-real-*` の当たりは、注釈・`.gitleaksignore`・外しのどれがあっても当たる |
+
+テストの走る場所: `leak-check.test.ts` は gitleaks を起こさず、`npm run check` の `npm run test`（今の `check` ジョブ）で走る。`leak-check.integration.test.ts` は実物の gitleaks が要るので、根の `vitest.config.ts` の `tools` の組から `*.integration.test.ts` を外し、`vitest.integration.config.ts` だけが読む。ジョブ `leak-check` が gitleaks を置いた後に `npm run test:integration` を打ち、続けて `npm run leak-check` を打つ。手元では gitleaks 8.30.1 を `PATH` に置くか `GITLEAKS_BIN` で指して `npm run test:integration` を打つ（無ければ `runGitleaks` が終了コード 2 の誤りにするので、テストは gitleaks が無いと失敗し、黙って飛ばさない）。
 
 ## 形の往復と I15・I12 の形
 
@@ -410,10 +425,12 @@ nd-factory/
 
 | ファイル | 変える中身 |
 | --- | --- |
-| `.github/workflows/ci.yml` | ジョブ `leak-check` を足す。取得は履歴をすべて取り（`fetch-depth: 0`。分岐点からのコミットを探すため）、Node の用意の後に、gitleaks の配布の資産と同じ版のチェックサムのファイルを取って要約値を照らしてから `PATH` へ置き、`npm run leak-check` を打つ（Pull Request では `-- --base <分岐点>`）。gitleaks の版と要約値はこのジョブの環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の 1 か所にだけ書く。環境変数 `LEAK_CHECK_TERMS`（秘密）と `LEAK_CHECK_REQUIRE_TERMS`（`ref-check` と同じ式で変数 `LEAK_CHECK_REQUIRE_TERMS` から作る）を渡す |
+| `.github/workflows/ci.yml` | ジョブ `leak-check` を足す。取得は履歴をすべて取り（`fetch-depth: 0`。分岐点からのコミットを探すため）、Node の用意と `npm ci` の後に、`GITLEAKS_VERSION` の版の配布の資産 `gitleaks_<版>_linux_x64.tar.gz` だけを取り、その `sha256sum` を環境変数 `GITLEAKS_SHA256` に固定した値と直接比べ（`echo "$GITLEAKS_SHA256  <資産>" \| sha256sum -c -`）、一致したときだけ展開して `PATH` へ置く。配布のチェックサムのファイルは取らない（同じ配布元から取った値と比べても、配布元を信じることにしかならず、固定にならないため）。続けて `npm run test:integration`（実物の gitleaks を起こす結合のテスト）を打ち、最後に `npm run leak-check` を打つ（Pull Request では `-- --base <分岐点>`）。gitleaks の版と要約値はこのジョブの環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の 1 か所にだけ書く。環境変数 `LEAK_CHECK_TERMS`（秘密）と `LEAK_CHECK_REQUIRE_TERMS`（`ref-check` と同じ式で変数 `LEAK_CHECK_REQUIRE_TERMS` から作る）を渡す |
 | `.github/workflows/ndf-contract.yml`（新設） | `on` は `pull_request`・`push`（main）・`schedule`（毎日 1 回）・`workflow_dispatch`。`permissions: contents: read`。ジョブ `ndf-contract` は Pull Request のとき、既定の取得（マージした結果のコミット）に加えて `base.sha` と `head.sha` を分岐点が求まる深さまで取り（`fetch-depth: 0`）、`npm run ndf-contract -- --base <base.sha> --head <head.sha> --summary "$GITHUB_STEP_SUMMARY"` を打つ。ほかの起動では `--base` と `--head` を渡さない。動作の版はコミットの SHA で固定する（`ci.yml` と同じ） |
 | `.ndf/project.json` | `ci.required_checks` に `leak-check`・`ndf-contract` を足す。`ci.workflows` に `ndf-contract.yml` の行を足す |
-| `package.json` | スクリプト `leak-check`・`ndf-contract` |
+| `package.json` | スクリプト `leak-check`・`ndf-contract`・`route-check`・`test:integration`（`vitest run -c vitest.integration.config.ts`） |
+| `vitest.config.ts` | `tools` の組に `exclude: ["tools/test/**/*.integration.test.ts"]` を足す。`npm run check` の `npm run test` は gitleaks を起こさないテストだけを走らせる |
+| `vitest.integration.config.ts`（新設） | `tools/test/**/*.integration.test.ts` だけを読む。ジョブ `leak-check` と、gitleaks を入れた手元で打つ |
 | `tools/package.json` | 依存 `@nd-factory/contracts`・`ajv`・`ajv-formats`・`yaml` |
 | `tools/tsconfig.json` | `checks/src` を含める |
 | `packages/contracts/package.json` | 書き出し `./secret-shapes` |
