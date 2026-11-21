@@ -320,7 +320,7 @@ infra/
 | `generated/mcp-tools.json` | `[{name, description, inputSchema, outputSchema, annotations}]`（操作の表の順） |
 | `generated/routes.json` | `[{method: "POST", path, operation, endpoint}]`（操作の表の順。GitHub の Webhook は I12 の外のため載せず、受け持つ #5 が足す） |
 | `generated/reasons.json` | `{"request": [{code, status}…], "item": [{code, status}…], "operations": {"<操作>": [{code, status}…]}}`。`operations` の値は `itemReasonsOf(op)` の `code` と `status` |
-| `generated/dummy/<操作>.json` | `{"operation", "normal": [...], "empty": [...], "edge": [...], "failures": [{"ok": false, "status", "reason"}…]}`。`empty` は `list` で `[{"ok": true, "items": [], "next_cursor": null}]`、`get` で `[{"ok": false, "status": 404, "reason": "not_found"}]`、それ以外は `[]`。`failures` は `itemReasonsOf(op)` の要素ごとに 1 つで、`status` と `reason` はその `ReasonDef` の値（読む操作は `when` が `write` の `version_mismatch` などを含めない）。どの失敗のダミーも、同じ `itemReasonsOf(op)` から作った `resultSchemaOf` の zod を通る |
+| `generated/dummy/<操作>.json` | `{"operation", "normal": [...], "empty": <結果 1 件> | null, "edge": [...], "failures": [{"ok": false, "status", "reason"}…]}`。`normal` と `failures` は送り手が要素ごとに 1 件を選ぶ元の並びで、要求の件数の写しではない。`empty` は要素 1 個に返す結果 1 件で、`list` で `{"ok": true, "items": [], "next_cursor": null}`（その要素の空の一覧）、`get` で `{"ok": false, "status": 404, "reason": "not_found"}`、それ以外は `null`（空の場面が無く、`normal` と同じに返す）。`failures` は `itemReasonsOf(op)` の要素ごとに 1 つで、`status` と `reason` はその `ReasonDef` の値（読む操作は `when` が `write` の `version_mismatch` などを含めない）。どの失敗のダミーも、同じ `itemReasonsOf(op)` から作った `resultSchemaOf` の zod を通る |
 | `generated/pending.json` | `[{"operation", "owner"}]` |
 
 理由のコードと HTTP の状態の対応は、共通の集まりも操作ごとのコードも `ReasonDef` の `status` だけが持つ（別の対応の表を持たない）。
@@ -358,12 +358,16 @@ infra/
 | --- | --- | --- | --- | --- |
 | `createOperationClient` | `packages/contracts/src/client.ts` | 新設 | `(transport: Transport) => { call<N extends OperationName>(name: N, items: readonly ItemOf<N>[]): Promise<CallResult<N>> }` | 要素の配列を送り、応答を結果の zod で検証して型つきで返す |
 | `httpTransport` | 同上 | 新設 | `(opts: { baseUrl: string; fetch: typeof fetch; token: () => Promise<string \| null> }) => Transport` | `POST <baseUrl>/v1/<entity>/<verb>` に `Authorization: Bearer` と JSON の本文で送る |
-| `createDummyTransport` | 同上 | 新設 | `(dummies: Readonly<Record<OperationName, DummyDoc>>, scenario: () => DummyScenario) => Transport` | 生成したダミーを場面ごとに返す。`normal`・`empty` は同じ名前の配列、`error` は `failures`、`notFound` は 404 の要素、`slow` は `normal` を返す（待ちは画面の基盤が足す） |
+| `createDummyTransport` | 同上 | 新設 | `(dummies: Readonly<Record<OperationName, DummyDoc \| null>>, scenario: () => DummyScenario) => Transport` | 生成したダミーから、要求の各要素に結果を 1 件ずつ組み、`{ status: 200, body: <要求と同じ件数・同じ順の配列> }` を返す。`i` 番目の要素の結果は、`normal`・`slow` で `normal[i % normal.length]`（待ちは画面の基盤が足す）、`empty` で `empty`（`null` なら `normal` と同じ）、`error` で `failures[i % failures.length]`（理由のコードを `itemReasonsOf(op)` の順に回す）、`notFound` で `{ ok: false, status: 404, reason: "not_found" }` |
 
 - `createOperationClient`
   - 事前条件: `items` は 1 個以上で、`ItemOf<N>` の形（型で縛る）
   - 事後条件: 戻り値は `{ ok: true; results: ResultOf<N>[] }`（要求と同じ数・同じ順）か、要求全体の誤り `{ ok: false; status; reason }`（problem の本文）。応答が結果の zod に合わなければ `{ ok: false; status: 0; reason: "response_invalid" }` を返し、例外を投げない
   - 副作用: `transport` の副作用だけ
+- `createDummyTransport`
+  - 事前条件: `items` は 1 個以上（`createOperationClient` が縛る）
+  - 事後条件: 本文の配列は要求の `items` と同じ件数・同じ順で、各要素は `resultSchemaOf(op)` の zod を通る。一覧の空は要素ごとの空の一覧（`items: []`）で表し、配列そのものを空にしない。ダミーの無い操作（形の未定）・`normal` が 0 件・`error` の場面で `failures` が 0 件のときは、要求全体の `{ status: 503, body: { reason: "unavailable" } }`（problem の本文）を返す
+  - 副作用: 無し（`scenario` を呼ぶたびに読み、要求ごとに場面を切り替えられる）
 
 ### 内部のデータと定数
 
@@ -378,7 +382,7 @@ infra/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `createOperationClient` | 偽の送り手の応答を型つきの結果で返す | 要素 1 個と上限ちょうど | 結果の形に合わない応答で `response_invalid`、problem の本文で要求全体の誤り |
-| `createDummyTransport` | 場面ごとに `normal`・`empty`・`failures`・404 を返す | 形の未定の操作は `unavailable` の 503 | — |
+| `createDummyTransport` | 場面ごとに `normal`・`empty`・`failures`・404 を要素ごとに 1 件ずつ返し、`createOperationClient` を通して結果の zod に合う | 要素 1 個の `normal` は 1 件（見本 3 件を返さない）、要素 5 個の `normal` は見本を順に回して 5 件。要素 1 個の `error` は 1 件、`list` の要素 2 個の `empty` は空の一覧 2 件、`create` の `empty` は `normal` と同じ。要素 1 個と上限ちょうどで件数が要求と同じ | 形の未定の操作・`failures` が 0 件の操作の `error` は要求全体の `unavailable` の 503 |
 
 ## 横断の部品
 

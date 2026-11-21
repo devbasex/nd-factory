@@ -154,7 +154,7 @@ graph TB
 | `mcp-tools.json` | 人だけでない操作の道具の定義（名前・入力 `{"items": [...]}`・出力の形・注記） | #11 の `createMcpHandler`・#1 の対応の検査 |
 | `routes.json` | 操作ごとの `POST` の経路・受け口・操作の名前 | `ApiRoutes` の部品・#1 の対応の検査 |
 | `reasons.json` | 操作ごとの理由のコードの一覧と、共通の集まり | 画面の翻訳のファイルの鍵の検査（#12） |
-| `dummy/<操作>.json` | `normal`・`empty`・`edge`・`failures`（理由のコードごとの失敗の要素） | 画面のダミーのクライアント（#12・#28） |
+| `dummy/<操作>.json` | `normal`・`empty`（要素 1 個への空の結果）・`edge`・`failures`（理由のコードごとの失敗の要素）。送り手が要素ごとに 1 件を選ぶ元 | 画面のダミーのクライアント（#12・#28） |
 | `pending.json` | 形の未定の操作と受け持つ子 | 計画と #48 |
 
 型は生成しない。操作の表から `z.infer` で型を出し（`ItemOf<"sprints.create">` など）、画面と API は同じ型を import する。
@@ -370,7 +370,7 @@ flowchart LR
 ### 決定 16: 画面（React 19）が操作を同じ型で呼べるよう、形の正本に操作の表の型で縛った呼び出しの口とダミーの送り手を置き、React の状態の層は画面の基盤（#12）に任せる
 
 - **質問**: 決定 140 の改め（画面は React 19 の関数の部品を TSX で書き、Vite と `@vitejs/plugin-react` で束ねる。正本は [platform.md](../docs/design/platform.md#言語と書き方の決まり) の「言語と書き方の決まり」と決定 140 で、この Pull Request が #53 と同じ改めを取り込む）を受けて、形の正本から画面向けに何をどの形で作るか
-- **選んだ案**: `packages/contracts/src/client.ts` に、操作の名前で要素と結果の型を引く呼び出しの口（`createOperationClient`）を置く。口は `fetch` と token の取り手を受け、`POST /v1/<entity>/<verb>` に要素の配列を送り、要素ごとの結果の配列を結果の zod で検証して返す。React も DOM も import せず、React の部品からもテストからも同じ口を使う。ダミーは同じ口に渡す送り手（`createDummyTransport`）で、生成した `generated/dummy/<操作>.json` を場面（`normal`・`empty`・`error`・`slow`・`notFound`）ごとに返す。型は `ItemOf`・`ResultOf`（`z.infer`）をそのまま TSX から import する。取得の控え・再読み込み・確定待ちの状態の層（`@tanstack/react-query` など、LIB-A20）と、Service Worker でダミーを返す形（`msw`、LIB-A21）を採るかは画面の基盤（#12）が決め、この口の上に載せる
+- **選んだ案**: `packages/contracts/src/client.ts` に、操作の名前で要素と結果の型を引く呼び出しの口（`createOperationClient`）を置く。口は `fetch` と token の取り手を受け、`POST /v1/<entity>/<verb>` に要素の配列を送り、要素ごとの結果の配列を結果の zod で検証して返す。React も DOM も import せず、React の部品からもテストからも同じ口を使う。ダミーは同じ口に渡す送り手（`createDummyTransport`）で、生成した `generated/dummy/<操作>.json` から、場面（`normal`・`empty`・`error`・`slow`・`notFound`）ごとに要求の各要素に結果を 1 件ずつ組んで返す（要求と同じ件数。一覧の空はその要素の空の一覧で表す）。型は `ItemOf`・`ResultOf`（`z.infer`）をそのまま TSX から import する。取得の控え・再読み込み・確定待ちの状態の層（`@tanstack/react-query` など、LIB-A20）と、Service Worker でダミーを返す形（`msw`、LIB-A21）を採るかは画面の基盤（#12）が決め、この口の上に載せる
 - **採らなかった案**: OpenAPI から呼び出しの口と型を生成する案（`@hey-api/openapi-ts`・`orval`・`openapi-typescript` と `openapi-fetch`、LIB-A22〜A25）は、`z.infer` の型と生成した型の 2 通りの型ができる（Value 13）。`openapi-typescript` 7.13.0 は TypeScript 5 を前提にし、このリポジトリの 6.0.3 と合わない。React のフックを形の正本に置く案は、形の正本の依存を zod だけにする決まり（detail.md の依存の表）に反し、状態の層の選び方を画面の基盤より先に決めてしまう
 - **代償**: React のフックの包みは画面の基盤（#12）が書く。呼び出しの口は全操作で同じ形のため、包みは 1 つで足りる。#12 は platform.md の決定 140 と「言語と書き方の決まり」（画面は React 19 と TSX、画面の外のコードは TSX と React を import しない）に従い、`client.ts` はその「画面の外」の側に置く
 - **作り方**: 自前で作る（型で縛った `fetch` の薄い包み。全操作が `POST` と配列の 1 つの形のため、生成器を足すより短い）
