@@ -87,11 +87,26 @@ type Mutation = { label: string; value: unknown };
 /** 照らすこと 8 の除外の 1 行。外すのを終える課題の Pull Request で、要らなくなった行が落ちるので消す */
 type RouteExclusion =
   | { kind: "legacy"; route: string; until: string; why: string }
-  | { kind: "endpoint"; endpoint: string; until: string; why: string };
+  | { kind: "endpoint"; endpoint: string; until: string; why: string }
+  | { kind: "receiver"; receiver: string; until: string; why: string };
+
+/** 操作でない受け口の経路の 1 本。操作の表に無く、経路の登録（`routes.json`）にも載らないが、API の設計で要る */
+type NonOperationRoute = { receiver: string; route: string; why: string };
 
 const PARTS: readonly Part[] = ["item", "result"];
 const PART_LABEL: Record<Part, string> = { item: "要素", result: "結果" };
 const FEATURES = Array.from({ length: 20 }, (_, i) => `F${i + 1}`);
+
+/**
+ * 照らすこと 8 の操作でない受け口の経路（docs/design/api.md）。操作の表と経路の登録に無いので、照らすこと 7 の外に置き、
+ * 照らすこと 8 で合成の経路の期待に足す（反映した後は、ここの経路がすべて合成にあることも確かめる）
+ */
+const NON_OPERATION_ROUTES: readonly NonOperationRoute[] = [
+  { receiver: "mcp", route: "POST /mcp", why: "MCP の受け口（docs/design/api.md の MCP の「HTTP の経路」）" },
+  { receiver: "mcp", route: "GET /mcp", why: "readMcpCall が 405 を返す（経路が無いと API Gateway が 404 を返し、Lambda に届かない）" },
+  { receiver: "mcp", route: "DELETE /mcp", why: "readMcpCall が 405 を返す（経路が無いと API Gateway が 404 を返し、Lambda に届かない）" },
+  { receiver: "github", route: "POST /v1/github/webhooks", why: "GitHub の Webhook の受け口（docs/design/api.md の操作の表の外の経路）" },
+];
 
 /**
  * 照らすこと 8 の期限付きの除外（承認で足したこと 2）。表が空になったとき、照らすこと 8 は合成の経路と登録の経路の完全一致になる。
@@ -103,6 +118,8 @@ const ROUTE_EXCLUSIONS: readonly RouteExclusion[] = [
   { kind: "endpoint", endpoint: "runner", until: "#4", why: "#2 は api-fn と ApiRoutes をスタックへ入れない（#2 の決定 11）" },
   { kind: "endpoint", endpoint: "machine", until: "#4", why: "#2 は api-fn と ApiRoutes をスタックへ入れない（#2 の決定 11）" },
   { kind: "endpoint", endpoint: "db_prep", until: "#13", why: "#13 が DB の用意を Lambda へ移し、2 本を操作の表から消す" },
+  { kind: "receiver", receiver: "mcp", until: "#4", why: "#2 は api-fn と ApiRoutes をスタックへ入れない（#2 の決定 11）。#4 が api-fn を反映し、F1〜F3 の MCP の道具を出す" },
+  { kind: "receiver", receiver: "github", until: "#4", why: "#2 は api-fn と ApiRoutes をスタックへ入れない（#2 の決定 11）" },
 ];
 
 // ---- 照らしの関数（作り物の入力を渡せる純粋な関数） ----
@@ -478,14 +495,22 @@ function templateRoutes(template: unknown): string[] {
 }
 
 /**
- * 照らすこと 8: 合成の経路から除外の旧経路を引いた集まりと、登録から除外の受け口の経路を引いた集まり（反映済みの経路）の食い違いと、
- * 要らなくなった除外の行（旧経路が合成に無い・受け口の経路が合成に 1 本でもある・受け口が登録に無い）を返す
+ * 照らすこと 8: 合成の経路から除外の旧経路を引いた集まりと、期待の集まり（登録から除外の受け口の経路を引いた反映済みの操作の経路に、
+ * 除外していない操作でない受け口の経路を足したもの）の食い違いと、要らなくなった除外の行（旧経路が合成に無い・受け口の経路が合成に
+ * 1 本でもある・受け口が登録に無い・操作でない受け口の経路が合成に 1 本でもある）を返す。操作でない受け口の経路が登録にあれば、
+ * 照らすこと 7 と二重に数えるので当たりにする
  */
-function synthRouteIssues(synth: readonly string[], registry: readonly RouteEntry[], exclusions: readonly RouteExclusion[]): string[] {
+function synthRouteIssues(
+  synth: readonly string[],
+  registry: readonly RouteEntry[],
+  exclusions: readonly RouteExclusion[],
+  nonOperation: readonly NonOperationRoute[] = NON_OPERATION_ROUTES,
+): string[] {
   const issues: string[] = [];
   const synthSet = new Set(synth);
   const legacy = new Set<string>();
   const endpoints = new Set<string>();
+  const receivers = new Set<string>();
   for (const ex of exclusions) {
     const stale = `除外の行が要らない（${ex.until} が終えた。行を消す）`;
     if (ex.kind === "legacy") {
@@ -493,15 +518,26 @@ function synthRouteIssues(synth: readonly string[], registry: readonly RouteEntr
       if (!synthSet.has(ex.route)) issues.push(`${stale}: 旧経路 ${ex.route} が合成に無い`);
       continue;
     }
+    if (ex.kind === "receiver") {
+      receivers.add(ex.receiver);
+      const routes = nonOperation.filter((r) => r.receiver === ex.receiver).map((r) => r.route);
+      if (routes.length === 0) issues.push(`${stale}: 操作でない受け口 ${ex.receiver} の経路が表に無い`);
+      for (const k of routes.filter((k) => synthSet.has(k))) issues.push(`${stale}: 操作でない受け口 ${ex.receiver} の経路 ${k} が合成にある`);
+      continue;
+    }
     endpoints.add(ex.endpoint);
     const routes = registry.filter((r) => r.endpoint === ex.endpoint).map(routeKey);
     if (routes.length === 0) issues.push(`${stale}: 受け口 ${ex.endpoint} の経路が登録に無い`);
     for (const k of routes.filter((k) => synthSet.has(k))) issues.push(`${stale}: 受け口 ${ex.endpoint} の経路 ${k} が合成にある`);
   }
+  const registryKeys = new Set(registry.map(routeKey));
+  for (const r of nonOperation.filter((r) => registryKeys.has(r.route))) issues.push(`操作でない受け口の経路が登録にある: ${r.route}`);
   const deployedSynth = synth.filter((k) => !legacy.has(k));
   const deployedRegistry = registry.filter((r) => !endpoints.has(r.endpoint)).map(routeKey);
+  const deployedReceivers = nonOperation.filter((r) => !receivers.has(r.receiver)).map((r) => r.route);
   issues.push(...difference(deployedRegistry, deployedSynth).map((k) => `登録にだけある経路: ${k}`));
-  issues.push(...difference(deployedSynth, deployedRegistry).map((k) => `合成にだけある経路: ${k}`));
+  issues.push(...difference(deployedReceivers, deployedSynth).map((k) => `合成に無い操作でない受け口の経路: ${k}`));
+  issues.push(...difference(deployedSynth, [...deployedRegistry, ...deployedReceivers]).map((k) => `合成にだけある経路: ${k}`));
   return issues;
 }
 
@@ -1354,15 +1390,40 @@ describe("照らすこと 8: 合成した経路が、除外を引いて経路の
     expect(synthRouteIssues(templateRoutes(fakeTemplate(synth)), FAKE_REGISTRY, ROUTE_EXCLUSIONS)).toEqual([]);
   });
 
-  it("除外の表が空で、合成と登録が完全に揃った組で 0 件", () => {
-    const keys = FAKE_REGISTRY.map((r) => `${r.method} ${r.path}`);
+  it("除外の表が空で、合成が登録の経路と操作でない受け口の経路に完全に揃った組で 0 件", () => {
+    const keys = [...FAKE_REGISTRY.map((r) => `${r.method} ${r.path}`), ...NON_OPERATION_ROUTES.map((r) => r.route)];
     expect(synthRouteIssues(templateRoutes(fakeTemplate(keys)), FAKE_REGISTRY, [])).toEqual([]);
+  });
+
+  it("操作でない受け口（POST /mcp・POST /v1/github/webhooks）は登録に無くても、反映した後の比べで登録にだけある経路にも合成にだけある経路にもならない", () => {
+    const keys = [...FAKE_REGISTRY.map((r) => `${r.method} ${r.path}`), ...NON_OPERATION_ROUTES.map((r) => r.route)];
+    expect(NON_OPERATION_ROUTES.map((r) => r.route)).toEqual(expect.arrayContaining(["POST /mcp", "POST /v1/github/webhooks"]));
+    expect(FAKE_REGISTRY.map(routeKey)).not.toContain("POST /mcp");
+    expect(synthRouteIssues(keys, FAKE_REGISTRY, [])).toEqual([]);
+  });
+
+  it("除外を外した操作でない受け口の経路が合成に無いと 1 件", () => {
+    const keys = [...synth, ...NON_OPERATION_ROUTES.filter((r) => r.route !== "POST /v1/github/webhooks").map((r) => r.route)];
+    const exclusions = ROUTE_EXCLUSIONS.filter((e) => e.kind !== "receiver");
+    expect(synthRouteIssues(keys, FAKE_REGISTRY, exclusions)).toEqual(["合成に無い操作でない受け口の経路: POST /v1/github/webhooks"]);
+  });
+
+  it("除外した操作でない受け口の経路が合成にあると、除外の行が要らないと 1 件", () => {
+    expect(synthRouteIssues([...synth, "POST /mcp"], FAKE_REGISTRY, ROUTE_EXCLUSIONS)).toEqual([
+      "除外の行が要らない（#4 が終えた。行を消す）: 操作でない受け口 mcp の経路 POST /mcp が合成にある",
+      "合成にだけある経路: POST /mcp",
+    ]);
+  });
+
+  it("操作でない受け口の経路が登録にもあると 1 件", () => {
+    const registry = [...FAKE_REGISTRY, { method: "POST", path: "/mcp", operation: "mcp", endpoint: "user" }];
+    expect(synthRouteIssues(synth, registry, ROUTE_EXCLUSIONS)).toContain("操作でない受け口の経路が登録にある: POST /mcp");
   });
 
   it("除外の表が空なら、旧経路は合成にだけある経路として 1 件", () => {
     const registry = FAKE_REGISTRY.filter((r) => r.endpoint === "user");
     const keys = [...synth, ...registry.map((r) => `${r.method} ${r.path}`)];
-    expect(synthRouteIssues(keys, registry, [])).toEqual(["合成にだけある経路: PUT /v1/users"]);
+    expect(synthRouteIssues([...keys, ...NON_OPERATION_ROUTES.map((r) => r.route)], registry, [])).toEqual(["合成にだけある経路: PUT /v1/users"]);
   });
 
   it("登録にだけある反映済みの経路で 1 件", () => {
@@ -1447,7 +1508,7 @@ describe("リポジトリの合成した API Gateway の経路（照らすこと
   const hasRegistry = existsSync(join(ROOT, REGISTRY));
   it.skipIf(!hasRegistry)(
     hasRegistry
-      ? "合成した経路から除外の旧経路を引いた集まりが、経路の登録から除外の受け口の経路を引いた集まりと等しい"
+      ? "合成した経路から除外の旧経路を引いた集まりが、経路の登録から除外の受け口の経路を引き、除外していない操作でない受け口の経路を足した集まりと等しい"
       : `相手が無い: 経路の登録（${REGISTRY}）が無いので、合成した経路と登録の比べを飛ばす`,
     () => {
       const registry = parseRegistry(readJson(REGISTRY));
