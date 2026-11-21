@@ -1,3 +1,4 @@
+import { RemovalPolicy } from "aws-cdk-lib";
 import { GatewayVpcEndpointAwsService, IpAddresses, Peer, Port, SecurityGroup, SubnetType, Vpc } from "aws-cdk-lib/aws-ec2";
 import { Construct } from "constructs";
 import type { AppResourceNames } from "./naming.ts";
@@ -59,5 +60,11 @@ export class Network extends Construct {
     this.taskSecurityGroup.addEgressRule(Peer.anyIpv4(), Port.tcp(443), "HTTPS to ECR, logs, API and inference");
     this.taskSecurityGroup.addEgressRule(this.dbSecurityGroup, Port.tcp(POSTGRES_PORT), "Progress DB");
     this.dbSecurityGroup.addIngressRule(this.taskSecurityGroup, Port.tcp(POSTGRES_PORT), "Runner tasks");
+
+    // 進行表の DB はスタックを消しても残す。DB の ENI が残る出口の無いサブネット・DB の SG・VPC は、
+    // 消そうとすると EC2 が使用中として拒み、スタックの削除が DELETE_FAILED になるため、同じく残す
+    this.vpc.applyRemovalPolicy(RemovalPolicy.RETAIN);
+    for (const subnet of this.vpc.isolatedSubnets) subnet.applyRemovalPolicy(RemovalPolicy.RETAIN);
+    this.dbSecurityGroup.applyRemovalPolicy(RemovalPolicy.RETAIN);
   }
 }

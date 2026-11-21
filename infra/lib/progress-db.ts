@@ -1,7 +1,7 @@
 import { Duration, RemovalPolicy } from "aws-cdk-lib";
 import { SubnetType } from "aws-cdk-lib/aws-ec2";
 import { AuroraPostgresEngineVersion, ClusterInstance, Credentials, DatabaseCluster } from "aws-cdk-lib/aws-rds";
-import { DatabaseClusterEngine, DatabaseSecret, ParameterGroup } from "aws-cdk-lib/aws-rds";
+import { DatabaseClusterEngine, DatabaseSecret, ParameterGroup, SubnetGroup } from "aws-cdk-lib/aws-rds";
 import type { ISecret } from "aws-cdk-lib/aws-secretsmanager";
 import { Construct } from "constructs";
 import type { AppResourceNames } from "./naming.ts";
@@ -27,11 +27,22 @@ export class ProgressDb extends Construct {
     super(scope, id);
     const engine = DatabaseClusterEngine.auroraPostgres({ version: PROGRESS_DB_ENGINE_VERSION });
 
+    // クラスタはスタックを消しても残す。残したクラスタが使う間は RDS がパラメーターのグループとサブネットのグループの削除を拒み、
+    // スタックの削除が DELETE_FAILED になるため、2 つのグループも残す（サブネット・SG・VPC は Network が残す）
+
     // Aurora PostgreSQL 16 は rds.force_ssl の既定が 0 で、TLS でない接続を受けてしまう
     const parameterGroup = new ParameterGroup(this, "Parameters", {
       engine,
       description: "nd-factory progress DB",
       parameters: { "rds.force_ssl": "1" },
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    const subnetGroup = new SubnetGroup(this, "Subnets", {
+      description: "nd-factory progress DB",
+      vpc: props.network.vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED },
+      removalPolicy: RemovalPolicy.RETAIN,
     });
 
     // 残したクラスタの管理の役割を、スタックを消した後も同じ器から読めるようにする
@@ -51,7 +62,7 @@ export class ProgressDb extends Construct {
       serverlessV2AutoPauseDuration: Duration.seconds(PROGRESS_DB_AUTO_PAUSE_SECONDS),
       credentials: Credentials.fromSecret(secret, PROGRESS_DB_ADMIN_USER),
       vpc: props.network.vpc,
-      vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED },
+      subnetGroup,
       securityGroups: [props.network.dbSecurityGroup],
       storageEncrypted: true,
       enableDataApi: true,
