@@ -218,13 +218,29 @@ const PUBLIC_DATABASE_GRANTS =
   "SELECT count(*) FILTER (WHERE pg_catalog.has_database_privilege('public', d.oid, 'CONNECT')" +
   " OR pg_catalog.has_database_privilege('public', d.oid, 'TEMPORARY'))::int AS remaining, count(*)::int AS found" +
   " FROM pg_catalog.pg_database d WHERE d.datname = ANY (string_to_array(:names, ','))";
-// 渡した名前のほかで、接続を許し、PUBLIC が CONNECT を持つデータベースの数。渡すのは手順の 1 が外して読み直す
+// 渡した名前のほかで、接続を許し、PUBLIC が CONNECT を持つデータベース（OID と名前）。渡すのは手順の 1 が外して読み直す
 // postgres・template1 と、手順の 3 が外して読み直すプロジェクトのデータベース。ほかのデータベース（ほかのプロジェクトのもの、
-// 別の経路で作られたもの）で PUBLIC が CONNECT を持てば、これから作る役割もそこへ接続できる。
+// 別の経路で作られたもの）で PUBLIC が CONNECT を持てば、用意済みのほかのプロジェクトの役割も、これから作る役割もそこへ接続できる。
 // 接続を許さないデータベース（作成の途中のほかのプロジェクトのもの・template0）は誰も接続できないため数えない
 const OTHER_PUBLIC_DATABASES =
-  "SELECT count(*)::int AS exposed FROM pg_catalog.pg_database d WHERE d.datallowconn" +
-  " AND NOT (d.datname = ANY (string_to_array(:names, ','))) AND pg_catalog.has_database_privilege('public', d.oid, 'CONNECT')";
+  "SELECT d.oid::text AS exposed_oid, d.datname::text AS exposed_name FROM pg_catalog.pg_database d WHERE d.datallowconn" +
+  " AND NOT (d.datname = ANY (string_to_array(:names, ','))) AND pg_catalog.has_database_privilege('public', d.oid, 'CONNECT')" +
+  " ORDER BY d.oid";
+// 渡した OID のうち、PUBLIC がまだ CONNECT か TEMPORARY を持つデータベースの数（復旧の REVOKE の読み直し）
+const EXPOSED_STILL_PUBLIC =
+  "SELECT count(*)::int AS exposed_remaining FROM pg_catalog.pg_database d WHERE d.oid = ANY (string_to_array(:oids, ',')::oid[])" +
+  " AND (pg_catalog.has_database_privilege('public', d.oid, 'CONNECT') OR pg_catalog.has_database_privilege('public', d.oid, 'TEMPORARY'))";
+// 復旧で切る相手: 渡した OID のデータベースへの、今の権限では CONNECT を持たないクライアントの接続（PUBLIC の CONNECT だけで
+// 繋いだほかのプロジェクトの役割など）。管理の役割と superuser の接続は除く（手順の 5 と同じ理由）。
+// CONNECT は接続を始めるときだけ照らされ、取り消しても繋いだままの接続は残るため、取り消した後に切る
+const UNAUTHORIZED_SESSIONS =
+  " FROM pg_catalog.pg_stat_activity s JOIN pg_catalog.pg_database d ON d.oid = s.datid" +
+  " WHERE d.oid = ANY (string_to_array(:oids, ',')::oid[]) AND s.pid <> pg_backend_pid()" +
+  " AND s.backend_type = 'client backend' AND s.usename IS DISTINCT FROM current_user" +
+  " AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles r WHERE r.oid = s.usesysid AND r.rolsuper)" +
+  " AND NOT pg_catalog.has_database_privilege(s.usesysid, d.oid, 'CONNECT')";
+const SIGNAL_UNAUTHORIZED = `SELECT count(*) FILTER (WHERE pg_terminate_backend(s.pid, 0))::int AS exposed_signalled${UNAUTHORIZED_SESSIONS}`;
+const REMAINING_UNAUTHORIZED = `SELECT count(*)::int AS remaining${UNAUTHORIZED_SESSIONS}`;
 // PUBLIC がまだ表か列のどれかを読めるカタログの数（表の権限の取り消しは同じ種類の列の権限も外す）
 const PUBLIC_CATALOG_READS =
   "SELECT count(*)::int AS remaining FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace" +
@@ -272,14 +288,39 @@ async function assertPublicDatabaseRevoked(
   if (got.remaining !== 0 || got.found !== names.length) throw new Error("PUBLIC からデータベースの接続を外せなかった");
 }
 
-// 渡した名前のほかの、接続を許すデータベースで PUBLIC が CONNECT を持てば投げる（読めない形も投げる）
-async function assertNoOtherPublicDatabase(sql: SqlExecutor, names: readonly string[]): Promise<void> {
-  const [row] = await sql.execute(OTHER_PUBLIC_DATABASES, [{ name: "names", value: names.join(",") }], ADMIN);
-  if (row?.exposed !== 0) throw new Error("ほかのデータベースで PUBLIC が接続を持つ");
+// 渡した名前のほかの、接続を許すデータベースで PUBLIC が CONNECT を持てば、既にあるプロジェクト間の接続の道を断ってから投げる
+// （読めない形も投げる）。PUBLIC の CONNECT が戻れば、用意済みのほかのプロジェクトの役割は今その時点でそこへ接続でき、
+// CONNECT を取り消しても繋いだままの接続は残る。そこで、見つけたデータベースの CONNECT・TEMPORARY を PUBLIC から外して読み直し
+// （新しい接続を断つ）、今の権限で CONNECT を持たない接続を切って消えたことを読み直す（繋いだままの接続を断つ）。
+// 断てても用意は止める: 戻った原因（手で打った GRANT など）を見るまで、次の打ち直しに任せる
+async function assertNoOtherPublicDatabase(sql: SqlExecutor, names: readonly string[], options: ProvisionOptions): Promise<void> {
+  const rows = await sql.execute(OTHER_PUBLIC_DATABASES, [{ name: "names", value: names.join(",") }], ADMIN);
+  if (rows.length === 0) return;
+  const exposed = rows.flatMap((r) =>
+    typeof r.exposed_oid === "string" && /^[0-9]+$/.test(r.exposed_oid) && typeof r.exposed_name === "string"
+      ? [{ oid: r.exposed_oid, name: r.exposed_name }]
+      : [],
+  );
+  if (exposed.length !== rows.length) throw new Error("ほかのデータベースの PUBLIC の接続を読めなかった");
+  for (const d of exposed) {
+    await sql.execute(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier(d.name)} FROM PUBLIC`, undefined, ADMIN);
+  }
+  const oids = [{ name: "oids", value: exposed.map((d) => d.oid).join(",") }];
+  // 外せなかったときも、外せたデータベースの接続を切ってから投げる
+  const [left] = await sql.execute(EXPOSED_STILL_PUBLIC, oids, ADMIN);
+  await terminateSessions(sql, SIGNAL_UNAUTHORIZED, REMAINING_UNAUTHORIZED, oids, options);
+  if (left?.exposed_remaining !== 0) throw new Error("ほかのデータベースで PUBLIC が接続を持ち、外せなかった");
+  throw new Error("ほかのデータベースで PUBLIC が接続を持っていた（外し、権限の無い接続を切った）");
 }
 
-// 手順の 5。シグナルを送り、対象が消えたことを期限の内で読み直す。期限を過ぎても残れば投げる
-async function terminateOthers(sql: SqlExecutor, params: SqlParam[], options: ProvisionOptions): Promise<void> {
+// シグナルを送り、対象が消えたことを期限の内で読み直す。期限を過ぎても残れば投げる（手順の 5 と、手順の 1 の復旧）
+async function terminateSessions(
+  sql: SqlExecutor,
+  signal: string,
+  remainingStmt: string,
+  params: SqlParam[],
+  options: ProvisionOptions,
+): Promise<void> {
   const deadlineMs = options.deadlineMs ?? 15_000;
   const pollMs = options.pollMs ?? 500;
   const now = options.now ?? (() => performance.now());
@@ -287,9 +328,9 @@ async function terminateOthers(sql: SqlExecutor, params: SqlParam[], options: Pr
   const deadline = now() + deadlineMs;
   for (;;) {
     // 読み直しの間に繋いだ接続にも送る（PUBLIC の外れた後は、CONNECT を持つ役割だけが繋げる）
-    await sql.execute(SIGNAL_OTHERS, params, ADMIN);
+    await sql.execute(signal, params, ADMIN);
     // 期限を過ぎていても、読み直しを 1 回打ってから決める
-    const { remaining } = await readCount(sql, REMAINING_OTHERS, params, ADMIN);
+    const { remaining } = await readCount(sql, remainingStmt, params, ADMIN);
     if (remaining === 0) return;
     const left = deadline - now();
     if (left <= 0) throw new Error("ほかの接続が期限の内に終わらなかった");
@@ -300,7 +341,7 @@ async function terminateOthers(sql: SqlExecutor, params: SqlParam[], options: Pr
 // docs/design/data.md の用意の手順の 1〜6。何度打っても、最後に渡したパスワードで同じ結果になる。
 // パスワードの平文は SQL の文にも引数にも載せず、SCRAM-SHA-256 の検証子を文に載せる（失敗した文は DB の側のログに書かれうるため）。
 // 取り消した権限は読み直して照らし、残っていれば役割に接続を与える前に投げる。
-// ほかのデータベースで PUBLIC が CONNECT を持つときも、何も作らずに投げる
+// ほかのデータベースで PUBLIC が CONNECT を持つときは、そこを PUBLIC から外して権限の無い接続を切り、何も作らずに投げる
 export async function provisionProject(
   sql: SqlExecutor,
   project: ProjectIdent & { password: string },
@@ -320,9 +361,9 @@ export async function provisionProject(
     await sql.execute(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier(name)} FROM PUBLIC`, undefined, ADMIN);
   }
   await assertPublicDatabaseRevoked(sql, SYSTEM_DATABASES, ADMIN);
-  // ほかのデータベースの PUBLIC の CONNECT は外さずに止める（ほかのプロジェクトや別の経路のデータベースの権限を書き換えない）。
-  // 残したまま進むと、6 で作る役割がそこへ接続できる
-  await assertNoOtherPublicDatabase(sql, [...SYSTEM_DATABASES, project.database]);
+  // ほかのデータベースで PUBLIC の CONNECT が戻っていれば、外して権限の無い接続を切り、何も作らずに止める。
+  // 残したまま進むと 6 で作る役割がそこへ接続でき、用意済みのほかのプロジェクトの役割も既に接続できる
+  await assertNoOtherPublicDatabase(sql, [...SYSTEM_DATABASES, project.database], options);
 
   // 2. 権限を整えるまで誰も接続できないように作る。CREATE DATABASE はトランザクションの中で打てないため自動の確定で打つ
   if (!(await readFlag(sql, DATABASE_EXISTS, "found", dbParam, ADMIN))) {
@@ -350,7 +391,7 @@ export async function provisionProject(
   }
 
   // 5. 作り直しのとき、権限を整える前から残る接続を断ち、終わったことを確かめる
-  await terminateOthers(sql, [...dbParam, ...roleParam], options);
+  await terminateSessions(sql, SIGNAL_OTHERS, REMAINING_OTHERS, [...dbParam, ...roleParam], options);
 
   // 6. 役割を作るか（作り直しなら）パスワードを書き直し、専用のスキーマと search_path を置き、最後に接続と一時表を与える。
   // ALTER ROLE は SUPERUSER などの属性を書かない（属性を変えるには superuser が要り、Aurora の管理の役割は superuser でない）

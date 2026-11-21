@@ -33,8 +33,12 @@ type FakeState = {
   // 取り消しの後の読み直しで、PUBLIC に残る権限の数（PUBLIC_DATABASE_GRANTS・PUBLIC_CATALOG_READS）
   publicDatabaseRemaining?: number;
   publicCatalogRemaining?: number;
-  // 手順の 1 で読む、渡した名前のほかの接続を許すデータベースで PUBLIC が CONNECT を持つものの数（OTHER_PUBLIC_DATABASES）
-  publicOtherDatabases?: number;
+  // 手順の 1 で読む、渡した名前のほかの接続を許すデータベースで PUBLIC が CONNECT を持つもの（OTHER_PUBLIC_DATABASES）
+  publicOtherDatabases?: Array<{ exposed_oid: unknown; exposed_name: unknown }>;
+  // 復旧の REVOKE の後に PUBLIC が残る数（EXPOSED_STILL_PUBLIC）
+  exposedRemaining?: number;
+  // 復旧で切る接続の残りの読みが、呼ばれるたびに返す数（REMAINING_UNAUTHORIZED）
+  unauthorizedSessions?: number[];
   // 手順の 5 の残りの読みが、呼ばれるたびに返す数。尽きたら最後の数を返し続ける
   remainingSessions?: number[];
 };
@@ -42,7 +46,14 @@ type FakeState = {
 function fakeDb(state: FakeState = {}): FakeSqlExecutor {
   const fake = new FakeSqlExecutor();
   let reads = 0;
+  let unauthorizedReads = 0;
   fake.respond = (sql, params) => {
+    if (sql.includes("AS remaining") && sql.includes("has_database_privilege(s.usesysid")) {
+      const seq = state.unauthorizedSessions ?? [0];
+      const n = seq[Math.min(unauthorizedReads, seq.length - 1)];
+      unauthorizedReads += 1;
+      return [{ remaining: n ?? 0 }];
+    }
     if (sql.includes("AS remaining")) {
       if (sql.includes("pg_database")) {
         const names = String(params?.find((p) => p.name === "names")?.value ?? "").split(",");
@@ -54,7 +65,9 @@ function fakeDb(state: FakeState = {}): FakeSqlExecutor {
       reads += 1;
       return [{ remaining: n ?? 0 }];
     }
-    if (sql.includes("AS exposed")) return [{ exposed: state.publicOtherDatabases ?? 0 }];
+    if (sql.includes("AS exposed_oid")) return state.publicOtherDatabases ?? [];
+    if (sql.includes("AS exposed_remaining")) return [{ exposed_remaining: state.exposedRemaining ?? 0 }];
+    if (sql.includes("AS exposed_signalled")) return [{ exposed_signalled: 0 }];
     if (sql.includes("AS signalled")) return [{ signalled: 0 }];
     if (sql.includes("AS present")) return [{ present: state.tablePresent ?? true }];
     if (sql.includes("FROM nd_prep.bindings")) return state.bindings ?? [];
@@ -279,7 +292,7 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
       at('REVOKE CONNECT, TEMPORARY ON DATABASE "postgres" FROM PUBLIC'),
       at('REVOKE CONNECT, TEMPORARY ON DATABASE "template1" FROM PUBLIC'),
       at("has_database_privilege('public'"),
-      at("AS exposed"),
+      at("AS exposed_oid"),
       at("CREATE DATABASE"),
       at(`REVOKE CONNECT, TEMPORARY ON DATABASE ${db} FROM PUBLIC`),
       at(`ALTER DATABASE ${db} WITH ALLOW_CONNECTIONS true`),
@@ -341,17 +354,69 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
   });
 
   it("ほかの接続を許すデータベースで PUBLIC が CONNECT を持てば、何も作らず接続を与えずに投げる。照らしから外すのは 1 と 3 で外すものだけ", async () => {
-    const fake = fakeDb({ publicOtherDatabases: 1 });
-    await expect(provisionProject(fake, { ...PROJECT, password: PASSWORD })).rejects.toThrow("ほかのデータベースで PUBLIC が接続を持つ");
+    const exposed = [
+      { exposed_oid: "16401", exposed_name: "acme_b_db" },
+      { exposed_oid: "16402", exposed_name: 'acme "c" db' },
+    ];
+    const fake = fakeDb({ publicOtherDatabases: exposed });
+    await expect(provisionProject(fake, { ...PROJECT, password: PASSWORD })).rejects.toThrow("ほかのデータベースで PUBLIC が接続を持っていた");
     expect(fake.statements().some((x) => x.startsWith("CREATE") || x.startsWith("ALTER") || x.startsWith("GRANT"))).toBe(false);
-    const check = fake.calls.find((c) => c.kind === "execute" && c.sql.includes("AS exposed"));
+    const check = fake.calls.find((c) => c.kind === "execute" && c.sql.includes("AS exposed_oid"));
     expect(check).toMatchObject({ database: ADMIN_DATABASE, transactionId: undefined });
     expect(check?.kind === "execute" && check.params).toEqual([{ name: "names", value: ["postgres", "template1", PROJECT.database].join(",") }]);
-    // 読めない形も投げる
-    const unreadable = fakeDb();
-    unreadable.respond = ((inner) => (sql, params) => (sql.includes("AS exposed") ? [] : inner(sql, params)))(unreadable.respond);
-    await expect(provisionProject(unreadable, { ...PROJECT, password: PASSWORD })).rejects.toThrow();
-    expect(unreadable.statements().some((x) => x.startsWith("GRANT"))).toBe(false);
+  });
+
+  it("ほかのデータベースの PUBLIC の CONNECT を見つけたら、そこを PUBLIC から外し、読み直し、権限の無い接続を切ってから投げる", async () => {
+    const exposed = [
+      { exposed_oid: "16401", exposed_name: "acme_b_db" },
+      { exposed_oid: "16402", exposed_name: 'acme "c" db' },
+    ];
+    const fake = fakeDb({ publicOtherDatabases: exposed, unauthorizedSessions: [1, 0] });
+    const waits: number[] = [];
+    await expect(
+      provisionProject(fake, { ...PROJECT, password: PASSWORD }, { now: () => 0, sleep: async (ms) => void waits.push(ms) }),
+    ).rejects.toThrow("外し、権限の無い接続を切った");
+    const s = fake.statements();
+    const at = (needle: string): number => s.findIndex((x) => x.includes(needle));
+    // 名前は識別子として逃がして打つ
+    expect(s).toContain(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier("acme_b_db")} FROM PUBLIC`);
+    expect(s).toContain(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier('acme "c" db')} FROM PUBLIC`);
+    // 外す → 読み直す → 切る（新しい接続を断ってから、繋いだままの接続を断つ）
+    expect(at("AS exposed_oid")).toBeLessThan(at('"acme_b_db" FROM PUBLIC'));
+    expect(at('"acme ""c"" db" FROM PUBLIC')).toBeLessThan(at("AS exposed_remaining"));
+    expect(at("AS exposed_remaining")).toBeLessThan(at("AS exposed_signalled"));
+    expect(s.filter((x) => x.includes("AS exposed_signalled"))).toHaveLength(2);
+    expect(waits).toEqual([500]);
+    // 切る相手は、今の権限で CONNECT を持たない接続。OID は引数で渡す
+    const signal = fake.calls.find((c) => c.kind === "execute" && c.sql.includes("AS exposed_signalled"));
+    expect(signal?.kind === "execute" && signal.sql).toContain("NOT pg_catalog.has_database_privilege(s.usesysid, d.oid, 'CONNECT')");
+    expect(signal?.kind === "execute" && signal.params).toEqual([{ name: "oids", value: "16401,16402" }]);
+    expect(signal).toMatchObject({ database: ADMIN_DATABASE, transactionId: undefined });
+    // 例外の文に名前を入れない
+    await provisionProject(fakeDb({ publicOtherDatabases: exposed }), { ...PROJECT, password: PASSWORD }).catch((e: Error) => {
+      expect(e.message).not.toContain("acme_b_db");
+    });
+  });
+
+  it("復旧の REVOKE の後も PUBLIC が残れば、接続を切ってから外せなかったとして投げる。接続が期限まで残れば投げる", async () => {
+    const exposed = [{ exposed_oid: "16401", exposed_name: "acme_b_db" }];
+    const left = fakeDb({ publicOtherDatabases: exposed, exposedRemaining: 1 });
+    await expect(provisionProject(left, { ...PROJECT, password: PASSWORD })).rejects.toThrow("外せなかった");
+    expect(left.statements().some((x) => x.includes("AS exposed_signalled"))).toBe(true);
+    let t = 0;
+    const stuck = fakeDb({ publicOtherDatabases: exposed, unauthorizedSessions: [1] });
+    await expect(
+      provisionProject(stuck, { ...PROJECT, password: PASSWORD }, { deadlineMs: 1_000, pollMs: 500, now: () => t, sleep: async (ms) => void (t += ms) }),
+    ).rejects.toThrow("期限の内に終わらなかった");
+    expect(stuck.statements().some((x) => x.startsWith("CREATE") || x.startsWith("GRANT"))).toBe(false);
+  });
+
+  it("ほかのデータベースの照らしが読めない形なら、外さず何も作らずに投げる", async () => {
+    for (const row of [{ exposed_oid: 16401, exposed_name: "acme_b_db" }, { exposed_oid: "1;x", exposed_name: "acme_b_db" }, { exposed_oid: "16401", exposed_name: null }]) {
+      const fake = fakeDb({ publicOtherDatabases: [row] });
+      await expect(provisionProject(fake, { ...PROJECT, password: PASSWORD })).rejects.toThrow("読めなかった");
+      expect(fake.statements().some((x) => x.startsWith("REVOKE CONNECT, TEMPORARY ON DATABASE \"acme_b_db\"") || x.startsWith("CREATE") || x.startsWith("GRANT"))).toBe(false);
+    }
   });
 
   it("取り消しの読み直しで見つかるデータベースの数が足りなければ投げる", async () => {
@@ -668,14 +733,48 @@ describePgDisposable("provisionProject（PostgreSQL）", () => {
       const admin = await db.connect();
       await admin.query(`GRANT CONNECT ON DATABASE ${escapeIdentifier(b.database)} TO PUBLIC`);
       const a = newProject(db, "a");
-      await expect(prepare(sql, a)).rejects.toThrow("ほかのデータベースで PUBLIC が接続を持つ");
+      await expect(prepare(sql, a)).rejects.toThrow("ほかのデータベースで PUBLIC が接続を持っていた");
       expect((await admin.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [a.role])).rows).toHaveLength(0);
       expect((await admin.query("SELECT 1 FROM pg_database WHERE datname = $1", [a.database])).rows).toHaveLength(0);
-      // B の PUBLIC を外し直せば、A の打ち直しが用意を終え、A の役割は B へ接続できない
-      await admin.query(`REVOKE CONNECT ON DATABASE ${escapeIdentifier(b.database)} FROM PUBLIC`);
+      // 止めたときに B の PUBLIC を外したため、A の打ち直しが用意を終え、A の役割は B へ接続できない
+      expect(await connectGrantees(db, b.database)).toEqual([b.role]);
       expect(await prepare(sql, a)).toBe("retry");
       expect(await canConnect(db, a.database, a)).toBe(true);
       expect(await canConnect(db, b.database, a)).toBe(false);
+    });
+  });
+
+  it("A と B を用意した後で B に PUBLIC の CONNECT が戻ると、次の用意が止まり、A の役割から B への新しい接続も繋いだままの接続も断つ", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      const a = newProject(db, "a");
+      const b = newProject(db, "b");
+      expect(await prepare(sql, a)).toBe("bound");
+      expect(await prepare(sql, b)).toBe("bound");
+      const admin = await db.connect();
+      await admin.query(`GRANT CONNECT ON DATABASE ${escapeIdentifier(b.database)} TO PUBLIC`);
+      // 戻った間に、用意済みの A の役割が B へ繋ぐ（B の役割も自分のデータベースへ繋いでおく）
+      const crossing = await db.connect(b.database, { user: a.role, password: a.password });
+      await crossing.query("SELECT 1");
+      const own = await db.connect(b.database, { user: b.role, password: b.password });
+      await own.query("SELECT 1");
+
+      // 次の用意（C）が検出して止まる
+      const c = newProject(db, "c");
+      await expect(prepare(sql, c)).rejects.toThrow("ほかのデータベースで PUBLIC が接続を持っていた");
+      expect((await admin.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [c.role])).rows).toHaveLength(0);
+
+      // 繋いだままの A の接続は切れ、A の役割は B へ新しく繋げない
+      await expect(crossing.query("SELECT 1")).rejects.toThrow();
+      expect(await canConnect(db, b.database, a)).toBe(false);
+      // B の PUBLIC は外れ、B の役割の接続と新しい接続は残る
+      expect(await connectGrantees(db, b.database)).toEqual([b.role]);
+      await own.query("SELECT 1");
+      expect(await canConnect(db, b.database, b)).toBe(true);
+      expect(await canConnect(db, a.database, a)).toBe(true);
+      // 次の打ち直しは用意を終える
+      expect(await prepare(sql, c)).toBe("retry");
+      expect(await canConnect(db, b.database, c)).toBe(false);
     });
   });
 
