@@ -187,7 +187,7 @@ describe("prepareBuildSpec", () => {
     );
   });
 
-  it("SSM から設定を書き出し、縦の切れ端だけを合成し、保存した結果の差分を残す", () => {
+  it("SSM から設定を書き出し、アプリのスタックだけを合成し、保存した結果の差分を残す", () => {
     expect(spec).toContain("/acme/test/settings");
     expect(spec).toContain("ND_STACKS=app");
     expect(spec).toContain("cdk diff --app cdk.out --method=template acme-test-app");

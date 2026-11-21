@@ -21,7 +21,7 @@ import { applyTags, pipelineResourceNames, settingsParameterName } from "./namin
 
 // 反映のパイプラインのスタック。取る → 準備 → 承認 → 反映 を CodePipeline で直に組む。
 // 承認の資料に、反映するのと同じ合成の結果の差分を示すため、差分と要約値は準備のアクションが作り、
-// 反映のアクションは同じ合成の結果を照らしてから反映する。反映するのは縦の切れ端のスタックだけで、
+// 反映のアクションは同じ合成の結果を照らしてから反映する。反映するのはアプリのスタックだけで、
 // このスタック自身は設置のコマンドで反映する（push だけで反映の役割の権限を広げられないようにする）
 
 // CodeStar の接続の名前の上限
@@ -50,7 +50,7 @@ export function cdkCliVersion(): string {
   return version;
 }
 
-// 準備のアクションの手順。設定を SSM から書き出し、縦の切れ端だけを合成して差分と要約値を作る
+// 準備のアクションの手順。設定を SSM から書き出し、アプリのスタックだけを合成して差分と要約値を作る
 export function prepareBuildSpec(s: Settings, appStack: string): BuildSpec {
   return BuildSpec.fromObject({
     version: "0.2",
@@ -112,7 +112,7 @@ export function deployBuildSpec(appStack: string, cdkVersion: string): BuildSpec
 
 export type PipelineStackProps = StackProps & {
   settings: Settings;
-  // パイプラインが反映する縦の切れ端のスタックの名前
+  // パイプラインが反映するアプリのスタックの名前
   appStackName: string;
 };
 

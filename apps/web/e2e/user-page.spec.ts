@@ -1,6 +1,6 @@
 import { type Page, type Request, type Route, expect, test } from "@playwright/test";
 
-// 利用者プールの認可と token、API、画面の設定の値をブラウザーの網の手前で差し替える。
+// 利用者プールの認可と token、API、画面の設定の値をブラウザーのネットワークの手前で差し替える。
 // 製品のコードは本物の URL を /config.json から読むだけで、試験のための分岐を持たない
 
 const AUTH = "https://acme-test.auth.example.com";

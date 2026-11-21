@@ -75,7 +75,7 @@ nd-factory/
 
 規則の組（`apps/*` は `apps/api`・`apps/web`・`apps/runner`・`apps/nd-runtime`・`apps/db-prep` の `src/` の `*.ts`。テストのディレクトリと e2e を含まない）:
 
-| 組の ID | 掛ける置き場 | 規則と選び方 | 土台の行 |
+| 組の ID | 掛ける置き場 | 規則と選び方 | プラットフォームの行 |
 | --- | --- | --- | --- |
 | `boundary.clock` | `apps/*` | `no-restricted-properties` の `Date.now`・`no-restricted-syntax` の引数なしの `new Date()` | 時計 |
 | `boundary.ids` | `apps/*` | `no-restricted-properties` の `Math.random`・`crypto.randomUUID`・`crypto.getRandomValues`。`no-restricted-imports` の `node:crypto` の `randomUUID`・`randomBytes` と `uuid` | ID と冪等の鍵 |

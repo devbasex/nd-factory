@@ -4,7 +4,7 @@
 
 ## 何が起きたか
 
-nd-factory は公開のリポジトリで、全体の設計（`docs/design/`）は「実際の値と秘密を置かない」「横断の部品を 1 か所に置く」「使える量の判定は 1 か所」「画面の操作はすべて API と MCP にもある」「NDF の契約に載るものだけでやり取りする」を、検査で機械的に止めると決めている（[土台の設計の決まりを縛る検査](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#設計の決まりを縛る検査)）。今の CI が持つのは、そのうち参照の検査（`tools/ref-check`）と CI の定義のテスト（`tools/test/ci-definition.test.ts`）だけで、ほかの検査はまだ無い。子の課題（#2〜#16）がコードを足し始める前に、決まりの破れを Pull Request の CI で落とせるようにしておく必要がある。
+nd-factory は公開のリポジトリで、全体の設計（`docs/design/`）は「実際の値と秘密を置かない」「横断の部品を 1 か所に置く」「使える量の判定は 1 か所」「画面の操作はすべて API と MCP にもある」「NDF の契約に載るものだけでやり取りする」を、検査で機械的に止めると決めている（[プラットフォームの設計の決まりを縛る検査](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#設計の決まりを縛る検査)）。今の CI が持つのは、そのうち参照の検査（`tools/ref-check`）と CI の定義のテスト（`tools/test/ci-definition.test.ts`）だけで、ほかの検査はまだ無い。子の課題（#2〜#16）がコードを足し始める前に、決まりの破れを Pull Request の CI で落とせるようにしておく必要がある。
 
 ## 種類
 
@@ -15,7 +15,7 @@ nd-factory は公開のリポジトリで、全体の設計（`docs/design/`）�
 - CI は GitHub の workflow `.github/workflows/ci.yml` の 4 つのジョブ（`check`・`synth`・`e2e`・`ref-check`）で、AWS の資格情報を持たない。4 つは `.ndf/project.json` の `ci.required_checks` に宣言してある
 - 参照の検査（`tools/ref-check`、CI の `ref-check`）は、照合の語（CI の秘密 `REF_CHECK_TERMS`）の当たり・NDF の固定の値（`ndf-pin.json` の `ndf_ref`）が 1 か所でないこと・NDF の版を読む式と大小の比べが同じ行にあることを落とす
 - CI の定義のテスト（`tools/test/ci-definition.test.ts`、CI の `check` の中）は、`ci.yml` のジョブの集合と必須のチェックの宣言の食い違いと、`ci.yml` の中の AWS の資格情報の語を落とす。`ci.yml` 以外のワークフローは読まない
-- 全体の設計は、足す検査を [土台の検査](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#検査)・[API と MCP の照らす検査（I14）](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#照らす検査i14)・[実行の契約の照合の定期の検査](https://github.com/devbasex/nd-factory/blob/main/docs/design/execution.md#契約の照合の定期の検査) に、置き場を [詳細設計のファイル配置](https://github.com/devbasex/nd-factory/blob/main/docs/design/detail.md#クラスと関数の構造) の `tools/checks/` に決めている
+- 全体の設計は、足す検査を [プラットフォームの検査](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#検査)・[API と MCP の照らす検査（I14）](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#照らす検査i14)・[実行の契約の照合の定期の検査](https://github.com/devbasex/nd-factory/blob/main/docs/design/execution.md#契約の照合の定期の検査) に、置き場を [詳細設計のファイル配置](https://github.com/devbasex/nd-factory/blob/main/docs/design/detail.md#クラスと関数の構造) の `tools/checks/` に決めている
 - NDF との契約は #41 の設計（PR #42）で ndf v11.0.12（契約の版 8）へ移る。契約の照合の検査（F23）が予告として読む先は、止まった `develop` の先端でなく ai-plugins の既定の枝の先端になる（#41 の決定 107）
 
 ## 何を足すか・変えるか
@@ -119,7 +119,7 @@ nd-factory は公開のリポジトリで、全体の設計（`docs/design/`）�
 | 項目 | 参照先 / 決めたこと |
 | --- | --- |
 | プロジェクト構造 | `AGENTS.md` の「リポジトリの形」。足す検査は `tools/checks/`（[詳細設計のファイル配置](https://github.com/devbasex/nd-factory/blob/main/docs/design/detail.md#クラスと関数の構造)） |
-| コーディング規約 | [土台の言語と書き方の決まり](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#言語と書き方の決まり)。秘密とインフラの実際の値を置かない・照合の語をリポジトリに書かない・CI に AWS の資格情報を足さない（`AGENTS.md`） |
+| コーディング規約 | [プラットフォームの言語と書き方の決まり](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#言語と書き方の決まり)。秘密とインフラの実際の値を置かない・照合の語をリポジトリに書かない・CI に AWS の資格情報を足さない（`AGENTS.md`） |
 
 ## 起票者の推定
 
