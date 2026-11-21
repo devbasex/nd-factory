@@ -55,7 +55,9 @@ export const loginSubjectKey = (row: LoginSubjectRow): RowKey => ({ pk: `LOGIN#$
 // binding_epoch は外した回数。sessions.create の冪等の鍵に入れ、外す前の結果を外した後に返さない。
 // cognito_username は結ぶのに使った token の username で、外した後の AdminUserGlobalSignOut に渡す。
 // signout_lease_id と signout_lease_until は signing_out の間だけ持つ、失効の呼び出しの借り。「行う予定」の行（外したときの binding_epoch に固定）の
-// 実行が AdminUserGlobalSignOut を呼ぶ前に、同じ世代の signing_out で借りが無いか期限を過ぎたときだけ取り、借りの持ち主だけが unlinked へ進める
+// 実行が AdminUserGlobalSignOut を呼ぶ前に、同じ世代の signing_out で借りが無いか期限を過ぎたときだけ取り、借りの持ち主だけが unlinked へ進める。
+// signout_unsettled_until は、応答を失った呼び出し（打ち切り・期限切れ・失敗。Cognito に届いた実行は取り消せない）の結果の分からない期間の終わり。
+// この時刻より前は借りを取らず、この時刻より後に始めた呼び出しの成功だけで unlinked へ進める（後から処理される前の失効が、結び直したセッションへ届かない）
 export const COGNITO_SUBJECT_STATES = ["bound", "signing_out", "unlinked"] as const;
 export const cognitoSubjectRow = overwriteRow(1, {
   cognito_sub: z.string().min(1),
@@ -69,6 +71,7 @@ export const cognitoSubjectRow = overwriteRow(1, {
   revoked_before: utcDateTime.optional(),
   signout_lease_id: uuid.optional(),
   signout_lease_until: utcDateTime.optional(),
+  signout_unsettled_until: utcDateTime.optional(),
 });
 export type CognitoSubjectRow = z.infer<typeof cognitoSubjectRow>;
 export const cognitoSubjectKey = (row: CognitoSubjectRow): RowKey => ({ pk: `COGNITO#${row.cognito_sub}`, sk: "COGNITO" });

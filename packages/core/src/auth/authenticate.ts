@@ -168,6 +168,11 @@ export const LOGIN_LINK_TTL_MS = 600_000;
 // 方針 aws-control の再試行を使い切るまでの全体の期限（要求ごとの 5 秒 × 3 回と待ち）より長くし、借りが切れて他の実行が取るときに前の呼び出しを残さない
 export const SIGNOUT_LEASE_MS = 60_000;
 
+// AdminUserGlobalSignOut の応答を失った呼び出しの後、次の呼び出しを始めるまで待つ長さ（結果の分からない期間。対応の行の signout_unsettled_until）。
+// 借りの期限でクライアントの呼び出しを打ち切っても、Cognito に届いた実行は取り消せない。Cognito が受けた要求を処理し終えるか捨てるまでの上限として置き、
+// この期間が過ぎてから始めた呼び出しの成功だけで unlinked へ進める
+export const SIGNOUT_SETTLE_MS = 900_000;
+
 // 引き換えの token を受ける経路。ほかの経路は用途ごとの token（レーン・終わりの報告）だけを受ける
 const RUNNER_EXCHANGE = "runner.exchanges.create";
 const DB_PREP_EXCHANGE = "db_prep.exchanges.create";
@@ -229,14 +234,21 @@ export type LinkVerdict = { readonly ok: true; readonly login: CognitoLogin } | 
 // expectedIdp はその流れの行の idp（開始のときに選んだ IdP）。認可の URL の identity_provider はブラウザーの側で変えられるため、
 // サーバーの側で得た IdP がそれと違えば link_invalid にする。
 // 人の token と同じ検証・新しさの照らし・結び直せる状態の照らし・サーバーの側での IdP の主体の取得を通し、まだ結んでいない主体だけを返す。
-// 既に結んだ主体は already_linked、ほかの外れは link_invalid（どちらも要素の 409）、依存先に届かなければ unavailable
+// 既に結んだ主体は、利用者プールから得た IdP が選んだ IdP と同じときだけ already_linked、ほかの外れ（選んだ IdP と違う既に結んだ主体を含む）は
+// link_invalid（どちらも要素の 409）、依存先に届かなければ unavailable。IdP の不一致は既に結んだことより先に照らす
 export async function verifyLoginToLink(loginToken: string, expectedIdp: CognitoLogin["idp"], deps: AuthDeps): Promise<LinkVerdict> {
   try {
     if (deps.cognito === null || !isJwtShape(loginToken)) return { ok: false, reason: "link_invalid" };
     const checked = await deps.cognito(loginToken, deps.clock.epochMs());
     if (!checked.ok) return { ok: false, reason: checked.reason === "unavailable" ? "unavailable" : "link_invalid" };
     const binding = await deps.readers.userOfSubject(checked.value.sub);
-    if (binding !== null && binding.state === "bound") return { ok: false, reason: "already_linked" };
+    if (binding !== null && binding.state === "bound") {
+      // 選んだ IdP と違うことを既に結んだことより先に照らす。流れを外れた戻り（identity_provider を変えた認可の URL）に、
+      // 別のアカウントを選び直す案内（already_linked）を出さず、流れを始め直させる
+      const identity = await deps.readers.cognitoIdentity(checked.value.username);
+      if (identity === null || identity.cognitoSub !== checked.value.sub || identity.idp !== expectedIdp) return { ok: false, reason: "link_invalid" };
+      return { ok: false, reason: "already_linked" };
+    }
     const login = await loginOf(checked.value, binding, deps);
     if (!login.ok) return { ok: false, reason: login.reason === "unavailable" ? "unavailable" : "link_invalid" };
     if (login.value.idp !== expectedIdp) return { ok: false, reason: "link_invalid" };

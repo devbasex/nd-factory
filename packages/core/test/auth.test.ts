@@ -302,6 +302,16 @@ describe("verifyLoginToLink: logins.create が認可コードの交換で得た�
     await expect(verifyLoginToLink(cognitoToken(), "google", deps)).resolves.toEqual({ ok: false, reason: "already_linked" });
   });
 
+  it("選んだ IdP と違う既に結んだ主体は、already_linked より先に link_invalid（流れを始め直す）", async () => {
+    const { deps } = setup();
+    await expect(verifyLoginToLink(cognitoToken(), "github", deps)).resolves.toEqual(LINK_INVALID);
+  });
+
+  it("既に結んだ主体でも、利用者プールから IdP の主体を引けなければ link_invalid", async () => {
+    const { deps } = setup({ bindings: { "cognito-sub-unlinked": { state: "bound", userId: USER, boundAuthTime: iso(NOW - 86_400_000), epoch: 0, version: 1 } } });
+    await expect(verifyLoginToLink(cognitoToken({ sub: "cognito-sub-unlinked" }), "google", deps)).resolves.toEqual(LINK_INVALID);
+  });
+
   it("外した主体は、失効を済ませた後のサインインだけを返す", async () => {
     const { deps } = setup({ bindings: { "cognito-sub-out": { state: "unlinked", revokedBefore: iso(NOW - 30_000), epoch: 2, version: 5 } } });
     await expect(verifyLoginToLink(cognitoToken({ sub: "cognito-sub-out", auth_time: NOW_SEC - 60 }), "google", deps)).resolves.toEqual(LINK_INVALID);
