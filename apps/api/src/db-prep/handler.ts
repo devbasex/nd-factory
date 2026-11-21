@@ -14,16 +14,18 @@ import { DataApiUnavailableError, type SqlExecutor } from "./sql-executor.ts";
 // 口がプロジェクトの行から返す、データベースと役割と秘密の器の名前と、今の用意が結んだ版の ID
 export type PrepTarget = { database: string; role: string; secret: string; secretVersion: string };
 
-// 終わりの記録の口。実装は #6（プロジェクトのモジュールの操作）。record は用意の ID・差し替えの番号・版の ID が
-// 今の値と合うときだけ書く条件つきの書き込みで、合わなければ書かずに mismatch を返す
+// 終わりの記録の口。実装は #6（プロジェクトのモジュールの操作）。isCurrent はプロジェクトの表をプロジェクトの ID の主キーで
+// 強い整合で読み（認可もそのプロジェクトに限る）、その行の用意の ID が渡した値と同じかを返す。record は用意の ID・
+// 差し替えの番号・版の ID が今の値と合うときだけ書く条件つきの書き込みで、合わなければ書かずに mismatch を返す
 export type PrepCompletionPort = {
-  isCurrent(prepId: string): Promise<boolean>;
+  isCurrent(projectId: string, prepId: string): Promise<boolean>;
   readTarget(projectId: string): Promise<PrepTarget>;
   record(inv: DbPrepInvocation, outcome: DbPrepOutcome, secretVersion: string): Promise<"recorded" | "mismatch">;
 };
 
 // 関数の誤りで止まった段。ログと投げる例外に載せる
-export type PrepStage = "is_current" | "claim" | "read_target" | "read_password" | "promote" | "record";
+// terminate は古い接続を切った後も残りを読んだ段（I17。終わりを記さずに落ち、見回りが I22 で呼び直す）
+export type PrepStage = "is_current" | "claim" | "read_target" | "read_password" | "terminate" | "promote" | "record";
 
 // ログに出す項目はこれだけ。値はどれも決まった形の ID・種類・コード・数で、名前・パスワード・URL・SQL の文を持たない
 export type PrepLogFields = {
@@ -138,6 +140,24 @@ function assertTarget(target: PrepTarget): void {
 
 type Ran = { outcome: DbPrepOutcome; error?: unknown };
 
+// SQL の失敗として記さず、関数の誤りとして終わりを記さずに止める段の失敗
+class StageFailure extends Error {
+  override name = "StageFailure";
+  readonly stage: PrepStage;
+  readonly inner: unknown;
+
+  constructor(stage: PrepStage, inner: unknown) {
+    super("段の失敗");
+    this.stage = stage;
+    this.inner = inner;
+  }
+}
+
+// 古い接続が残った（I17）。値を持たない
+class ConnectionsRemainError extends Error {
+  override name = "ConnectionsRemainError";
+}
+
 function failed(reason: DbPrepFailureReason, error?: unknown): Ran {
   return { outcome: { result: "failed", reason }, error };
 }
@@ -159,25 +179,41 @@ async function runCreate(sql: SqlExecutor, project: ProjectIdent, password: stri
   }
 }
 
-async function runRotate(sql: SqlExecutor, project: ProjectIdent, password: string, seq: number, wait: SessionWait): Promise<Ran> {
+// 差し替え。古い接続の残りが 0 と読んだら、差し替えの鎖と番号 n の読みを持ったまま promote で結んだ版へ AWSCURRENT を移し、
+// その後に鎖を放す（重なった古い呼び出しが、新しい呼び出しの移した版を古い版へ戻せないように）。
+// 残りが 1 以上なら終わりを記さずに落ちる（I17）。promote の失敗も SQL の失敗として記さずに落ちる
+async function runRotate(
+  sql: SqlExecutor,
+  project: ProjectIdent,
+  password: string,
+  seq: number,
+  wait: SessionWait,
+  promote: () => Promise<void>,
+): Promise<Ran> {
+  let promoteFailure: { error: unknown } | undefined;
+  const whileLocked = async (): Promise<void> => {
+    try {
+      await promote();
+    } catch (e) {
+      promoteFailure = { error: e };
+      throw e;
+    }
+  };
+  let rotated: Awaited<ReturnType<typeof rotateRole>>;
+  let cut: Awaited<ReturnType<typeof terminateRoleConnections>>;
   try {
-    const rotated = await rotateRole(sql, { ...project, password, seq });
+    rotated = await rotateRole(sql, { ...project, password, seq });
     if (rotated.kind === "superseded_greater") return { outcome: { result: "rotation_superseded", recorded_seq: rotated.recorded } };
-    const cut = await terminateRoleConnections(sql, project.role, seq, wait);
-    if (cut.kind === "superseded_greater") return { outcome: { result: "rotation_superseded", recorded_seq: cut.recorded } };
-    if (cut.remaining > 0) return failed("connections_remain");
-    return rotated.kind === "applied"
-      ? { outcome: { result: "applied" } }
-      : { outcome: { result: "rotation_superseded", recorded_seq: rotated.recorded } };
+    cut = await terminateRoleConnections(sql, project.role, seq, { ...wait, whileLocked });
   } catch (e) {
+    if (promoteFailure !== undefined) throw new StageFailure("promote", promoteFailure.error);
     return sqlFailure(e);
   }
-}
-
-// 版へ AWSCURRENT を移すのは、DB にその版のパスワードが書かれたと分かる結果だけ
-function shouldPromote(inv: DbPrepInvocation, outcome: DbPrepOutcome): boolean {
-  if (outcome.result === "applied") return true;
-  return outcome.result === "rotation_superseded" && inv.kind === "rotate" && outcome.recorded_seq === inv.rotation_seq;
+  if (cut.kind === "superseded_greater") return { outcome: { result: "rotation_superseded", recorded_seq: cut.recorded } };
+  if (cut.remaining > 0) throw new StageFailure("terminate", new ConnectionsRemainError("古い接続が残った"));
+  return rotated.kind === "applied"
+    ? { outcome: { result: "applied" } }
+    : { outcome: { result: "rotation_superseded", recorded_seq: rotated.recorded } };
 }
 
 // 呼び出しを照らし、用意の ID を読み直し、重複の配信を除き、用意か差し替えを打って、結果を終わりの記録の口へ渡す
@@ -198,7 +234,7 @@ export function createDbPrepHandler(deps: PrepDeps): (event: unknown) => Promise
     const elapsed = () => Math.max(0, Math.round(deps.now() - started));
     let stage: PrepStage = "is_current";
     try {
-      if (!(await completion.isCurrent(inv.prep_id))) {
+      if (!(await completion.isCurrent(inv.project_id, inv.prep_id))) {
         logger.info({ ...base, result: "not_current" }, PREP_LOG_MESSAGES.notCurrent);
         return;
       }
@@ -215,15 +251,18 @@ export function createDbPrepHandler(deps: PrepDeps): (event: unknown) => Promise
       const password = await deps.readPassword(target.secret, target.secretVersion);
 
       const project: ProjectIdent = { projectId: inv.project_id, database: target.database, role: target.role };
-      const ran =
-        inv.kind === "create"
-          ? await runCreate(sql, project, password, wait)
-          : await runRotate(sql, project, password, inv.rotation_seq, wait);
-
-      // 保留を下ろす前に、結んだ版に AWSCURRENT が付いていることを確かめる
-      if (shouldPromote(inv, ran.outcome)) {
-        stage = "promote";
-        await deps.promote(target.secret, target.secretVersion);
+      const promote = () => deps.promote(target.secret, target.secretVersion);
+      // 終わりを記す前に、結んだ版に AWSCURRENT が付いていることを確かめる。移すのは DB にその版のパスワードが書かれたと
+      // 分かる結果だけ（作るなら applied、差し替えなら applied か記した番号 = n の rotation_superseded。差し替えは鎖の中で移す）
+      let ran: Ran;
+      if (inv.kind === "create") {
+        ran = await runCreate(sql, project, password, wait);
+        if (ran.outcome.result === "applied") {
+          stage = "promote";
+          await promote();
+        }
+      } else {
+        ran = await runRotate(sql, project, password, inv.rotation_seq, wait, promote);
       }
       stage = "record";
       const recorded = await completion.record(inv, ran.outcome, target.secretVersion);
@@ -243,10 +282,12 @@ export function createDbPrepHandler(deps: PrepDeps): (event: unknown) => Promise
       } else {
         logger.info(fields, PREP_LOG_MESSAGES.finished);
       }
-    } catch (e) {
+    } catch (caughtError) {
       // 自動の再試行は 0 回で、見回りが期限の後に扱う
-      logger.error({ ...base, stage, ...errFields(e), duration_ms: elapsed() }, PREP_LOG_MESSAGES.functionError);
-      throw new DbPrepFunctionError(stage, errName(e));
+      const failedStage = caughtError instanceof StageFailure ? caughtError.stage : stage;
+      const e = caughtError instanceof StageFailure ? caughtError.inner : caughtError;
+      logger.error({ ...base, stage: failedStage, ...errFields(e), duration_ms: elapsed() }, PREP_LOG_MESSAGES.functionError);
+      throw new DbPrepFunctionError(failedStage, errName(e));
     }
   };
 }

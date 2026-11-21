@@ -103,8 +103,8 @@ class FakeWorld {
 
   port(): PrepCompletionPort {
     return {
-      isCurrent: async (prepId) => {
-        this.events.push(`isCurrent:${prepId}`);
+      isCurrent: async (projectId, prepId) => {
+        this.events.push(`isCurrent:${projectId}:${prepId}`);
         if (this.fail.isCurrent) throw this.fail.isCurrent;
         return this.current;
       },
@@ -187,7 +187,7 @@ function statements(db: FakeSqlExecutor): string[] {
 }
 
 function prepStatements(db: FakeSqlExecutor): string[] {
-  return statements(db).filter((s) => /^(CREATE (DATABASE|ROLE)|ALTER ROLE|GRANT |REVOKE CONNECT)/.test(s));
+  return statements(db).filter((s) => /^(CREATE (DATABASE|ROLE)|ALTER ROLE|GRANT |REVOKE CONNECT|DO \$nd_role_password\$)/.test(s));
 }
 
 function expectNoSecretIn(lines: string[]): void {
@@ -241,7 +241,7 @@ describe("createDbPrepHandler の用意の ID の読み直しと受け取り", (
     const t = setup();
     t.world.current = false;
     await t.handle(CREATE);
-    expect(t.world.events).toEqual([`isCurrent:${PREP_ID}`]);
+    expect(t.world.events).toEqual([`isCurrent:${PROJECT_ID}:${PREP_ID}`]);
     expect(t.db.calls).toEqual([]);
     expect(t.logs()[0]).toMatchObject({ prep_id: PREP_ID, kind: "create", result: "not_current" });
   });
@@ -249,7 +249,7 @@ describe("createDbPrepHandler の用意の ID の読み直しと受け取り", (
   it("claimPrepRun が duplicate なら、用意の SQL・readTarget・promote・record を呼ばず、duplicate_delivery を出す", async () => {
     const t = setup({ claim: "duplicate" });
     await t.handle(CREATE);
-    expect(t.world.events).toEqual([`isCurrent:${PREP_ID}`]);
+    expect(t.world.events).toEqual([`isCurrent:${PROJECT_ID}:${PREP_ID}`]);
     expect(prepStatements(t.db)).toEqual([]);
     expect(t.logs()[0]).toMatchObject({ prep_id: PREP_ID, result: "duplicate_delivery" });
   });
@@ -260,7 +260,7 @@ describe("createDbPrepHandler の用意の ID の読み直しと受け取り", (
     const e = await caught(t.handle(CREATE));
     expect(e).toBeInstanceOf(DbPrepFunctionError);
     expect((e as DbPrepFunctionError).stage).toBe("claim");
-    expect(t.world.events).toEqual([`isCurrent:${PREP_ID}`]);
+    expect(t.world.events).toEqual([`isCurrent:${PROJECT_ID}:${PREP_ID}`]);
     expect(t.world.records).toEqual([]);
     expect(t.logs().at(-1)).toMatchObject({ stage: "claim", err_name: "DataApiUnavailableError" });
   });
@@ -269,7 +269,7 @@ describe("createDbPrepHandler の用意の ID の読み直しと受け取り", (
     const t = setup();
     t.db.failOn = (c) => (c.kind === "commit" ? leaky("InternalServerErrorException") : undefined);
     await expect(t.handle(CREATE)).rejects.toBeInstanceOf(DbPrepFunctionError);
-    expect(t.world.events).toEqual([`isCurrent:${PREP_ID}`]);
+    expect(t.world.events).toEqual([`isCurrent:${PROJECT_ID}:${PREP_ID}`]);
     expect(prepStatements(t.db)).toEqual([]);
   });
 
@@ -368,7 +368,7 @@ describe("createDbPrepHandler の作る", () => {
     const t = setup();
     await t.handle(CREATE);
     expect(t.world.events).toEqual([
-      `isCurrent:${PREP_ID}`,
+      `isCurrent:${PROJECT_ID}:${PREP_ID}`,
       `readTarget:${PROJECT_ID}`,
       `readPassword:${VERSION}`,
       "promote:moved",
@@ -376,7 +376,7 @@ describe("createDbPrepHandler の作る", () => {
     ]);
     expect(t.world.records).toEqual([{ inv: CREATE, outcome: { result: "applied" }, secretVersion: VERSION }]);
     expect(statements(t.db).some((s) => s.startsWith("CREATE DATABASE"))).toBe(true);
-    expect(statements(t.db).some((s) => s.startsWith("CREATE ROLE"))).toBe(true);
+    expect(statements(t.db).some((s) => s.includes("CREATE ROLE %I"))).toBe(true);
     expect(t.logs().at(-1)).toMatchObject({
       prep_id: PREP_ID,
       kind: "create",
@@ -415,7 +415,7 @@ describe("createDbPrepHandler の作る", () => {
 
   it("ほかの SQL の失敗は failed・sql_failed で、例外の名前と SQLSTATE だけを出す", async () => {
     const t = setup();
-    t.db.failOn = (c) => (c.kind === "execute" && c.sql.startsWith("CREATE ROLE") ? leaky("DatabaseError", { code: "42710" }) : undefined);
+    t.db.failOn = (c) => (c.kind === "execute" && c.sql.includes("CREATE ROLE %I") ? leaky("DatabaseError", { code: "42710" }) : undefined);
     await t.handle(CREATE);
     expect(t.world.records.map((r) => r.outcome)).toEqual([{ result: "failed", reason: "sql_failed" }]);
     const last = t.logs().at(-1);
@@ -425,7 +425,7 @@ describe("createDbPrepHandler の作る", () => {
 
   it("SQLSTATE の形でないコードと、識別子の形でない例外の名前は出さない", async () => {
     const t = setup();
-    t.db.failOn = (c) => (c.kind === "execute" && c.sql.startsWith("CREATE ROLE") ? leaky(`bad ${ROLE}`, { code: `x ${PASSWORD}` }) : undefined);
+    t.db.failOn = (c) => (c.kind === "execute" && c.sql.includes("CREATE ROLE %I") ? leaky(`bad ${ROLE}`, { code: `x ${PASSWORD}` }) : undefined);
     await t.handle(CREATE);
     const last = t.logs().at(-1);
     expect(last?.err_name).toBe("Unknown");
@@ -453,7 +453,7 @@ describe("createDbPrepHandler の差し替え", () => {
   it("記した番号 = n なら書かずに切り、残り 0 で promote の後に rotation_superseded（記した番号）", async () => {
     const t = setup({ recorded: [{ recorded: 3, cutoff_recorded: true }] });
     await t.handle(rotate(3));
-    expect(statements(t.db).some((s) => s.startsWith("ALTER ROLE"))).toBe(false);
+    expect(statements(t.db).some((s) => s.includes("ALTER ROLE %I"))).toBe(false);
     expect(t.world.events.slice(-2)).toEqual(["promote:moved", "record"]);
     expect(t.world.records.map((r) => r.outcome)).toEqual([{ result: "rotation_superseded", recorded_seq: 3 }]);
   });
@@ -474,13 +474,58 @@ describe("createDbPrepHandler の差し替え", () => {
     expect(t.world.records.map((r) => r.outcome)).toEqual([{ result: "rotation_superseded", recorded_seq: 4 }]);
   });
 
-  it("古い接続が期限まで残れば、promote を呼ばずに failed・connections_remain", async () => {
+  it("古い接続が期限まで残れば、promote も record も呼ばずに投げる（終わりを記さず、見回りが呼び直す。I17・I22）", async () => {
     const t = setup({ recorded: [{ recorded: 2, cutoff_recorded: false }, { recorded: 3, cutoff_recorded: false }], oldSessions: [1] });
-    await t.handle(rotate(3));
+    const e = await caught(t.handle(rotate(3)));
+    expect(e).toBeInstanceOf(DbPrepFunctionError);
+    expect((e as DbPrepFunctionError).stage).toBe("terminate");
+    expect((e as DbPrepFunctionError).errName).toBe("ConnectionsRemainError");
     expect(t.world.events.some((x) => x.startsWith("promote"))).toBe(false);
-    expect(t.world.records.map((r) => r.outcome)).toEqual([{ result: "failed", reason: "connections_remain" }]);
+    expect(t.world.events).not.toContain("record");
+    expect(t.logs().at(-1)).toMatchObject({ stage: "terminate", err_name: "ConnectionsRemainError", level: 50 });
     // 期限（15 秒）は差し替えた時計で過ぎる
     expect(t.clock.now()).toBeGreaterThanOrEqual(15_000);
+  });
+
+  it("promote は古い接続を切るトランザクションの中で、差し替えの鎖を持ったまま確定の前に打つ", async () => {
+    const t = setup({ recorded: [{ recorded: 2, cutoff_recorded: false }, { recorded: 3, cutoff_recorded: false }] });
+    let callsAtPromote = -1;
+    const inner = t.world.promote;
+    t.world.promote = async (secret, versionId) => {
+      callsAtPromote = t.db.calls.length;
+      await inner(secret, versionId);
+    };
+    const handle = createDbPrepHandler({
+      sql: t.db,
+      completion: t.world.port(),
+      readPassword: t.world.readPassword,
+      promote: t.world.promote,
+      logger: createPrepLogger({ write: () => undefined }),
+      now: t.clock.now,
+      sleep: t.clock.sleep,
+    });
+    await handle(rotate(3));
+    const before = t.db.calls.slice(0, callsAtPromote);
+    const after = t.db.calls.slice(callsAtPromote);
+    // 最後に始めたトランザクション（古い接続の切り）は、promote の前に鎖を取り、promote の後に確定する
+    const lastBegin = before.map((c) => c.kind).lastIndexOf("begin");
+    expect(lastBegin).toBeGreaterThan(-1);
+    const inTx = before.slice(lastBegin);
+    expect(inTx.some((c) => c.kind === "execute" && c.sql.includes("nd-rotate:"))).toBe(true);
+    expect(inTx.some((c) => c.kind === "commit" || c.kind === "rollback")).toBe(false);
+    expect(after.map((c) => c.kind)).toEqual(["commit"]);
+    expect(t.world.records.map((r) => r.outcome)).toEqual([{ result: "applied" }]);
+  });
+
+  it("差し替えで promote が投げたら、古い接続を切るトランザクションを巻き戻し、record を呼ばずに段 promote で投げる", async () => {
+    const t = setup({ recorded: [{ recorded: 2, cutoff_recorded: false }, { recorded: 3, cutoff_recorded: false }] });
+    t.world.fail.promote = leaky("InvalidRequestException");
+    const e = await caught(t.handle(rotate(3)));
+    expect((e as DbPrepFunctionError).stage).toBe("promote");
+    expect((e as DbPrepFunctionError).errName).toBe("InvalidRequestException");
+    expect(t.db.calls.at(-1)?.kind).toBe("rollback");
+    expect(t.world.events).not.toContain("record");
+    expectNoSecretIn(t.lines);
   });
 
   it("古い接続の 1 回目の読み直しが 1・2 回目が 0 なら applied", async () => {
@@ -511,7 +556,6 @@ describe("createDbPrepHandler の差し替え", () => {
       { state: { databaseExists: true }, inv: CREATE, promotes: false },
       { state: { recorded: [{ recorded: 3, cutoff_recorded: true }] }, inv: rotate(3), promotes: true },
       { state: { recorded: [{ recorded: 9, cutoff_recorded: true }] }, inv: rotate(3), promotes: false },
-      { state: { recorded: [{ recorded: 3, cutoff_recorded: true }], oldSessions: [2] }, inv: rotate(3), promotes: false },
     ];
     for (const c of cases) {
       const t = setup(c.state);
@@ -537,7 +581,7 @@ describe("createDbPrepHandler のログ", () => {
         t.db.failOn = (c) => (c.kind === "execute" && c.sql.startsWith("CREATE DATABASE") ? new DataApiUnavailableError(12, leaky("X")) : undefined);
       },
       (t) => {
-        t.db.failOn = (c) => (c.kind === "execute" && c.sql.startsWith("CREATE ROLE") ? leaky("DatabaseError", { code: "42710" }) : undefined);
+        t.db.failOn = (c) => (c.kind === "execute" && c.sql.includes("CREATE ROLE %I") ? leaky("DatabaseError", { code: "42710" }) : undefined);
       },
       (t) => {
         t.world.fail.readPassword = leaky("ResourceNotFoundException");
@@ -672,9 +716,74 @@ describePgDisposable("createDbPrepHandler（PostgreSQL）", () => {
         }),
       );
       await Promise.all(handles.map((h) => h(CREATE)));
-      const creates = seen.map((s) => s.filter((x) => x.startsWith("CREATE DATABASE") || x.startsWith("CREATE ROLE")).length);
+      const creates = seen.map((s) => s.filter((x) => x.startsWith("CREATE DATABASE") || x.includes("CREATE ROLE %I")).length);
       expect(creates.sort()).toEqual([0, 2]);
       expect(world.records).toEqual([{ result: "applied" }]);
+    });
+  });
+
+  it("重なった差し替え: 古い番号の呼び出しが版を移す間は鎖を持ち、新しい番号の呼び出しは待ってから移すため、最後に AWSCURRENT が付くのは新しい版", async () => {
+    await withTestDatabase(async (db) => {
+      const target = newTarget(db);
+      const versions: Record<string, string> = { v0: randomBytes(24).toString("base64url"), v1: randomBytes(24).toString("base64url"), v2: randomBytes(24).toString("base64url") };
+      let current: string | undefined;
+      const promoted: string[] = [];
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let oldPromoting: () => void = () => undefined;
+      const oldReachedPromote = new Promise<void>((resolve) => {
+        oldPromoting = resolve;
+      });
+      const records: Array<{ seq: number | undefined; outcome: DbPrepOutcome }> = [];
+      const handlerFor = (version: string, gated: boolean) =>
+        createDbPrepHandler({
+          sql: db.executor(),
+          completion: {
+            isCurrent: async () => true,
+            readTarget: async () => ({ ...target, secretVersion: version }),
+            record: async (inv, outcome) => {
+              records.push({ seq: inv.kind === "rotate" ? inv.rotation_seq : undefined, outcome });
+              return "recorded";
+            },
+          },
+          readPassword: async (_secret, versionId) => versions[versionId] ?? "",
+          promote: async (_secret, versionId) => {
+            if (gated) {
+              oldPromoting();
+              await gate;
+            }
+            promoted.push(versionId);
+            current = versionId;
+          },
+          logger: createPrepLogger({ write: () => undefined }),
+          now: () => performance.now(),
+        });
+      await handlerFor("v0", false)(CREATE);
+      const older = handlerFor("v1", true)(rotate(1, "prep_acme_old"));
+      await oldReachedPromote;
+      const newer = handlerFor("v2", false)(rotate(2, "prep_acme_new"));
+      // 新しい呼び出しは鎖を待つため、古い呼び出しが移し終えるまで進めない（進めば先に終わる）
+      const newerFirst = await Promise.race([newer.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 1_000))]);
+      release();
+      await Promise.all([older, newer]);
+      expect(newerFirst).toBe(false);
+      expect(promoted).toEqual(["v0", "v1", "v2"]);
+      expect(current).toBe("v2");
+      // DB のパスワードも新しい版と合う
+      const ok = await db.connect(target.database, { user: target.role, password: versions.v2 ?? "" }).then(
+        async (c) => {
+          await c.end();
+          return true;
+        },
+        () => false,
+      );
+      expect(ok).toBe(true);
+      expect(records.filter((r) => r.seq !== undefined).map((r) => [r.seq, r.outcome.result])).toEqual([
+        [1, "applied"],
+        [2, "applied"],
+      ]);
     });
   });
 });

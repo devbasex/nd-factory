@@ -113,6 +113,8 @@ describe("dbPrepOutcome", () => {
 
   it("一覧に無い理由を誤りにする", () => {
     expect(dbPrepOutcome.safeParse({ result: "failed", reason: "timeout" }).success).toBe(false);
+    // 古い接続が残った差し替えは終わりを記さない（I17）
+    expect(dbPrepOutcome.safeParse({ result: "failed", reason: "connections_remain" }).success).toBe(false);
   });
 
   it("result に合わない項目を持てば誤りにする", () => {
@@ -129,8 +131,8 @@ describe("dbPrepOutcome", () => {
 });
 
 describe("DB_PREP_FAILURE_REASONS", () => {
-  it("4 つの理由をこの順で持つ", () => {
-    expect(DB_PREP_FAILURE_REASONS).toEqual(["data_api_unavailable", "guard_conflict", "connections_remain", "sql_failed"]);
+  it("3 つの理由をこの順で持ち、終わりを記さない connections_remain を持たない", () => {
+    expect(DB_PREP_FAILURE_REASONS).toEqual(["data_api_unavailable", "guard_conflict", "sql_failed"]);
   });
 });
 

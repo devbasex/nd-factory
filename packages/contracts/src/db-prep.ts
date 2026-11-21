@@ -24,12 +24,8 @@ export const dbPrepInvocation = z.discriminatedUnion("kind", [
   z.strictObject({ prep_id: prepId, project_id: projectId, kind: z.literal("rotate"), rotation_seq: seq }),
 ]);
 
-export const DB_PREP_FAILURE_REASONS = Object.freeze([
-  "data_api_unavailable",
-  "guard_conflict",
-  "connections_remain",
-  "sql_failed",
-] as const);
+// 古い接続が残った差し替えは終わりを記さずに落ちる（I17）ため、記す理由に無い
+export const DB_PREP_FAILURE_REASONS = Object.freeze(["data_api_unavailable", "guard_conflict", "sql_failed"] as const);
 
 // recorded_seq は DB の側に記してあった差し替えの番号
 export const dbPrepOutcome = z.discriminatedUnion("result", [

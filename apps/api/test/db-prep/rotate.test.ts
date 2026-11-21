@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { type Client, escapeIdentifier } from "pg";
+import { type Client, escapeIdentifier, escapeLiteral } from "pg";
 import { describe, expect, it } from "vitest";
 import { type TerminateOptions, rotateRole, terminateRoleConnections } from "../../src/db-prep/rotate.ts";
 import { ADMIN_DATABASE, type Row, type SqlExecutor } from "../../src/db-prep/sql-executor.ts";
@@ -142,10 +142,16 @@ describe("rotateRole（作り物の SqlExecutor）", () => {
     expect(ex[0]!.params).toEqual([{ name: "role_name", value: PROJECT.role }]);
     const s = fake.statements();
     const read = s.findIndex((x) => x.includes("AS recorded"));
-    const alter = s.findIndex((x) => x.startsWith(`ALTER ROLE ${escapeIdentifier(PROJECT.role)} WITH PASSWORD 'SCRAM-SHA-256$`));
+    // 検証子は引数で渡してトランザクションの中だけの設定に置き、DO の中で ALTER ROLE を打つ。検証子は文の本文に無い
+    const stage = s.findIndex((x) => x.includes("set_config('nd_prep.role_verifier', CAST(:verifier AS text), true)"));
+    const alter = s.findIndex((x) => x.startsWith("DO $nd_role_password$") && x.includes("'ALTER ROLE %I WITH PASSWORD %L'"));
     const write = s.findIndex((x) => x.includes("INSERT INTO nd_prep.rotation_seq"));
     expect(read).toBeGreaterThan(0);
-    expect(alter).toBeGreaterThan(read);
+    expect(stage).toBeGreaterThan(read);
+    expect(alter).toBe(stage + 1);
+    expect(ex[stage]!.params).toEqual([{ name: "verifier", value: expect.stringMatching(/^SCRAM-SHA-256\$4096:/) }]);
+    expect(s[alter]).toContain(escapeLiteral(PROJECT.role));
+    for (const x of s) expect(x).not.toContain("SCRAM-SHA-256$");
     expect(write).toBeGreaterThan(read);
     // 書くと境の時刻を空へ戻す
     expect(s[write]).toContain("old_conn_cutoff = NULL");
@@ -155,20 +161,20 @@ describe("rotateRole（作り物の SqlExecutor）", () => {
   it("行が無ければ（初めての差し替え）書く", async () => {
     const fake = fakeDb({ recorded: undefined });
     expect(await rotateRole(fake, { ...PROJECT, password: PASSWORD, seq: 1 })).toEqual({ kind: "applied", recorded: 1 });
-    expect(fake.statements().some((x) => x.startsWith("ALTER ROLE"))).toBe(true);
+    expect(fake.statements().some((x) => x.includes("ALTER ROLE %I"))).toBe(true);
   });
 
   it("記した番号 = n なら書かずに superseded_equal", async () => {
     const fake = fakeDb({ recorded: { recorded: 3, cutoff_recorded: false } });
     expect(await rotateRole(fake, { ...PROJECT, password: PASSWORD, seq: 3 })).toEqual({ kind: "superseded_equal", recorded: 3 });
-    expect(fake.statements().some((x) => x.startsWith("ALTER ROLE") || x.includes("INSERT") || x.includes("UPDATE"))).toBe(false);
+    expect(fake.statements().some((x) => x.includes("ALTER ROLE %I") || x.includes("INSERT") || x.includes("UPDATE"))).toBe(false);
     expect(fake.calls.at(-1)).toEqual({ kind: "commit", transactionId: "tx-1" });
   });
 
   it("記した番号 > n なら何も変えずに superseded_greater と記した番号", async () => {
     const fake = fakeDb({ recorded: { recorded: 4, cutoff_recorded: true } });
     expect(await rotateRole(fake, { ...PROJECT, password: PASSWORD, seq: 3 })).toEqual({ kind: "superseded_greater", recorded: 4 });
-    expect(fake.statements().some((x) => x.startsWith("ALTER ROLE") || x.includes("INSERT") || x.includes("UPDATE"))).toBe(false);
+    expect(fake.statements().some((x) => x.includes("ALTER ROLE %I") || x.includes("INSERT") || x.includes("UPDATE"))).toBe(false);
   });
 
   it("表が無ければ、差し替えの鎖の後にスキーマの鎖を取り、カタログを読み直してから作る", async () => {
@@ -206,7 +212,7 @@ describe("rotateRole（作り物の SqlExecutor）", () => {
       const fake = fakeDb();
       const failure = new Error("boom");
       fake.failOn = (c) => {
-        if (c.kind === "execute" && c.sql.startsWith("ALTER ROLE")) return failure;
+        if (c.kind === "execute" && c.sql.includes("ALTER ROLE %I")) return failure;
         if (rollbackFails && c.kind === "rollback") return new Error("rollback failed");
         return undefined;
       };
@@ -220,7 +226,7 @@ describe("rotateRole（作り物の SqlExecutor）", () => {
     const fake = fakeDb();
     fake.respond = (sql) => (sql.includes("AS recorded") ? [{ recorded: "3", cutoff_recorded: true }] : sql.includes("AS present") ? [{ present: true }] : []);
     await expect(rotateRole(fake, { ...PROJECT, password: PASSWORD, seq: 4 })).rejects.toThrow();
-    expect(fake.statements().some((x) => x.startsWith("ALTER ROLE"))).toBe(false);
+    expect(fake.statements().some((x) => x.includes("ALTER ROLE %I"))).toBe(false);
   });
 });
 
@@ -240,6 +246,36 @@ describe("terminateRoleConnections（作り物の SqlExecutor）", () => {
       expect(c.database).toBe(ADMIN_DATABASE);
       expect(c.sql).not.toContain(PROJECT.role);
     }
+  });
+
+  it("残りが 0 なら、whileLocked を鎖を持ったまま確定の前に 1 回打つ", async () => {
+    const fake = fakeDb({ recorded: current, remaining: [1, 0] });
+    const at: number[] = [];
+    const result = await terminateRoleConnections(fake, PROJECT.role, 3, fakeClock().options({ whileLocked: async () => void at.push(fake.calls.length) }));
+    expect(result).toEqual({ kind: "done", remaining: 0 });
+    expect(at).toHaveLength(1);
+    // 打った時はまだ確定も巻き戻しもしていない。その次が確定
+    expect(fake.calls.slice(0, at[0]).some((c) => c.kind === "commit" || c.kind === "rollback")).toBe(false);
+    expect(fake.calls.slice(at[0]).map((c) => c.kind)).toEqual(["commit"]);
+  });
+
+  it("残りが 1 以上か記した番号が n より大きければ、whileLocked を打たない", async () => {
+    for (const state of [{ recorded: current, remaining: [1] }, { recorded: { recorded: 4, cutoff_recorded: true } }]) {
+      const fake = fakeDb(state);
+      let called = false;
+      await terminateRoleConnections(fake, PROJECT.role, 3, fakeClock().options({ whileLocked: async () => void (called = true) }));
+      expect(called).toBe(false);
+    }
+  });
+
+  it("whileLocked が投げたら巻き戻して、その例外を投げる", async () => {
+    const fake = fakeDb({ recorded: current });
+    const failure = new Error("移せない");
+    await expect(
+      terminateRoleConnections(fake, PROJECT.role, 3, fakeClock().options({ whileLocked: async () => Promise.reject(failure) })),
+    ).rejects.toBe(failure);
+    expect(fake.calls.at(-1)).toEqual({ kind: "rollback", transactionId: "tx-1" });
+    expect(fake.calls.some((c) => c.kind === "commit")).toBe(false);
   });
 
   it("記した番号が n より大きければ何も切らず、境の時刻も記さずに superseded_greater", async () => {

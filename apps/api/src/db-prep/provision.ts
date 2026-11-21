@@ -1,6 +1,6 @@
 import { PROGRESS_DB_IDENT_SHAPE } from "@nd-factory/contracts/db-prep";
-import { escapeIdentifier, escapeLiteral } from "pg";
-import { scramVerifier } from "./scram.ts";
+import { escapeIdentifier } from "pg";
+import { prepareRolePassword } from "./role-password.ts";
 import { ADMIN_DATABASE, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
 
 // プロジェクトと、そのデータベースと役割の名前。名前は API（#6）が無作為に作り、関数は口から読む
@@ -364,7 +364,8 @@ async function terminateSessions(
 }
 
 // docs/design/data.md の用意の手順の 1〜6。何度打っても、最後に渡したパスワードで同じ結果になる。
-// パスワードの平文は SQL の文にも引数にも載せず、SCRAM-SHA-256 の検証子を文に載せる（失敗した文は DB の側のログに書かれうるため）。
+// パスワードの平文は SQL の文にも引数にも載せず、SCRAM-SHA-256 の検証子も文の本文に載せない（失敗した文は DB の側のログに
+// 書かれうるため。role-password.ts）。
 // 取り消した権限は読み直して照らし、残っていれば役割に接続を与える前に投げる。
 // 毎回、どのデータベースでも今の権限の無い接続を切る。ほかのデータベースで PUBLIC が CONNECT を持つときは、
 // そこを PUBLIC から外して権限の無い接続を切り、何も作らずに投げる
@@ -375,7 +376,8 @@ export async function provisionProject(
 ): Promise<void> {
   assertIdent(project);
   // 文を打つ前に作る。印字できない文字のパスワードはここで投げ、何も打たない
-  const verifier = escapeLiteral(scramVerifier(project.password));
+  const createRole = prepareRolePassword(project.role, project.password, "create_login");
+  const alterRole = prepareRolePassword(project.role, project.password, "alter_login");
   const db = escapeIdentifier(project.database);
   const role = escapeIdentifier(project.role);
   const inProject = { database: project.database };
@@ -428,11 +430,9 @@ export async function provisionProject(
 
   // 6. 役割を作るか（作り直しなら）パスワードを書き直し、専用のスキーマと search_path を置き、最後に接続と一時表を与える。
   // ALTER ROLE は SUPERUSER などの属性を書かない（属性を変えるには superuser が要り、Aurora の管理の役割は superuser でない）
-  if (await readFlag(sql, ROLE_EXISTS, "found", roleParam, ADMIN)) {
-    await sql.execute(`ALTER ROLE ${role} WITH LOGIN PASSWORD ${verifier}`, undefined, ADMIN);
-  } else {
-    await sql.execute(`CREATE ROLE ${role} WITH LOGIN PASSWORD ${verifier}`, undefined, ADMIN);
-  }
+  // 検証子はトランザクションの中だけの設定に置いて渡すため、1 つのトランザクションで打つ
+  const roleExists = await readFlag(sql, ROLE_EXISTS, "found", roleParam, ADMIN);
+  await inTransaction(sql, ADMIN_DATABASE, (opts) => (roleExists ? alterRole : createRole)(sql, opts));
   // スキーマをその役割の持ち物にするには、superuser でない管理の役割はその役割へ SET ROLE できる所属が要る。
   // PostgreSQL 16 で CREATE ROLE の作り手に付くのは ADMIN OPTION だけのため、SET を明示して与える（作り直しでも打つ。
   // 既にあれば何も変えない）。INHERIT は付けず、管理の役割がプロジェクトの役割の権限を受け継がないようにする

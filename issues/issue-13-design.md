@@ -157,14 +157,15 @@ graph TD
 | `dbPrepInvocation` | API と見回り → 関数（`Invoke` の `InvocationType: Event`） | `prep_id`（用意の ID）・`project_id`・`kind`（`create` か `rotate`）・`rotation_seq`（`rotate` だけ。番号 n）。パスワード・管理の値・データベースと役割の名前を載せない |
 | `dbPrepOutcome` | 関数 → 終わりの記録の口 | `result`（`applied`・`rotation_superseded`・`failed`）・`recorded_seq`（`rotation_superseded` だけ。DB に記してあった番号）・`reason`（`failed` だけ。下の表） |
 
-関数は SQL の前に、終わりの記録の口（`PrepCompletionPort`）の `isCurrent(prep_id)` で用意の ID が今の値であることを読み、違えば何もせずに終える（[全体の設計の決定 96](../docs/design/platform.md#決定の記録)）。データベースと役割の名前と秘密の器の名前は口の `readTarget(project_id)` でプロジェクトの行から読み、新しいパスワードは、口が同じ行から返す秘密の器の版の ID（`progress_db_secret_version`）で、その版の URL から読む（ラベルの `AWSPENDING` では読まない）。SQL の結果が `applied` か記した番号 = n の `rotation_superseded` なら、関数はその版へ `AWSCURRENT` を移して読み直し、その後に口の `record` へ呼び出しと結果と版の ID を渡して記す。口は用意の ID・差し替えの番号・版の ID が今の値と合うときだけ書く条件つきの書き込みで、合わなければ書かずに `mismatch` を返す。秘密の器の版とサービスの表を 1 つの書き込みにできないため、この順で、保留を下ろす前に `AWSCURRENT` が結んだ版にあるようにする（[データの文書のパスワードの版](../docs/design/data.md#パスワードの版)）。口の実装（プロジェクトのモジュールの操作）は #6 が作る。
+関数は SQL の前に、終わりの記録の口（`PrepCompletionPort`）の `isCurrent(project_id, prep_id)` で、そのプロジェクトの行（プロジェクトの表の主キーはプロジェクトの ID で、用意の ID は行の属性）を強い整合で読み、行の用意の ID が今の値であることを照らし、違えば何もせずに終える（[全体の設計の決定 96](../docs/design/platform.md#決定の記録)）。データベースと役割の名前と秘密の器の名前は口の `readTarget(project_id)` でプロジェクトの行から読み、新しいパスワードは、口が同じ行から返す秘密の器の版の ID（`progress_db_secret_version`）で、その版の URL から読む（ラベルの `AWSPENDING` では読まない）。SQL の結果が `applied` か記した番号 = n の `rotation_superseded` なら、関数はその版へ `AWSCURRENT` を移して読み直し（差し替えでは、古い接続を切るトランザクションの中で差し替えの鎖を持ったまま移し、重なった古い番号の呼び出しが新しい版から古い版へ戻せないようにする。移した直後の読みは結果整合で移す前を返しうるため、移しは打ち直さずに期限まで読み直す）、その後に口の `record` へ呼び出しと結果と版の ID を渡して記す。口は用意の ID・差し替えの番号・版の ID が今の値と合うときだけ書く条件つきの書き込みで、合わなければ書かずに `mismatch` を返す。秘密の器の版とサービスの表を 1 つの書き込みにできないため、この順で、保留を下ろす前に `AWSCURRENT` が結んだ版にあるようにする（[データの文書のパスワードの版](../docs/design/data.md#パスワードの版)）。口の実装（プロジェクトのモジュールの操作）は #6 が作る。
 
 | `reason` | 起きたこと |
 | --- | --- |
 | `data_api_unavailable` | Data API の再開の待ち（`DatabaseResumingException`）が再試行の後も続いた |
 | `guard_conflict` | データベースか役割が、別のプロジェクトの結び付きに記されていた、または別の役割・別のデータベースへ結ばれていた（I10） |
-| `connections_remain` | 役割の古い接続（境の時刻より前に始まった接続）を切った後も残っていた（I17） |
 | `sql_failed` | ほかの SQL の失敗 |
+
+役割の古い接続（境の時刻より前に始まった接続）を切った後も残っていたときは、`failed` を含めて終わりを記さずに関数の誤りで終え、保留を残して見回りの呼び直し（I22）に任せる（I17）。
 
 パスワード・URL・管理の値は、呼び出し・結果・ログ・合成の出力に出さない。
 
@@ -200,12 +201,12 @@ flowchart TD
     R -->|記した番号 < n| W[パスワードと番号 n を書く] --> K[境の時刻より前に始まった役割の接続だけを切り、残りを読む]
     R -->|記した番号 = n| K
     R -->|記した番号 > n| S[rotation_superseded]
-    K -->|残る| F3["failed: connections_remain"]
-    K -->|残らない| OK2[applied か rotation_superseded]
-    OK2 --> P
+    K -->|残る| E3[終わりを記さずに関数の誤りで終える]
+    K -->|残らない| P2[鎖を持ったまま結んだ版へ AWSCURRENT を移して読み直す]
+    P2 --> OK2[applied か rotation_superseded]
 ```
 
-結果は終わりの記録の口へ渡す。用意の ID を受け取りの表へ記せた後の段で Data API の呼び出しが再開の待ちを超えたら、`failed`・`data_api_unavailable` を渡す。受け取りの段（`claimPrepRun`）で再開の待ちを超えたか、確定の応答が届かず記せたかを確かめられないときは、`failed` も記さずに関数の誤りで終え、期限の後の見回りに委ねる。同じ用意の ID のもう一方の配信が受け取って DDL を打っている間に、こちらの `failed` が作成を `無い` へ戻し、次の開始と重なるのを防ぐためである。名前・秘密の器を読めないとき・結んだ版へ `AWSCURRENT` を移せないとき・口の呼び出しが失敗したときは、終わりを記さずに関数の誤りで終え、見回りが期限の後に扱う（自動の再試行は 0 回）。版を移した後に記せずに落ちても、呼び直しは同じ版を読み、移し済みを読み直してから記す。
+結果は終わりの記録の口へ渡す。用意の ID を受け取りの表へ記せた後の段で Data API の呼び出しが再開の待ちを超えたら、`failed`・`data_api_unavailable` を渡す。受け取りの段（`claimPrepRun`）で再開の待ちを超えたか、確定の応答が届かず記せたかを確かめられないときは、`failed` も記さずに関数の誤りで終え、期限の後の見回りに委ねる。同じ用意の ID のもう一方の配信が受け取って DDL を打っている間に、こちらの `failed` が作成を `無い` へ戻し、次の開始と重なるのを防ぐためである。名前・秘密の器を読めないとき・結んだ版へ `AWSCURRENT` を移せないとき・差し替えで古い接続が残ったとき・口の呼び出しが失敗したときは、終わりを記さずに関数の誤りで終え、見回りが期限の後に扱う（自動の再試行は 0 回）。版を移した後に記せずに落ちても、呼び直しは同じ版を読み、移し済みを読み直してから記す。
 
 差し替えで切るのは「古い接続」だけである。古い接続とは、番号 n のパスワードを書いたトランザクションが確定した後に記す境の時刻より前に始まった、その役割の接続をいう。同じ番号 n の呼び直しが先に終わりを記して保留が下り、新しいパスワードでレーンが接続を始めた後に、時間切れの守り（全体の設計の決定 96）が外れて遅れた前の呼び出しが切りに来ても、新しい接続は境の時刻より後に始まっているため切られない。境の時刻は、どの呼び出しも終わりを記す前に必ず記す（切りの段で記されていなければ記す）ため、保留が下りる前に定まる（詳細設計の「並行と排他」）。境の時刻は [差し替えの番号](../docs/design/data.md#差し替えの番号) の表に足す 1 列で、読み書きするのは DB の用意の関数だけである（表の置き場・書き手・読み手は変えない）。
 
@@ -443,7 +444,7 @@ flowchart TD
 | Docker の前提 | `diff` を打つ端末と準備のアクションに Docker が要る。無ければ `diff` が合成の前に止まる（終了コード 6） |
 | `setup.md` と終了コード | 前提の表に Docker と、profile に要る ECR の許しを足す。終了コード 0・5・6 の「AWS へ書いたか」を自前の ECR への push に合わせる（`packages/contracts/data/exit-codes.json`） |
 | DB の用意の関数を呼ぶ側 | 用意の ID と新しい版の ID を条件つきの書き込みで置き、勝ったときだけ秘密の器へその版の ID でパスワードを入れ、`Invoke`（`InvocationType: Event`）で `dbPrepInvocation` を渡す（[データの文書のパスワードの版](../docs/design/data.md#パスワードの版)）。負けた要求は秘密の器へ書かない。差し替えの呼び直しの前に、見回りは結んだ版が秘密の器にあるかを読み、無ければ同じ版の ID で新しいパスワードを入れる（見回りの役割に `secretsmanager:DescribeSecret`・`PutSecretValue` を `<prefix>/<environment>/progress-db/*` に許す）。#6 のテストは、同じプロジェクトの 2 つの開始を並べて、負けた方が `PutSecretValue` を呼ばないことを照らす。呼べるのは API の関数と見回りの関数だけ（`lambda:InvokeFunction` を許す） |
-| 終わりの記録の口 | `PrepCompletionPort`（`isCurrent`・`readTarget`・`record`）を、プロジェクトのモジュールの 3 つの処理（`db_prep.is_current`・`db_prep.read_target`・`db_prep.record`。[API の文書の DB の用意の関数の処理](../docs/design/api.md#ランナー手元のマシンの-http-の経路)）で作り、`apps/api/src/entries/db-prep.ts` で渡す。3 つとも認可の判定と操作の記録の書き手を通す。口をつなぐまで、#13 の版の `handler` は呼ばれたら投げる口を渡し、関数を呼ぶ側も無いため誰も呼ばない |
+| 終わりの記録の口 | `PrepCompletionPort`（`isCurrent`・`readTarget`・`record`）を、プロジェクトのモジュールの 3 つの処理（`db_prep.is_current`・`db_prep.read_target`・`db_prep.record`。[API の文書の DB の用意の関数の処理](../docs/design/api.md#ランナー手元のマシンの-http-の経路)）で作り、`apps/api/src/entries/db-prep.ts` で渡す。`isCurrent(projectId, prepId)` はプロジェクトの表を `project_id` の `GetItem` で強い整合で読み、その行の用意の ID と照らす（許された `GetItem` で行を特定でき、認可もそのプロジェクトに限れる）。3 つとも認可の判定と操作の記録の書き手を通す。口をつなぐまで、#13 の版の `handler` は呼ばれたら投げる口を渡し、関数を呼ぶ側も無いため誰も呼ばない |
 | 口が要る DynamoDB の権限 | 口をつなぐ同じ変更で、`AppStack` から `DbPrepFunction.grantCompletionAccess` をプロジェクトの表と操作の記録の表で呼ぶ。許すのはプロジェクトの表への `GetItem`・`UpdateItem`・`ConditionCheckItem` と、操作の記録の表への `PutItem` だけ（詳細設計の「DB の用意の関数の資源」）。`DbPrepFunction` の合成のテストの DynamoDB の期待を、`AppStack` の合成の出力で照らす形へ移す |
 | 見回り | 作成の時間切れ（I18）と差し替えの呼び直し（I22）。期限 15 分・間隔 5 分・呼び直しの上限 3 回（決定 9） |
 | ランナーのタスクの大きさ | 1 vCPU・2 GB・x86_64・一時の保存 20 GiB（決定 5） |

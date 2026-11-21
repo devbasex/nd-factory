@@ -147,10 +147,41 @@ describe("promoteVersion", () => {
     expect(fake.calls).toHaveLength(1);
   });
 
-  it("読み直しで付いていなければ投げる", async () => {
+  it("読み直しが期限まで付いていないままなら、移しを打ち直さずに投げる", async () => {
     const fake = stagesFake({ [OLD_VERSION]: ["AWSCURRENT"], [VERSION]: ["AWSPENDING"] }, { moves: false });
-    await expect(promoteVersion(fake.asClient(), SECRET, VERSION)).rejects.toThrow("AWSCURRENT を移せなかった");
+    let t = 0;
+    const waits: number[] = [];
+    const options = {
+      now: () => t,
+      sleep: async (ms: number) => {
+        waits.push(ms);
+        t += ms;
+      },
+    };
+    await expect(promoteVersion(fake.asClient(), SECRET, VERSION, options)).rejects.toThrow("AWSCURRENT を移せなかった");
     expect(fake.updates()).toHaveLength(1);
+    // 既定の期限 20 秒まで、250 ms から 2 秒まで倍にして読み直し、期限を越えて待たない
+    expect(t).toBe(20_000);
+    expect(waits.slice(0, 5)).toEqual([250, 500, 1_000, 2_000, 2_000]);
+    expect(fake.calls.at(-1)).toBeInstanceOf(DescribeSecretCommand);
+  });
+
+  it("移した直後の読みが移す前を返しても（結果整合）、移しを打ち直さずに読み直して確かめる", async () => {
+    const fake = stagesFake({ [OLD_VERSION]: ["AWSCURRENT"], [VERSION]: ["AWSPENDING"] });
+    const inner = fake.handle;
+    let describes = 0;
+    fake.handle = (cmd) => {
+      // 移した後の 1・2 回目の読みは、移す前の状態を返す
+      if (cmd instanceof DescribeSecretCommand && (describes += 1) > 1 && describes <= 3) {
+        return { VersionIdsToStages: { [OLD_VERSION]: ["AWSCURRENT"], [VERSION]: ["AWSPENDING"] } };
+      }
+      return inner(cmd);
+    };
+    const waits: number[] = [];
+    await promoteVersion(fake.asClient(), SECRET, VERSION, { now: () => 0, sleep: async (ms) => void waits.push(ms) });
+    expect(fake.updates()).toHaveLength(1);
+    expect(describes).toBe(4);
+    expect(waits).toEqual([250, 500]);
   });
 
   it("移しが投げれば、そのまま投げる", async () => {
