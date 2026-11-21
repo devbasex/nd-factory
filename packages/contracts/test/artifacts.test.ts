@@ -22,6 +22,18 @@ import { awsAccountId, money } from "../src/values.ts";
 import { FIXTURE_CREATE, FIXTURE_LIST, FIXTURE_OPERATIONS } from "./fixtures/operations.ts";
 
 const ALL: readonly OperationDef[] = [...OPERATIONS, ...FIXTURE_OPERATIONS];
+
+// buildOpenApi の components.schemas のうち、再帰しない形（$defs の値に $ref を持たない形。z.toJSONSchema は再帰だけを $ref で出す）が $defs と同じ値か。
+// 再帰する形は zod-openapi が再帰を components.schemas の別の名前（__schemaN）へ切り出すため照らさず、件数も数えない
+function expectFlatSchemasMatchDefs(ops: readonly OperationDef[]): void {
+  const schemas = buildOpenApi(ops).components?.schemas ?? {};
+  const defs = buildOperationSchemas(ops).$defs;
+  const names = ops.filter((op) => op.endpoint === "user").flatMap((op) => [`${op.name}.item`, `${op.name}.result`]);
+  expect(Object.keys(schemas)).toEqual(expect.arrayContaining(names));
+  const flat = names.filter((name) => !JSON.stringify(defs[name]).includes('"$ref"'));
+  expect(flat.length).toBeGreaterThan(0);
+  for (const name of flat) expect(schemas[name], name).toEqual(defs[name]);
+}
 const UUID_V7 = "01935b4e-7c2a-7d10-8f3e-2b6f0c9a1d42";
 
 // 見本を書いた操作。値の形と作り物の値の決まりを照らす
@@ -365,6 +377,10 @@ describe("自分へ戻る形の $ref", () => {
     expect((node as z.ZodType).safeParse(bad).success).toBe(false);
   });
 
+  it("再帰する形を操作の表に足しても、再帰しない形の $defs との一致の照らしは通る", () => {
+    expectFlatSchemasMatchDefs([...ALL, op]);
+  });
+
   it("MCP の道具の outputSchema は単独の文書として参照が解ける", () => {
     const [tool] = buildMcpTools([op], doc);
     const validate = new Ajv2020({ strict: true, validateFormats: false }).compile(tool!.outputSchema);
@@ -375,15 +391,11 @@ describe("自分へ戻る形の $ref", () => {
 
 describe("buildOpenApi", () => {
   const doc = buildOpenApi(ALL);
-  const defs = buildOperationSchemas(ALL).$defs;
 
-  // 操作の表の形は再帰しない。再帰する形は zod-openapi が components.schemas の __schemaN へ切り出し一致しないため、「自分へ戻る形の $ref」で参照の解けと合否を照らす
-  it("OpenAPI 3.1.1 で、components.schemas の各値が operations.schema.json の同じ名前の $defs と一致する（zod-openapi と z.toJSONSchema の差を拾う）", () => {
+  // 再帰する形は zod-openapi が components.schemas の __schemaN へ切り出し一致しないため、「自分へ戻る形の $ref」で参照の解けと合否を照らす
+  it("OpenAPI 3.1.1 で、再帰しない形の components.schemas の各値が operations.schema.json の同じ名前の $defs と一致する（zod-openapi と z.toJSONSchema の差を拾う）", () => {
     expect(doc.openapi).toBe("3.1.1");
-    const schemas = doc.components?.schemas ?? {};
-    const names = Object.keys(schemas).filter((n) => n !== "problem");
-    expect(names.length).toBe(ALL.filter((op) => op.endpoint === "user").length * 2);
-    for (const name of names) expect(schemas[name], name).toEqual(defs[name]);
+    expectFlatSchemasMatchDefs(ALL);
   });
 
   it("受け口 user の操作だけを POST で持ち、形の未定は not の形", () => {
