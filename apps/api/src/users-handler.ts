@@ -1,4 +1,6 @@
+// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- #2 が横断の部品へ移す
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- #2 が横断の部品へ移す
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import {
   STORE_UNAVAILABLE,
@@ -86,6 +88,8 @@ let sharedClient: DynamoDBDocumentClient | undefined;
 export const handler = createHandler({
   client: () => (sharedClient ??= DynamoDBDocumentClient.from(new DynamoDBClient({}))),
   table: () => process.env.USERS_TABLE,
+  // eslint-disable-next-line no-restricted-syntax -- #2 が横断の部品へ移す
   now: () => new Date(),
+  // eslint-disable-next-line no-restricted-globals -- #2 が横断の部品へ移す
   log: (line) => console.log(line),
 });

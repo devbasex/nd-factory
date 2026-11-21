@@ -1,0 +1,29 @@
+{
+  "owner": "D2（contracts/domains）",
+  "summary": "固定の点 752a9cf の entrypoints.json のうち、テストが照らす口の行の id・kind・target・env（ほかの列と行は写さない）",
+  "columns": [
+    "id",
+    "kind",
+    "target",
+    "env"
+  ],
+  "rows": [
+    {
+      "id": "skill-workflow",
+      "kind": "skill",
+      "target": "development-workflow",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_LOOP_EXCLUDE",
+        "NDF_ISSUE_REQUEST_FILE",
+        "NDF_MVV_STATE_DIR",
+        "NDF_PROGRESS_DB",
+        "NDF_ORGANIZER_DIR",
+        "NDF_ORGANIZER_LANE",
+        "GH_TOKEN"
+      ]
+    }
+  ]
+}

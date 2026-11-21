@@ -89,6 +89,53 @@ export class AppStack extends Stack {
     const webOrigin = `https://${distribution.distributionDomainName}`;
     const webRoot = `${webOrigin}/`;
 
+    const { userPool, client } = this.addLogin(names, clientId, webRoot);
+
+    // API。認証の無い要求は JWT の認可で拒み、Lambda を起こさない
+    const authorizer = new HttpJwtAuthorizer("Jwt", `https://cognito-idp.${this.region}.amazonaws.com/${userPool.userPoolId}`, {
+      authorizerName: names.jwtAuthorizer,
+      jwtAudience: [client.userPoolClientId],
+    });
+    const api = new HttpApi(this, "Api", {
+      apiName: names.api,
+      corsPreflight: {
+        allowOrigins: [webOrigin],
+        allowMethods: [CorsHttpMethod.PUT],
+        allowHeaders: ["authorization", "content-type"],
+        maxAge: Duration.hours(1),
+      },
+    });
+    api.addRoutes({
+      // eslint-disable-next-line no-restricted-syntax -- #4 が置き換える
+      path: "/v1/users",
+      methods: [HttpMethod.PUT],
+      integration: new HttpLambdaIntegration("UsersIntegration", fn),
+      authorizer,
+    });
+
+    this.webConfig = {
+      api_url: api.apiEndpoint,
+      authority: loginDomainUrl(s, this.region),
+      client_id: client.userPoolClientId,
+      // Google のクライアントの ID が入るまでは、画面はログインへ送らずに設定の待ちを示す
+      login_ready: clientId !== undefined,
+    };
+
+    new BucketDeployment(this, "WebDeployment", {
+      sources: [Source.asset(props.webDistPath), Source.jsonData("config.json", this.webConfig)],
+      destinationBucket: webBucket,
+      distribution,
+      distributionPaths: ["/*"],
+    });
+
+    new CfnOutput(this, "WebUrl", { value: webRoot });
+    new CfnOutput(this, "ApiUrl", { value: api.apiEndpoint });
+
+    applyTags(this, s);
+  }
+
+  // Google の secret の器・利用者プール・Google の IdP・画面のクライアントを作る
+  private addLogin(names: ReturnType<typeof appResourceNames>, clientId: string | undefined, webRoot: string) {
     // Google の secret の器。値は自動で作り、人が本物の値で上書きする。生成の設定と名前は設定の値で変えない
     // （変えると器に新しい版ができ、人が入れた値を上書きしたかを版で見分けられなくなる）
     const googleSecret = new Secret(this, "GoogleOAuthSecret", {
@@ -130,46 +177,6 @@ export class AppStack extends Stack {
       },
     });
     if (google) client.node.addDependency(google);
-
-    // API。認証の無い要求は JWT の認可で拒み、Lambda を起こさない
-    const authorizer = new HttpJwtAuthorizer("Jwt", `https://cognito-idp.${this.region}.amazonaws.com/${userPool.userPoolId}`, {
-      authorizerName: names.jwtAuthorizer,
-      jwtAudience: [client.userPoolClientId],
-    });
-    const api = new HttpApi(this, "Api", {
-      apiName: names.api,
-      corsPreflight: {
-        allowOrigins: [webOrigin],
-        allowMethods: [CorsHttpMethod.PUT],
-        allowHeaders: ["authorization", "content-type"],
-        maxAge: Duration.hours(1),
-      },
-    });
-    api.addRoutes({
-      path: "/v1/users",
-      methods: [HttpMethod.PUT],
-      integration: new HttpLambdaIntegration("UsersIntegration", fn),
-      authorizer,
-    });
-
-    this.webConfig = {
-      api_url: api.apiEndpoint,
-      authority: loginDomainUrl(s, this.region),
-      client_id: client.userPoolClientId,
-      // Google のクライアントの ID が入るまでは、画面はログインへ送らずに設定の待ちを示す
-      login_ready: clientId !== undefined,
-    };
-
-    new BucketDeployment(this, "WebDeployment", {
-      sources: [Source.asset(props.webDistPath), Source.jsonData("config.json", this.webConfig)],
-      destinationBucket: webBucket,
-      distribution,
-      distributionPaths: ["/*"],
-    });
-
-    new CfnOutput(this, "WebUrl", { value: webRoot });
-    new CfnOutput(this, "ApiUrl", { value: api.apiEndpoint });
-
-    applyTags(this, s);
+    return { userPool, client };
   }
 }
