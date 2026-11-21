@@ -2,7 +2,7 @@ import { App, type CfnElement, CfnResource, RemovalPolicy } from "aws-cdk-lib";
 import { Template } from "aws-cdk-lib/assertions";
 import { AttributeType, TableV2 } from "aws-cdk-lib/aws-dynamodb";
 import { CfnNatGateway, CfnSecurityGroupIngress, Peer, Port } from "aws-cdk-lib/aws-ec2";
-import { CfnService } from "aws-cdk-lib/aws-ecs";
+import { CfnService, CfnTaskSet } from "aws-cdk-lib/aws-ecs";
 import { ManagedPolicy, Policy, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { CfnFunction } from "aws-cdk-lib/aws-lambda";
 import { CfnDBInstance } from "aws-cdk-lib/aws-rds";
@@ -144,6 +144,16 @@ describe("stackRuleViolations", () => {
       cidrIp: "0.0.0.0/0",
     });
     expect(stackRuleViolations(Template.fromStack(stack))).toEqual([{ rule: "task_ingress", id: idOf(stack, ingress) }]);
+  });
+
+  it("タスクセットを 1 つ足しても ecs_service に当たる", () => {
+    const stack = newStack();
+    const taskSet = new CfnTaskSet(stack, "BadTaskSet", {
+      cluster: "example-cluster",
+      service: "example-service",
+      taskDefinition: "arn:aws:ecs:ap-northeast-1:123456789012:task-definition/example:1",
+    });
+    expect(stackRuleViolations(Template.fromStack(stack))).toEqual([{ rule: "ecs_service", id: idOf(stack, taskSet) }]);
   });
 
   it("タスクの役割へ付く別の方針の資源も task_role_statement に当たる", () => {
