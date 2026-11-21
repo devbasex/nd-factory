@@ -1,3 +1,14 @@
+import type { AnyRowCodec } from "./row-codec.ts";
+import { answerCodec, approvalCodec, questionCodec } from "./rows/decisions.ts";
+import { assignmentCodec, githubTokenCodec, projectCodec, repositoryCodec } from "./rows/projects.ts";
+import { auditCodec } from "./rows/audit.ts";
+import { costRecordCodec } from "./rows/usage.ts";
+import { cognitoSubjectCodec, delegationCodec, loginCodec, loginLinkCodec, loginSubjectCodec, sessionRevocationCodec, userCodec } from "./rows/users.ts";
+import { destinationCodec, noticeCodec } from "./rows/notices.ts";
+import { idempotencyCodec } from "./rows/idempotency.ts";
+import { invitationCodec, machineCodec, seatCodec, teamCodec, usageMonthCodec } from "./rows/teams.ts";
+import { laneCodec, segmentCodec, sprintCodec } from "./rows/sprints.ts";
+import { progressEventCodec } from "./rows/events.ts";
 import { TTL_ATTRIBUTE } from "./rows/common.ts";
 
 // サービスの 10 の表の仕様（docs/design/data.md の「表と鍵」、issues/issue-2-design-detail.md の「サービスの表」、決定 8）。
@@ -24,6 +35,7 @@ export type IndexSpec = {
 export type RowSpec = {
   readonly name: string;
   readonly skPattern: RegExp | null;
+  readonly codec: AnyRowCodec;
   readonly writes: RowWrites;
 };
 
@@ -86,24 +98,24 @@ export const TABLES = defineTables([
     // ログインをつなぐ流れの行とセッションの取り消しの行が TTL で消える
     ttl: true,
     rows: [
-      { name: "user", skPattern: /^USER$/, writes: "overwrite" },
-      { name: "login_subject", skPattern: /^LOGIN$/, writes: "create_delete" },
-      { name: "cognito_subject", skPattern: /^COGNITO$/, writes: "overwrite" },
-      { name: "session_revocation", skPattern: new RegExp(`^REVOKED#${ID}$`), writes: "append" },
-      { name: "login_link", skPattern: new RegExp(`^LINK#${ID}$`), writes: "advance_state" },
-      { name: "login", skPattern: new RegExp(`^LOGIN#${ID}#.+$`), writes: "create_delete" },
-      { name: "delegation", skPattern: new RegExp(`^DELEGATION#${ID}$`), writes: "overwrite" },
+      { name: "user", skPattern: /^USER$/, codec: userCodec, writes: "overwrite" },
+      { name: "login_subject", skPattern: /^LOGIN$/, codec: loginSubjectCodec, writes: "create_delete" },
+      { name: "cognito_subject", skPattern: /^COGNITO$/, codec: cognitoSubjectCodec, writes: "overwrite" },
+      { name: "session_revocation", skPattern: new RegExp(`^REVOKED#${ID}$`), codec: sessionRevocationCodec, writes: "append" },
+      { name: "login_link", skPattern: new RegExp(`^LINK#${ID}$`), codec: loginLinkCodec, writes: "advance_state" },
+      { name: "login", skPattern: new RegExp(`^LOGIN#${ID}#.+$`), codec: loginCodec, writes: "create_delete" },
+      { name: "delegation", skPattern: new RegExp(`^DELEGATION#${ID}$`), codec: delegationCodec, writes: "overwrite" },
     ],
   }),
   table("teams", {
     // 主体が席を持つチームの候補（ScopeReader.seatsOf）。db-teams で user_id の列を持つのは席の行だけ
     indexes: [{ name: "user-seats", partitionKey: "user_id", sortKey: "team_id", projection: ["role"] }],
     rows: [
-      { name: "team", skPattern: /^TEAM$/, writes: "overwrite" },
-      { name: "seat", skPattern: new RegExp(`^SEAT#${ID}$`), writes: "overwrite" },
-      { name: "invitation", skPattern: new RegExp(`^INVITE#${ID}$`), writes: "overwrite" },
-      { name: "machine", skPattern: new RegExp(`^MACHINE#${ID}$`), writes: "overwrite" },
-      { name: "usage_month", skPattern: /^USAGE#\d{4}-\d{2}$/, writes: "overwrite" },
+      { name: "team", skPattern: /^TEAM$/, codec: teamCodec, writes: "overwrite" },
+      { name: "seat", skPattern: new RegExp(`^SEAT#${ID}$`), codec: seatCodec, writes: "overwrite" },
+      { name: "invitation", skPattern: new RegExp(`^INVITE#${ID}$`), codec: invitationCodec, writes: "overwrite" },
+      { name: "machine", skPattern: new RegExp(`^MACHINE#${ID}$`), codec: machineCodec, writes: "overwrite" },
+      { name: "usage_month", skPattern: /^USAGE#\d{4}-\d{2}$/, codec: usageMonthCodec, writes: "overwrite" },
     ],
   }),
   table("projects", {
@@ -111,47 +123,50 @@ export const TABLES = defineTables([
     // チームに今割り当てたプロジェクトの候補（projectsOfTeams）。current_team_id のあるプロジェクトの行だけが載る
     indexes: [{ name: "team-projects", partitionKey: "current_team_id", sortKey: "project_id", projection: ["name", "current_assign_id"] }],
     rows: [
-      { name: "project", skPattern: /^PROJECT$/, writes: "overwrite" },
-      { name: "repository", skPattern: new RegExp(`^REPO#${ID}$`), writes: "overwrite" },
-      { name: "assignment", skPattern: new RegExp(`^ASSIGN#${ID}#${ID}$`), writes: "append" },
-      { name: "github_token", skPattern: new RegExp(`^GHTOKEN#${ID}#${ID}#\\d+$`), writes: "append" },
+      { name: "project", skPattern: /^PROJECT$/, codec: projectCodec, writes: "overwrite" },
+      { name: "repository", skPattern: new RegExp(`^REPO#${ID}$`), codec: repositoryCodec, writes: "overwrite" },
+      { name: "assignment", skPattern: new RegExp(`^ASSIGN#${ID}#${ID}$`), codec: assignmentCodec, writes: "append" },
+      { name: "github_token", skPattern: new RegExp(`^GHTOKEN#${ID}#${ID}#\\d+$`), codec: githubTokenCodec, writes: "append" },
     ],
   }),
   table("sprints", {
     rows: [
-      { name: "segment", skPattern: new RegExp(`^SPRINT#${ID}#LANE#${ID}#SEG#\\d+$`), writes: "overwrite" },
-      { name: "lane", skPattern: new RegExp(`^SPRINT#${ID}#LANE#${ID}$`), writes: "overwrite" },
-      { name: "sprint", skPattern: new RegExp(`^SPRINT#${ID}$`), writes: "overwrite" },
+      { name: "segment", skPattern: new RegExp(`^SPRINT#${ID}#LANE#${ID}#SEG#\\d+$`), codec: segmentCodec, writes: "overwrite" },
+      { name: "lane", skPattern: new RegExp(`^SPRINT#${ID}#LANE#${ID}$`), codec: laneCodec, writes: "overwrite" },
+      { name: "sprint", skPattern: new RegExp(`^SPRINT#${ID}$`), codec: sprintCodec, writes: "overwrite" },
     ],
   }),
   table("events", {
-    rows: [{ name: "progress_event", skPattern: /^SEQ#\d+$/, writes: "append" }],
+    rows: [{ name: "progress_event", skPattern: /^SEQ#\d+$/, codec: progressEventCodec, writes: "append" }],
   }),
   table("decisions", {
     // 見えるプロジェクトの待っているもの。古い順。waiting_since のある依頼と問いだけが載る（答えの行は持たない）
     indexes: [{ name: "waiting", partitionKey: "project_id", sortKey: "waiting_since", projection: ["sprint_id", "lane_id", "gate", "category"] }],
     rows: [
-      { name: "answer", skPattern: new RegExp(`^(APPROVAL|QUESTION)#${ID}#ANSWER#${ID}$`), writes: "append" },
-      { name: "approval", skPattern: new RegExp(`^APPROVAL#${ID}$`), writes: "overwrite" },
-      { name: "question", skPattern: new RegExp(`^QUESTION#${ID}$`), writes: "overwrite" },
+      { name: "answer", skPattern: new RegExp(`^(APPROVAL|QUESTION)#${ID}#ANSWER#${ID}$`), codec: answerCodec, writes: "append" },
+      { name: "approval", skPattern: new RegExp(`^APPROVAL#${ID}$`), codec: approvalCodec, writes: "overwrite" },
+      { name: "question", skPattern: new RegExp(`^QUESTION#${ID}$`), codec: questionCodec, writes: "overwrite" },
     ],
   }),
   table("notices", {
     rows: [
-      { name: "notice", skPattern: new RegExp(`^NOTICE#${ID}#${ID}$`), writes: "overwrite" },
-      { name: "destination", skPattern: new RegExp(`^DEST#${ID}$`), writes: "overwrite" },
+      { name: "notice", skPattern: new RegExp(`^NOTICE#${ID}#${ID}$`), codec: noticeCodec, writes: "overwrite" },
+      { name: "destination", skPattern: new RegExp(`^DEST#${ID}$`), codec: destinationCodec, writes: "overwrite" },
     ],
   }),
   table("usage", {
-    rows: [{ name: "cost_record", skPattern: /^COST#.+$/, writes: "append" }],
+    rows: [{ name: "cost_record", skPattern: /^COST#.+$/, codec: costRecordCodec, writes: "append" }],
   }),
   table("audit", {
     ttl: true,
-    rows: [{ name: "audit", skPattern: /^\d{4}-\d{2}-\d{2}T.+$/, writes: "append" }],
+    rows: [{ name: "audit", skPattern: /^\d{4}-\d{2}-\d{2}T.+$/, codec: auditCodec, writes: "append" }],
   }),
   table("idempotency", {
     sortKey: false,
     ttl: true,
-    rows: [{ name: "idempotency", skPattern: null, writes: "settle_once" }],
+    rows: [{ name: "idempotency", skPattern: null, codec: idempotencyCodec, writes: "settle_once" }],
   }),
 ]);
+
+// 行の種類の名前から RowCodec を引く
+export const ROW_CODECS: Readonly<Record<string, AnyRowCodec>> = Object.fromEntries(Object.values(TABLES).flatMap((t) => t.rows.map((r) => [r.name, r.codec])));

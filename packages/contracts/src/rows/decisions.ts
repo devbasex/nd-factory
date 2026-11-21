@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rowCodec } from "../row-codec.ts";
 import { idOf } from "../ids.ts";
 import { utcDateTime } from "../values.ts";
 import { identifier, overwriteRow, type RowKey, sha256Hex, uuid, versionlessRow } from "./common.ts";
@@ -90,3 +91,8 @@ export const answerKey = (row: AnswerRow): RowKey => ({
   pk: `PROJECT#${row.project_id}`,
   sk: `${row.parent_id.startsWith("apr_") ? "APPROVAL" : "QUESTION"}#${row.parent_id}#ANSWER#${row.answer_id}`,
 });
+
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
+export const approvalCodec = rowCodec({ latest: { version: 1, schema: approvalRow }, writeVersion: 1, keyOf: approvalKey });
+export const questionCodec = rowCodec({ latest: { version: 1, schema: questionRow }, writeVersion: 1, keyOf: questionKey });
+export const answerCodec = rowCodec({ latest: { version: 1, schema: answerRow }, writeVersion: 1, keyOf: answerKey });

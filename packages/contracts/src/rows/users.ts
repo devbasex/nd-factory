@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rowCodec } from "../row-codec.ts";
 import { idOf } from "../ids.ts";
 import { languageTag, timeZone, utcDateTime } from "../values.ts";
 import { expireAt, overwriteRow, type RowKey, sha256Hex, uuid, versionlessRow } from "./common.ts";
@@ -128,3 +129,12 @@ export const delegationRow = overwriteRow(1, {
 });
 export type DelegationRow = z.infer<typeof delegationRow>;
 export const delegationKey = (row: DelegationRow): RowKey => ({ pk: `USER#${row.user_id}`, sk: `DELEGATION#${row.delegation_id}` });
+
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
+export const userCodec = rowCodec({ latest: { version: 1, schema: userRow }, writeVersion: 1, keyOf: userKey });
+export const loginCodec = rowCodec({ latest: { version: 1, schema: loginRow }, writeVersion: 1, keyOf: loginKey });
+export const loginSubjectCodec = rowCodec({ latest: { version: 1, schema: loginSubjectRow }, writeVersion: 1, keyOf: loginSubjectKey });
+export const cognitoSubjectCodec = rowCodec({ latest: { version: 1, schema: cognitoSubjectRow }, writeVersion: 1, keyOf: cognitoSubjectKey });
+export const sessionRevocationCodec = rowCodec({ latest: { version: 1, schema: sessionRevocationRow }, writeVersion: 1, keyOf: sessionRevocationKey });
+export const loginLinkCodec = rowCodec({ latest: { version: 1, schema: loginLinkRow }, writeVersion: 1, keyOf: loginLinkKey });
+export const delegationCodec = rowCodec({ latest: { version: 1, schema: delegationRow }, writeVersion: 1, keyOf: delegationKey });

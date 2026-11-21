@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rowCodec } from "../row-codec.ts";
 import { idOf, UUID_V7_PATTERN } from "../ids.ts";
 import { githubIssueRef, utcDateTime } from "../values.ts";
 import { identifier, inference, overwriteRow, place, reasonCode, type RowKey, SEQ_DIGITS, seqKey } from "./common.ts";
@@ -72,3 +73,8 @@ export const segmentKey = (row: SegmentRow): RowKey => ({
   pk: `PROJECT#${row.project_id}`,
   sk: `SPRINT#${row.sprint_id}#LANE#${row.lane_id}#SEG#${seqKey(row.seq)}`,
 });
+
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
+export const sprintCodec = rowCodec({ latest: { version: 1, schema: sprintRow }, writeVersion: 1, keyOf: sprintKey });
+export const laneCodec = rowCodec({ latest: { version: 1, schema: laneRow }, writeVersion: 1, keyOf: laneKey });
+export const segmentCodec = rowCodec({ latest: { version: 1, schema: segmentRow }, writeVersion: 1, keyOf: segmentKey });
