@@ -9,14 +9,14 @@
 ```text
 nd-factory/
 ├── eslint.config.js                       規則の組を読み込む
-├── package.json                           スクリプト leak-check・ndf-contract・route-check・test:integration・knip、開発の依存 knip
-├── knip.json                            * knip の入口と控え
+├── package.json                           スクリプト leak-check・ndf-contract・route-check・test:integration・knip、check に knip、開発の依存 knip
+├── knip.json                            * knip の入口（控えを持たない）
 ├── vitest.config.ts                       tools の組から *.integration.test.ts を外す
-├── vitest.integration.config.ts         * 実物の gitleaks を起こす結合のテストだけを読む
+├── vitest.integration.config.ts         * 実物の gitleaks と zizmor を起こす結合のテストだけを読む
 ├── .ndf/project.json                      必須のチェックに 2 つ足す
-├── AGENTS.md                              LEAK_CHECK_TERMS の行
+├── AGENTS.md                              LEAK_CHECK_TERMS の行・手元の確かめに knip
 ├── .github/workflows/
-│   ├── ci.yml                             ジョブ leak-check・workflow-audit を足す。synth に経路の照らし、check に knip を足す
+│   ├── ci.yml                             ジョブ leak-check・workflow-audit を足す。synth に経路の照らしを足す
 │   └── ndf-contract.yml                 * ジョブ ndf-contract
 ├── apps/api/test/
 │   └── dispatch-routes.test.ts          * Lambda の振り分けの経路と操作の表の照らし
@@ -31,6 +31,7 @@ nd-factory/
     │   ├── data/lint-exceptions.json    * 規則の控え（決定 5）
     │   ├── data/leak-allow.json         * 漏れの検査の外し（パス・規則・件数）
     │   ├── data/screen-pending.json     * I14 の画面の控え（操作の名前・画面を作る課題）
+    │   ├── data/zizmor.yml              * zizmor に明示して渡す設定（点検の例外の行だけ。最初は空）
     │   └── src/
     │       ├── lint-rules.ts            * ESLint の規則の組
     │       ├── leak-check.ts            * 漏れの検査（CLI）
@@ -42,6 +43,8 @@ nd-factory/
         ├── lint-rules.test.ts           *
         ├── leak-check.test.ts           *   gitleaks を起こさない単体のテスト（check で走る）
         ├── leak-check.integration.test.ts * 実物の gitleaks を起こす結合のテスト（leak-check で走る）
+        ├── workflow-audit.integration.test.ts * 実物の zizmor を起こす結合のテスト（workflow-audit で走る）
+        ├── knip-config.test.ts          *   knip の設定と check のスクリプトの照らし
         ├── deployed-routes.test.ts      *
         ├── round-trip.test.ts           *
         ├── operation-coverage.test.ts   *
@@ -258,7 +261,7 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | `mainLeakCheck`（`leak-check.integration.test.ts`。実物の gitleaks を起こす結合のテスト） | 種類ごとに当たり（違反の文字列は実行の時に組み立てる）、終了コード 1。無ければ 0 | 作り物の値・置き場所の記号・13 桁の数・16 進の中の 12 桁で当たらない。`docs/` の下のファイルで当たる。追跡していないファイルの値には当たらない。一時のディレクトリの名前か `/tmp` の途中に含まれる短い語（`tmp` と、`scanRoot` の名前の一部をテストの中で語にしたもの）を渡しても、相対パスにその語を含まないファイルは `nd-real-*` で当たらず、相対パスに含むファイルだけが当たる（今の木と履歴の両方）。既定の全体の許可が飛ばすパス（`package-lock.json` と、`.png` の拡張子のパス）に置いた語と形の値が、今の木と履歴の両方で `nd-real-<種類>` と `nd-<種類>-<id>` で当たる（`own` に `useDefault` を入れると落ちる）。`--base` を渡すと、途中のコミットで足して消した値が `leak-history:` で当たる。途中のコミットで内容を変えずに語を含む名前へ改名し、後のコミットで名前を戻した履歴が `leak-history:nd-real-path-<種類>` で当たる（gitleaks の `path` の規則だけでは当たらない）。マージコミット（競合を解くときに語を足す）で足し、後のコミットで消した語は `leak-history:nd-real-*` で当たる（`--diff-merges` を外すと落ちる）。main の側で形の値を足して消し、外しも消した後に、その main を Pull Request の枝へマージしたコミットの形の当たりは `leak-history:` で当たらない（マージコミットの当たりを捨てないと落ちる）。同じマージで main から来た語は `leak-history:nd-real-*` で当たる。分岐の後に基点の枝（main）で足して消した値は、マージした結果のコミットを作業の木の `HEAD` にした Pull Request でも `leak-history:` で当たらない（終点を `HEAD` にすると落ちる）。外したファイルを 2 つのコミットで触った Pull Request で、外した値が `leak-history:` で落ちない | 語の形の誤り・必須なのに無い・gitleaks が無いで 2。`--base` だけ・`--head` だけを渡すと、gitleaks を起こす前に 2。`--base` に読めない SHA（どのオブジェクトでもない 40 桁）を渡すと 2。分岐点の無い 2 つのコミット（`git commit-tree` で根を別にした履歴）を `--base` と `--head` に渡すと、`git merge-base` の失敗で 2。どれも標準エラーは誤りの種類だけで、パスが出ない。実際の値をパスに含み本文にも当たりのあるファイルで、標準出力と標準エラーのどちらにも語と当たった文字が現れない。コミットのメッセージに語を含む履歴で、出力にも一時のディレクトリにも語が現れない |
 | 黙らせる仕組み（同じ結合のテスト。`dir` と `--base` の `git` の両方で確かめる） | 値の行に `gitleaks:allow` の注釈を付けても当たる。その値の指紋を書いた `.gitleaksignore` を、追跡している木の根（`--root` の作業の木の根）と起動したディレクトリのそれぞれに置いても当たる。追跡している `.gitleaks.toml` に許可を書いても当たる | 件数つきの外しの行は、注釈や `.gitleaksignore` があっても件数どおりに効き、件数が違えば食い違いが出る | `nd-real-*` の当たりは、注釈・`.gitleaksignore`・外しのどれがあっても当たる。作り物の印（`EXAMPLE`）を含む語（語そのものに印を含むものと、印と同じ行に置いた語の両方）も、今の木と履歴の両方で `nd-real-*` で当たる。印を含む token の見本は既定の規則でも当たらない |
 
-テストの走る場所: `leak-check.test.ts` は gitleaks を起こさず、`npm run check` の `npm run test`（今の `check` ジョブ）で走る。`leak-check.integration.test.ts` は実物の gitleaks が要るので、根の `vitest.config.ts` の `tools` の組から `*.integration.test.ts` を外し、`vitest.integration.config.ts` だけが読む。ジョブ `leak-check` が gitleaks を置いた後に `npm run test:integration` を打ち、続けて `npm run leak-check` を打つ。手元では gitleaks 8.30.1 を `PATH` に置くか `GITLEAKS_BIN` で指して `npm run test:integration` を打つ（無ければ `runGitleaks` が終了コード 2 の誤りにするので、テストは gitleaks が無いと失敗し、黙って飛ばさない）。
+テストの走る場所: `leak-check.test.ts` は gitleaks を起こさず、`npm run check` の `npm run test`（今の `check` ジョブ）で走る。`leak-check.integration.test.ts` は実物の gitleaks が要るので、根の `vitest.config.ts` の `tools` の組から `*.integration.test.ts` を外し、`vitest.integration.config.ts` だけが読む。ジョブ `leak-check` が gitleaks を置いた後に `npm run test:integration -- leak-check` を打ち、続けて `npm run leak-check` を打つ。手元では gitleaks 8.30.1 を `PATH` に置くか `GITLEAKS_BIN` で指して `npm run test:integration` を打つ（無ければ `runGitleaks` が終了コード 2 の誤りにするので、テストは gitleaks が無いと失敗し、黙って飛ばさない）。
 
 ## 形の往復と I15・I12 の形
 
@@ -385,7 +388,8 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
   - 事後条件: どの起動でも、作業の木（`--root`）の `ndf-pin.json` の固定の点と形の正本で照らす。先端は、`--base` が無い起動（push・毎日・手動）と、`--base` があり `pinChanged` が真の Pull Request でだけ照らす。`--base` があり `pinChanged` が偽なら、先端を取らずに `skip: tip-pin-unchanged` の 1 行を出す（設計文書の決定 6）
   - 出力の行（標準出力と要約の両方に出す。どの行が出たかで、照らしたかどうかと理由を見分ける）:
     - `skip: tip-pin-unchanged` — Pull Request で固定の点を変えていないので、先端を照らさなかった（固定の点は照らした）
-    - `skip: no-contract-use <固定の点のコミット>` — NDF の契約の使い方の書き出しが無いので 1〜6 を照らさなかった（契約のファイルを読めることだけを確かめた）
+    - `skip: no-contract-use <固定の点のコミット>` — `CONTRACT_USE_REQUIRED` が偽で、NDF の契約の使い方の書き出しが無いので 1〜6 を照らさなかった（契約のファイルを読めることだけを確かめた）
+    - `fail: no-contract-use <固定の点のコミット>` — `CONTRACT_USE_REQUIRED` が真なのに書き出しが無い（消した・名前を変えた）。終了コード 1
     - `checked: fixed <固定の点のコミット> 1-6` — 固定の点に対して照らすこと 1〜6 をすべて実行した。食い違いの有無に関わらず、1〜6 を実行したときだけ出す
     - `checked: tip <先端のコミット> 1-6` — 先端に対して同じく実行した（先端を取れなければ出さず、要約に先端を照らさなかったと出す）
 
@@ -409,6 +413,8 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | 5 | 区間の報告の `shape.values` と `shape.items` が、ランナーが読む結果の値と項目を含む | `C/hooks/unattended-report.json` | 区間の報告から読む値と項目 |
 | 6 | 使う口がすべて契約の口の表にある | `C/domains/entrypoints.json` | 使う口 |
 
+この 6 つは、形の正本の判定とデータ（#2）を契約と照らす。ランナー（#6）が実際に組み立てた呼び出しと環境変数を判定とデータに照らすのは、`apps/runner` のテスト（設計文書の K6-2。#6 の受け入れ条件）で、この検査ではない。
+
 `ask-journal` の行が `fields` を持つようになったら、4 の照らしに入る前に、要約の「知らせ」の行へその点と `fields` を出す（失敗にしない。#41 の決定 106 の答えを知るため）。
 
 ### 内部のデータと定数
@@ -419,6 +425,7 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | 契約の置き場 | 定数（出所: #41 の決定 104） | 同上 | `plugins/ndf/contracts` |
 | `ContractFinding` | 型 `{ check: 1〜6; path: string; id?: string; detail: string }`。`id` は見本の id か表の行の id | 同上 | — |
 | `NdfContractUse` | 型（#2 の書き出しから写す） | 同上 | 書き出しが無ければ `null` |
+| `CONTRACT_USE_REQUIRED` | 定数（真偽値）。真なら書き出しの欠けを失敗にする | 同上 | 偽。NDF の契約の使い方の書き出しを置く #2 の Pull Request が、同じ Pull Request で真にする（設計文書の K2-9）。真にした後に偽へ戻さない |
 
 ### 異常系の処理
 
@@ -427,7 +434,8 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | `pinChanged` | 基点か head のコミットを読めない・分岐点が無い | ワークフローが履歴を取っていない | `git merge-base`・`git show` の失敗 | 止める | 終了コード 2 | ワークフローを直して打ち直す |
 | `fetchContract`（固定の点） | 取れない・契約のファイルが無い・JSON でない | ネットワーク・固定の点の誤り・置き場の移動 | 取得と読み込み | 止める | 標準エラーに理由、終了コード 2 | 打ち直せる。置き場の移動なら固定の点を変える Pull Request で直す |
 | `fetchContract`（先端） | 同上 | 同上 | 同上 | 既定値で続ける（先端を照らさなかったと要約に出す） | 要約の行、固定の点の結果で終わる | 次の毎日の実行で照らす |
-| `compareContract` | NDF の契約の使い方の書き出しが無い | #2 がまだ置いていない | 動的な import | 既定値で続ける（1〜6 を照らさず、契約のファイルが読めることだけを確かめる） | `skip: no-contract-use <固定の点のコミット>` の 1 行と要約の行。`checked:` の行を出さない | — |
+| `compareContract` | NDF の契約の使い方の書き出しが無い（`CONTRACT_USE_REQUIRED` が偽） | #2 がまだ置いていない | 動的な import | 既定値で続ける（1〜6 を照らさず、契約のファイルが読めることだけを確かめる） | `skip: no-contract-use <固定の点のコミット>` の 1 行と要約の行。`checked:` の行を出さない | — |
+| `compareContract` | NDF の契約の使い方の書き出しが無い（`CONTRACT_USE_REQUIRED` が真） | 書き出しを消した・名前を変えた | 動的な import | 呼び出し元へ返す | `fail: no-contract-use <固定の点のコミット>` の 1 行と要約の行、終了コード 1。`checked:` の行を出さない | 書き出しを戻すか、検査の読む名前を同じ Pull Request で直す |
 | `mainNdfContractCheck` | 固定の点で食い違う | 固定の点を変えた・nd-factory の側を変えた | 照らした後 | 呼び出し元へ返す | 要約の表と食い違いの行、終了コード 1 | 直すか固定の点を戻す |
 | `mainNdfContractCheck` | 先端だけで食い違う | 上流の未配布の変更 | 照らした後 | 既定値で続ける | 要約の表に見本の id と契約のファイルのパス、終了コード 0 | 次の固定の点を変える Pull Request で扱う |
 
@@ -437,27 +445,29 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | --- | --- | --- | --- |
 | `pinChanged` | 分岐点と head が同じ中身で偽、違えば真 | 空白だけの違いも真（中身の比べ）。分岐の後に基点の枝だけで `ndf-pin.json` を変えたリポジトリで偽。作業の木だけを変えても結果が変わらない | 基点か head を読めないと例外 |
 | `compareContract` | 作り物の契約と使い方で 0 件 | 使い方が `null` で照らさない。`ask-journal` に `fields` を足した契約で知らせが出て、食い違いにならない | 1〜6 のそれぞれ 1 つを壊した契約で、その番号の食い違いが出る |
-| `mainNdfContractCheck` | 固定の点だけの食い違いで 1、先端だけで 0 と要約の行。どちらも `checked: fixed <固定の点> 1-6` の行が出る | `--base` と `--head` の分岐点が同じ中身で `skip: tip-pin-unchanged` と `checked: fixed` の行が出て、`checked: tip` の行が出ない。使い方の書き出しが無いと `skip: no-contract-use` と 0、`checked:` の行が出ない | 固定の点の取得の失敗で 2。`--base` だけを渡すと 2 |
+| `mainNdfContractCheck` | 固定の点だけの食い違いで 1、先端だけで 0 と要約の行。どちらも `checked: fixed <固定の点> 1-6` の行が出る | `--base` と `--head` の分岐点が同じ中身で `skip: tip-pin-unchanged` と `checked: fixed` の行が出て、`checked: tip` の行が出ない。`CONTRACT_USE_REQUIRED` が偽で使い方の書き出しが無いと `skip: no-contract-use` と 0、`checked:` の行が出ない | 固定の点の取得の失敗で 2。`--base` だけを渡すと 2。`CONTRACT_USE_REQUIRED` が真で書き出しが無いと `fail: no-contract-use` と 1 で、`skip: no-contract-use` が出ない |
 
-`fetchContract` はテストでネットワークを使わず、テストの中で作った git のリポジトリを NDF のリポジトリの代わりに渡す（URL を引数で差し替える）。
+先端は ai-plugins の既定の枝の先端だけを取り（`git ls-remote --symref` の `HEAD`）、`develop` を名前で取る経路を持たない（設計文書の決定 6）。`fetchContract` はテストでネットワークを使わず、テストの中で作った git のリポジトリを NDF のリポジトリの代わりに渡す（URL を引数で差し替える）。
 
 ## ワークフローと宣言
 
-満たす決定: 設計の決定 4・6、受け入れ条件 1・8・10
+満たす決定: 設計の決定 4・6・11、受け入れ条件 1・8・10・12・13
 
 | ファイル | 変える中身 |
 | --- | --- |
-| `.github/workflows/ci.yml` | ジョブ `check` の `npm run check` の後に `npm run knip` の手順を足す。ジョブ `workflow-audit` を足す（`persist-credentials: false` で取得し、`ZIZMOR_VERSION` の版の linux の実行ファイルの資産を取り、その `sha256sum` を環境変数 `ZIZMOR_SHA256` に固定した値と直接比べ、一致したときだけ置いて `zizmor --offline --format plain .github/workflows` を打つ。当たりがあれば失敗。版と要約値はこのジョブの環境変数の 1 か所だけ）。ジョブ `synth` の「作り物の値で合成する」の後に、`npm run route-check -- --cdk-out infra/cdk.out`（API Gateway の合成の結果の経路の照らし）の手順を足す。ジョブ `leak-check` を足す。取得は履歴をすべて取り（`fetch-depth: 0`。分岐点からのコミットを探すため）、Node の用意と `npm ci` の後に、`GITLEAKS_VERSION` の版の配布の資産 `gitleaks_<版>_linux_x64.tar.gz` だけを取り、その `sha256sum` を環境変数 `GITLEAKS_SHA256` に固定した値と直接比べ（`echo "$GITLEAKS_SHA256  <資産>" \| sha256sum -c -`）、一致したときだけ展開して `PATH` へ置く。配布のチェックサムのファイルは取らない（同じ配布元から取った値と比べても、配布元を信じることにしかならず、固定にならないため）。続けて `npm run test:integration`（実物の gitleaks を起こす結合のテスト）を打ち、最後に `npm run leak-check` を打つ（Pull Request では `-- --base "$BASE_SHA" --head "$HEAD_SHA"`。手順の環境変数 `BASE_SHA` と `HEAD_SHA` に `github.event.pull_request.base.sha` と `github.event.pull_request.head.sha` を入れる。履歴の範囲の終点を `head.sha` に固定し、既定の取得の `HEAD`（マージした結果のコミット）を使わない）。gitleaks の版と要約値はこのジョブの環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の 1 か所にだけ書く。環境変数 `LEAK_CHECK_TERMS`（秘密）と `LEAK_CHECK_REQUIRE_TERMS`（`ref-check` と同じ式で変数 `LEAK_CHECK_REQUIRE_TERMS` から作る）を渡す |
+| `.github/workflows/ci.yml` | ジョブ `check` は変えない（knip は `npm run check` の中で走る）。ジョブ `workflow-audit` を足す（`persist-credentials: false` で取得し、Node の用意と `npm ci` の後に、`ZIZMOR_VERSION` の版の linux の実行ファイルの資産を取り、その `sha256sum` を環境変数 `ZIZMOR_SHA256` に固定した値と直接比べ、一致したときだけ置く。続けて `npm run test:integration -- workflow-audit`（実物の zizmor で、採る理由の点検が `--offline` で効くことを確かめる結合のテスト）を打ち、最後に `npm run workflow-audit` を打つ。当たりがあれば失敗。版と要約値はこのジョブの環境変数の 1 か所だけ）。ジョブ `synth` の「作り物の値で合成する」の後に、`npm run route-check -- --cdk-out infra/cdk.out`（API Gateway の合成の結果の経路の照らし）の手順を足す。ジョブ `leak-check` を足す。取得は履歴をすべて取り（`fetch-depth: 0`。分岐点からのコミットを探すため）、Node の用意と `npm ci` の後に、`GITLEAKS_VERSION` の版の配布の資産 `gitleaks_<版>_linux_x64.tar.gz` だけを取り、その `sha256sum` を環境変数 `GITLEAKS_SHA256` に固定した値と直接比べ（`echo "$GITLEAKS_SHA256  <資産>" \| sha256sum -c -`）、一致したときだけ展開して `PATH` へ置く。配布のチェックサムのファイルは取らない（同じ配布元から取った値と比べても、配布元を信じることにしかならず、固定にならないため）。続けて `npm run test:integration -- leak-check`（実物の gitleaks を起こす結合のテスト）を打ち、最後に `npm run leak-check` を打つ（Pull Request では `-- --base "$BASE_SHA" --head "$HEAD_SHA"`。手順の環境変数 `BASE_SHA` と `HEAD_SHA` に `github.event.pull_request.base.sha` と `github.event.pull_request.head.sha` を入れる。履歴の範囲の終点を `head.sha` に固定し、既定の取得の `HEAD`（マージした結果のコミット）を使わない）。gitleaks の版と要約値はこのジョブの環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の 1 か所にだけ書く。環境変数 `LEAK_CHECK_TERMS`（秘密）と `LEAK_CHECK_REQUIRE_TERMS`（`ref-check` と同じ式で変数 `LEAK_CHECK_REQUIRE_TERMS` から作る）を渡す |
 | `.github/workflows/ndf-contract.yml`（新設） | `on` は `pull_request`・`push`（main）・`schedule`（毎日 1 回）・`workflow_dispatch`（設計文書の決定 6）。`permissions: contents: read`。ジョブ `ndf-contract` は Pull Request のとき、既定の取得（マージした結果のコミット）に加えて `base.sha` と `head.sha` を分岐点が求まる深さまで取り（`fetch-depth: 0`）、`npm run ndf-contract -- --base <base.sha> --head <head.sha> --summary "$GITHUB_STEP_SUMMARY"` を打つ。ほかの起動では `--base` と `--head` を渡さない。動作の版はコミットの SHA で固定する（`ci.yml` と同じ） |
 | `.ndf/project.json` | `ci.required_checks` に `leak-check`・`ndf-contract`・`workflow-audit` を足す。`ci.workflows` に `ndf-contract.yml` の行を足す |
-| `package.json` | スクリプト `leak-check`・`ndf-contract`・`route-check`・`test:integration`（`vitest run -c vitest.integration.config.ts`）・`knip`（`knip --no-progress`）。開発の依存 `knip` |
-| `knip.json`（新設） | ワークスペース（`packages/*`・`apps/*`・`infra`・`tools`）ごとの入口（Lambda の起点・画面の起点・設置のコマンド・検査の CLI・テスト）と、今の当たりの控え（`ignore` の行。受け持つ課題の番号を注に書く）。控えは直した後に残さない（knip が使われているものを控えに置いたと知らせる設定 `treatConfigHintsAsErrors` を有効にする） |
+| `package.json` | スクリプト `leak-check`・`ndf-contract`・`route-check`・`test:integration`（`vitest run -c vitest.integration.config.ts`。ファイルの名前の絞りを引数で受ける）・`knip`（`knip --no-progress`）・`workflow-audit`（`zizmor --offline --config tools/checks/data/zizmor.yml --format plain .github/workflows`。結合のテストも同じ引数をこのスクリプトの定義から読む）。`check` の最後に `&& npm run knip` を足す（手元の `npm run check` と CI の `check` を同じにする）。開発の依存 `knip` |
+| `knip.json`（新設） | ワークスペース（`packages/*`・`apps/*`・`infra`・`tools`）ごとの入口（Lambda の起点・画面の起点・設置のコマンド・検査の CLI・テスト）と、`includeEntryExports: true`（入口のファイルの書き出しも照らす）と `treatConfigHintsAsErrors: true`。`ignore`・`ignoreFiles` を持たない（ファイルの単位で報告を消し、同じファイルに足した別の当たりも隠すため）。今の当たりは実装の Pull Request で消す。消せない依存の当たりだけを `ignoreDependencies` に依存の名前 1 つずつで置き、何も外さなくなった行は `treatConfigHintsAsErrors` が落とす（設計文書の決定 11） |
+| 入口の公開のシンボル | 実行基盤が名前で参照し import では読まれない書き出し（Lambda の起点の `handler`。CDK の `handler` の文字列が指す）に、書き出しごとに JSDoc の `@public` を付ける。検査の CLI（`tools/checks/src/*.ts`・`tools/ref-check/src/ref-check.ts`）・画面の起点・設置のコマンドは、`package.json` のスクリプトか `vite` がファイルとして起こし書き出しを名前で読まないので、`@public` を付けず、書き出しはテストが import するものだけを残す。`@public` を付けた書き出しの一覧は実装の Pull Request で knip を打って決め、この表へ書き戻す |
+| `tools/checks/data/zizmor.yml`（新設） | zizmor に `--config` で明示して渡す設定。点検の例外を持たない（`rules` が空）。例外を足すときは、点検の名前・対象のファイル・受け持つ課題・理由の注を行に書き、同じ Pull Request でこの表を直す |
 | `vitest.config.ts` | `tools` の組に `exclude: ["tools/test/**/*.integration.test.ts"]` を足す。`npm run check` の `npm run test` は gitleaks を起こさないテストだけを走らせる |
-| `vitest.integration.config.ts`（新設） | `tools/test/**/*.integration.test.ts` だけを読む。ジョブ `leak-check` と、gitleaks を入れた手元で打つ |
+| `vitest.integration.config.ts`（新設） | `tools/test/**/*.integration.test.ts` だけを読む。ジョブ `leak-check` は `leak-check` の、ジョブ `workflow-audit` は `workflow-audit` の名前の絞りで、自分の道具の結合のテストだけを打つ。手元では gitleaks か zizmor を入れて打つ |
 | `tools/package.json` | 依存 `@nd-factory/contracts`・`ajv`・`ajv-formats`・`yaml` |
 | `tools/tsconfig.json` | `checks/src` を含める |
 | `packages/contracts/package.json` | 書き出し `./secret-shapes` |
-| `AGENTS.md` | 「秘密とインフラの値を置かない」に、実際の値の一覧は CI の秘密 `LEAK_CHECK_TERMS` から受ける行を足す |
+| `AGENTS.md` | 「秘密とインフラの値を置かない」に、実際の値の一覧は CI の秘密 `LEAK_CHECK_TERMS` から受ける行を足す。「コードの決まり」の手元の確かめを「`npm run check`（lint・型検査・生成物の差・単体テスト・使っていないコード）」にする |
 
 ### 関数の仕様（CI の定義のテスト）
 
@@ -471,7 +481,7 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | `permissionBlocks` | 同上 | 新設 | `(doc: Workflow) => { scope: string; value: unknown }[]` | 最上位の `permissions` と、各ジョブの `permissions` を、場所（`top` かジョブの名前）と値の組で返す。`write-all`・`read-all` の文字列の形もそのまま返す |
 | `credentialWords` | 同上 | 変えない | `(yaml: string) => string[]` | 元の文字列で資格情報の語を探す（鍵でも値でも当たるように、解いた値でなく文字列を読む） |
 
-テストが照らすこと: Pull Request で起動するワークフローのジョブの名前の和集合が必須のチェックの宣言と等しい・ジョブの名前がワークフローの間で重ならない・どのワークフローにも資格情報の語が無い・どのワークフローも最上位の `permissions` が `{ contents: read }` だけで、ジョブの `permissions` は持たないか `{ contents: read }` だけ（ジョブの上書きで権限を足させない）。
+テストが照らすこと: Pull Request で起動するワークフローのジョブの名前の和集合が必須のチェックの宣言と等しい・ジョブ `workflow-audit` の手順が `npm run workflow-audit` を打ち、そのスクリプトの定義が `--offline` と `--config tools/checks/data/zizmor.yml` を持つ・どのワークフローの元の文字列にも `zizmor: ignore` が無い・zizmor が自動で探す設定のファイル（根の `zizmor.yml`・`.zizmor.yml`・`.github/zizmor.yml`・`.github/zizmor.yaml`）が無い・ジョブの名前がワークフローの間で重ならない・どのワークフローにも資格情報の語が無い・どのワークフローも最上位の `permissions` が `{ contents: read }` だけで、ジョブの `permissions` は持たないか `{ contents: read }` だけ（ジョブの上書きで権限を足させない）。
 
 ### 単体テストの観点
 
@@ -480,3 +490,7 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | `loadWorkflows`・`triggersPullRequest`・`jobNames` | 2 つのワークフローを読み、Pull Request で起動するものを選ぶ | `on: pull_request`・`on: [pull_request]`・`on:` の下の鍵の 3 つの書き方 | 解けない YAML のファイルで失敗する。片方のワークフローにだけ資格情報の語・`id-token: write` を足すと当たる |
 | `permissionBlocks` と権限の照らし | 今の 2 つのワークフローで違反 0 件 | ジョブの `permissions: { contents: read }` は通る | ジョブの `permissions` に `pull-requests: write`（資格情報の語に当たらない種類）を足す・ジョブに `permissions: write-all` を書く・最上位に `issues: write` を足すと、それぞれ場所つきで当たる |
 | 参照の検査のテスト | — | — | ワークフローの文字列に NDF の版を読む式と比べを同じ行に置くと当たる |
+| zizmor の設定の照らし（`ci-definition.test.ts`） | 今のワークフローと `tools/checks/data/zizmor.yml` で違反 0 件 | 設定の `rules` が空 | `workflow-audit` のスクリプトから `--config` か `--offline` を消す・ワークフローに `# zizmor: ignore[artipacked]` を書く・根に `zizmor.yml` を置く、のそれぞれで当たる |
+| `knip-config.test.ts` | `knip.json` が `includeEntryExports: true` と `treatConfigHintsAsErrors: true` を持ち、`check` のスクリプトが `npm run knip` を含む | `ignoreDependencies` が無いか、依存の名前だけの配列 | `knip.json` に `ignore` か `ignoreFiles` を足す・`includeEntryExports` を外す・`check` から `npm run knip` を外すと落ちる |
+| knip の当たり（`knip-config.test.ts` の中で、作り物のワークスペースを一時のディレクトリへ組み、リポジトリの `knip.json` と同じ選び方で `knip` を起こす） | 揃った作り物で 0 件 | `@public` を付けた入口の書き出しは当たらない | 入口のファイル（CLI と画面の起点にあたるもの）に使っていない書き出しを足す・`@public` の書き出しを持つファイルに `@public` の無い使っていない書き出しを足す・使っていない依存とファイルを足す・何も外さない `ignoreDependencies` の行を足す、のそれぞれで終了コードが 0 でない |
+| `workflow-audit.integration.test.ts`（実物の zizmor） | 揃った作り物のワークフローで当たり 0 件 | — | `permissions: write-all` のジョブで `excessive-permissions`、`persist-credentials` を外した `actions/checkout` で `artipacked`、`actions/checkout@main` で `unpinned-uses` が、`npm run workflow-audit` と同じ引数（スクリプトの定義から読み、対象のディレクトリだけを一時のディレクトリに置き換える）で 1 件以上出る。違反のワークフローは実行の時に一時のディレクトリへ組み、リポジトリに置かない（置くと `workflow-audit` と CI の定義のテストが当たる） |

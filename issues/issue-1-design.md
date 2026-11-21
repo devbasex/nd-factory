@@ -36,7 +36,7 @@ flowchart LR
 - 依存の向きの決まりで、`tools` が import してよいのは `packages/contracts` だけで、ほかの置き場は文字として読む（[詳細設計の依存の表](../docs/design/detail.md#クラスと関数の構造)）。検査はランナーや横断の部品のコードを import できない
 - 境界の検査の対象は `apps/` の 5 つの置き場の実行時のコードで、`packages/core`・`infra/`・`tools/` は外す（プラットフォームの決定 91）
 - 照らす相手がまだ無い検査は、相手が無いことで落とさずに通り、わざと違反を入れた入力で落ちることをテストで示す（要求の前提 2）
-- 全体の設計で決めた「落とすもの」の集合は変えない（要求の前提 1）。#41 の決定が承認で変われば、この設計の F23 の節を直す
+- 落とすものの集合を足す・減らすときは、全体の設計を同じ設計 PR の中で直す（要求の前提 1。plan.md の決まりをこの課題で緩めた形で、承認者の判断を「人へ残す判断」に置く）。この設計が足したのは使っていないコードとワークフローの点検の 2 行だけである（決定 11）。#41 の決定が承認で変われば、この設計の F23 の節を直す
 - #2（K2）の設計が同時に進む。形の往復と、検査が読む形の正本のデータは、両方の課題の境目に当たる（実行計画の変更重複）
 - `ndf_ref` を読む行に大小の比べの記号を置くと参照の検査が落ちる。この文書も追跡するファイルとして読まれる
 - MVV 版 2（PR #54。利用者が承認し、main へのマージ待ち）の開発の目標 Value 10〜16 と、画面を React 19 と TSX で組む決定 140 の改め（PR #53。同じくマージ待ち）に従う。どちらかの内容が承認と違ってマージされたら、この設計を直す
@@ -88,8 +88,8 @@ flowchart TB
 | 実際の経路の照らし（`tools/checks/src/deployed-routes.ts` と `apps/api/test/dispatch-routes.test.ts`、新設） | API Gateway の合成の結果（`cdk.out` の雛形）の経路と、Lambda の振り分けが受ける経路を、操作の表の経路と照らす。文字列の lint だけでは、CDK の別の登録の方法を生成した登録に限定できないため | `synth`（合成の照らし）・`check`（振り分けのテスト） |
 | NDF の契約の照合（`tools/checks/src/ndf-contract-check.ts`、新設） | 固定の点と既定の枝の先端の契約を取り、形の正本の NDF の契約の使い方（#2）と照らす。固定の点の食い違いで失敗し、先端だけの食い違いは要約に並べる | `ndf-contract` |
 | CI の定義のテスト（`tools/test/ci-definition.test.ts`、変更） | `.github/workflows/` のすべてのワークフローを `yaml`（LIB12）で解いて読み、Pull Request で走るジョブの集合と必須のチェックの宣言の一致・資格情報の語の無さ・足したジョブの権限を照らす | `check` |
-| 使っていないコードの検査（`knip.json`、新設） | knip（LIB11）の設定。ワークスペースごとの入口と、置き場ごとの控え（受け持つ課題の番号つき）だけを持つ | `check` |
-| ワークフローの点検（`.github/workflows/ci.yml` のジョブ `workflow-audit`、新設） | zizmor（LIB14）を版と要約値で固定して取り、`.github/workflows/` をネットワークなしの点検で探す。当たりで失敗する | `workflow-audit` |
+| 使っていないコードの検査（`knip.json`、新設） | knip（LIB11）の設定。ワークスペースごとの入口と、入口の書き出しも照らす設定（`includeEntryExports`）を持ち、ファイルの単位の控え（`ignore`）を持たない。`npm run check` の中で走る | `check` |
+| ワークフローの点検（`.github/workflows/ci.yml` のジョブ `workflow-audit` と設定 `tools/checks/data/zizmor.yml`、新設） | zizmor（LIB14）を版と要約値で固定して取り、明示した設定で `.github/workflows/` をネットワークなしの点検で探す。当たりで失敗する。結合のテストで、採る理由の点検が `--offline` で効くことを確かめる | `workflow-audit` |
 | 参照の検査（`tools/ref-check`、変えない） | 追跡しているファイルをすべて読むため、足すワークフローも今のまま対象に入る。テストだけを足す | `ref-check` |
 
 ## 自前で作る部分と既存のツール
@@ -104,7 +104,7 @@ flowchart TB
 | I14 の対応 | TypeScript の構文木（このリポジトリが既に使う `typescript`） | — | 操作の表と画面・MCP・経路・機能の突き合わせ。nd-factory の操作の表の形に固有の照らしで、置き換えられる道具の候補を挙げられなかった（「外部の調査」の確かめられなかったこと） |
 | NDF の契約の照合（F23） | git（取得）・形の正本の判定（#2） | — | 契約のファイルと形の正本のデータの照らし。NDF の契約の形に固有の照らしで、置き換えられる道具の候補を挙げられなかった（同上） |
 | CI の定義のテスト | `yaml`（LIB12。決定 10）と、ワークフローの危うい書き方は zizmor（LIB14。決定 11） | actionlint（LIB14） | 必須のチェックの宣言とジョブの集合の一致・AWS の資格情報の語・`permissions` を `contents: read` だけにする照らし。nd-factory の決まり（Value 8）で、zizmor は持たない |
-| 使っていないコード | knip（LIB11。決定 11） | — | 無し（設定と控えだけ） |
+| 使っていないコード | knip（LIB11。決定 11） | — | 無し（設定と、`knip.json` が `ignore` を持たないことを照らすテストだけ） |
 
 knip（LIB11）と zizmor（LIB14）は、前は全体の設計の検査の表に無いので #57 に起票して別に決めるとしたが、より堅牢で長く良い形を選ぶ方針（2026-11-21 の利用者の指示）で、この課題に入れ、全体の設計の検査の表にもこの PR で行を足した（決定 11）。
 
@@ -148,8 +148,16 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 | K2-6 | NDF の契約の使い方のデータと呼び出しの判定を `packages/contracts` に置く（決定 7。受ける組を置くことは実行計画で #2 にある） | F23 が照らす相手 |
 | K2-7 | 人だけの操作の定義に、対になる読み出しの操作の名前（`paired_read`）を持たせる。値は全体の設計の操作の一覧の「MCP の道具か」の列の「依頼と材料の読み出しだけ（`<操作の名前>`）」の名前（例 `approvals.answer` は `approvals.get`、`sessions.create` は `users.get`） | I14 の人だけの操作の照らしが、同じエンティティの無関係な読む操作でなく、指定された読み出しが MCP にあることを照らす |
 | K2-8 | `apps/api` の振り分けの入口と、振り分けが `routeKey` を引く登録（実際に引く表そのもの。写しでなく）を書き出し、受けた `routeKey` をその登録で引き、登録に無い経路は `route_unknown` で返す。登録の外の経路を受ける分岐（`if` や `switch` で `routeKey` を見るなど）を入口に置かない | `apps/api/test/dispatch-routes.test.ts` が、振り分けの登録のキーの集まりを操作の表の経路と両方の向きで照らし、表の外の事象を拒むときの応答を照らす |
+| K2-9 | NDF の契約の使い方の書き出しを置く Pull Request で、`tools/checks/src/ndf-contract-check.ts` の定数 `CONTRACT_USE_REQUIRED` を真にし、`ndf-contract` の出力に `checked: fixed <固定の点のコミット> 1-6` があり `skip: no-contract-use` が無いことを、その Pull Request の CI で確かめる | 書き出しを後で消すか名前を変えたときに、必須のチェックが成功したまま 1〜6 の照合が止まらないようにする（決定 7） |
 
-#29 へ渡す欠け: 料金プランの名前を形の正本の閉じた語の集まりとして、料金プランの値を `packages/contracts/data/` のデータとして置き、値を読む書き出しを 1 つにする（I8 の検査がその書き出しの import を判定の外で落とし、名前を画面で落とす）。#6 へ渡す欠け: ランナーは NDF を起こす前に形の正本の呼び出しの判定を通す（決定 7）。
+#29 へ渡す欠け: 料金プランの名前を形の正本の閉じた語の集まりとして、料金プランの値を `packages/contracts/data/` のデータとして置き、値を読む書き出しを 1 つにする（I8 の検査がその書き出しの import を判定の外で落とし、名前を画面で落とす）。
+
+#6 へ渡す欠け（#6 の受け入れ条件に入れる。#1 の実装の最初のタスクで #6 の本文へ追記する）:
+
+| # | 欠け | なぜ要るか |
+| --- | --- | --- |
+| K6-1 | ランナーは NDF を起こす前に、組み立てた呼び出しの口・引数・環境変数を形の正本の呼び出しの判定に通し、通らなければ起こさない | F23 が照らす判定を、ランナーが実際に使う（決定 7） |
+| K6-2 | `apps/runner` のテストで、ランナーが実際に組み立てる関数（呼び出しの引数と環境変数を組む関数。写しでなく）の出力を、(a) 形の正本の呼び出しの判定に通して通ること、(b) 渡す環境変数の名前の集まりが形の正本の NDF の契約の使い方の「渡す環境変数の名前」と等しいこと、(c) 使う口が使い方の「使う口」にあることで照らす。レーンの指示の種類（`skill-workflow` の `#N`・`block-next`）ごとに 1 件以上を組んで照らす | F23 は判定とデータだけを照らすので、#6 の組み立てがそれらと食い違っても検査は通る（決定 7 の代償）。組み立てと判定・データの間は、このテストだけが照らす |
 
 ## 決定の記録
 
@@ -211,7 +219,7 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 ### 決定 6: ランナーの翻訳と形の正本の食い違いをマージの前に知るため、固定の点の契約はすべての Pull Request・main への push・毎日・手動で照らし、既定の枝の先端は固定の点を変えた Pull Request と push・毎日・手動で照らす
 
 - **質問**: F23 をいつ照らすか。前の全体の設計は「毎日 1 回と `ndf-pin.json` を変える Pull Request」だったが、F23 が照らす相手は固定の点の契約だけでなく形の正本の NDF の契約の使い方（#2）と呼び出しの判定（#6 が使う）でもあり、それを変える Pull Request は固定の点を変えない。照らしは必須のチェックにも載る（プラットフォームの文書）
-- **選んだ案**: 新しいワークフロー `.github/workflows/ndf-contract.yml` に 1 つのジョブ `ndf-contract` を置き、`pull_request`・main への `push`・`schedule`（毎日 1 回）・`workflow_dispatch` で起動する。どの起動でも、作業の木の `ndf-pin.json` の固定の点の契約と形の正本で照らすこと 1〜6 を行い、食い違えば失敗にする。ai-plugins の既定の枝の先端の契約は、`push`・`schedule`・`workflow_dispatch` と、`ndf-pin.json` を変えた Pull Request（分岐点と head のコミットの中身を比べる）でだけ照らし、食い違いは要約に並べるだけにする。ほかの Pull Request は先端を照らさず、`skip: tip-pin-unchanged` の行を出す。Pull Request では、マージした結果のコミット（`pull_request` の既定の取得）で照らす。全体の設計（実行の文書の「契約の照合の定期の検査」の「いつ」の行・決定 79・プラットフォームの文書の検査の表の行）をこの PR で同じ形に直した
+- **選んだ案**: 新しいワークフロー `.github/workflows/ndf-contract.yml` に 1 つのジョブ `ndf-contract` を置き、`pull_request`・main への `push`・`schedule`（毎日 1 回）・`workflow_dispatch` で起動する。どの起動でも、作業の木の `ndf-pin.json` の固定の点の契約と形の正本で照らすこと 1〜6 を行い、食い違えば失敗にする。ai-plugins の既定の枝の先端の契約は、`push`・`schedule`・`workflow_dispatch` と、`ndf-pin.json` を変えた Pull Request（分岐点と head のコミットの中身を比べる）でだけ照らし、食い違いは要約に並べるだけにする。ほかの Pull Request は先端を照らさず、`skip: tip-pin-unchanged` の行を出す。Pull Request では、マージした結果のコミット（`pull_request` の既定の取得）で照らす。先端として取るのは ai-plugins の既定の枝の先端（#41 の決定 107）だけで、`develop` を取る形は作らない。全体の設計の「何を読むか」は #41 の承認までは develop の先端と書くが、#1 の実装は PR #42 の承認の後に始めるので（「影響と危険」の「#41（PR #42）の承認との順序」）、実装が動く時には既定の枝の先端が正になっている。決定 107 が承認されなければ、実装の前に先端の取り方をこの設計で直す。全体の設計（実行の文書の「契約の照合の定期の検査」の「いつ」の行・決定 79・プラットフォームの文書の検査の表の行）をこの PR で同じ形に直した
 - 採らなかった案: 毎日 1 回と `ndf-pin.json` を変える Pull Request だけで照らす（前の全体の設計の結論。必須のチェックに載せるためにほかの Pull Request では照らさずに通すことになり、形の正本の NDF の契約の使い方だけを変えた Pull Request の食い違いが、マージした後の毎日の実行まで分からない。照らしは手元のデータと深さ 1 の取得だけで済み、毎回打っても費用はほぼ無い）
 - 採らなかった案: `on.pull_request.paths` で起動を絞る（起動しなかった Pull Request で必須のチェックが待ちのまま残り、マージできない。STD1）
 - 採らなかった案: 先端もすべての Pull Request で照らす（先端の食い違いは配布の前の変更を含み、失敗にしない知らせである。固定の点を変えない Pull Request の要約に毎回同じ知らせが並ぶと、読まれなくなる。毎日と push で知れば足りる）
@@ -225,7 +233,8 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 - **選んだ案**: ランナーが打つ前に使う判定（呼び出しの口・値・環境変数の名前が受ける契約に合うか）と、NDF の契約の使い方のデータ（受ける組・使う口・渡す環境変数の名前・読むファイルと項目・区間の報告から読む項目）を、形の正本（`packages/contracts`）に置き、ランナー（#6）と検査の両方がそれを使う。形の正本に置くのは #2 で、この設計は検査が要る形を #2 へ渡す欠けとして書く（下の「#2 との境目」）。検査は見本 26 件（`entrypoint-cases.json`）をその判定へ通して `valid` と比べ、データを契約のファイルと照らす
 - 採らなかった案: 検査の中に契約の判定を自前で持つ（契約を契約自身と照らすことになり、ランナーの食い違いを拾えない）
 - 採らなかった案: 検査がランナーのコードを読み込む（`tools` は `packages/contracts` だけに依る決まりに反する）
-- **代償**: #2 が判定とデータを置くまで、照合は 1〜6 を照らさずに `skip: no-contract-use` と出して通る（要求の前提 2）。#6 が判定を使わずに組み立てを書くと、検査は食い違いを拾えない。#6 の受け入れ条件へ「判定を通す」ことを渡す
+- 「相手が無い」で通る期間の終わり: `skip: no-contract-use` で通すのは、検査の定数 `CONTRACT_USE_REQUIRED` が偽の間だけにする。NDF の契約の使い方を形の正本に置く #2 の Pull Request が、同じ Pull Request でこの定数を真にする（K2-9）。真の後は、書き出しが無いこと（消した・名前を変えた）を `fail: no-contract-use` で失敗にし、`skip: no-contract-use` を出さない。定数を偽へ戻す変更は検査の定数の差分としてレビューに出る
+- **代償**: #2 が判定とデータを置くまで、照合は 1〜6 を照らさずに `skip: no-contract-use` と出して通る（要求の前提 2）。検査が直接照らすのは #2 の判定とデータで、#6 が実際に組み立てた呼び出しと環境変数ではない。#6 の組み立てが判定とデータと食い違っても、この検査は通る。そこで、#6 の受け入れ条件へ「判定を通す」ことと、実際に組み立てた呼び出しと環境変数を判定と契約に照らす試験を渡す（下の「#6 へ渡す欠け」）。その試験は、`tools` がランナーを import できないので、`apps/runner` 自身のテストに置く（`apps/api/test/dispatch-routes.test.ts` と同じ置き方）
 - 根拠: Vision・Value 8（MVV バージョン 2）
 
 ### 決定 8: 生成物の間の食い違いを見本の外でも拾うため、形の往復は見本とその機械的な変形を 4 つの形で検証して比べる
@@ -263,10 +272,19 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 ### 決定 11: 使わなくなったコードとワークフローの危うい書き方を残さないため、knip と zizmor を検査に足し、全体の設計の検査の表にも行を足す
 
 - **質問**: MVV 版 2 の Value 13（使わなくなったコード・設定・文書は残さない）と Value 8（CI は資格情報を持たない）に効く既存の道具を、この課題の検査に入れるか、全体の設計に足すかを別の課題で決めるか
-- **選んだ案**: 入れる。knip を `check` のジョブの手順（`npm run knip`）で走らせ、使っていないファイル・書き出し・依存で落とす。設定は `knip.json` に置き、ワークスペースごとの入口を書く。今のリポジトリの当たりは、直すか、決定 5 と同じく受け持つ課題の番号つきの控え（`knip.json` の `ignore` の行）に置く。zizmor は新しいジョブ `workflow-audit` で、版と要約値で固定して取った実行ファイルを `--offline` で打ち、`.github/workflows/` の当たりで落とす。全体の設計（プラットフォームの文書の「設計の決まりを縛る検査」の表と「構成要素」の検査の行）に 2 行を足した。#57 は #1 に入れたので閉じる
+- **選んだ案**: 入れる。knip と zizmor の扱いは次のとおりにする
+  - knip を走らせる所: `check` のスクリプト（`npm run check`）の最後に `npm run knip` を足し、CI の `check` のジョブは今のまま `npm run check` だけを打つ。手元の `npm run check` と CI の `check` が同じ検査になり、`AGENTS.md` の「手元の確かめ」の説明に「使っていないコード（knip）」を足す。使っていないファイル・書き出し・依存で落とす。設定は `knip.json` に置き、ワークスペースごとの入口を書く
+  - 入口のファイルの書き出し: knip は既定で入口のファイルの書き出しを照らさないので、`includeEntryExports: true` で入口の書き出しも照らす。実行基盤が名前で参照する公開のシンボル（Lambda の起点の `handler` など。CDK が文字として指し、import では読まれない）だけに JSDoc の `@public` を付け、knip の報告から外す。`@public` は書き出し 1 つずつに付き、同じファイルのほかの書き出しは照らされたままである。`@public` を付ける書き出しの一覧は詳細設計の表に置く
+  - 控えを置かない: 今のリポジトリの当たりは、検査を足す Pull Request で直す（使っていないファイル・書き出し・依存は消す）。`knip.json` の `ignore`（ファイルの単位で、そのファイルのすべての種類の報告を消す）と `ignoreFiles` は使わない。消せない当たりが出たら、当たりと同じ粒度の控えだけを置く: 依存は `ignoreDependencies` に依存の名前 1 つずつ（ワークスペースごと）、書き出しは控えにせず `@public` の基準に当たるときだけ `@public` を付ける。控えの陳腐化は、`ignoreDependencies` の行が何も外さなくなると知らせる設定の知らせ（`treatConfigHintsAsErrors`）で落とす。`knip.json` が `ignore`・`ignoreFiles` を持たないことは単体テストが照らす
+  - zizmor: 新しいジョブ `workflow-audit` で、版と要約値で固定して取った実行ファイルを、`--offline` と、明示した設定 `--config tools/checks/data/zizmor.yml` で打ち、`.github/workflows/` の当たりで落とす。zizmor はほかに、リポジトリの中の設定のファイル（`zizmor.yml`・`.github/zizmor.yml`）を自動で探して読み、その設定で点検を無効にできる。明示した設定を渡せば自動の探索をしないので、点検を外せるのは明示した設定 1 つだけになる。明示した設定は最初は点検の例外を持たず、例外を足すときは点検の名前・受け持つ課題・理由を行に書く。CI の定義のテストが、`workflow-audit` の手順が `--offline` と `--config tools/checks/data/zizmor.yml` を持つこと・設定の例外がその設定のファイルの行だけであること（行の中の例外の注釈 `zizmor: ignore` をどのワークフローにも書かない）・自動で探される場所に設定のファイルが無いことを照らす
+  - 点検が `--offline` で効くこと: zizmor は一部の点検がネットワークを要し、`--offline` ではそれを飛ばす。採る理由に挙げた `excessive-permissions`・`artipacked`・`unpinned-uses` がネットワークを要さないかは、zizmor の点検の文書（`docs/audits.md`）の点検ごとの記載を、実装の最初のタスクで確かめて「外部の調査」に記す。どれかがネットワークを要すると分かれば、実装の前にこの決定を直す。加えて、ジョブ `workflow-audit` の結合のテスト（`tools/test/workflow-audit.integration.test.ts`）が、3 つの点検のそれぞれに違反するワークフローを実行の時に一時のディレクトリへ組み、ジョブと同じ引数で zizmor を打って、点検ごとに当たりが出ることを確かめる。飛ばされた点検は当たりを出さないので、このテストが落ちる
+  - 全体の設計（プラットフォームの文書の「設計の決まりを縛る検査」の表と「構成要素」の検査の行）に 2 行を足した。#57 は、この設計に入れたことを課題のコメントに書いて 2026-11-21 に閉じた（閉じたのは conductor。設計 PR のマージでは閉じない）
 - 採らなかった案: 全体の設計に足すかを #57 で別に決める（前の結論。検査の表に無い検査を足すのは詳細設計の決め直しに当たるとしたが、Value 13 と Value 8 を検査で守る形の方が長く保ちやすく、同じ PR で全体の設計も直せる）
 - 採らなかった案: actionlint だけを入れる（ワークフローの書き誤りを見つけるが、権限の広さと資格情報の持ち出しを見つけるのは zizmor の点検（`excessive-permissions`・`artipacked`・`unpinned-uses` など）である。両方を入れると同じ表で 2 つの道具を保守することになる）
-- **代償**: 実行ファイルの依存がもう 1 つ増え、版と要約値の上げを手で行う。knip は入口の設定を誤ると使っているものを使っていないと出すので、ワークスペースごとの入口を `knip.json` に書いて保つ。必須のチェックが 7 つになる
+- 採らなかった案: knip の当たりを `knip.json` の `ignore` に受け持つ課題の番号つきで控える（前の結論。`ignore` はファイルの単位で報告を消すので、既知の当たりを 1 つ控えると、同じファイルに足した別の使っていない書き出しも見えなくなる。`treatConfigHintsAsErrors` は、その控えが何も消さなくなったときしか陳腐化を知らせない）
+- 採らなかった案: knip を CI の `check` のジョブの手順にだけ足す（前の結論。手元の `npm run check` が通っても CI の `check` が knip で落ち、`AGENTS.md` の手元の確かめと CI の検査が食い違う）
+- 採らなかった案: zizmor を設定の指定なしで打つ（自動で探した設定で点検を無効にでき、受け入れ条件 13 の違反を必須のチェックが見逃す構成を作れる）
+- **代償**: 実行ファイルの依存がもう 1 つ増え、版と要約値の上げを手で行う。knip は入口の設定を誤ると使っているものを使っていないと出すので、ワークスペースごとの入口を `knip.json` に書いて保つ。`npm run check` が knip の分だけ遅くなる。`@public` は付けた書き出しを照らさないので、付ける基準（実行基盤が名前で参照する）を外れた `@public` はレビューで見る。必須のチェックが 7 つになる
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB11 / LIB14
 - 根拠: Value 8・Value 13・Value 14・Value 15（MVV バージョン 2）
@@ -292,10 +310,11 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 | --- | --- | --- |
 | 別名で受ける・変数に入れてから呼ぶ（決定 1） | 構文の印の無い呼び出し（`const f = Date.now; f()` など）は ESLint の規則に当たらない | レビュー |
 | 印を避ける書き方（決定 2） | 再帰で繰り返す・応答を作る部品を別に作る・文字列を連結して経路や理由のコードを組む | レビュー。正当な例外は控えに理由を書いて足す |
-| 固定の点を変えない Pull Request での NDF の契約の使い方の変更（決定 6） | 形の正本の NDF の契約の使い方だけを変えた Pull Request は、その Pull Request では照らされない | マージの後の次の毎日の実行で落ちる |
+| 先端だけの食い違い（決定 6） | 固定の点を変えない Pull Request は先端を照らさない。先端を照らしても、先端だけの食い違いは失敗にせず要約に並べるだけである | main への push・毎日・手動の実行の要約で読み、次に固定の点を変える Pull Request で扱う（その Pull Request では先端も照らし、新しい固定の点で食い違えば失敗になる） |
+| ランナーの実際の組み立てと判定の食い違い（決定 7） | F23 は形の正本の判定とデータを照らすので、#6 が実際に組み立てた呼び出しと環境変数がそれらと食い違っても `ndf-contract` は通る | #6 の受け入れ条件の組み立ての照合のテスト（K6-2）。#6 の実装の Pull Request の `check` で落ちる |
 | 漏れの検査の外しの中の置き換え（上の「漏れの検査の外しの粒度」） | 外したファイルの当たりを、同じ件数の別の実際の値へ置き換える。外したパスと規則の組に、途中のコミットで値を足して消す | 秘密の一覧との照合とレビュー |
 | マージコミットの形の当たり（上の「壊れうる箇所」） | Pull Request の枝へ main をマージするときに、競合の解消で形の値（語の一覧に無い値）を入れ、後のコミットで消す | 秘密の一覧との照合（マージコミットでも効く）とレビュー |
-| 照らす相手（#2・#29）がそろうまで「相手が無い」で通る検査 | 形の往復・I14（#2 の操作の表と生成物）・実際の経路の照らし（`route-check` と `dispatch-routes.test.ts`。#2 の操作の表と振り分けの入口と登録。K2-3・K2-8）・I8 の料金プランの値と名前（#29）・F23 の 1〜6（#2 の NDF の契約の使い方）は、相手が無い間はリポジトリへの適用を飛ばして通る。作り物の入力で落ちることはテストで示すが、実物は照らされない | #2・#29 の実装の Pull Request で相手が入った時点から照らされる。形の往復・I14・I8 は、相手を足す Pull Request の CI で検査がその相手を読むことを確かめる。実際の経路の照らしは、操作の表と振り分けの入口を足す #2 の Pull Request の CI で、ジョブ `synth` の `route-check` の出力に `skip: no-operation-table` の行が無く、ジョブ `check` の `dispatch-routes.test.ts` のテストの名前に「相手が無い」が無いことを確かめる（どちらかが残れば、K2-3・K2-8 が満たされないまま照らしが黙って通っている）。F23 は、相手を足す #2 の Pull Request の `ndf-contract` の実行がマージした結果のコミットで固定の点を照らすので（決定 6）、その CI の出力に `checked: fixed <固定の点のコミット> 1-6` の行があり、`skip: no-contract-use` の行が無いことで、固定の点に対して照らすこと 1〜6 が実行されたと確かめる（出力の行は詳細設計の「NDF の契約の照合」） |
+| 照らす相手（#2・#29）がそろうまで「相手が無い」で通る検査 | 形の往復・I14（#2 の操作の表と生成物）・実際の経路の照らし（`route-check` と `dispatch-routes.test.ts`。#2 の操作の表と振り分けの入口と登録。K2-3・K2-8）・I8 の料金プランの値と名前（#29）・F23 の 1〜6（#2 の NDF の契約の使い方）は、相手が無い間はリポジトリへの適用を飛ばして通る。作り物の入力で落ちることはテストで示すが、実物は照らされない | #2・#29 の実装の Pull Request で相手が入った時点から照らされる。形の往復・I14・I8 は、相手を足す Pull Request の CI で検査がその相手を読むことを確かめる。実際の経路の照らしは、操作の表と振り分けの入口を足す #2 の Pull Request の CI で、ジョブ `synth` の `route-check` の出力に `skip: no-operation-table` の行が無く、ジョブ `check` の `dispatch-routes.test.ts` のテストの名前に「相手が無い」が無いことを確かめる（どちらかが残れば、K2-3・K2-8 が満たされないまま照らしが黙って通っている）。F23 は、相手を足す #2 の Pull Request の `ndf-contract` の実行がマージした結果のコミットで固定の点を照らすので（決定 6）、その CI の出力に `checked: fixed <固定の点のコミット> 1-6` の行があり、`skip: no-contract-use` の行が無いことで、固定の点に対して照らすこと 1〜6 が実行されたと確かめる（出力の行は詳細設計の「NDF の契約の照合」）。同じ Pull Request で `CONTRACT_USE_REQUIRED` を真にするので（K2-9）、その後に書き出しを消すか名前を変えると `fail: no-contract-use` で落ちる |
 | I14 の画面の控え（決定 5） | 控えに載せた操作は、画面が無くても `screen-missing` にならない | 画面を作る課題が自分の行を消す |
 
 ### このリポジトリだけの事情
@@ -340,9 +359,10 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 | 受け入れ条件 10 | ジョブを宣言とワークフローの片方にだけ足す・どれかのワークフローに資格情報の語を足す・最上位かジョブの `permissions` に `contents: read` 以外を足すと、CI の定義のテストが落ちる | `ci.yml` だけを読む・最上位の `permissions` だけを読む・`on: [pull_request]` の書き方を読み落とすと落ちる |
 | 受け入れ条件 11 | 詳細設計（[issue-1-design-detail.md](./issue-1-design-detail.md)）が、全体の設計の置き場・依存の向き・落とすものを引いて書かれ、決め直していない（cross-review が読む） | 全体の設計に無い置き場や、落とすものの増減を書くと cross-review が落とす |
 | 決定 5 | 控えの行のファイルが規則に当たらなくなると単体テストが落ちる | 控えの照らしを消すと落ちる |
+| 決定 7（相手が無い期間の終わり） | `CONTRACT_USE_REQUIRED` が真で NDF の契約の使い方の書き出しが無い作業の木で、`fail: no-contract-use` と終了コード 1 になり、`skip: no-contract-use` が出ない。偽なら `skip: no-contract-use` と 0 | 真でも `skip` で通す・定数を読まずに書き出しの有無だけで決めると落ちる |
 | 決定 6 | どの起動でも固定の点を照らし、`checked: fixed` の行が出る。先端は、`ndf-pin.json` が分岐点と head で違う Pull Request と push・毎日・手動で照らし、同じ Pull Request では `skip: tip-pin-unchanged` を出して照らさない。分岐の後に基点の枝だけで `ndf-pin.json` を変えた作業の木では先端を照らさない | 固定の点の照らしを Pull Request で飛ばす・先端の判定を逆にする・基点の枝の先端と比べると落ちる |
-| 受け入れ条件 12・決定 11（knip） | 使っていない書き出し・使っていない依存・どこからも読まれないファイルを足した作業の木で `npm run knip` が落ち、控えの行は当たらない | 入口を広げすぎて当たりが消える・控えを置き場の全体にすると落ちる |
-| 受け入れ条件 13・決定 11（zizmor） | ジョブの `permissions` に書き込みを足す・`actions/checkout` の `persist-credentials: false` を外す・動作を SHA でなく枝の名前で参照するワークフローを足すと、ジョブ `workflow-audit` が落ちる。今の 2 つのワークフローでは当たりが 0 件 | `--offline` を外してネットワークに依る・対象を `ci.yml` だけにすると落ちる |
+| 受け入れ条件 12・決定 11（knip） | 使っていない書き出し・使っていない依存・どこからも読まれないファイルを足した作業の木で `npm run knip` が落ちる。入口のファイル（検査の CLI の `tools/checks/src/leak-check.ts`・画面の起点・Lambda の起点）に使っていない書き出しを足しても落ちる。`@public` を付けた書き出しを持つ入口のファイルに、`@public` の無い使っていない書き出しを足しても落ちる。実行基盤が参照する書き出しから `@public` を外すと落ちる。`npm run check` が knip を含む（スクリプトの定義を読むテスト）。`knip.json` が `ignore`・`ignoreFiles` を持たない（設定を読むテスト）。何も外さなくなった `ignoreDependencies` の行で `npm run knip` が落ちる | 入口を広げすぎて当たりが消える・`includeEntryExports` を外す・ファイルの単位の控えを置く・knip を `check` のスクリプトから外すと落ちる |
+| 受け入れ条件 13・決定 11（zizmor） | ジョブの `permissions` に書き込みを足す・`actions/checkout` の `persist-credentials: false` を外す・動作を SHA でなく枝の名前で参照するワークフローを、結合のテスト（`workflow-audit.integration.test.ts`）が実行の時に組み、ジョブと同じ引数（`--offline` と明示した設定）で打つと、`excessive-permissions`・`artipacked`・`unpinned-uses` のそれぞれで当たりが出て失敗の終了コードになる（`--offline` で飛ばされた点検は当たりを出さないので、このテストが落ちる）。CI の定義のテストが、`workflow-audit` の手順の `--offline` と `--config tools/checks/data/zizmor.yml`・ワークフローに `zizmor: ignore` が無いこと・自動で探される場所（`zizmor.yml`・`.github/zizmor.yml`）に設定のファイルが無いことを照らす。今のワークフロー（`ci.yml` と、実装で足す `ndf-contract.yml`）の当たりは、実装の Pull Request で zizmor を打って確かめ、同じ Pull Request で直す（今の当たりの数はまだ確かめていない。「未確認のまま残ること」）。直せない当たりは、明示した設定に点検の名前・受け持つ課題・理由を書いた行として置く | `--offline` を外してネットワークに依る・対象を `ci.yml` だけにする・`--config` を外して自動で探した設定を読む・リポジトリに `zizmor.yml` を置いて点検を無効にする・行の中の `zizmor: ignore` を書くと落ちる |
 
 ## 設計の結果
 
@@ -350,7 +370,7 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1 | 実装する | — | `eslint.config.js`、`tools/checks/src/lint-rules.ts`、`tools/checks/data/lint-exceptions.json`、`tools/checks/data/screen-pending.json`、`tools/checks/src/leak-check.ts`、`tools/checks/data/leak-allow.json`、`tools/checks/src/round-trip.ts`、`tools/checks/src/operation-coverage.ts`、`tools/checks/src/deployed-routes.ts`、`tools/checks/src/ndf-contract-check.ts`、`packages/contracts/data/secret-shapes.json`、`packages/contracts/src/secret-shapes.ts`、`packages/contracts/package.json`、`tools/test/lint-rules.test.ts`、`tools/test/leak-check.test.ts`、`tools/test/round-trip.test.ts`、`tools/test/operation-coverage.test.ts`、`tools/test/deployed-routes.test.ts`、`tools/test/leak-check.integration.test.ts`、`apps/api/test/dispatch-routes.test.ts`、`tools/test/ndf-contract-check.test.ts`、`tools/test/ci-definition.test.ts`、`tools/test/ref-check.test.ts`、`tools/package.json`、`tools/tsconfig.json`、`package.json`、`package-lock.json`、`vitest.config.ts`、`vitest.integration.config.ts`、`.github/workflows/ci.yml`、`.github/workflows/ndf-contract.yml`、`knip.json`（新設）、`.ndf/project.json`、`AGENTS.md` |
+| #1 | 実装する | — | `eslint.config.js`、`tools/checks/src/lint-rules.ts`、`tools/checks/data/lint-exceptions.json`、`tools/checks/data/screen-pending.json`、`tools/checks/src/leak-check.ts`、`tools/checks/data/leak-allow.json`、`tools/checks/src/round-trip.ts`、`tools/checks/src/operation-coverage.ts`、`tools/checks/src/deployed-routes.ts`、`tools/checks/src/ndf-contract-check.ts`、`packages/contracts/data/secret-shapes.json`、`packages/contracts/src/secret-shapes.ts`、`packages/contracts/package.json`、`tools/test/lint-rules.test.ts`、`tools/test/leak-check.test.ts`、`tools/test/round-trip.test.ts`、`tools/test/operation-coverage.test.ts`、`tools/test/deployed-routes.test.ts`、`tools/test/leak-check.integration.test.ts`、`tools/test/workflow-audit.integration.test.ts`、`tools/test/knip-config.test.ts`、`tools/checks/data/zizmor.yml`（新設）、`apps/api/test/dispatch-routes.test.ts`、`tools/test/ndf-contract-check.test.ts`、`tools/test/ci-definition.test.ts`、`tools/test/ref-check.test.ts`、`tools/package.json`、`tools/tsconfig.json`、`package.json`、`package-lock.json`、`vitest.config.ts`、`vitest.integration.config.ts`、`.github/workflows/ci.yml`、`.github/workflows/ndf-contract.yml`、`knip.json`（新設）、`.ndf/project.json`、`AGENTS.md` |
 
 ## 人へ残す判断
 
@@ -359,7 +379,8 @@ C1 と C7 は、NDF の共通原則が「AI が自分で進めずに必ず人の
 | 判断 | 当たるレッドライン | なぜ当たるか |
 | --- | --- | --- |
 | CI の秘密 `LEAK_CHECK_TERMS` に実際の値を登録し、変数 `LEAK_CHECK_REQUIRE_TERMS` を `1` にする（GitHub のリポジトリの設定。実装の Pull Request のマージの後に持ち主が行う） | C1 | 運用する環境の実際の値という秘密に触れる |
-| `.ndf/project.json` の必須のチェックに `leak-check`・`ndf-contract`・`workflow-audit` を足し、`AGENTS.md` の「秘密とインフラの値を置かない」に `LEAK_CHECK_TERMS` の行を足す | C7 | 利用者の設定と指示書を書き換える。実装の中でコミットし、承認ゲートで人が見る |
+| `.ndf/project.json` の必須のチェックに `leak-check`・`ndf-contract`・`workflow-audit` を足し、`AGENTS.md` の「秘密とインフラの値を置かない」に `LEAK_CHECK_TERMS` の行を、「コードの決まり」の手元の確かめ `npm run check` の説明に「使っていないコード（knip）」を足す | C7 | 利用者の設定と指示書を書き換える。実装の中でコミットし、承認ゲートで人が見る |
+| 要求の前提 1 の書き換え（「落とすものの集合を足す・減らす必要が出たら、全体の設計を直す Pull Request を先に出す」という plan.md の「決まり」の詳細設計の行を、この課題では「同じ設計 PR の中で全体の設計を直す」に緩めた）を、この課題だけの例外として認めるか、plan.md の決まりそのものを直すか。plan.md を直すなら、ほかの子の課題にも同じ緩みが及ぶので、plan.md を直す課題を別に起こす。この PR は plan.md の決まりを変えない | C7 | 開発の計画（plan.md）の決まりを、利用者の指示（2026-11-21「より堅牢で長期的に良い方を選ぶ」）を根拠にこの課題の要求の中で緩めている。承認者が設計承認ゲートで例外として認めるかを決める |
 
 ## 未確認のまま残ること
 
@@ -367,6 +388,8 @@ C1 と C7 は、NDF の共通原則が「AI が自分で進めずに必ず人の
 | --- | --- |
 | 今のリポジトリの漏れの検査の当たり | 12 桁の数の当たりがどれだけ出るか。実装の Pull Request で main の全体を走らせて分かる |
 | GitHub の main の保護の必須のチェックの今の値 | 宣言の 4 つと一致しているか。実装の Pull Request の前に持ち主の設定で分かる |
+| 今のワークフローの zizmor の当たり | `ci.yml` と、実装で足す `ndf-contract.yml` に zizmor を打った結果は、まだ確かめていない。実装の Pull Request で打ち、当たりは同じ Pull Request で直す |
+| 今のリポジトリの knip の当たり | 使っていないファイル・書き出し・依存の当たりと、`@public` を付ける書き出しの一覧。実装の Pull Request で打って分かり、当たりは同じ Pull Request で消す |
 | 上流の `ask-journal` の `fields` | #41 の決定 106 の依頼の答えで分かる。足されたら、F23 の照らすこと (4) が読む項目に入る |
 
 ## 外部の調査
@@ -382,7 +405,7 @@ C1 と C7 は、NDF の共通原則が「AI が自分で進めずに必ず人の
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
 | STD1 | GitHub Actions の必須のステータスチェック | パスや枝の絞り込みでワークフローが起動しないと、必須のチェックは待ちのまま残りマージを止める。ジョブの `if` で飛ばしたジョブは成功と報告される | 決定 6（パスで絞らず、ジョブの中で照らすかを決める） | https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks（2026-11-21） |
-| STD2 | GitHub Actions の `schedule` と `workflow_dispatch` | `schedule` は既定の枝の最新のコミットで走り、公開のリポジトリで 60 日活動が無いと止まる。`workflow_dispatch` で手で起こせる | 決定 6・影響と危険（`schedule` を使い、`workflow_dispatch` は「いつ」に無いので使わない） | https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows（2026-11-21） |
+| STD2 | GitHub Actions の `schedule` と `workflow_dispatch` | `schedule` は既定の枝の最新のコミットで走り、公開のリポジトリで 60 日活動が無いと止まる。`workflow_dispatch` で手で起こせる | 決定 6・影響と危険（`schedule` で毎日、`workflow_dispatch` で手動の起動をする。どちらも全体の設計の「いつ」の行にある） | https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows（2026-11-21） |
 | STD3 | JSON Schema draft 2020-12 と zod v4 の `z.toJSONSchema` | zod v4 の書き出しの既定の版は draft 2020-12。ajv はこの版に別のクラスを使う | 決定 8 | https://zod.dev/json-schema・https://ajv.js.org/json-schema.html（2026-11-21） |
 | STD4 | AWS の ARN | 形は `arn:partition:service:region:account-id:resource`。パーティションは `aws`・`aws-cn`・`aws-us-gov`。資源によりリージョンとアカウントを省く。ARN そのものは秘密でないと明記 | 決定 3（ARN の形と、秘密でなくても実際の値として探す理由） | https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html（2026-11-21） |
 | STD5 | GitHub Actions の `permissions` と秘密の伏せ字 | `permissions` で 1 つでも指定すると、ほかは `none` になる。`::add-mask::` で値をログで伏せる | 足すワークフローは `contents: read` だけにする。検査は値を出さないので伏せ字に頼らない | https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions・https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions（2026-11-21） |
@@ -411,7 +434,7 @@ C1 と C7 は、NDF の共通原則が「AI が自分で進めずに必ず人の
 | LIB11 | knip | 6.47.0 | ISC | 2026-11-20 | 無し | 満たす。採る（決定 11）。使っていないファイル・書き出し・依存を見つける（star 12,699）。npm のワークスペースを設定なしで扱い、ワークスペースごとに入口を書ける | https://registry.npmjs.org/knip・`gh api repos/webpro-nl/knip`・knip の文書の「Monorepos & Workspaces」（`packages/docs/src/content/docs/features/monorepos-and-workspaces.md`）（2026-11-21） |
 | LIB12 | yaml（eemeli/yaml） | 2.9.1 | ISC | 2026-09-11 | 無し | 満たす。採る（決定 10）。YAML 1.2 で読み、今の `ci.yml` の `on`・`jobs`・`permissions` を鍵の名前のまま取れた。`SECURITY.md` がある | https://registry.npmjs.org/yaml・`gh api repos/eemeli/yaml`（2026-11-21）。作業ディレクトリに 2.9.1 を入れて `ci.yml` を解いた（2026-11-21） |
 | LIB13 | fast-check と zod-fast-check | 4.10.3・0.10.1 | MIT・MIT | 2026-11-18・2023-09-13 | 無し | fast-check は保守が活発（star 5,296）。zod から値を作る zod-fast-check は `peerDependencies` が `fast-check <4.0.0`・`zod ^3.18.0` で、今の fast-check 4 と zod 4 を範囲に持たない | https://registry.npmjs.org/fast-check・https://registry.npmjs.org/zod-fast-check・`gh api repos/dubzzz/fast-check`（2026-11-21） |
-| LIB14 | actionlint・zizmor | v1.7.12・v1.32.0 | MIT・MIT | 2026-03-30・2026-11-02 | 無し | zizmor を採る（決定 11）。zizmor はワークフローの静的な点検で、広すぎる権限（`excessive-permissions`）・資格情報の持ち出し（`artipacked`）・固定していない動作の参照（`unpinned-uses`）・テンプレートの注入などの点検を持ち、点検ごとにネットワークなしで動くかが文書にある。配布の資産に linux の実行ファイルがある（star 7,102）。actionlint（star 4,421）は採らない。どちらも必須のチェックの宣言とジョブの集合の一致は持たない | `gh api repos/rhysd/actionlint`・`gh api repos/zizmorcore/zizmor`・zizmor の README と `docs/audits.md`・`gh api repos/zizmorcore/zizmor/releases/latest`（2026-11-21） |
+| LIB14 | actionlint・zizmor | v1.7.12・v1.32.0 | MIT・MIT | 2026-03-30・2026-11-02 | 無し | zizmor を採る（決定 11）。zizmor はワークフローの静的な点検で、広すぎる権限（`excessive-permissions`）・資格情報の持ち出し（`artipacked`）・固定していない動作の参照（`unpinned-uses`）・テンプレートの注入などの点検を持ち、点検ごとにネットワークなしで動くかが文書にある（採る理由の 3 つの点検がネットワークなしで動くかは、点検ごとには確かめていない。「確かめられなかったこと」）。配布の資産に linux の実行ファイルがある（star 7,102）。actionlint（star 4,421）は採らない。どちらも必須のチェックの宣言とジョブの集合の一致は持たない | `gh api repos/rhysd/actionlint`・`gh api repos/zizmorcore/zizmor`・zizmor の README と `docs/audits.md`・`gh api repos/zizmorcore/zizmor/releases/latest`（2026-11-21） |
 
 ### 確かめられなかったこと
 
@@ -420,6 +443,8 @@ C1 と C7 は、NDF の共通原則が「AI が自分で進めずに必ず人の
 | trufflehog の許可の一覧と出力の伏せ字の設定 | 試していない | 上限。trufflehog は AGPL-3.0 の理由で退けたので、この結果に依らない |
 | npm の週のダウンロード数（secretlint・eslint-plugin-boundaries・eslint-plugin-import-x・dependency-cruiser・knip・yaml・fast-check） | `https://api.npmjs.org/downloads/point/last-week/<名前>` | 取得の制限（`error code: 1015`）で拒まれた。使われている広さは GitHub の star 数で比べた |
 | eslint-plugin-import-x の `no-restricted-paths` と dependency-cruiser の型だけの import の扱い | 試していない | 上限。どちらも採らず、LIB5 で書けることを確かめたので、この結果に依らない |
+| zizmor の `--offline` で効く点検・明示した `--config` で自動の探索が止まるか・行の中の例外の注釈 | zizmor の README と `docs/audits.md` を読んだ | 点検ごとの記載を `excessive-permissions`・`artipacked`・`unpinned-uses` について照らしておらず、実物も打っていない。実装の最初のタスクで文書を照らしてこの表に記し、`workflow-audit.integration.test.ts` と CI の定義のテストで縛る（決定 11）。どれかがネットワークを要すれば、実装の前に決定 11 を直す |
+| knip の `includeEntryExports` と JSDoc の `@public` の効き方 | knip の文書の「Configuring Project Files」（https://knip.dev/guides/configuring-project-files）と「Configuration Hints」（https://knip.dev/reference/configuration-hints）を cross-review の指摘（2026-11-21）が出典に挙げた。この設計の中では取得していない | 入口の書き出しの既定の扱いと `ignore` がファイルの単位であることは指摘の出典の記載に依る。実物の knip で、入口の書き出しの報告と `@public` を付けた書き出しの外れ方を打っていない。実装の最初のタスクで確かめ、受け入れ条件 12 のテストで縛る |
 | zizmor の配布の資産の要約値のファイル | `gh api repos/zizmorcore/zizmor/releases/latest` の資産の一覧 | 一覧に要約値のファイルが無い。実装で資産を取り、要約値をワークフローに固定する（gitleaks と同じく、配布元の値と比べない） |
 | `gitleaks dir` が git の追跡しているファイルだけに絞るか | README | 書かれていない。包みが追跡しているファイルだけを一時のディレクトリへ写すので、この結果に依らない |
 | I14 の対応（操作の表と画面・MCP・経路の突き合わせ）と NDF の契約の照合をする既存の道具 | 試していない | nd-factory の操作の表と NDF の契約の形に固有の照らしで、調べる候補を挙げられなかった。道具が無いとは確かめていない |
