@@ -16,7 +16,8 @@ export type MissingContext = {
 // key は照らしの種類（テストと後の課題が行を見分ける）。text は利用者へ出す 1 行
 export type MissingItem = { key: string; text: string };
 
-export type MissingCheck = (ctx: MissingContext) => Promise<MissingItem[]>;
+// label は利用者へ出す照らしの名前（照らしが投げたときの「<label> を確かめられない」の行に使う）
+export type MissingCheck = { label: string; run: (ctx: MissingContext) => Promise<MissingItem[]> };
 
 const IDP_DOC = "docs/operations/idp-and-apps.md";
 
@@ -72,13 +73,19 @@ export async function checkCostAllocationTags(ctx: MissingContext): Promise<Miss
       },
     ];
   }
-  const inactive = keys.filter((k) => statuses[k] !== "Active");
-  if (inactive.length === 0) return [];
+  const notActive = keys.filter((k) => statuses[k] !== "Active");
+  if (notActive.length === 0) return [];
+  // Missing のキーは請求の画面の一覧に無く、すぐには有効にできない。タグの付いた資源ができてから最大 24 時間で一覧に出る
+  const missing = notActive.filter((k) => statuses[k] === "Missing");
+  const wait =
+    missing.length > 0
+      ? `${missing.join("・")} はタグの付いた資源がまだ無く、請求の画面のコスト配分タグの一覧に出ていないため、まだ有効にできない。deploy でタグの付いた資源を作り、一覧にキーが出るまで最大 24 時間待ってから有効にする。`
+      : "";
   const org = await ctx.readOrganizationManager(ctx.target);
   return [
     {
       key: "cost_allocation_tags",
-      text: `コスト配分タグ ${inactive.join("・")} が有効でない。有効になるまで予算は 0 を数え続け、予算の知らせは鳴らない。有効にする先: ${activationTarget(org)}。有効にできなければ設定のファイルの budget.scope を account にする（アカウントの全体を数える）`,
+      text: `コスト配分タグ ${notActive.join("・")} が有効でない。有効になるまで予算は 0 を数え続け、予算の知らせは鳴らない。${wait}有効にする先: ${activationTarget(org)}。有効にできなければ設定のファイルの budget.scope を account にする（アカウントの全体を数える）`,
     },
   ];
 }
@@ -112,16 +119,16 @@ export async function checkGetAzs(ctx: MissingContext): Promise<MissingItem[]> {
   return [
     {
       key: "get_azs",
-      text: `Fn::GetAZs が返す AZ が ${count} つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（aws ec2 create-default-subnet --availability-zone <AZ>）か、既定のサブネットをすべて消す`,
+      text: `Fn::GetAZs が返す AZ が ${count} つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（aws ec2 create-default-subnet --profile ${ctx.target.profile} --region ${ctx.target.region} --availability-zone <AZ>）か、既定のサブネットをすべて消す`,
     },
   ];
 }
 
 export const MISSING_CHECKS: readonly MissingCheck[] = [
-  checkGoogleClientId,
-  checkCostAllocationTags,
-  checkOpsNotifyEmails,
-  checkGetAzs,
+  { label: "Google のクライアントの ID", run: checkGoogleClientId },
+  { label: "コスト配分タグ", run: checkCostAllocationTags },
+  { label: "運用の知らせの宛先", run: checkOpsNotifyEmails },
+  { label: "Fn::GetAZs が返す AZ の数", run: checkGetAzs },
 ];
 
 function errorText(e: unknown): string {
@@ -131,12 +138,14 @@ function errorText(e: unknown): string {
 // 照らしを順に打つ。1 つの照らしが投げても、ほかの照らしは続け、その照らしを「確かめられない」の 1 行にする
 export async function collectMissingSettings(ctx: MissingContext, checks: readonly MissingCheck[]): Promise<MissingItem[]> {
   const items: MissingItem[] = [];
-  for (const [i, check] of checks.entries()) {
+  for (const check of checks) {
     try {
-      items.push(...(await check(ctx)));
+      items.push(...(await check.run(ctx)));
     } catch (e) {
-      const name = check.name || `${i + 1} 番目の照らし`;
-      items.push({ key: "check_failed", text: `${name} を確かめられない（${errorText(e)}）` });
+      items.push({
+        key: "check_failed",
+        text: `${check.label} を確かめられない（${errorText(e)}）。AWS の読みが思わぬ形で失敗した。profile の認証と通信を確かめて diff を打ち直す`,
+      });
     }
   }
   return items;

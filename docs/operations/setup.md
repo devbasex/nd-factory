@@ -70,11 +70,12 @@ npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> 
 | 行 | 出るとき | 直し方 |
 | --- | --- | --- |
 | Google のクライアントの ID が無い | 設定のファイルに `login.google.client_id` が無い | 画面はログインの設定を待つ。[idp-and-apps.md](idp-and-apps.md) の順でクライアントを作り、`client_id` を書いて `diff` と `deploy` を打ち直す |
-| コスト配分タグが有効でない | `budget.scope` が `tags`（既定）で、タグ `app-prefix`・`app-env` のどれかが有効でない | 有効になるまで予算は 0 を数え続け、予算の知らせは鳴らない。行が示す先（組織に入っていなければこのアカウントの請求の画面、組織のメンバーなら組織の管理のアカウント）で有効にする。有効にできなければ `budget.scope` を `account` にする（[settings.md](settings.md)） |
+| コスト配分タグが有効でない | `budget.scope` が `tags`（既定）で、タグ `app-prefix`・`app-env` のどれかが有効でない | 有効になるまで予算は 0 を数え続け、予算の知らせは鳴らない。行が示す先（組織に入っていなければこのアカウントの請求の画面、組織のメンバーなら組織の管理のアカウント）で有効にする。初めての設置ではタグの付いた資源がまだ無く、キーが請求の画面の一覧に出ないため、すぐには有効にできない（行はそのキーを「タグの付いた資源がまだ無く」と挙げる）。そのときは `deploy` でタグの付いた資源を作り、一覧にキーが出るまで最大 24 時間待ってから有効にし、`diff` を打ち直して行が消えたことを確かめる（[AWS のタグの有効化](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/activating-tags.html)）。有効にできなければ `budget.scope` を `account` にする（[settings.md](settings.md)） |
 | コスト配分タグが有効かを確かめられない | タグの状態を読めない | 行が示す次の操作に従う。組織に入っていなければ `ce:ListCostAllocationTags` を許した profile で打ち直し、組織のメンバーなら組織の管理のアカウントへ有効化を頼むか `budget.scope` を `account` にする |
 | 運用の知らせの宛先が空 | 設定のファイルの `ops.notify_emails` が無いか空 | 宛先のメールを書く。無いと予算と運用の知らせがどこにも届かない |
-| `Fn::GetAZs` が返す AZ が 2 つ未満 | 既定の VPC の既定のサブネットが 1 つの AZ にだけある | 反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --availability-zone <AZ>`）か、既定のサブネットをすべて消す |
+| `Fn::GetAZs` が返す AZ が 2 つ未満 | 既定の VPC の既定のサブネットが 1 つの AZ にだけある | 反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --profile <profile> --region <リージョン> --availability-zone <AZ>`。行は `diff` に渡した profile と、それが解いたリージョンを入れて示す）か、既定のサブネットをすべて消す |
 | `Fn::GetAZs` が返す AZ の数を確かめられない | サブネットか AZ を読めない | 下の許しを持つ profile で打ち直す |
+| <照らし> を確かめられない（<例外の名前>: <文>） | 上の行の照らし（Google のクライアントの ID・コスト配分タグ・運用の知らせの宛先・`Fn::GetAZs` が返す AZ の数）の途中で、AWS の読みが上の行で扱わない形で失敗した（例: タグの状態は読めたが組織を読めない。認証の期限切れ・通信の失敗） | 括弧の中の例外で原因を確かめ、profile の認証と通信を直して `diff` を打ち直す。権限が足りないなら下の許しを足す。ほかの照らしは続くため、その照らしの行だけが欠ける |
 
 `budget.scope` が `account` のときは、コスト配分タグの行を出さず、タグの状態も読まない。
 

@@ -91,9 +91,22 @@ describe("collectMissingSettings", () => {
       expect(text).toContain("有効にできなければ設定のファイルの budget.scope を account にする（アカウントの全体を数える）");
     });
 
-    it("一覧に無いタグ（Missing）も有効でないと数える", async () => {
+    it("一覧に無いタグ（Missing）も有効でないと数え、資源を作って最大 24 時間待ってから有効にすると示す", async () => {
       const text = only(await collect({ tags: { "app-prefix": "Missing", "app-env": "Missing" } }), "cost_allocation_tags");
       expect(text).toMatch(/^コスト配分タグ app-prefix・app-env が有効でない。/);
+      expect(text).toContain(
+        "app-prefix・app-env はタグの付いた資源がまだ無く、請求の画面のコスト配分タグの一覧に出ていないため、まだ有効にできない。deploy でタグの付いた資源を作り、一覧にキーが出るまで最大 24 時間待ってから有効にする。有効にする先: ",
+      );
+    });
+
+    it("Inactive と Missing が混ざれば、待ちの文は Missing のキーだけを挙げる", async () => {
+      const text = only(await collect({ tags: { "app-prefix": "Inactive", "app-env": "Missing" } }), "cost_allocation_tags");
+      expect(text).toMatch(/^コスト配分タグ app-prefix・app-env が有効でない。/);
+      expect(text).toContain("。app-env はタグの付いた資源がまだ無く");
+    });
+
+    it("Inactive だけなら待ちの文を出さない", async () => {
+      expect(only(await collect({ tags: INACTIVE }), "cost_allocation_tags")).not.toContain("24 時間");
     });
 
     it.each([
@@ -158,7 +171,7 @@ describe("collectMissingSettings", () => {
     expect(await collect({ azs: 2 })).toEqual([]);
     const text = only(await collect({ azs: 1 }), "get_azs");
     expect(text).toBe(
-      "Fn::GetAZs が返す AZ が 1 つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（aws ec2 create-default-subnet --availability-zone <AZ>）か、既定のサブネットをすべて消す",
+      "Fn::GetAZs が返す AZ が 1 つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（aws ec2 create-default-subnet --profile acme-test --region us-west-2 --availability-zone <AZ>）か、既定のサブネットをすべて消す",
     );
   });
 
@@ -178,13 +191,19 @@ describe("collectMissingSettings", () => {
   });
 
   it("照らしが投げると、その照らしを確かめられないの 1 行にして続ける", async () => {
-    const broken: MissingCheck = async function brokenCheck() {
-      throw new TypeError("壊れた");
+    const broken: MissingCheck = {
+      label: "壊れた照らし",
+      run: async () => {
+        throw new TypeError("壊れた");
+      },
     };
-    const after: MissingCheck = async () => [{ key: "after", text: "後の照らし" }];
+    const after: MissingCheck = { label: "後", run: async () => [{ key: "after", text: "後の照らし" }] };
     const items = await collectMissingSettings(ctx(), [broken, after]);
     expect(items).toEqual([
-      { key: "check_failed", text: "brokenCheck を確かめられない（TypeError: 壊れた）" },
+      {
+        key: "check_failed",
+        text: "壊れた照らし を確かめられない（TypeError: 壊れた）。AWS の読みが思わぬ形で失敗した。profile の認証と通信を確かめて diff を打ち直す",
+      },
       { key: "after", text: "後の照らし" },
     ]);
   });
@@ -195,7 +214,12 @@ describe("collectMissingSettings", () => {
       throw new Error("壊れた");
     };
     const items = await collectMissingSettings(c, MISSING_CHECKS);
-    expect(items).toEqual([{ key: "check_failed", text: "checkCostAllocationTags を確かめられない（Error: 壊れた）" }]);
+    expect(items).toEqual([
+      {
+        key: "check_failed",
+        text: "コスト配分タグ を確かめられない（Error: 壊れた）。AWS の読みが思わぬ形で失敗した。profile の認証と通信を確かめて diff を打ち直す",
+      },
+    ]);
   });
 });
 
