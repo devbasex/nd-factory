@@ -1,6 +1,9 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CostExplorerClient } from "@aws-sdk/client-cost-explorer";
+import { EC2Client } from "@aws-sdk/client-ec2";
+import { OrganizationsClient } from "@aws-sdk/client-organizations";
 import { SSMClient } from "@aws-sdk/client-ssm";
 import { STSClient } from "@aws-sdk/client-sts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +12,9 @@ import {
   BootstrapReadError,
   ProfileError,
   readBootstrapVersion,
+  readCostAllocationTags,
+  readGetAzsCount,
+  readOrganizationManager,
   resolveProfile,
 } from "../setup/aws-reader.ts";
 
@@ -108,5 +114,128 @@ describe("readBootstrapVersion", () => {
   it("数でない値は BootstrapReadError", async () => {
     vi.spyOn(SSMClient.prototype, "send").mockResolvedValue({ Parameter: { Value: "abc" } } as never);
     await expect(readBootstrapVersion(TARGET)).rejects.toBeInstanceOf(BootstrapReadError);
+  });
+});
+
+type Sent = { constructor: { name: string }; input: Record<string, unknown> };
+
+function sentName(call: unknown[]): string {
+  return (call[0] as Sent).constructor.name;
+}
+
+function sentInput(call: unknown[]): Record<string, unknown> {
+  return (call[0] as Sent).input;
+}
+
+describe("readCostAllocationTags", () => {
+  beforeEach(() => awsFiles("[profile acme-test]\nregion = us-west-2\n"));
+
+  it("渡したキーの状態を返し、一覧に無いキーは Missing", async () => {
+    const send = vi
+      .spyOn(CostExplorerClient.prototype, "send")
+      .mockResolvedValue({ CostAllocationTags: [{ TagKey: "app-prefix", Type: "UserDefined", Status: "Active" }] } as never);
+    expect(await readCostAllocationTags(TARGET, ["app-prefix", "app-env"])).toEqual({ "app-prefix": "Active", "app-env": "Missing" });
+    expect(sentInput(send.mock.calls[0]!)).toMatchObject({ TagKeys: ["app-prefix", "app-env"], Type: "UserDefined" });
+  });
+
+  it("続きのページも読む", async () => {
+    const send = vi
+      .spyOn(CostExplorerClient.prototype, "send")
+      .mockResolvedValueOnce({ CostAllocationTags: [{ TagKey: "app-prefix", Status: "Inactive" }], NextToken: "next" } as never)
+      .mockResolvedValueOnce({ CostAllocationTags: [{ TagKey: "app-env", Status: "Active" }] } as never);
+    expect(await readCostAllocationTags(TARGET, ["app-prefix", "app-env"])).toEqual({ "app-prefix": "Inactive", "app-env": "Active" });
+    expect(sentInput(send.mock.calls[1]!)).toMatchObject({ NextToken: "next" });
+  });
+
+  it("端点は us-east-1 に解く", async () => {
+    const client = new CostExplorerClient({ region: TARGET.region });
+    const endpoint = await client.config.endpointProvider({ Region: TARGET.region, UseFIPS: false, UseDualStack: false });
+    expect(endpoint.url.hostname).toBe("ce.us-east-1.amazonaws.com");
+  });
+
+  it("読めなければ投げる", async () => {
+    vi.spyOn(CostExplorerClient.prototype, "send").mockRejectedValue(
+      Object.assign(new Error("denied"), { name: "AccessDeniedException" }) as never,
+    );
+    await expect(readCostAllocationTags(TARGET, ["app-prefix"])).rejects.toThrow();
+  });
+});
+
+describe("readOrganizationManager", () => {
+  beforeEach(() => awsFiles("[profile acme-test]\nregion = us-west-2\n"));
+
+  it("組織のメンバーなら管理のアカウントを返す", async () => {
+    vi.spyOn(OrganizationsClient.prototype, "send").mockResolvedValue({
+      Organization: { MasterAccountId: "210987654321" },
+    } as never);
+    expect(await readOrganizationManager(TARGET)).toEqual({ member: true, managementAccount: "210987654321" });
+  });
+
+  it("組織の管理のアカウント自身なら member: false", async () => {
+    vi.spyOn(OrganizationsClient.prototype, "send").mockResolvedValue({
+      Organization: { MasterAccountId: "123456789012" },
+    } as never);
+    expect(await readOrganizationManager(TARGET)).toEqual({ member: false, managementAccount: "123456789012" });
+  });
+
+  it("組織に入っていなければ member: false", async () => {
+    vi.spyOn(OrganizationsClient.prototype, "send").mockRejectedValue(
+      Object.assign(new Error("not in use"), { name: "AWSOrganizationsNotInUseException" }) as never,
+    );
+    expect(await readOrganizationManager(TARGET)).toEqual({ member: false, managementAccount: null });
+  });
+
+  it("権限が無ければ unknown", async () => {
+    vi.spyOn(OrganizationsClient.prototype, "send").mockRejectedValue(
+      Object.assign(new Error("denied"), { name: "AccessDeniedException" }) as never,
+    );
+    expect(await readOrganizationManager(TARGET)).toBe("unknown");
+  });
+});
+
+describe("readGetAzsCount", () => {
+  beforeEach(() => awsFiles("[profile acme-test]\nregion = us-west-2\n"));
+
+  function subnets(zones: string[]) {
+    return { Subnets: zones.map((z) => ({ AvailabilityZone: z, DefaultForAz: true })) };
+  }
+
+  const AVAILABLE = { AvailabilityZones: ["us-west-2a", "us-west-2b", "us-west-2c"].map((z) => ({ ZoneName: z })) };
+
+  it("既定のサブネットが 3 つの AZ にあれば 3", async () => {
+    const send = vi
+      .spyOn(EC2Client.prototype, "send")
+      .mockResolvedValue(subnets(["us-west-2a", "us-west-2b", "us-west-2c"]) as never);
+    expect(await readGetAzsCount(TARGET)).toBe(3);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(sentName(send.mock.calls[0]!)).toBe("DescribeSubnetsCommand");
+    expect(sentInput(send.mock.calls[0]!)).toMatchObject({ Filters: [{ Name: "default-for-az", Values: ["true"] }] });
+  });
+
+  it("既定のサブネットが 1 つの AZ にだけあれば、使える AZ が 3 つでも 1", async () => {
+    const send = vi.spyOn(EC2Client.prototype, "send").mockImplementation((async (command: Sent) =>
+      command.constructor.name === "DescribeSubnetsCommand" ? subnets(["us-west-2a"]) : AVAILABLE) as never);
+    expect(await readGetAzsCount(TARGET)).toBe(1);
+    expect(send.mock.calls.map(sentName)).toEqual(["DescribeSubnetsCommand"]);
+  });
+
+  it("既定のサブネットが無ければ使える AZ の数", async () => {
+    const send = vi.spyOn(EC2Client.prototype, "send").mockImplementation((async (command: Sent) =>
+      command.constructor.name === "DescribeSubnetsCommand" ? subnets([]) : AVAILABLE) as never);
+    expect(await readGetAzsCount(TARGET)).toBe(3);
+    expect(send.mock.calls.map(sentName)).toEqual(["DescribeSubnetsCommand", "DescribeAvailabilityZonesCommand"]);
+    expect(sentInput(send.mock.calls[1]!)).toMatchObject({
+      Filters: [
+        { Name: "state", Values: ["available"] },
+        { Name: "zone-type", Values: ["availability-zone"] },
+      ],
+    });
+  });
+
+  it("既定のサブネットの続きのページも数え、同じ AZ は 1 つに数える", async () => {
+    vi.spyOn(EC2Client.prototype, "send")
+      .mockResolvedValueOnce({ ...subnets(["us-west-2a", "us-west-2a"]), NextToken: "next" } as never)
+      .mockResolvedValueOnce(subnets(["us-west-2b"]) as never);
+    expect(await readGetAzsCount(TARGET)).toBe(2);
   });
 });

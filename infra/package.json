@@ -7,6 +7,9 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@aws-sdk/client-cost-explorer": "3.1170.0",
+    "@aws-sdk/client-ec2": "3.1170.0",
+    "@aws-sdk/client-organizations": "3.1170.0",
     "@aws-sdk/client-ssm": "3.1170.0",
     "@aws-sdk/client-sts": "3.1170.0",
     "@aws-sdk/credential-providers": "3.1170.0",
