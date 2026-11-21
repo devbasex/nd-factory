@@ -20,10 +20,10 @@ function codecWriting(writeVersion: number): RowCodec<V2> {
   return rowCodec({ latest: { version: 2, schema: v2 }, previous: { version: 1, schema: v1, upgrade, downgrade }, writeVersion, keyOf });
 }
 
-// 1 段目（読み手は両方、書き手は前の版）・2 段目（書き手も次の版）・書き手を戻した状態（1 段目と同じ値）
+// 1 段目（読み手は両方、書き手は前の版）・2 段目（書き手も次の版）。書き手を戻した状態は 1 段目と同じ値なので stage1 で表し、
+// 確かめるのは 2 段目で書いた行をその状態で読み書きできること
 const stage1 = codecWriting(1);
 const stage2 = codecWriting(2);
-const rolledBack = codecWriting(1);
 const onlyV1 = rowCodec({ latest: { version: 1, schema: v1 }, writeVersion: 1, keyOf });
 
 const rowV1 = { pk: "ITEM#a", sk: "ITEM", schema_version: 1, version: 3, item_id: "a", nick: "acme" };
@@ -44,10 +44,28 @@ describe("rowCodec", () => {
   it("writeVersion が 3・previous.version が latest.version - 1 でない・previous があって downgrade が無い組で投げる", () => {
     expect(() => codecWriting(3)).toThrow(RowCodecError);
     expect(() => rowCodec({ latest: { version: 1, schema: v1 }, writeVersion: 2, keyOf })).toThrow(RowCodecError);
-    expect(() => rowCodec({ latest: { version: 3, schema: v2 }, previous: { version: 1, schema: v1, upgrade, downgrade }, writeVersion: 3, keyOf })).toThrow(RowCodecError);
+    const v3 = v2.extend({ schema_version: z.literal(3) });
+    expect(() => rowCodec({ latest: { version: 3, schema: v3 }, previous: { version: 1, schema: v1, upgrade: (r: V1) => ({ ...upgrade(r), schema_version: 3 as const }), downgrade: (r) => downgrade({ ...r, schema_version: 2 }) }, writeVersion: 3, keyOf })).toThrow(/previous.version は latest.version - 1/);
     const noDowngrade = { version: 1, schema: v1, upgrade } as unknown as { version: number; schema: typeof v1; upgrade: typeof upgrade; downgrade: typeof downgrade };
     expect(() => rowCodec({ latest: { version: 2, schema: v2 }, previous: noDowngrade, writeVersion: 2, keyOf })).toThrow(RowCodecError);
     expect(() => rowCodec({ latest: { version: 0, schema: v1 }, writeVersion: 0, keyOf })).toThrow(RowCodecError);
+  });
+
+  it("latest.version が 1 のときの previous.version 0 を拒む（版 0 を読まず、writeVersion 0 も選べない）", () => {
+    const v0 = v1.extend({ schema_version: z.literal(0) });
+    const up = (r: z.infer<typeof v0>): V1 => ({ ...r, schema_version: 1 });
+    const down = (r: V1) => ({ ...r, schema_version: 0 as const });
+    expect(() => rowCodec({ latest: { version: 1, schema: v1 }, previous: { version: 0, schema: v0, upgrade: up, downgrade: down }, writeVersion: 1, keyOf })).toThrow(/previous.version は 1 以上の整数/);
+    expect(() => rowCodec({ latest: { version: 1, schema: v1 }, previous: { version: 0, schema: v0, upgrade: up, downgrade: down }, writeVersion: 0, keyOf })).toThrow(RowCodecError);
+  });
+
+  it("schema の schema_version のリテラルが各 version と食い違う組・schema_version の列が無い形で投げる", () => {
+    expect(() => rowCodec({ latest: { version: 2, schema: v1 as unknown as typeof v2 }, writeVersion: 2, keyOf })).toThrow(/latest.schema の schema_version/);
+    expect(() => rowCodec({ latest: { version: 2, schema: v2 }, previous: { version: 1, schema: v2 as unknown as typeof v1, upgrade, downgrade }, writeVersion: 1, keyOf })).toThrow(/previous.schema の schema_version/);
+    const noColumn = z.object({ version: z.int().min(1), item_id: z.string(), display_name: z.string() });
+    expect(() => rowCodec({ latest: { version: 2, schema: noColumn as unknown as typeof v2 }, writeVersion: 2, keyOf })).toThrow(/latest.schema の schema_version/);
+    const twoValues = v2.extend({ schema_version: z.literal([1, 2]) });
+    expect(() => rowCodec({ latest: { version: 2, schema: twoValues as unknown as typeof v2 }, writeVersion: 2, keyOf })).toThrow(/latest.schema の schema_version/);
   });
 });
 
@@ -64,11 +82,31 @@ describe("readRow と writeRow（受け入れ条件 9 の読み手）", () => {
     expect(writeRow(stage2, asV2)).toEqual(rowV2);
   });
 
-  it("書き手を戻した状態: 2 段目に書いた版 2 の行と版 1 の行をどちらも読み、writeRow は版 1 の行を出す", () => {
+  it("書き手を戻した状態: 2 段目に書いた版 2 の行を読み、書き換えると版 1 の行になる", () => {
     const written = writeRow(stage2, { ...asV2, display_name: "acme-2" });
-    expect(readRow(rolledBack, written)).toEqual({ ok: true, row: { ...asV2, display_name: "acme-2" }, from: 2 });
-    expect(readRow(rolledBack, rowV1)).toEqual({ ok: true, row: asV2, from: 1 });
-    expect(writeRow(rolledBack, asV2)).toEqual(rowV1);
+    const read = readRow(stage1, written);
+    expect(read).toEqual({ ok: true, row: { ...asV2, display_name: "acme-2" }, from: 2 });
+    if (!read.ok) throw new Error("読めない");
+    expect(writeRow(stage1, read.row)).toEqual({ ...rowV1, nick: "acme-2" });
+    expect(rowUpdateOf(stage1, written, read.row)).toEqual({ set: { schema_version: 1, item_id: "a", nick: "acme-2" }, remove: ["display_name"] });
+  });
+
+  it("upgrade が投げた前の版の行は、投げずに shape_invalid を返す", () => {
+    const throwing = rowCodec({
+      latest: { version: 2, schema: v2 },
+      previous: {
+        version: 1,
+        schema: v1,
+        upgrade: () => {
+          throw new Error("upgrade の誤り");
+        },
+        downgrade,
+      },
+      writeVersion: 2,
+      keyOf,
+    });
+    expect(readRow(throwing, rowV1)).toEqual({ ok: false, reason: "shape_invalid" });
+    expect(readRow(throwing, rowV2)).toEqual({ ok: true, row: asV2, from: 2 });
   });
 
   it("版 1 → upgrade → downgrade で元の行に戻る", () => {
@@ -127,8 +165,24 @@ describe("rowUpdateOf", () => {
     expect(update.remove).toEqual(["nick"]);
   });
 
-  it("書き手を戻した状態では、次の版だけの列を remove に並べる", () => {
-    expect(rowUpdateOf(rolledBack, rowV2, asV2)).toEqual({ set: { schema_version: 1, item_id: "a", nick: "acme" }, remove: ["display_name"] });
+  it("書き手を戻した状態（1 段目と同じ値）では、次の版だけの列を remove に並べる", () => {
+    expect(rowUpdateOf(stage1, rowV2, asV2)).toEqual({ set: { schema_version: 1, item_id: "a", nick: "acme" }, remove: ["display_name"] });
+  });
+
+  it("undefined にした任意の列は set に出さず、保存済みなら remove に並べる（writeRow も出さない）", () => {
+    const withNote = z.object({ schema_version: z.literal(1), version: z.int().min(1), item_id: z.string(), note: z.string().optional() });
+    const codec = rowCodec({ latest: { version: 1, schema: withNote }, writeVersion: 1, keyOf });
+    const row = { schema_version: 1 as const, version: 3, item_id: "a", note: undefined };
+    expect(writeRow(codec, row)).not.toHaveProperty("note");
+    const raw = { pk: "ITEM#a", sk: "ITEM", schema_version: 1, version: 3, item_id: "a", note: "old" };
+    expect(rowUpdateOf(codec, raw, row)).toEqual({ set: { schema_version: 1, item_id: "a" }, remove: ["note"] });
+    const { note: _note, ...rawWithout } = raw;
+    expect(rowUpdateOf(codec, rawWithout, row)).toEqual({ set: { schema_version: 1, item_id: "a" }, remove: [] });
+  });
+
+  it("constructor・toString などの継承した名前の列も、新しい行に無ければ remove に並べる", () => {
+    const raw = { ...rowV2, constructor: "x", toString: "y", hasOwnProperty: "z" };
+    expect(rowUpdateOf(stage2, raw, asV2).remove).toEqual(["constructor", "toString", "hasOwnProperty"]);
   });
 
   it("消した列が無ければ remove が空", () => {

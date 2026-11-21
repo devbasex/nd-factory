@@ -1,4 +1,4 @@
-import type { z } from "zod";
+import { z } from "zod";
 import type { RowKey } from "./rows/common.ts";
 
 // 行の版の読み手と書き手（issues/issue-2-design-detail.md の「表の移し」、決定 9）。
@@ -40,6 +40,13 @@ function isVersion(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= 1;
 }
 
+// 版の形は z.object で、schema_version の列が version だけのリテラルであること（食い違うと writeRow が投げるか、readRow が読めない行を出す）
+function assertSchemaVersion(which: string, schema: z.ZodType, version: number): void {
+  const column = schema instanceof z.ZodObject ? (schema.shape as Record<string, unknown>)["schema_version"] : undefined;
+  const values = column instanceof z.ZodLiteral ? [...column.values] : null;
+  if (values === null || values.length !== 1 || values[0] !== version) throw new RowCodecError(`${which}.schema の schema_version は z.literal(${version})`);
+}
+
 export function rowCodec<L, P>(spec: {
   latest: { version: number; schema: z.ZodType<L> };
   previous?: { version: number; schema: z.ZodType<P>; upgrade: (row: P) => L; downgrade: (row: L) => P };
@@ -48,9 +55,12 @@ export function rowCodec<L, P>(spec: {
 }): RowCodec<L> {
   const { latest, previous, writeVersion, keyOf } = spec;
   if (!isVersion(latest.version)) throw new RowCodecError(`latest.version は 1 以上の整数: ${latest.version}`);
+  assertSchemaVersion("latest", latest.schema, latest.version);
   if (previous !== undefined) {
+    if (!isVersion(previous.version)) throw new RowCodecError(`previous.version は 1 以上の整数: ${previous.version}`);
     if (previous.version !== latest.version - 1) throw new RowCodecError(`previous.version は latest.version - 1: ${previous.version}`);
     if (typeof previous.upgrade !== "function" || typeof previous.downgrade !== "function") throw new RowCodecError("previous は upgrade と downgrade を持つ");
+    assertSchemaVersion("previous", previous.schema, previous.version);
   }
   if (writeVersion !== latest.version && writeVersion !== previous?.version) throw new RowCodecError(`writeVersion は latest.version か previous.version: ${writeVersion}`);
   return {
@@ -70,7 +80,8 @@ export function rowCodec<L, P>(spec: {
   };
 }
 
-// latest の版はそのまま、previous の版は upgrade で latest の形へそろえて返し、ほかの版を拒む。writeVersion によらず同じ結果を返す
+// latest の版はそのまま、previous の版は upgrade で latest の形へそろえて返し、ほかの版を拒む。writeVersion によらず同じ結果を返す。
+// upgrade が投げたときは、前の版の行を latest の形へそろえられなかったものとして shape_invalid を返す（読み手は投げない）
 export function readRow<L>(codec: RowCodec<L>, raw: unknown): ReadRowResult<L> {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ok: false, reason: "shape_invalid" };
   const from = (raw as Record<string, unknown>)["schema_version"];
@@ -83,12 +94,18 @@ export function readRow<L>(codec: RowCodec<L>, raw: unknown): ReadRowResult<L> {
   if (previous === null || from !== previous.version) return { ok: false, reason: "version_unsupported" };
   const old = previous.schema.safeParse(raw);
   if (!old.success) return { ok: false, reason: "shape_invalid" };
-  const upgraded = codec.latest.schema.safeParse(previous.upgrade(old.data));
+  let upgradedRow: L;
+  try {
+    upgradedRow = previous.upgrade(old.data);
+  } catch {
+    return { ok: false, reason: "shape_invalid" };
+  }
+  const upgraded = codec.latest.schema.safeParse(upgradedRow);
   return upgraded.success ? { ok: true, row: upgraded.data, from } : { ok: false, reason: "shape_invalid" };
 }
 
 // writeVersion の形の行（schema_version と鍵の列を含む）を返す。writeVersion が previous.version なら downgrade を通す。
-// 版の形を通らなければ投げる（書き手の誤り）
+// 値が undefined の列は出さない（DynamoDB へ書く値に undefined を残さない）。版の形を通らなければ投げる（書き手の誤り）
 export function writeRow<L>(codec: RowCodec<L>, row: L): Record<string, unknown> {
   const key = codec.keyOf(row);
   const previous = codec.previous;
@@ -97,14 +114,16 @@ export function writeRow<L>(codec: RowCodec<L>, row: L): Record<string, unknown>
   const schema = toPrevious ? previous.schema : codec.latest.schema;
   const parsed = schema.safeParse(typeof body === "object" && body !== null ? { ...body, schema_version: codec.writeVersion } : body);
   if (!parsed.success) throw new RowCodecError(`行が版 ${codec.writeVersion} の形を通らない: ${parsed.error.issues.map((i) => i.path.join(".")).join(", ")}`);
-  return { ...(parsed.data as Record<string, unknown>), pk: key.pk, ...(key.sk === null ? {} : { sk: key.sk }) };
+  const columns = Object.entries(parsed.data as Record<string, unknown>).filter(([, value]) => value !== undefined);
+  return { ...Object.fromEntries(columns), pk: key.pk, ...(key.sk === null ? {} : { sk: key.sk }) };
 }
 
 // 読んだ行（raw）を row へ書き換える更新の set と remove を作る。set は writeRow の戻り値から pk・sk・version を外したもの（schema_version を含む）。
-// remove は raw の列のうち writeRow の戻り値に無く、pk・sk・version でもない列（別の版で消した列。索引の鍵なら書き込みで索引から外れる）
+// remove は raw の列のうち writeRow の戻り値に無く、pk・sk・version でもない列（別の版で消した列と、undefined にした任意の列。索引の鍵なら書き込みで索引から外れる）。
+// 列の有無は自身の列だけで見る（constructor などの継承した名前を列と取り違えない）
 export function rowUpdateOf<L>(codec: RowCodec<L>, raw: Readonly<Record<string, unknown>>, row: L): RowUpdate {
   const written = writeRow(codec, row);
   const set = Object.fromEntries(Object.entries(written).filter(([column]) => !NOT_UPDATED.has(column)));
-  const remove = Object.keys(raw).filter((column) => !(column in written) && !NOT_UPDATED.has(column));
+  const remove = Object.keys(raw).filter((column) => !Object.hasOwn(written, column) && !NOT_UPDATED.has(column));
   return { set, remove };
 }
