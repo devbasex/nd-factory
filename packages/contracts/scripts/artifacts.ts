@@ -81,12 +81,13 @@ function rebaseRefs(value: unknown, from: string, to: string): unknown {
   if (Array.isArray(value)) return value.map((v) => rebaseRefs(v, from, to));
   if (value === null || typeof value !== "object") return value;
   const prefix = from === "#" ? "#/" : `${from}/`;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value)) {
-    if (k === "$ref" && typeof v === "string" && (v === from || v.startsWith(prefix))) out[k] = `${to}${v.slice(from.length)}`;
-    else out[k] = rebaseRefs(v, from, to);
-  }
-  return out;
+  // 代入で写すと、properties の __proto__ という項目は自身のプロパティにならず落ちる。すべての鍵を自身のプロパティとして組む
+  return Object.fromEntries(
+    Object.entries(value).map(([k, v]) => [
+      k,
+      k === "$ref" && typeof v === "string" && (v === from || v.startsWith(prefix)) ? `${to}${v.slice(from.length)}` : rebaseRefs(v, from, to),
+    ]),
+  );
 }
 
 // 操作ごとの要素と結果の JSON Schema。形の未定は z.never() の {"not": {}}。

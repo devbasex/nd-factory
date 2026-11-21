@@ -487,3 +487,26 @@ describe("buildReasons・buildRoutes・buildPending", () => {
     expect(buildPending([half])).toEqual([{ operation: "fixture_notes.find", owner: "#9" }]);
   });
 });
+
+describe("__proto__ という名前の項目", () => {
+  // 計算した鍵で書くと、__proto__ は原型でなく自身の項目になる
+  const shape = z.strictObject({ ["__proto__"]: z.string(), name: z.string() });
+  const op = defineOperation({
+    ...FIXTURE_CREATE,
+    name: "fixture_protos.create",
+    item: shape,
+    result: okItem(shape),
+    examples: null,
+    owner: "#2",
+  });
+  const doc = buildOperationSchemas([op]);
+
+  // Ajv は properties の __proto__ を自身の項目として扱わず、正しい Schema でもこの項目を余分と見るため、Zod の出力と照らす
+  it("operations.schema.json の properties に Zod の出力と同じく残る（required だけに名前が残らない）", () => {
+    const item = doc.$defs["fixture_protos.create.item"] as { properties: Record<string, unknown>; required: string[] };
+    expect(Object.hasOwn(item.properties, "__proto__")).toBe(true);
+    expect(item.required).toContain("__proto__");
+    const zod = z.toJSONSchema(shape, { io: "input" }) as { properties: Record<string, unknown> };
+    expect(JSON.stringify(item.properties)).toBe(JSON.stringify(zod.properties));
+  });
+});
