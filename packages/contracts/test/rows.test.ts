@@ -1,13 +1,13 @@
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { type RowKey, SEQ_DIGITS, seqKey } from "../src/rows/common.ts";
+import { expireAtSeconds, type RowKey, SEQ_DIGITS, seqKey } from "../src/rows/common.ts";
 import { decisionState, deliveryState } from "../src/rows/decisions.ts";
 import { destinationKind, noticeKind } from "../src/rows/notices.ts";
 import { segmentResult, sprintState } from "../src/rows/sprints.ts";
 import { seatRole } from "../src/rows/teams.ts";
 import { usageKind } from "../src/rows/usage.ts";
-import { idp } from "../src/rows/users.ts";
+import { idp, loginLinkState } from "../src/rows/users.ts";
 import { defineTables, TABLE_PURPOSES, TABLES, type TableSpec, TableSpecError } from "../src/tables.ts";
 import { AT, id, LANE, PRJ, ROW_CASES, USR } from "./fixtures/rows.ts";
 
@@ -34,8 +34,8 @@ const DETAIL_ROWS = [
   "idempotency",
 ];
 const OVERALL_ROWS = ["login_subject", "project", "assignment", "lane", "approval", "audit"];
-// 認証（Cognito の sub から利用者を引く読み手）のために足した行。19 の行に数えない
-const AUTH_ROWS = ["cognito_subject"];
+// 認証（Cognito の sub から利用者を引く読み手・サインアウトしたセッションを断つ・ログインをつなぐ流れ）のために足した行。19 の行に数えない
+const AUTH_ROWS = ["cognito_subject", "session_revocation", "login_link"];
 
 const ajv = new Ajv2020({ strict: true, validateFormats: false });
 
@@ -164,6 +164,100 @@ describe("行の形（受け入れ条件 8）", () => {
     }
   });
 
+  it.each(["login", "login_subject"])("%s: Cognito の主体の対応の行の鍵と結んだ時のサインインの時刻を必須にする", (name) => {
+    const c = ROW_CASES[name];
+    if (c === undefined) throw new Error(`${name} が無い`);
+    const validate = ajv.compile(z.toJSONSchema(c.schema));
+    const rejected = [without(c.sample, "cognito_sub"), without(c.sample, "bound_auth_time"), { ...c.sample, cognito_sub: "" }, { ...c.sample, bound_auth_time: "2026-11-21T12:04:05+09:00" }];
+    for (const row of rejected) {
+      expect(c.schema.safeParse(row).success).toBe(false);
+      expect(validate(row)).toBe(false);
+    }
+  });
+
+  it("セッションの取り消しの行は sub と origin_jti から鍵を組み、取り消した時刻と TTL を必須にする", () => {
+    const c = ROW_CASES["session_revocation"];
+    if (c === undefined) throw new Error("session_revocation が無い");
+    expect(keyOf("session_revocation", c.sample)).toEqual({ pk: `COGNITO#${String(c.sample["cognito_sub"])}`, sk: "REVOKED#session-1" });
+    const validate = ajv.compile(z.toJSONSchema(c.schema));
+    const rejected = ["cognito_sub", "session_id", "revoked_at", "expire_at"].map((column) => without(c.sample, column));
+    for (const row of rejected) {
+      expect(c.schema.safeParse(row).success).toBe(false);
+      expect(validate(row)).toBe(false);
+    }
+  });
+
+  it("ログインをつなぐ流れの行は利用者と流れの ID から鍵を組み、3 つの状態と状態ごとの列を持つ", () => {
+    const c = ROW_CASES["login_link"];
+    if (c === undefined) throw new Error("login_link が無い");
+    expect(keyOf("login_link", c.sample)).toEqual({ pk: `USER#${USR}`, sk: `LINK#${String(c.sample["link_id"])}` });
+    expect(loginLinkState.options).toEqual(["open", "verified", "used"]);
+    const validate = ajv.compile(z.toJSONSchema(c.schema));
+    const open = { ...c.sample, code_verifier: "verifier-acme" };
+    const verified = {
+      ...c.sample,
+      state: "verified",
+      exchange_idempotency_key: "0b6f7f0e-1d2c-4b3a-9e8f-7a6b5c4d3e2f",
+      exchange_fingerprint: "b".repeat(64),
+      candidate_sub: "7e1d2c3b-4a59-4687-9f0e-1d2c3b4a5968",
+      candidate_username: "google_1234567890",
+      candidate_idp: "google",
+      candidate_subject: "1234567890",
+      candidate_auth_time: AT,
+      account_label: "ops@example.com",
+    };
+    const used = {
+      ...c.sample,
+      state: "used",
+      exchange_idempotency_key: "0b6f7f0e-1d2c-4b3a-9e8f-7a6b5c4d3e2f",
+      exchange_fingerprint: "b".repeat(64),
+      account_label: "ops@example.com",
+      used_idempotency_key: "1c7a8b9d-2e3f-4a5b-8c6d-7e8f9a0b1c2d",
+      linked_idp: "google",
+      linked_subject: "1234567890",
+    };
+    for (const row of [open, verified, used]) {
+      expect(c.schema.safeParse(row).success).toBe(true);
+      expect(validate(row)).toBe(true);
+    }
+    const rejected = [
+      { ...c.sample, state: "expired" },
+      { ...c.sample, link_id: "not-a-uuid" },
+      { ...verified, account_label: "" },
+      { ...verified, exchange_fingerprint: "short" },
+      { ...used, linked_idp: "okta" },
+      ...["link_id", "state", "created_at", "user_id", "session_sub", "session_id", "session_bound_auth_time", "idp", "expires_at", "expire_at"].map((column) => without(c.sample, column)),
+    ];
+    for (const row of rejected) {
+      expect(c.schema.safeParse(row).success).toBe(false);
+      expect(validate(row)).toBe(false);
+    }
+  });
+
+  it.each(["idempotency", "github_token", "audit", "session_revocation", "login_link"])("%s: TTL の列は 10 桁の秒の整数だけを通す", (name) => {
+    const c = ROW_CASES[name];
+    if (c === undefined) throw new Error(`${name} が無い`);
+    const validate = ajv.compile(z.toJSONSchema(c.schema));
+    for (const v of [9_999_999_999, 1_000_000_000]) {
+      expect(c.schema.safeParse({ ...c.sample, expire_at: v }).success).toBe(true);
+      expect(validate({ ...c.sample, expire_at: v })).toBe(true);
+    }
+    // ミリ秒の値・桁の足りない値・整数でない値・文字の値
+    for (const v of [1_795_000_000_000, 999_999_999, 1_795_000_000.5, "1795000000"]) {
+      expect(c.schema.safeParse({ ...c.sample, expire_at: v }).success).toBe(false);
+      expect(validate({ ...c.sample, expire_at: v })).toBe(false);
+    }
+  });
+
+  it("expireAtSeconds は期限の UNIX のミリ秒を切り捨てて秒の整数にする", () => {
+    expect(expireAtSeconds(1_795_000_000_000)).toBe(1_795_000_000);
+    expect(expireAtSeconds(1_795_000_000_999)).toBe(1_795_000_000);
+    expect(expireAtSeconds(Date.parse(AT))).toBe(1_794_884_645);
+    // 書いた値は行の形の TTL の列を通る
+    const c = ROW_CASES["session_revocation"];
+    expect(c?.schema.safeParse({ ...c.sample, expire_at: expireAtSeconds(Date.parse(AT) + 31 * 86_400_000) }).success).toBe(true);
+  });
+
   it("形の版が整数の 1 でない行が落ちる", () => {
     const c = ROW_CASES["user"];
     for (const v of [0, 2, "1", 1.5]) expect(c?.schema.safeParse({ ...c.sample, schema_version: v }).success).toBe(false);
@@ -209,7 +303,7 @@ describe("TABLES", () => {
       expect(spec.sortKey).toBe(spec.purpose === "idempotency" ? null : "sk");
     }
     const ttl = Object.values(TABLES).filter((t) => t.ttlAttribute === "expire_at").map((t) => t.purpose);
-    expect(ttl.sort()).toEqual(["audit", "idempotency", "projects"]);
+    expect(ttl.sort()).toEqual(["audit", "idempotency", "projects", "users"]);
   });
 
   it("3 つの索引の鍵と写す列が詳細設計と一致する", () => {
@@ -237,7 +331,7 @@ describe("TABLES", () => {
 
   it("TTL の列を持つ表の、TTL の列を持つ行が詳細設計と一致する", () => {
     const holders = Object.values(TABLES).flatMap((t) => t.rows.filter((r) => "expire_at" in (ROW_CASES[r.name]?.schema as z.ZodObject).shape).map((r) => r.name));
-    expect(holders.sort()).toEqual(["audit", "github_token", "idempotency"]);
+    expect(holders.sort()).toEqual(["audit", "github_token", "idempotency", "login_link", "session_revocation"]);
   });
 
   const base = Object.values(TABLES);

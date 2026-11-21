@@ -7,8 +7,9 @@ export const TABLE_PURPOSES = ["users", "teams", "projects", "sprints", "events"
 
 export type TablePurpose = (typeof TABLE_PURPOSES)[number];
 
-// 行の書き方。上書き（version で照らす）・追記だけ・作ると消すだけ・借りから済みへ 1 回だけ書き換える
-export type RowWrites = "overwrite" | "append" | "create_delete" | "settle_once";
+// 行の書き方。上書き（version で照らす）・追記だけ・作ると消すだけ・借りから済みへ 1 回だけ書き換える・
+// 状態を条件に決まった向きへだけ書き換える（version を持たない。ログインをつなぐ流れの open → verified → used）
+export type RowWrites = "overwrite" | "append" | "create_delete" | "settle_once" | "advance_state";
 
 // 索引。鍵は元の行の列そのもので、索引のための写しの列を持たない。どの索引も結果整合で、候補を出すだけに使う（決定 14）
 export type IndexSpec = {
@@ -82,10 +83,14 @@ function table(purpose: TablePurpose, opts: { sortKey?: boolean; ttl?: boolean; 
 
 export const TABLES = defineTables([
   table("users", {
+    // ログインをつなぐ流れの行とセッションの取り消しの行が TTL で消える
+    ttl: true,
     rows: [
       { name: "user", skPattern: /^USER$/, writes: "overwrite" },
       { name: "login_subject", skPattern: /^LOGIN$/, writes: "create_delete" },
       { name: "cognito_subject", skPattern: /^COGNITO$/, writes: "overwrite" },
+      { name: "session_revocation", skPattern: new RegExp(`^REVOKED#${ID}$`), writes: "append" },
+      { name: "login_link", skPattern: new RegExp(`^LINK#${ID}$`), writes: "advance_state" },
       { name: "login", skPattern: new RegExp(`^LOGIN#${ID}#.+$`), writes: "create_delete" },
       { name: "delegation", skPattern: new RegExp(`^DELEGATION#${ID}$`), writes: "overwrite" },
     ],
