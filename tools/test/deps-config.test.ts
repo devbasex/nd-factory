@@ -90,7 +90,11 @@ const VIOLATIONS: Violation[] = [
     { file: "infra/lib/bad-api-name.ts", code: 'import { handler } from "@nd-factory/api/handler";\nexport const h = handler;\n', note: "名前の import" },
     { file: "infra/lib/bad-api-relative.ts", code: 'import { handler } from "../../apps/api/src/handler.ts";\nexport const h = handler;\n', note: "相対のパスの import" },
     { file: "infra/lib/bad-api-type.ts", code: 'import type { Handler } from "@nd-factory/api/handler";\nexport type H = Handler;\n', note: "型だけの import" },
-  ].map((v) => ({ ...v, rule: "infra-does-not-import-apps" })),
+    { file: "infra/lib/bad-core-name.ts", code: 'import { store } from "@nd-factory/core/store";\nexport const s = store;\n', note: "名前の import（packages/core）" },
+    { file: "infra/lib/bad-core-type.ts", code: 'import type { Now } from "@nd-factory/core/clock";\nexport type N = Now;\n', note: "型だけの import（packages/core）" },
+    { file: "infra/lib/bad-core-relative.ts", code: 'import { now } from "../../packages/core/src/clock.ts";\nexport const n = now;\n', note: "相対のパスの import（packages/core）" },
+    { file: "infra/lib/bad-tools-relative.ts", code: 'import { check } from "../../tools/checks/src/check.ts";\nexport const c = check;\n', note: "相対のパスの import（tools）" },
+  ].map((v) => ({ ...v, rule: "infra-depends-on-contracts-only" })),
   ...[
     { file: "tools/checks/src/bad-core-name.ts", code: 'import { store } from "@nd-factory/core/store";\nexport const s = store;\n', note: "名前の import（packages/core）" },
     { file: "tools/checks/src/bad-api-relative.ts", code: 'import { handler } from "../../../apps/api/src/handler.ts";\nexport const h = handler;\n', note: "相対のパスの import（apps）" },

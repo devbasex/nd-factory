@@ -52,11 +52,11 @@ module.exports = {
       to: { path: "^packages/core/src/", pathNot: "^packages/core/src/(clock|ids|redact|log)([./]|$)" },
     },
     {
-      name: "infra-does-not-import-apps",
-      comment: "infra は apps/* を import しない（Lambda の起点はパスの文字列で渡す）",
+      name: "infra-depends-on-contracts-only",
+      comment: "infra はこのリポジトリのうち形の正本だけを import する。apps/* の起点はパスの文字列で渡す（全体の設計の依存の表）",
       severity: "error",
       from: { path: "^infra/" },
-      to: { path: "^apps/" },
+      to: { path: "^(packages/core|apps|tools)/" },
     },
     {
       name: "tools-depends-on-contracts-only",

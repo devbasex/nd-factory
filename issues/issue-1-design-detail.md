@@ -91,7 +91,7 @@ nd-factory/
 | `apps-do-not-import-each-other` | `^apps/([^/]+)/` | `^apps/` のうち自分の app の外（`$1` を使う） |
 | `apps-do-not-import-infra-or-tools` | `^apps/` | `^infra/`・`^tools/` |
 | `web-uses-browser-core-only` | `^apps/web/` | `^packages/core/src/` のうち `clock`・`ids`・`redact`・`log` の外 |
-| `infra-does-not-import-apps` | `^infra/` | `^apps/` |
+| `infra-depends-on-contracts-only` | `^infra/` | `^packages/core/`・`^apps/`・`^tools/`（全体の設計の依存の表で `infra` が依るのは `packages/contracts` だけ） |
 | `tools-depends-on-contracts-only` | `^tools/` | `^packages/core/`・`^apps/`・`^infra/` |
 | `react-only-in-web` | `apps/web/` の外 | `react`・`react-dom`・`@vitejs/plugin-react` |
 | `plan-values-only-in-usage-limit` | `packages/core/src/usage-limit*` と `packages/contracts/` の外 | 料金プランの値のデータと、それを読む書き出しのファイル（#29 が置く。公開の名前の import も相対のパスの import も、解決したファイルで照らす） |
