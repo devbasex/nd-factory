@@ -234,6 +234,14 @@
       {
         "code": "in_progress",
         "status": 409
+      },
+      {
+        "code": "link_invalid",
+        "status": 409
+      },
+      {
+        "code": "already_linked",
+        "status": 409
       }
     ],
     "logins.delete": [

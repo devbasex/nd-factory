@@ -149,8 +149,10 @@ export function dbPrepClaimsOf(claims: SignedClaims): DbPrepTokenClaims | null {
 export type CognitoConfig = { readonly userPoolId: string; readonly clientId: string };
 
 // sub は Cognito の利用者の ID、username は Cognito の利用者の名前（IdP の主体を引く AdminGetUser に渡す）、
-// authTime は利用者が IdP でサインインした時刻（auth_time。refresh token で取り直しても変わらない）のエポックの秒
-export type CognitoClaims = { readonly sub: string; readonly username: string; readonly authTime: number };
+// authTime は利用者が IdP でサインインした時刻（auth_time。refresh token で取り直しても変わらない）のエポックの秒。
+// originJti は 1 回のサインインのセッションの識別子（origin_jti。refresh token で取り直しても変わらず、別のサインインでは別の値）。
+// アプリのクライアントの token の取り消しを有効にした利用者プールが載せる。ログインをつなぐ流れを始めたセッションに結ぶのに使う
+export type CognitoClaims = { readonly sub: string; readonly username: string; readonly authTime: number; readonly originJti: string };
 
 export type CognitoCheck = (token: string, nowMs: number) => Promise<CheckResult<CognitoClaims>>;
 
@@ -219,7 +221,10 @@ export function createCognitoCheck(config: CognitoConfig, options: CognitoCheckO
       if (typeof username !== "string" || username.length === 0) return unauthorized("shape");
       const authTime: unknown = payload.auth_time;
       if (typeof authTime !== "number" || !Number.isFinite(authTime)) return unauthorized("shape");
-      return { ok: true, value: { sub, username, authTime } };
+      // つなぐ流れを始めたセッションに結ぶため、セッションの識別子 origin_jti を必須にする
+      const originJti: unknown = payload.origin_jti;
+      if (typeof originJti !== "string" || originJti.length === 0) return unauthorized("shape");
+      return { ok: true, value: { sub, username, authTime, originJti } };
     } catch (error) {
       if (isUnavailable(error)) return { ok: false, reason: "unavailable", cause: causeOf(error) };
       return unauthorized(faultOf(error));

@@ -48,7 +48,7 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
     schema: loginLinkRow,
     keyOf: loginLinkKey,
     overwrite: false,
-    sample: { schema_version: 1, link_id: UUID, user_id: USR, session_sub: UUID, idp: "google", code_verifier: "v".repeat(43), expires_at: AT, expire_at: 1_795_000_000 },
+    sample: { schema_version: 1, link_id: UUID, user_id: USR, session_sub: UUID, session_id: UUID, session_epoch: 0, idp: "google", code_verifier: "v".repeat(43), expires_at: AT, expire_at: 1_795_000_000 },
   },
   delegation: {
     schema: delegationRow,

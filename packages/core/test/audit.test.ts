@@ -17,7 +17,7 @@ const PROJECT = "prj_01890a5d-ac96-774b-bcce-b302099a8058";
 const TEAM = "team_01890a5d-ac96-774b-bcce-b302099a8059";
 const AUDIT = "aud_01890a5d-ac96-774b-bcce-b302099a805a";
 
-const human: Principal = { kind: "human", userId: USER, cognitoSub: "cognito-sub-1", bindingEpoch: 0 };
+const human: Principal = { kind: "human", userId: USER, cognitoSub: "cognito-sub-1", sessionId: "session-1", bindingEpoch: 0 };
 
 const entry = (over: Partial<AuditEntry> = {}): AuditEntry => ({
   auditId: AUDIT,

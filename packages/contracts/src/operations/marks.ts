@@ -18,8 +18,8 @@ export type PendingOperation<N extends string> = OperationDef<N, PendingShape, P
 
 type Marks = Omit<OperationInput<string, PendingShape, PendingShape>, "name" | "item" | "result" | "owner">;
 
-// 表の列の外から足す印（席の役割ごとの操作・冪等の鍵・全部か無か・要素ごとの人だけ）
-export type ExtraMarks = Pick<Marks, "ownerOnly" | "idempotencyKey" | "allOrNothing" | "humanOnly">;
+// 表の列の外から足す印（席の役割ごとの操作・冪等の鍵・全部か無か・要素ごとの人だけ・操作ごとの理由のコード）
+export type ExtraMarks = Pick<Marks, "ownerOnly" | "idempotencyKey" | "allOrNothing" | "humanOnly" | "reasons">;
 
 export const IDEMPOTENT = { idempotencyKey: true } as const satisfies ExtraMarks;
 export const OWNER_ONLY = { ownerOnly: true } as const satisfies ExtraMarks;

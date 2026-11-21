@@ -53,7 +53,9 @@ export const loginSubjectKey = (row: LoginSubjectRow): RowKey => ({ pk: `LOGIN#$
 // bound_auth_time は結んだときに使った token の auth_time。認証はこれより前にサインインした token を断つ。
 // revoked_before は失効を済ませた時刻。これ以前にサインインした token では結び直せない（外す前のセッションと、失効の済む前のセッション）。
 // binding_epoch は外した回数。sessions.create の冪等の鍵に入れ、外す前の結果を外した後に返さない。
-// cognito_username は結ぶのに使った token の username で、外した後の AdminUserGlobalSignOut に渡す
+// cognito_username は結ぶのに使った token の username で、外した後の AdminUserGlobalSignOut に渡す。
+// signout_lease_id と signout_lease_until は signing_out の間だけ持つ、失効の呼び出しの借り。「行う予定」の行（外したときの binding_epoch に固定）の
+// 実行が AdminUserGlobalSignOut を呼ぶ前に、同じ世代の signing_out で借りが無いか期限を過ぎたときだけ取り、借りの持ち主だけが unlinked へ進める
 export const COGNITO_SUBJECT_STATES = ["bound", "signing_out", "unlinked"] as const;
 export const cognitoSubjectRow = overwriteRow(1, {
   cognito_sub: z.string().min(1),
@@ -65,19 +67,24 @@ export const cognitoSubjectRow = overwriteRow(1, {
   user_id: idOf("usr").optional(),
   bound_auth_time: utcDateTime.optional(),
   revoked_before: utcDateTime.optional(),
+  signout_lease_id: uuid.optional(),
+  signout_lease_until: utcDateTime.optional(),
 });
 export type CognitoSubjectRow = z.infer<typeof cognitoSubjectRow>;
 export const cognitoSubjectKey = (row: CognitoSubjectRow): RowKey => ({ pk: `COGNITO#${row.cognito_sub}`, sk: "COGNITO" });
 
 // ログインをつなぐ流れ（USER#<利用者> / LINK#<流れの ID>）。作ると消すだけ。
-// login_links.create が今の利用者とそのセッション（要求の token の Cognito の sub）に結んで作り、認可の要求の state に link_id を、
+// login_links.create が今の利用者とそのセッション（要求の token の Cognito の sub・origin_jti と、その sub の対応の行の binding_epoch）に結んで作り、認可の要求の state に link_id を、
 // PKCE の code_challenge に code_verifier の S256 を載せる。code_verifier はサーバーだけが持ち、画面へ返さない（ログに出さない）。
-// logins.create が認可コードを、この行の code_verifier で交換し、ログインを結ぶのと同じトランザクションで消す（1 回だけ使う）。
+// logins.create は同じセッション・同じ世代から続けていることを照らし、認可コードをこの行の code_verifier で交換し、
+// 得た IdP が idp と同じことを照らして、ログインを結ぶのと同じトランザクションで消す（1 回だけ使う）。
 // 期限（expires_at）を過ぎた行は使えず、TTL（expire_at）で消える
 export const loginLinkRow = versionlessRow(1, {
   link_id: uuid,
   user_id: idOf("usr"),
   session_sub: z.string().min(1),
+  session_id: z.string().min(1),
+  session_epoch: z.int().min(0),
   idp,
   code_verifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/),
   expires_at: utcDateTime,

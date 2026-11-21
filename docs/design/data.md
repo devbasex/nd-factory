@@ -128,14 +128,14 @@ erDiagram
 
 | 表 | 区切りの鍵 / 並びの鍵 | 持つ列 | 書き方 |
 | --- | --- | --- | --- |
-| `db-users` | `COGNITO#<Cognito の sub>` / `COGNITO` | `cognito_sub`・`cognito_username`・`idp`・`subject`・`state`・`binding_epoch`・`user_id?`・`bound_auth_time?`・`revoked_before?`・`version`・`schema_version` | 上書き（条件つき）。結ぶとき・外すとき・失効を済ませたときに、下の表の条件で書き換える |
+| `db-users` | `COGNITO#<Cognito の sub>` / `COGNITO` | `cognito_sub`・`cognito_username`・`idp`・`subject`・`state`・`binding_epoch`・`user_id?`・`bound_auth_time?`・`revoked_before?`・`signout_lease_id?`・`signout_lease_until?`・`version`・`schema_version` | 上書き（条件つき）。結ぶとき・外すとき・失効の呼び出しの借りを取るとき・失効を済ませたときに、下の表の条件で書き換える |
 
 `state` は次の 3 つである。`binding_epoch` は外した回数で、外すたびに 1 上げる（`sessions.create` の冪等の鍵に入れる。[API の文書の冪等の鍵](api.md#冪等の鍵)）。
 
 | `state` | 意味 | 持つ列 | 認証の扱い |
 | --- | --- | --- | --- |
 | `bound` | 利用者へ結んでいる | `user_id`・`bound_auth_time`（結ぶのに使った token の `auth_time`） | `auth_time` が `bound_auth_time` 以後の token だけを人として通す |
-| `signing_out` | 外して、その Cognito の利用者の `AdminUserGlobalSignOut` の済むのを待つ間 | — | どの操作も 401。結び直させない（済む前に結び直すと、後から届く失効が結び直したセッションの refresh token まで取り消すため） |
+| `signing_out` | 外して、その Cognito の利用者の `AdminUserGlobalSignOut` の済むのを待つ間 | 失効の呼び出しの借り（`signout_lease_id`・`signout_lease_until`。呼び出しの間だけ） | どの操作も 401。結び直させない（済む前に結び直すと、後から届く失効が結び直したセッションの refresh token まで取り消すため） |
 | `unlinked` | 外して失効を済ませた | `revoked_before`（失効を済ませた時刻） | 結ぶとき（`sessions.create` の主体と、`logins.create` が交換で得た token）だけ、`auth_time` が `revoked_before` より後のサインインを結び直させる。ほかの操作は 401 |
 
 行の書き方と値の引き元は次のとおりである。どの値も要求の本文から採らない。「利用者の行」は `USER#<利用者>` / `USER` で、`login_count`（結んだログインの数）を持つ。
@@ -143,9 +143,9 @@ erDiagram
 | 場面 | Cognito の `sub` と IdP の主体の引き元 | 同じトランザクションに入れる書き込み |
 | --- | --- | --- |
 | 初めてのサインイン（`sessions.create`） | 要求の access token の `sub`（認証が検証した値）。IdP の主体は、認証が検証した token の `username` で利用者プールを読み（`AdminGetUser`）、属性 `sub` が token と同じことと、属性 `identities` の IdP の名前と IdP の利用者の ID を得る。IdP の名前は設定で `google` か `github` に当てる | 利用者の行を無いときだけ書く（`login_count` は 1）。ログインの組と IdP の主体の一意の行を無いときだけ書く（`cognito_sub` を写す）。対応の行は、認証が読んだときに無ければ無いときだけ書き（`binding_epoch` は 0）、`unlinked` なら読んだ版と「`state` が `unlinked` で `revoked_before` が token の `auth_time` より前」を条件に `bound` へ書き換える（`binding_epoch` はそのまま）。外れたら 409 |
-| ログインをつなぐ（`logins.create`） | 下の [ログインをつなぐ流れの行](#ログインをつなぐ流れの行) の認可コードを、サーバーがその行の `code_verifier` で交換して得た access token を、人の token と同じに検証した `sub`。IdP の主体は初めてのサインインと同じに利用者プールから得る。要求の Authorization は今の利用者を決めるだけ | 利用者の行を読んだ版を条件に `login_count` を 1 足す。ログインの組・IdP の主体の一意の行・対応の行は初めてのサインインと同じ。ログインをつなぐ流れの行を「`user_id` が今の利用者、`session_sub` が要求の token の `sub`、`expires_at` が今より後」を条件に消す（1 回だけ使う）。外れたら 409。手順は [詳細設計の `verifyLoginToLink`](detail.md#関数の仕様) |
-| ログインを外す（`logins.delete`） | 外すログインの組の行（`USER#<利用者>` / `LOGIN#<IdP>#<主体>`）を強い整合で読んだ `cognito_sub`。要求の token の `sub` は使わない（別のログインのものであり得る）。IdP と主体は要素の `idp`・`subject` | ログインの組と IdP の主体の一意の行を「`user_id` が今の利用者、`cognito_sub` が読んだ値」を条件に消す。対応の行を「`state` が `bound` で `user_id` が今の利用者」を条件に `signing_out` へ書き換え、`user_id` と `bound_auth_time` を消し、`binding_epoch` を 1 上げる。利用者の行を読んだ版と「`login_count` が 2 以上」を条件に `login_count` を 1 引く（同じ時に別々のログインを外す 2 つの要求は同じ利用者の行の版を条件にするため片方が外れ、最後のログインは外れない）。その Cognito の利用者の `AdminUserGlobalSignOut` の「行う予定」の行を書く。外れたら 409 |
-| 失効を済ませる（「行う予定」の行の実行） | 対応の行の `cognito_username` | `AdminUserGlobalSignOut` が成功した後に、対応の行を読んだ版と「`state` が `signing_out`」を条件に `unlinked` へ書き換え、`revoked_before` をその時刻（成功を受けた後の注入した時計）にする。失敗は「行う予定」の行の再試行に任せ、その間は `signing_out` のまま結び直させない |
+| ログインをつなぐ（`logins.create`） | 下の [ログインをつなぐ流れの行](#ログインをつなぐ流れの行) の認可コードを、サーバーがその行の `code_verifier` で交換して得た access token を、人の token と同じに検証した `sub`。IdP の主体は初めてのサインインと同じに利用者プールから得て、IdP が流れの行の `idp` と同じことを照らす。要求の Authorization は今の利用者とセッション（`sub`・`origin_jti`・`binding_epoch`）を決めるだけ | 利用者の行を読んだ版を条件に `login_count` を 1 足す。ログインの組・IdP の主体の一意の行・対応の行は初めてのサインインと同じ。ログインをつなぐ流れの行を「`user_id` が今の利用者、`session_sub`・`session_id`・`session_epoch` が要求の主体の `sub`・`origin_jti`・`binding_epoch`、`expires_at` が今より後」を条件に消す（1 回だけ使う）。開始元の対応の行（`COGNITO#<session_sub>` / `COGNITO`）を「`state` が `bound`、`user_id` が今の利用者、`binding_epoch` が `session_epoch`」を条件に照らす（書かない条件の照らし。交換の間に開始元のログインが外されたら結ばない）。IdP の主体の一意の行が既にあれば要素の 409 `already_linked`、ほかの条件の外れは要素の 409 `link_invalid`。手順は [詳細設計の `verifyLoginToLink`](detail.md#関数の仕様) |
+| ログインを外す（`logins.delete`） | 外すログインの組の行（`USER#<利用者>` / `LOGIN#<IdP>#<主体>`）を強い整合で読んだ `cognito_sub`。要求の token の `sub` は使わない（別のログインのものであり得る）。IdP と主体は要素の `idp`・`subject` | ログインの組と IdP の主体の一意の行を「`user_id` が今の利用者、`cognito_sub` が読んだ値」を条件に消す。対応の行を「`state` が `bound` で `user_id` が今の利用者」を条件に `signing_out` へ書き換え、`user_id` と `bound_auth_time` を消し、`binding_epoch` を 1 上げる。利用者の行を読んだ版と「`login_count` が 2 以上」を条件に `login_count` を 1 引く（同じ時に別々のログインを外す 2 つの要求は同じ利用者の行の版を条件にするため片方が外れ、最後のログインは外れない）。その Cognito の利用者の `AdminUserGlobalSignOut` の「行う予定」の行を、`cognito_sub` と上げた後の `binding_epoch`（その外しの世代）に固定して書く。外れたら 409 |
+| 失効を済ませる（「行う予定」の行の実行） | 対応の行の `cognito_username` | 次の 3 段で行う。(1) 呼ぶ前に、対応の行を「`state` が `signing_out`、`binding_epoch` が予定の行の世代、借りが無いか `signout_lease_until` が今より前」を条件に書き換え、借り（新しい `signout_lease_id` と、今から `SIGNOUT_LEASE_MS` の `signout_lease_until`）を取る。`state` か世代が違えば、その予定の行は済んだ世代か後の外しの世代のものとして呼ばずに終える。借りが他にあれば呼ばずに再試行へ回す。(2) 借りを取った実行だけが `AdminUserGlobalSignOut` を呼ぶ。呼び出しは `signout_lease_until` の前に打ち切る（中断の信号）。`SIGNOUT_LEASE_MS` は方針の `aws-control`（利用者プールの管理の呼び出し）の再試行を使い切るまでの全体の期限（要求ごとの期限 × 回数と待ち）より長くし、借りが切れて他の実行が取るときには前の呼び出しが残らないようにする。(3) 成功を受けたら、対応の行を「`state` が `signing_out`、`binding_epoch` が予定の行の世代、`signout_lease_id` が自分の借り、`signout_lease_until` が今より後」を条件に `unlinked` へ書き換え、`revoked_before` をその時刻（成功を受けた後の注入した時計）にし、借りを消す。条件に外れたら（借りが切れた）`unlinked` へ進めず再試行へ回す。失敗は「行う予定」の行の再試行に任せ、その間は `signing_out` のまま結び直させない。同じ世代の呼び出しは借りで 1 つに限られ、`unlinked` へ進めるのはその呼び出しが済んだ後だけのため、結び直した後のセッションへ前の失効が届かない |
 
 結ぶ（初めてのサインインとログインをつなぐ）token は、IdP でサインインした時刻（`auth_time`）が 5 分の内のものだけを受ける。`bound_auth_time` には結ぶのに使った token の `auth_time` を、`cognito_username` には検証した token の `username` を書く。
 
@@ -153,11 +153,11 @@ erDiagram
 
 ### ログインをつなぐ流れの行
 
-`logins.create` が結ぶログインを、今の利用者がそのセッションで始めた流れで得たものに限るための行である。画面の `state` と PKCE だけに頼ると、別の流れで得た直近の token を API へ直に渡して、別の利用者へ結べてしまうため、流れの始まりをサーバーが今の利用者とセッションに結び、認可コードの交換をサーバーがその流れの `code_verifier` で行い、流れを 1 回だけ使う。
+`logins.create` が結ぶログインを、今の利用者がそのセッションで始めた流れで得たものに限るための行である。画面の `state` と PKCE だけに頼ると、別の流れで得た直近の token を API へ直に渡して、別の利用者へ結べてしまうため、流れの始まりをサーバーが今の利用者とセッション（Cognito の `sub` は同じログインの別のサインインでも同じため、セッションの識別子 `origin_jti` と開始元の対応の行の世代まで）に結び、認可コードの交換をサーバーがその流れの `code_verifier` で行い、流れを 1 回だけ使う。
 
 | 表 | 区切りの鍵 / 並びの鍵 | 持つ列 | 書き方 |
 | --- | --- | --- | --- |
-| `db-users` | `USER#<利用者>` / `LINK#<流れの ID>` | `link_id`（UUID。認可の要求の `state`）・`user_id`・`session_sub`（流れを始めた要求の token の Cognito の `sub`）・`idp`（選んだ IdP）・`code_verifier`（PKCE。サーバーだけが持ち、画面へ返さずログに出さない）・`expires_at`（作ってから 10 分）・`expire_at`（TTL）・`schema_version` | `login_links.create` が無いときだけ書く。`logins.create` がログインを結ぶのと同じトランザクションで、上の条件で消す |
+| `db-users` | `USER#<利用者>` / `LINK#<流れの ID>` | `link_id`（UUID。認可の要求の `state`）・`user_id`・`session_sub`（流れを始めた要求の token の Cognito の `sub`）・`session_id`（その token の `origin_jti`。そのサインインのセッションの識別子で、同じ `sub` の別のサインインでは違う）・`session_epoch`（開始元の対応の行の `binding_epoch`）・`idp`（選んだ IdP）・`code_verifier`（PKCE。サーバーだけが持ち、画面へ返さずログに出さない）・`expires_at`（作ってから 10 分）・`expire_at`（TTL）・`schema_version` | `login_links.create` が無いときだけ書く。`logins.create` がログインを結ぶのと同じトランザクションで、上の条件で消す |
 
 ### テーブル定義
 

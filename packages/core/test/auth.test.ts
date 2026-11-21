@@ -48,6 +48,7 @@ const PREP = "prep-acme-1";
 
 const UNAUTHORIZED = { ok: false, reason: "unauthorized" } as const;
 const UNAVAILABLE = { ok: false, reason: "unavailable" } as const;
+const LINK_INVALID = { ok: false, reason: "link_invalid" } as const;
 
 const b64 = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString("base64url");
 const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
@@ -65,7 +66,7 @@ const JWKS = { keys: [{ ...rsa.publicKey.export({ format: "jwk" }), kid: "kid-1"
 
 function cognitoToken(over: Record<string, unknown> = {}, opts: { key?: KeyObject; kid?: string } = {}): string {
   const sub = typeof over["sub"] === "string" ? over["sub"] : "cognito-sub-1";
-  const payload: Record<string, unknown> = { sub, username: `google_${sub}`, iss: ISSUER, client_id: CLIENT, token_use: "access", auth_time: NOW_SEC - 60, iat: NOW_SEC, exp: NOW_SEC + 600, ...over };
+  const payload: Record<string, unknown> = { sub, username: `google_${sub}`, iss: ISSUER, client_id: CLIENT, token_use: "access", auth_time: NOW_SEC - 60, origin_jti: `session-${sub}`, iat: NOW_SEC, exp: NOW_SEC + 600, ...over };
   for (const [k, v] of Object.entries(payload)) if (v === undefined) delete payload[k];
   const input = `${b64({ alg: "RS256", kid: opts.kid ?? "kid-1", typ: "JWT" })}.${b64(payload)}`;
   return `${input}.${sign("RSA-SHA256", Buffer.from(input), opts.key ?? rsa.privateKey).toString("base64url")}`;
@@ -193,7 +194,7 @@ describe("authenticate: 人（Cognito の access token）", () => {
   it("署名・発行元・client_id・token_use・期限が合えば人に決まる", async () => {
     const fetcher = fakeFetcher();
     const { deps } = setup({}, { fetcher });
-    await expect(authenticate(req("user", cognitoToken()), deps)).resolves.toEqual({ ok: true, principal: { kind: "human", userId: USER, cognitoSub: "cognito-sub-1", bindingEpoch: 0 } });
+    await expect(authenticate(req("user", cognitoToken()), deps)).resolves.toEqual({ ok: true, principal: { kind: "human", userId: USER, cognitoSub: "cognito-sub-1", sessionId: "session-cognito-sub-1", bindingEpoch: 0 } });
     expect(fetcher.calls).toEqual([`${ISSUER}/.well-known/jwks.json`]);
   });
 
@@ -229,11 +230,11 @@ describe("authenticate: 人（Cognito の access token）", () => {
     // IdP の主体は本文から採らず、検証した username で利用者プールを引いて得る
     await expect(authenticate(req("user", token, "sessions.create"), deps)).resolves.toEqual({
       ok: true,
-      principal: { kind: "newcomer", login: { cognitoSub: "cognito-sub-new", idp: "google", subject: "g-cognito-sub-new", authTime: NOW_SEC - 60, bindingEpoch: 0, rowVersion: null } },
+      principal: { kind: "newcomer", login: { cognitoSub: "cognito-sub-new", username: "google_cognito-sub-new", idp: "google", subject: "g-cognito-sub-new", authTime: NOW_SEC - 60, bindingEpoch: 0, rowVersion: null } },
     });
     await expect(authenticate(req("user", token, "users.get"), deps)).resolves.toEqual(UNAUTHORIZED);
     // 結んだ主体は sessions.create でも人
-    await expect(authenticate(req("user", cognitoToken(), "sessions.create"), deps)).resolves.toEqual({ ok: true, principal: { kind: "human", userId: USER, cognitoSub: "cognito-sub-1", bindingEpoch: 0 } });
+    await expect(authenticate(req("user", cognitoToken(), "sessions.create"), deps)).resolves.toEqual({ ok: true, principal: { kind: "human", userId: USER, cognitoSub: "cognito-sub-1", sessionId: "session-cognito-sub-1", bindingEpoch: 0 } });
     // 検証に外れた token は sessions.create でも断る
     await expect(authenticate(req("user", cognitoToken({ sub: "cognito-sub-new", exp: NOW_SEC - 1 }), "sessions.create"), deps)).resolves.toEqual(UNAUTHORIZED);
   });
@@ -243,8 +244,9 @@ describe("authenticate: 人（Cognito の access token）", () => {
     const stale = cognitoToken({ sub: "cognito-sub-new", auth_time: (NOW - LOGIN_BIND_FRESH_MS - 1000) / 1000 });
     await expect(authenticate(req("user", stale, "sessions.create"), deps)).resolves.toEqual(UNAUTHORIZED);
     await expect(authenticate(req("user", cognitoToken({ sub: "cognito-sub-unlinked" }), "sessions.create"), deps)).resolves.toEqual(UNAUTHORIZED);
-    // username と auth_time の無い token は形の違い
+    // username・auth_time・origin_jti の無い token は形の違い
     await expect(authenticate(req("user", cognitoToken({ username: undefined })), deps)).resolves.toEqual(UNAUTHORIZED);
+    await expect(authenticate(req("user", cognitoToken({ origin_jti: undefined })), deps)).resolves.toEqual(UNAUTHORIZED);
     await expect(authenticate(req("user", cognitoToken({ auth_time: undefined })), deps)).resolves.toEqual(UNAUTHORIZED);
   });
 
@@ -265,7 +267,7 @@ describe("authenticate: 人（Cognito の access token）", () => {
     await expect(authenticate(req("user", cognitoToken({ sub: "cognito-sub-out", auth_time: NOW_SEC - 30 }), "sessions.create"), deps)).resolves.toEqual(UNAUTHORIZED);
     await expect(authenticate(req("user", cognitoToken({ sub: "cognito-sub-out", auth_time: NOW_SEC - 29 }), "sessions.create"), deps)).resolves.toEqual({
       ok: true,
-      principal: { kind: "newcomer", login: { cognitoSub: "cognito-sub-out", idp: "google", subject: "g-cognito-sub-out", authTime: NOW_SEC - 29, bindingEpoch: 1, rowVersion: 3 } },
+      principal: { kind: "newcomer", login: { cognitoSub: "cognito-sub-out", username: "google_cognito-sub-out", idp: "google", subject: "g-cognito-sub-out", authTime: NOW_SEC - 29, bindingEpoch: 1, rowVersion: 3 } },
     });
     // 外した主体はほかの操作を通らない
     await expect(authenticate(req("user", cognitoToken({ sub: "cognito-sub-out", auth_time: NOW_SEC - 29 })), deps)).resolves.toEqual(UNAUTHORIZED);
@@ -274,36 +276,36 @@ describe("authenticate: 人（Cognito の access token）", () => {
   });
 
   it("sessions.create の冪等の鍵は、対応の行を作る前と後で同じで、外すと変わる", () => {
-    const login = { cognitoSub: "cognito-sub-new", idp: "google", subject: "g-1", authTime: NOW_SEC, bindingEpoch: 0, rowVersion: null } as const;
+    const login = { cognitoSub: "cognito-sub-new", username: "google_cognito-sub-new", idp: "google", subject: "g-1", authTime: NOW_SEC, bindingEpoch: 0, rowVersion: null } as const;
     const before = idempotencyPrincipalKey({ kind: "newcomer", login }, "sessions.create");
-    const after = idempotencyPrincipalKey({ kind: "human", userId: USER, cognitoSub: "cognito-sub-new", bindingEpoch: 0 }, "sessions.create");
+    const after = idempotencyPrincipalKey({ kind: "human", userId: USER, cognitoSub: "cognito-sub-new", sessionId: "s-1", bindingEpoch: 0 }, "sessions.create");
     expect(after).toBe(before);
     // 外した後に結び直した要求は、外す前の結果を引かない
     const relinked = idempotencyPrincipalKey({ kind: "newcomer", login: { ...login, bindingEpoch: 1, rowVersion: 3 } }, "sessions.create");
     expect(relinked).not.toBe(before);
-    expect(idempotencyPrincipalKey({ kind: "human", userId: id("usr", 9), cognitoSub: "cognito-sub-new", bindingEpoch: 1 }, "sessions.create")).toBe(relinked);
-    expect(idempotencyPrincipalKey({ kind: "human", userId: USER, cognitoSub: "cognito-sub-new", bindingEpoch: 0 }, "users.get")).toBe(USER);
+    expect(idempotencyPrincipalKey({ kind: "human", userId: id("usr", 9), cognitoSub: "cognito-sub-new", sessionId: "s-2", bindingEpoch: 1 }, "sessions.create")).toBe(relinked);
+    expect(idempotencyPrincipalKey({ kind: "human", userId: USER, cognitoSub: "cognito-sub-new", sessionId: "s-1", bindingEpoch: 0 }, "users.get")).toBe(USER);
   });
 });
 
 describe("verifyLoginToLink: logins.create が認可コードの交換で得た、つなぐログインの token", () => {
   it("まだ結んでいない主体の新しいサインインだけを、サーバーの側で引いた IdP の主体とともに返す", async () => {
     const { deps } = setup();
-    await expect(verifyLoginToLink(cognitoToken({ sub: "cognito-sub-new" }), deps)).resolves.toEqual({
+    await expect(verifyLoginToLink(cognitoToken({ sub: "cognito-sub-new" }), "google", deps)).resolves.toEqual({
       ok: true,
-      login: { cognitoSub: "cognito-sub-new", idp: "google", subject: "g-cognito-sub-new", authTime: NOW_SEC - 60, bindingEpoch: 0, rowVersion: null },
+      login: { cognitoSub: "cognito-sub-new", username: "google_cognito-sub-new", idp: "google", subject: "g-cognito-sub-new", authTime: NOW_SEC - 60, bindingEpoch: 0, rowVersion: null },
     });
   });
 
   it("既に結んだ主体は already_linked（IdP で別のアカウントを選び直す）", async () => {
     const { deps } = setup();
-    await expect(verifyLoginToLink(cognitoToken(), deps)).resolves.toEqual({ ok: false, reason: "already_linked" });
+    await expect(verifyLoginToLink(cognitoToken(), "google", deps)).resolves.toEqual({ ok: false, reason: "already_linked" });
   });
 
   it("外した主体は、失効を済ませた後のサインインだけを返す", async () => {
     const { deps } = setup({ bindings: { "cognito-sub-out": { state: "unlinked", revokedBefore: iso(NOW - 30_000), epoch: 2, version: 5 } } });
-    await expect(verifyLoginToLink(cognitoToken({ sub: "cognito-sub-out", auth_time: NOW_SEC - 60 }), deps)).resolves.toEqual(UNAUTHORIZED);
-    await expect(verifyLoginToLink(cognitoToken({ sub: "cognito-sub-out", auth_time: NOW_SEC - 10 }), deps)).resolves.toMatchObject({ ok: true, login: { bindingEpoch: 2, rowVersion: 5 } });
+    await expect(verifyLoginToLink(cognitoToken({ sub: "cognito-sub-out", auth_time: NOW_SEC - 60 }), "google", deps)).resolves.toEqual(LINK_INVALID);
+    await expect(verifyLoginToLink(cognitoToken({ sub: "cognito-sub-out", auth_time: NOW_SEC - 10 }), "google", deps)).resolves.toMatchObject({ ok: true, login: { bindingEpoch: 2, rowVersion: 5 } });
   });
 
   it.each([
@@ -311,14 +313,19 @@ describe("verifyLoginToLink: logins.create が認可コードの交換で得た�
     ["期限切れ", cognitoToken({ sub: "cognito-sub-new", exp: NOW_SEC - 1 })],
     ["IdP の主体を引けない", cognitoToken({ sub: "cognito-sub-unlinked" })],
     ["JWT でない", "ndfd_x.y.z"],
-  ])("%s は unauthorized", async (_label, token) => {
+  ])("%s は link_invalid（流れを始め直す）", async (_label, token) => {
     const { deps } = setup();
-    await expect(verifyLoginToLink(token, deps)).resolves.toEqual(UNAUTHORIZED);
+    await expect(verifyLoginToLink(token, "google", deps)).resolves.toEqual(LINK_INVALID);
+  });
+
+  it("サーバーの側で得た IdP が流れを始めたときに選んだ IdP と違えば link_invalid", async () => {
+    const { deps } = setup();
+    await expect(verifyLoginToLink(cognitoToken({ sub: "cognito-sub-new" }), "github", deps)).resolves.toEqual(LINK_INVALID);
   });
 
   it("利用者プールか表に届かなければ unavailable", async () => {
     const { deps } = setup({ fail: new Error("down") });
-    await expect(verifyLoginToLink(cognitoToken({ sub: "cognito-sub-new" }), deps)).resolves.toEqual(UNAVAILABLE);
+    await expect(verifyLoginToLink(cognitoToken({ sub: "cognito-sub-new" }), "google", deps)).resolves.toEqual(UNAVAILABLE);
   });
 
   it("期限と nbf は実時刻でなく注入した時計だけで照らす", async () => {
