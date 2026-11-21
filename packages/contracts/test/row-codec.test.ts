@@ -258,6 +258,41 @@ describe("readRow と writeRow（受け入れ条件 9 の読み手）", () => {
     expect(() => writeRow(rewriting(2), zeros)).not.toThrow();
   });
 
+  it("共有バッファ（SharedArrayBuffer）を裏に持つバイナリの行は、写しが元とバイトを共有するため読まずに拒み、書かずに投げる", () => {
+    const meta = z.looseObject({}).optional();
+    const b1 = v1.extend({ meta });
+    const b2 = v2.extend({ meta });
+    type B1 = z.infer<typeof b1>;
+    type B2 = z.infer<typeof b2>;
+    const zeroing = (writeVersion: number) =>
+      rowCodec({
+        latest: { version: 2, schema: b2 },
+        previous: {
+          version: 1,
+          schema: b1,
+          upgrade: (r: B1): B2 => {
+            const blob = r.meta?.["blob"];
+            if (blob instanceof Uint8Array) blob.fill(0);
+            return { ...upgrade(r), ...(r.meta === undefined ? {} : { meta: r.meta }) };
+          },
+          downgrade: (r: B2): B1 => ({ ...downgrade(r), ...(r.meta === undefined ? {} : { meta: r.meta }) }),
+        },
+        writeVersion,
+        keyOf,
+      });
+    for (const writeVersion of [1, 2]) {
+      const shared = new Uint8Array(new SharedArrayBuffer(3));
+      shared.set([1, 2, 3]);
+      const raw = { ...rowV1, meta: { blob: shared } };
+      expect(readRow(zeroing(writeVersion), raw)).toEqual({ ok: false, reason: "shape_invalid" });
+      expect([...shared]).toEqual([1, 2, 3]);
+      expect(() => rowUpdateOf(zeroing(writeVersion), raw, asV2)).toThrow(expect.objectContaining({ code: "shared_buffer" }));
+      expect(() => writeRow(zeroing(writeVersion), { ...asV2, meta: { blob: shared } })).toThrow(/共有バッファ/);
+      expect(() => writeRow(zeroing(writeVersion), { ...asV2, meta: { set: new Set([new DataView(new SharedArrayBuffer(1))]) } })).toThrow(/共有バッファ/);
+      expect([...shared]).toEqual([1, 2, 3]);
+    }
+  });
+
   it("upgrade が投げた前の版の行は、投げずに shape_invalid を返す", () => {
     const throwing = rowCodec({
       latest: { version: 2, schema: v2 },
@@ -409,6 +444,21 @@ describe("rowUpdateOf", () => {
     const row = codec.latest.schema.parse(sample);
     const raw = writeRow(codec, row);
     expect(() => rowUpdateOf(codec, raw, { ...row, user_id: id("usr", 99) })).toThrow(RowCodecError);
+  });
+
+  it("例外は理由の符号（code）を持ち、移しのログはこの符号で形の不正・値の損失・鍵の不一致を分けられる", () => {
+    const codeOf = (f: () => unknown): string | null => {
+      try {
+        f();
+      } catch (e) {
+        return e instanceof RowCodecError ? e.code : null;
+      }
+      return null;
+    };
+    expect(codeOf(() => rowUpdateOf(stage2, { ...rowV1, nick: 1 }, asV2))).toBe("previous_shape_invalid");
+    expect(codeOf(() => rowUpdateOf(droppingMemo(2), rowM1, asV2))).toBe("value_lost");
+    expect(codeOf(() => rowUpdateOf(stage2, rowV2, { ...asV2, item_id: "b" }))).toBe("key_mismatch");
+    expect(codeOf(() => writeRow(stage2, { ...asV2, display_name: 1 } as unknown as V2))).toBe("row_invalid");
   });
 
   it("鍵の不一致の例外は違った列の名前だけを載せ、鍵の値を載せない", () => {
