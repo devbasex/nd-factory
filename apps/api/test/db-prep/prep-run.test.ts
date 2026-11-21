@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PREP_RUN_RETENTION_DAYS, claimPrepRun } from "../../src/db-prep/prep-run.ts";
-import { ADMIN_DATABASE } from "../../src/db-prep/sql-executor.ts";
+import { ADMIN_DATABASE, type SqlExecutor } from "../../src/db-prep/sql-executor.ts";
 import { FakeSqlExecutor } from "./fake-sql-executor.ts";
 import { describePg, withTestDatabase } from "./pg-executor.ts";
 
@@ -37,11 +37,13 @@ describe("claimPrepRun（作り物の SqlExecutor）", () => {
     expect(PREP_RUN_RETENTION_DAYS).toBe(7);
   });
 
-  it("表が無ければ排他の鎖の下で作ってから記す", async () => {
+  it("表の有無を見る前に排他の鎖を取り、表が無ければ鎖の下で作ってから記す", async () => {
     const fake = fakeWith(false, true);
     expect(await claimPrepRun(fake, "prep-1")).toBe("first");
     const s = fake.statements();
     const lock = s.findIndex((x) => x.includes("pg_advisory_xact_lock(hashtext('nd-prep:schema'))"));
+    expect(lock).toBe(0);
+    expect(s.findIndex((x) => x.includes("to_regclass"))).toBe(1);
     const schema = s.findIndex((x) => x.includes("CREATE SCHEMA IF NOT EXISTS nd_prep"));
     const table = s.findIndex((x) => x.includes("CREATE TABLE IF NOT EXISTS nd_prep.prep_runs"));
     const insert = s.findIndex((x) => x.includes("ON CONFLICT (prep_id) DO NOTHING RETURNING prep_id"));
@@ -51,10 +53,17 @@ describe("claimPrepRun（作り物の SqlExecutor）", () => {
     expect(table).toBeLessThan(insert);
   });
 
-  it("表があれば作る文を打たない", async () => {
+  it("表があっても鎖を取ってから見て、作る文を打たない", async () => {
     const fake = fakeWith(true, true);
     await claimPrepRun(fake, "prep-1");
+    expect(fake.statements()[0]).toContain("pg_advisory_xact_lock");
     expect(fake.statements().some((x) => x.includes("CREATE"))).toBe(false);
+  });
+
+  it("残す日数は int に決めて make_interval へ渡す（Data API は整数を bigint で渡す）", async () => {
+    const fake = fakeWith(true, true);
+    await claimPrepRun(fake, "prep-1");
+    expect(fake.statements().find((x) => x.includes("DELETE"))).toContain("make_interval(days => CAST(:retention_days AS int))");
   });
 
   it("行を返さなければ duplicate", async () => {
@@ -149,6 +158,45 @@ describePg("claimPrepRun（PostgreSQL）", () => {
       expect(await claimPrepRun(sql, "prep-next")).toBe("first");
       const rows = await sql.execute("SELECT prep_id::text AS id FROM nd_prep.prep_runs ORDER BY prep_id", undefined, ADMIN);
       expect(rows).toEqual([{ id: "prep-6d" }, { id: "prep-next" }, { id: "prep-now" }]);
+    });
+  });
+
+  it("別の配信が鎖を持つ間は表の有無を見ずに待ち、その確定の後に作られた表を見て作らずに first", async () => {
+    await withTestDatabase(async (db) => {
+      // 別の配信の代わり: 鎖を取り、確定しないまま持つ
+      const other = await db.connect();
+      await other.query("BEGIN");
+      await other.query("SELECT pg_advisory_xact_lock(hashtext('nd-prep:schema'))");
+
+      // 受け取りが打った文を、DB へ送る前に残す
+      const inner = db.executor();
+      const sent: string[] = [];
+      const sql: SqlExecutor = {
+        ...inner,
+        execute: (s, p, o) => {
+          sent.push(s);
+          return inner.execute(s, p, o);
+        },
+      };
+      const claim = claimPrepRun(sql, "prep-a");
+      const watcher = await db.connect();
+      for (;;) {
+        const res = await watcher.query<{ n: number }>(
+          "SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
+        );
+        if (res.rows[0]!.n > 0) break;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      // 鎖を待つ間に、表の有無はまだ見ていない
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toContain("pg_advisory_xact_lock");
+
+      // 別の配信が表を作って確定する。受け取りは鎖の後に見るので、作られた表を見て作る文を打たない
+      await other.query("CREATE SCHEMA nd_prep");
+      await other.query("CREATE TABLE nd_prep.prep_runs (prep_id text PRIMARY KEY, claimed_at timestamptz NOT NULL DEFAULT now())");
+      await other.query("COMMIT");
+      expect(await claim).toBe("first");
+      expect(sent.some((x) => x.includes("CREATE"))).toBe(false);
     });
   });
 

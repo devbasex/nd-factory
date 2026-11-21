@@ -40,7 +40,8 @@ export function toPositional(sql: string, params: SqlParam[] | undefined): { tex
       if (!byName.has(name)) throw new Error(`引数が渡されていない: ${name}`);
       let n = order.indexOf(name);
       if (n === -1) n = order.push(name) - 1;
-      text += `$${n + 1}`;
+      // 整数は Data API が longValue（bigint）で渡すのに合わせて型を決める。型の無い引数で送ると、Data API でだけ落ちる文を見逃す
+      text += Number.isInteger(byName.get(name)) ? `$${n + 1}::bigint` : `$${n + 1}`;
       i += 1 + name.length;
     } else {
       text += c;

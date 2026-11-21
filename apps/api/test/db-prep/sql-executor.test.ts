@@ -310,13 +310,13 @@ describe("toPositional", () => {
         { name: "a", value: 1 },
         { name: "b", value: "x" },
       ]),
-    ).toEqual({ text: "SELECT $1, $2, $1", values: [1, "x"] });
+    ).toEqual({ text: "SELECT $1::bigint, $2, $1::bigint", values: [1, "x"] });
   });
 
   it("型の決め・文字列・識別子・注釈の中の : を引数にしない", () => {
     const sql = `SELECT :a::int, 'SCRAM-SHA-256$4096:abc$x:y', E'it''s :b', "col:c" -- :d\n, /* :e */ 1`;
     expect(toPositional(sql, [{ name: "a", value: 1 }])).toEqual({
-      text: `SELECT $1::int, 'SCRAM-SHA-256$4096:abc$x:y', E'it''s :b', "col:c" -- :d\n, /* :e */ 1`,
+      text: `SELECT $1::bigint::int, 'SCRAM-SHA-256$4096:abc$x:y', E'it''s :b', "col:c" -- :d\n, /* :e */ 1`,
       values: [1],
     });
   });
