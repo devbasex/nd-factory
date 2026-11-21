@@ -251,7 +251,7 @@ docs/operations/settings.md・setup.md
 | --- | --- | --- | --- | --- |
 | `PipelineStack` の `constructor` | `infra/lib/pipeline-stack.ts` | 変更 | 変えない | 反映のアクションの CodeBuild を `privileged: true` にし、引き受けられる bootstrap の役割に `image-publishing` を足す。準備のアクションは変えない |
 
-`docs/operations/setup.md` の前提の表に Docker（`deploy` を打つ端末）を足し、手順に「イメージの資産を初めて入れる版は、パイプラインのスタックを先に反映する」と「`gc` を月に 1 回、反映と同時でない時に打つ」を足す。
+`docs/operations/setup.md` の前提の表に Docker（`deploy` を打つ端末）を足し、手順に「イメージの資産を初めて入れる版は、パイプラインのスタックを先に反映する」と「`gc` を月に 1 回、反映と同時でない時に打つ」を足す。あわせて、先の反映の前に保存するもの・戻しを始める条件・前の版へ戻す 4 つの段（設計文書の決定 11）を、運用する環境の節に手順として写す。
 
 ## DB の用意のタスク
 
