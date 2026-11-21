@@ -119,10 +119,19 @@ describe("defineOperation", () => {
     expect(op.onceOnly).toEqual(["item.token"]);
   });
 
-  it("1 回だけ返す値の場所は、途中の包み（nullable・optional・default）を外して下りる", () => {
+  it("1 回だけ返す値の場所は、途中の包み（nullable・optional・default・prefault・readonly・catch・nonoptional）を外して下りる", () => {
     // item は封筒の検査でオブジェクトに限るので、包みはその下の場所に置く
     const inner = z.strictObject({ token: z.string().nullable() });
-    for (const issued of [inner.nullable(), inner.optional(), inner.default({ token: null })]) {
+    const wrapped = [
+      inner.nullable(),
+      inner.optional(),
+      inner.default({ token: null }),
+      inner.prefault({ token: null }),
+      inner.readonly(),
+      inner.catch({ token: null }),
+      inner.optional().nonoptional(),
+    ];
+    for (const issued of wrapped) {
       const result = okItem(z.strictObject({ delegation_id: idOf("dlg"), issued }));
       const op = defineOperation(base({ ...ONCE_WRITE, result, onceOnly: ["item.issued.token"] }));
       expect(op.onceOnly).toEqual(["item.issued.token"]);

@@ -160,7 +160,7 @@ function checkResult(name: string, verb: string, endpoint: Endpoint, result: Res
 const ONCE_ONLY_PATH = new RegExp(`^${SEGMENT}(?:\\.${SEGMENT})*$`);
 
 // 場所の値を受ける形（オブジェクトの和は、その鍵を持つ選択肢のすべて）。
-// 末尾の場所は settleIdempotency が値ごと null に替えるので、配列や包み（optional・nullable・default など）を含めたその場所の形そのものを返す。
+// 末尾の場所は settleIdempotency が値ごと null に替えるので、配列や包み（optional・nullable・default・nonoptional など）を含めたその場所の形そのものを返す。
 // 場所の途中では包みを外し、配列は要素の形へ下りる（settleIdempotency も要素ごとに同じ場所を替え、null の途中の値はそのまま残す）
 function schemasAt(schema: z.ZodType, segments: readonly string[]): z.ZodType[] {
   const [head, ...rest] = segments;
@@ -171,7 +171,8 @@ function schemasAt(schema: z.ZodType, segments: readonly string[]): z.ZodType[] 
     schema instanceof z.ZodDefault ||
     schema instanceof z.ZodPrefault ||
     schema instanceof z.ZodReadonly ||
-    schema instanceof z.ZodCatch
+    schema instanceof z.ZodCatch ||
+    schema instanceof z.ZodNonOptional
   ) {
     return schemasAt(schema.def.innerType as z.ZodType, segments);
   }
