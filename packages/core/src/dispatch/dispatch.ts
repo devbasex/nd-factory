@@ -24,6 +24,9 @@ export type * from "./types.ts";
 // 要約の記録と応答に残す時間（ミリ秒）。要素の前の残り時間がこれを下回れば、残りの要素を処理しない
 export const DISPATCH_RESERVE_MS = 1500;
 
+// 予備の時間のうち、要約の記録と応答だけに残す時間（ミリ秒）。確定しなかった要素の後始末（冪等の鍵の借りの手放し）はこれを超える分だけを使う
+export const DISPATCH_SUMMARY_MS = 1000;
+
 // 認可の対象を要素の指す行でなく主体の利用者自身にする操作（外したログインの行の有無は、冪等の鍵の照合の後にハンドラーが照らす）
 const LOGINS_DELETE = "logins.delete";
 
@@ -440,9 +443,18 @@ async function eachItem(c: Ctx, parsed: readonly ParsedItem[], authz: readonly (
 }
 
 // 全部か無かで確定しなかったとき、この要求が借りた冪等の鍵を手放す。持ち主が自分で借りたままの行だけを消す（取り直された行・済みの行は残す）。
-// 手放せなかった鍵は借りの期限の後に取り直せるため、要求の結果は変えない
+// 手放せなかった鍵は借りの期限の後に取り直せるため、要求の結果は変えない。
+// 後始末は要約の記録と応答の時間（DISPATCH_SUMMARY_MS）を食わない。残り時間がそれを超える分だけを使い、鍵ごとの手放しを並べて打ち、
+// その時間で終わらなければ待たずに返す（終わらなかった手放しは持ち主の条件つきのため、後で届いても他の要求の行を消さない）
 async function releaseTaken(c: Ctx): Promise<void> {
-  for (const claim of c.taken.splice(0)) {
+  const claims = c.taken.splice(0);
+  if (claims.length === 0) return;
+  const budget = c.req.call.remainingMs() - DISPATCH_SUMMARY_MS;
+  if (budget <= 0) {
+    c.req.log.warn("残り時間が足りないため冪等の鍵の借りを手放さない", { count: claims.length });
+    return;
+  }
+  const release = async (claim: IdempotencyClaimInput): Promise<void> => {
     const item: TransactItem = {
       table: "idempotency",
       op: "delete",
@@ -455,6 +467,16 @@ async function releaseTaken(c: Ctx): Promise<void> {
     } catch (error) {
       c.req.log.warn("確定しなかった要素の冪等の鍵の借りを手放せない", { error: errorName(error) });
     }
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<"expired">((resolve) => {
+    timer = setTimeout(() => resolve("expired"), budget);
+  });
+  try {
+    const done = await Promise.race([Promise.all(claims.map(release)).then(() => "done" as const), expired]);
+    if (done === "expired") c.req.log.warn("後始末の時間内に冪等の鍵の借りを手放し終えない", { count: claims.length });
+  } finally {
+    clearTimeout(timer);
   }
 }
 

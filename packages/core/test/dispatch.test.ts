@@ -4,7 +4,7 @@ import type { AuthDeps, DelegationRecord, Principal } from "../src/auth/authenti
 import type { ScopeReader } from "../src/authorize.ts";
 import { createClock } from "../src/clock.ts";
 import { cond, putIfAbsent, updateIfVersion, type TransactItem } from "../src/conditional-write.ts";
-import { DISPATCH_RESERVE_MS, dispatch, readHttpCall, type DispatchDeps, type DispatchResult, type Handler, type HttpEvent, type OperationCall } from "../src/dispatch/dispatch.ts";
+import { DISPATCH_RESERVE_MS, DISPATCH_SUMMARY_MS, dispatch, readHttpCall, type DispatchDeps, type DispatchResult, type Handler, type HttpEvent, type OperationCall } from "../src/dispatch/dispatch.ts";
 import { createLogger } from "../src/log.ts";
 import { DISPATCH_OPERATIONS, NOTE_KEY, noteHandlers } from "./fixtures/dispatch.ts";
 import { projectsGet } from "./fixtures/operations.ts";
@@ -745,6 +745,41 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     revoke(table);
     const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
     expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "state_mismatch" }]);
+  });
+
+  it("全部か無かの後始末は要約の記録と応答の時間を食わず、残り時間が足りなければ借りを手放さずに要約を書いて返す", async () => {
+    const { table, deps } = setup();
+    const items = [
+      { project_id: P_A, title: "one", idempotency_key: IDEM_1 },
+      { project_id: P_A, title: "two", idempotency_key: IDEM_2 },
+    ];
+    table.seed("sprints", { pk: `PROJECT#${P_A}`, sk: "NOTE#two", schema_version: 1, version: 1, title: "two" });
+    const result = await dispatch(call("notes.bulk", items, { remainingMs: () => DISPATCH_SUMMARY_MS + (table.rows("idempotency").length < 2 ? DISPATCH_RESERVE_MS : 0) }), deps);
+    expect(itemsOf(result)).toHaveLength(2);
+    expect(table.rows("idempotency").map((r) => r["state"])).toEqual(["leased", "leased"]);
+    expect(table.transactions.filter((t) => t.some((i) => i.table === "idempotency" && i.op === "delete"))).toHaveLength(0);
+    expect(summaryRows(table)).toHaveLength(1);
+  });
+
+  it("全部か無かの後始末が残り時間の内に終わらなければ、待たずに要約を書いて返す", async () => {
+    const { table, deps } = setup();
+    const items = [
+      { project_id: P_A, title: "one", idempotency_key: IDEM_1 },
+      { project_id: P_A, title: "two", idempotency_key: IDEM_2 },
+    ];
+    table.seed("sprints", { pk: `PROJECT#${P_A}`, sk: "NOTE#two", schema_version: 1, version: 1, title: "two" });
+    const hanging: DispatchDeps = {
+      ...deps,
+      db: {
+        ...deps.db,
+        transactWrite: (writes) => (writes.some((i) => i.table === "idempotency" && i.op === "delete") ? new Promise<void>(() => {}) : deps.db.transactWrite(writes)),
+      },
+    };
+    const started = Date.now();
+    const result = await dispatch(call("notes.bulk", items, { remainingMs: () => DISPATCH_SUMMARY_MS + (table.rows("idempotency").length < 2 ? DISPATCH_RESERVE_MS : 50) }), hanging);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(itemsOf(result)).toHaveLength(2);
+    expect(summaryRows(table)).toHaveLength(1);
   });
 
   it("結果の形に無い鍵は応答に残さない", async () => {
