@@ -10,6 +10,7 @@ import {
   projectsRename,
   questionsAnswer,
   runnerEventsAppend,
+  sessionsCreate,
   sprintsCreate,
   teamsRename,
 } from "./fixtures/operations.ts";
@@ -32,7 +33,7 @@ const P_MOVING = id("prj", 23); // チーム B からチーム A へ移す途中
 const LANE = id("lane", 30);
 const MACHINE = id("mch", 40);
 
-const human = (userId: `usr_${string}`): Principal => ({ kind: "human", userId });
+const human = (userId: `usr_${string}`): Principal => ({ kind: "human", userId, cognitoSub: `cognito-${userId}`, sessionId: `session-${userId}`, bindingEpoch: 0 });
 const delegation = (userId: `usr_${string}`, projectIds: `prj_${string}`[], operations: "read" | "run" | "manage" = "manage"): Principal => ({
   kind: "delegation",
   userId,
@@ -250,6 +251,14 @@ describe("authorize: ランナー・手元のマシン・DB の用意のタス�
     const table = world();
     const prep: Principal = { kind: "db_prep", projectId: P_A, prepId: "prep-1" };
     expect(items(await authorize(prep, dbPrepSecretsGet, [{ project_id: P_A }, { project_id: P_B }], fakeScope(table)))).toEqual([{ decision: "allow", projectId: P_A, role: null }, NOT_FOUND]);
+  });
+
+  it("まだ結んでいない人は sessions.create だけを通り、見えるプロジェクトを持たない", async () => {
+    const table = world();
+    const newcomer: Principal = { kind: "newcomer", login: { cognitoSub: "cognito-sub-new", username: "google_cognito-sub-new", sessionId: "session-1", idp: "google", subject: "1234567890", authTime: 0, bindingEpoch: 0, rowVersion: null } };
+    expect(await visibleProjectIds(newcomer, fakeScope(table))).toEqual([]);
+    expect(items(await authorize(newcomer, sessionsCreate, [{}], fakeScope(table)))).toEqual([{ decision: "allow", projectId: null, role: null }]);
+    expect(await authorize(newcomer, projectsGet, [{ project_id: P_A }], fakeScope(table))).toEqual({ reject: "scope_insufficient" });
   });
 
   it("GitHub と見回りは利用者向けの操作を要求全体で断られる", async () => {

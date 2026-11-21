@@ -85,6 +85,7 @@ export const TABLES = defineTables([
     rows: [
       { name: "user", skPattern: /^USER$/, writes: "overwrite" },
       { name: "login_subject", skPattern: /^LOGIN$/, writes: "create_delete" },
+      { name: "cognito_subject", skPattern: /^COGNITO$/, writes: "overwrite" },
       { name: "login", skPattern: new RegExp(`^LOGIN#${ID}#.+$`), writes: "create_delete" },
       { name: "delegation", skPattern: new RegExp(`^DELEGATION#${ID}$`), writes: "overwrite" },
     ],

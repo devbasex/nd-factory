@@ -33,6 +33,9 @@ export const sprintsCreate = defineOperation({
 // 要素によって人だけになる操作
 export const questionsAnswer = defineOperation({ ...pending, name: "questions.answer", features: ["F10"], access: "write", humanOnly: "per_item", delegationKind: "run", auditKeys: ["project_id", "question_id"] });
 
+// 初めてのサインインで利用者を作る人だけの操作（まだ結んでいない人の主体を受ける）
+export const sessionsCreate = defineOperation({ ...pending, name: "sessions.create", features: ["F1"], access: "write", humanOnly: "always", idempotencyKey: true, mcpRead: "users.get" });
+
 // 人だけの操作
 export const delegationsCreate = defineOperation({ ...pending, name: "delegations.create", features: ["F16"], access: "write", humanOnly: "always", mcpRead: "delegations.list" });
 

@@ -1,5 +1,5 @@
 import type { DelegationKind, OperationDef } from "@nd-factory/contracts/operation";
-import type { Principal } from "./auth/authenticate.ts";
+import { SESSIONS_CREATE, type Principal } from "./auth/authenticate.ts";
 import type { Id } from "./ids.ts";
 import type { Logger } from "./log.ts";
 
@@ -95,6 +95,7 @@ export async function visibleProjectIds(principal: Principal, scope: ScopeReader
       return [...(await laneProjects(principal, scope))];
     case "db_prep":
       return [principal.projectId];
+    case "newcomer":
     case "github":
     case "patrol":
       return [];
@@ -115,6 +116,9 @@ function requestReject(principal: Principal, op: OperationDef): "human_only" | "
     case "machine":
     case "db_prep":
       return op.endpoint === principal.kind ? null : "scope_insufficient";
+    case "newcomer":
+      // まだ利用者へ結んでいない人は、利用者を作る sessions.create だけ
+      return op.name === SESSIONS_CREATE ? null : "scope_insufficient";
     case "github":
     case "patrol":
       // 利用者向けの操作と、ほかの主体向けの経路を呼べない

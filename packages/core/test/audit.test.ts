@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { AUDIT_RETENTION_DAYS, AuditUnavailableError, appendAudit, auditItem, auditPartitionOf, type AuditEntry } from "../src/audit.ts";
+import { actorOfCreatedUser, AUDIT_RETENTION_DAYS, AuditUnavailableError, appendAudit, auditItem, auditPartitionOf, type AuditEntry } from "../src/audit.ts";
 import type { Principal } from "../src/auth/authenticate.ts";
 import { createClock } from "../src/clock.ts";
 import { putIfAbsent, WriteUnavailableError, writeAtomically } from "../src/conditional-write.ts";
 import { leakedSecrets, SECRET_SAMPLES } from "./fixtures/secrets.ts";
-import { projectsGet, projectsRename, sprintsCreate } from "./fixtures/operations.ts";
+import { projectsGet, projectsRename, sessionsCreate, sprintsCreate } from "./fixtures/operations.ts";
 import { fakeTable } from "./fakes/table.ts";
 
 // DynamoDB は呼ばない。記録の行は偽の表へ書き、行の中身を照らす
@@ -17,7 +17,16 @@ const PROJECT = "prj_01890a5d-ac96-774b-bcce-b302099a8058";
 const TEAM = "team_01890a5d-ac96-774b-bcce-b302099a8059";
 const AUDIT = "aud_01890a5d-ac96-774b-bcce-b302099a805a";
 
-const human: Principal = { kind: "human", userId: USER };
+const human: Principal = { kind: "human", userId: USER, cognitoSub: "cognito-sub-1", sessionId: "session-1", bindingEpoch: 0 };
+
+// まだ利用者へ結んでいない人（sessions.create の初回）
+const newcomer: Principal = {
+  kind: "newcomer",
+  login: { cognitoSub: "cognito-sub-new", username: "google_cognito-sub-new", sessionId: "session-new", idp: "google", subject: "g-subject-new", authTime: 0, bindingEpoch: 0, rowVersion: null },
+};
+const newcomerEntry = (over: Partial<AuditEntry> = {}): AuditEntry =>
+  entry({ actor: { principal: newcomer, mcpClientName: null }, operation: "sessions.create", targetIds: {}, projectId: null, ...over });
+const NEWCOMER_VALUES = ["cognito-sub-new", "google_cognito-sub-new", "session-new", "g-subject-new"];
 
 const entry = (over: Partial<AuditEntry> = {}): AuditEntry => ({
   auditId: AUDIT,
@@ -134,6 +143,31 @@ describe("auditItem", () => {
     expect(leakedSecrets(JSON.stringify(item))).toEqual([]);
   });
 
+  it("まだ結んでいない人が利用者を作った要素と要約の行は、作った利用者の人の主体で本人の区切りへ置く", () => {
+    const actor = actorOfCreatedUser({ principal: newcomer, mcpClientName: null }, USER);
+    expect(actor.principal).toEqual({ kind: "human", userId: USER, cognitoSub: "cognito-sub-new", sessionId: "session-new", bindingEpoch: 0 });
+    for (const itemIndex of [0, null]) {
+      const item = auditItem(newcomerEntry({ actor, itemIndex }), sessionsCreate, clock).item;
+      expect(item).toMatchObject({ pk: `USER#${USER}`, actor: { kind: "human", user_id: USER } });
+      const text = JSON.stringify(item);
+      for (const value of NEWCOMER_VALUES) expect(text).not.toContain(value);
+    }
+  });
+
+  it("まだ結んでいない人の利用者を作らなかった行は、種類だけを持って主体の無い 401 と同じ区切りに置く", () => {
+    const item = auditItem(newcomerEntry({ result: { outcome: "partial", status: 200, reasons: ["state_mismatch"] } }), sessionsCreate, clock).item;
+    expect(item).toMatchObject({ pk: `ANON#${AT.slice(0, 10)}`, actor: { kind: "newcomer" } });
+    const text = JSON.stringify(item);
+    for (const value of NEWCOMER_VALUES) expect(text).not.toContain(value);
+  });
+
+  it("newcomer でない主体は actorOfCreatedUser で変えない", () => {
+    const actor = { principal: human, mcpClientName: null };
+    expect(actorOfCreatedUser(actor, "usr_01890a5d-ac96-774b-bcce-b302099a8099")).toBe(actor);
+    const unknown = { principal: null, mcpClientName: null };
+    expect(actorOfCreatedUser(unknown, USER)).toBe(unknown);
+  });
+
   it("UTC でない時刻と負の要素の番号は投げる", () => {
     expect(() => auditItem(entry({ at: "2026-11-21T12:04:05+09:00" }), projectsGet, clock)).toThrow();
     expect(() => auditItem(entry({ itemIndex: -1 }), projectsGet, clock)).toThrow();
@@ -184,6 +218,14 @@ describe("状態と記録を 1 つのトランザクションで書く", () => {
     expect(await writeAtomically(table.db, [state(), auditItem(entry(), projectsRename, clock)])).toEqual({ ok: true });
     expect(table.rows("projects")).toHaveLength(1);
     expect(table.rows("audit")).toHaveLength(1);
+  });
+
+  it("利用者を作った要素の記録を利用者の行と同じトランザクションで書き、本人の区切りから読める", async () => {
+    const table = fakeTable();
+    const user = putIfAbsent({ table: "users", item: { pk: `USER#${USER}`, sk: "USER", schema_version: 1, version: 1, user_id: USER }, onConflict: "fail" });
+    const actor = actorOfCreatedUser({ principal: newcomer, mcpClientName: null }, USER);
+    expect(await writeAtomically(table.db, [user, auditItem(newcomerEntry({ actor }), sessionsCreate, clock)])).toEqual({ ok: true });
+    expect(table.rows("audit").map((r) => r.pk)).toEqual([`USER#${USER}`]);
   });
 
   it("記録の表に届かなければ投げ、状態も書かれない", async () => {

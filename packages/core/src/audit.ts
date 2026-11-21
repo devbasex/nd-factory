@@ -49,6 +49,19 @@ export type AuditEntry = {
   readonly itemIndex: number | null;
 };
 
+// まだ利用者へ結んでいない人（newcomer）が利用者を作った要素（sessions.create の初回）の記録の主体。作った利用者の人の主体に替え、
+// 区切りの鍵もその利用者（USER#<利用者>）にして、本人が自分の記録として読めるようにする。dispatch はハンドラーが利用者を作った要素の行と
+// その要求の要約の行をこの主体で組み、要素の行を利用者の行と同じトランザクションへ入れる。利用者を作らなかった要素と要求は newcomer のまま書く
+// （主体の種類だけで、Cognito の sub・username・IdP の主体を写さない）。newcomer でない主体はそのまま返す
+export function actorOfCreatedUser(actor: AuditActor, userId: Id<"usr">): AuditActor {
+  const p = actor.principal;
+  if (p === null || p.kind !== "newcomer") return actor;
+  return {
+    ...actor,
+    principal: { kind: "human", userId, cognitoSub: p.login.cognitoSub, sessionId: p.login.sessionId, bindingEpoch: p.login.bindingEpoch },
+  };
+}
+
 // 状態を書かない要求の記録を書けない（表に届かない・表が断った）。呼び手は要求全体の 503 audit_unavailable にし、読む操作は値を返さない
 export class AuditUnavailableError extends Error {
   override name = "AuditUnavailableError";
@@ -77,9 +90,11 @@ export function auditPartitionOf(entry: AuditEntry): string {
     case "runner":
     case "db_prep":
       return `PROJECT#${principal.projectId}`;
+    case "newcomer":
     case "github":
     case "patrol":
-      // 利用者・チーム・プロジェクトを持たない主体は、主体の無い 401 と同じ日ごとの区切りに置く
+      // 利用者・チーム・プロジェクトを持たない主体は、主体の無い 401 と同じ日ごとの区切りに置く。まだ利用者へ結んでいない人は
+      // 利用者を作らなかった要素と要求だけがここへ来る（作った要素は actorOfCreatedUser で作った利用者の区切りへ置く）
       return `ANON#${entry.at.slice(0, 10)}`;
   }
 }
@@ -100,6 +115,8 @@ function actorColumns(actor: AuditActor): Record<string, unknown> {
       return { kind: p.kind, team_id: p.teamId, machine_id: p.machineId, ...mcp };
     case "db_prep":
       return { kind: p.kind, project_id: p.projectId, prep_id: p.prepId, ...mcp };
+    // まだ利用者へ結んでいない人は種類だけ（Cognito の sub・username・IdP の主体は写さない。作った利用者は actorOfCreatedUser で人の主体にする）
+    case "newcomer":
     case "github":
     case "patrol":
       return { kind: p.kind, ...mcp };

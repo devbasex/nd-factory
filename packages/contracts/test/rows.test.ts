@@ -34,6 +34,8 @@ const DETAIL_ROWS = [
   "idempotency",
 ];
 const OVERALL_ROWS = ["login_subject", "project", "assignment", "lane", "approval", "audit"];
+// 認証（Cognito の sub から利用者を引く読み手）のために足した行。19 の行に数えない
+const AUTH_ROWS = ["cognito_subject"];
 
 const ajv = new Ajv2020({ strict: true, validateFormats: false });
 
@@ -48,6 +50,13 @@ function keyOf(name: string, row: unknown): RowKey {
   return (c.keyOf as (r: unknown) => RowKey)(row);
 }
 
+// 行の形の列（状態ごとに形を分けた行は、どれかの状態の形が持つ列）
+function hasColumn(name: string, column: string): boolean {
+  const schema = ROW_CASES[name]?.schema;
+  const objects = schema instanceof z.ZodUnion ? (schema.options as z.ZodObject[]) : [schema as z.ZodObject];
+  return objects.some((o) => column in o.shape);
+}
+
 function tableOfRow(name: string): TableSpec {
   const spec = Object.values(TABLES).find((t) => t.rows.some((r) => r.name === name));
   if (spec === undefined) throw new Error(`行の種類の表が無い: ${name}`);
@@ -57,9 +66,9 @@ function tableOfRow(name: string): TableSpec {
 const cases = Object.entries(ROW_CASES);
 
 describe("行の形（受け入れ条件 8）", () => {
-  it("19 の行と全体の設計の 6 つの行がそろい、どの表の行の種類とも 1 対 1 に当たる", () => {
+  it("19 の行と全体の設計の 6 つの行と認証の行がそろい、どの表の行の種類とも 1 対 1 に当たる", () => {
     expect(DETAIL_ROWS).toHaveLength(19);
-    expect(Object.keys(ROW_CASES).sort()).toEqual([...DETAIL_ROWS, ...OVERALL_ROWS].sort());
+    expect(Object.keys(ROW_CASES).sort()).toEqual([...DETAIL_ROWS, ...OVERALL_ROWS, ...AUTH_ROWS].sort());
     const specRows = Object.values(TABLES).flatMap((t) => t.rows.map((r) => r.name));
     expect(specRows.sort()).toEqual(Object.keys(ROW_CASES).sort());
   });
@@ -148,6 +157,39 @@ describe("行の形（受け入れ条件 8）", () => {
     expect(usage?.schema.safeParse({ ...usage.sample, used_amount_minor: 1.5 }).success).toBe(false);
   });
 
+  it("Cognito の主体の対応の行は状態に要る列を必須にし、状態に当たらない列を断つ", () => {
+    const c = ROW_CASES["cognito_subject"];
+    if (c === undefined) throw new Error("cognito_subject が無い");
+    const validate = ajv.compile(z.toJSONSchema(c.schema));
+    const { revoked_before: _r, ...base } = c.sample;
+    const bound = { ...base, state: "bound", user_id: USR, bound_auth_time: AT };
+    const signingOut = { ...base, state: "signing_out", signout_lease_id: "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b", signout_lease_until: AT, signout_unsettled_until: AT };
+    const accepted = [bound, signingOut, { ...base, state: "signing_out" }, { ...base, state: "signing_out", signout_unsettled_until: AT }, c.sample];
+    const rejected = [
+      without(bound, "user_id"),
+      without(bound, "bound_auth_time"),
+      { ...bound, revoked_before: AT },
+      { ...bound, signout_lease_id: "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b" },
+      { ...signingOut, user_id: USR },
+      { ...signingOut, bound_auth_time: AT },
+      { ...signingOut, revoked_before: AT },
+      without(signingOut, "signout_lease_id"),
+      without(signingOut, "signout_lease_until"),
+      { ...base, state: "unlinked" },
+      { ...c.sample, user_id: USR },
+      { ...c.sample, signout_lease_until: AT },
+      { ...c.sample, signout_unsettled_until: AT },
+    ];
+    for (const row of accepted) {
+      expect(c.schema.safeParse(row).success).toBe(true);
+      expect(validate(row)).toBe(true);
+    }
+    for (const row of rejected) {
+      expect(c.schema.safeParse(row).success).toBe(false);
+      expect(validate(row)).toBe(false);
+    }
+  });
+
   it("形の版が整数の 1 でない行が落ちる", () => {
     const c = ROW_CASES["user"];
     for (const v of [0, 2, "1", 1.5]) expect(c?.schema.safeParse({ ...c.sample, schema_version: v }).success).toBe(false);
@@ -215,12 +257,12 @@ describe("TABLES", () => {
   });
 
   it("db-teams で user_id の列を持つのは席の行だけ", () => {
-    const holders = TABLES.teams.rows.filter((r) => "user_id" in (ROW_CASES[r.name]?.schema as z.ZodObject).shape).map((r) => r.name);
+    const holders = TABLES.teams.rows.filter((r) => hasColumn(r.name, "user_id")).map((r) => r.name);
     expect(holders).toEqual(["seat"]);
   });
 
   it("TTL の列を持つ表の、TTL の列を持つ行が詳細設計と一致する", () => {
-    const holders = Object.values(TABLES).flatMap((t) => t.rows.filter((r) => "expire_at" in (ROW_CASES[r.name]?.schema as z.ZodObject).shape).map((r) => r.name));
+    const holders = Object.values(TABLES).flatMap((t) => t.rows.filter((r) => hasColumn(r.name, "expire_at")).map((r) => r.name));
     expect(holders.sort()).toEqual(["audit", "github_token", "idempotency"]);
   });
 
