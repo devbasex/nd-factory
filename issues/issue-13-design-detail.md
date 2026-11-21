@@ -57,7 +57,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `infra/bin/app.ts` | 変更 | 合成の入力のダイジェストを読んで `AppStack` へ渡す | `images.ts` | モジュール | 最上位の処理（変更） |
 | `infra/setup/images.ts` | 新設 | イメージを作って push し、一覧を書く | `images.ts`・AWS SDK（ECR） | モジュール | `buildAndPushImages` |
 | `infra/setup/images-cli.ts` | 新設 | パイプラインの準備のアクションから `buildAndPushImages` を打つ入口 | `setup/images.ts` | モジュール | `main` |
-| `packages/contracts/data/exit-codes.json` | 変更 | 6 `BUILD` の意味にイメージの作成と push を足し、0・6 の「AWS へ書いたか」を自前の ECR への push に合わせる（`setup.md` の表は生成） | — | — | — |
+| `packages/contracts/data/exit-codes.json` | 変更 | 6 `BUILD` の意味にイメージの作成と push を足し、0・5・6 の「AWS へ書いたか」を自前の ECR への push に合わせる（`setup.md` の表は生成） | — | — | — |
 | `infra/setup/aws-reader.ts` | 変更 | コスト配分タグ・組織・AZ を読む | AWS SDK（Cost Explorer・Organizations・EC2） | モジュール | `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount`（新設） |
 | `infra/setup/nd-setup.ts` | 変更 | `diff` の合成の前にイメージを push する。`diff` の最後に一覧を出す | 上の 2 つ | モジュール | `runDiff`・`synthesize`・`defaultDeps`（変更） |
 | `infra/test/support.ts` | 変更 | スタックの決まりの検査 | — | モジュール | `stackRuleViolations`（新設）・`hourlyCostResources`（変更） |
@@ -286,9 +286,10 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | 終了コード | 名前 | 意味 | AWS へ書いたか |
 | --- | --- | --- | --- |
 | 0 | `OK`（直す） | `diff` は差分を示して止まった。`deploy` は反映した | `diff` は `app` を選び ECR があるときだけ、自前の ECR へ push した。`deploy` は CloudFormation へ反映した |
+| 5 | `BOOTSTRAP`（直す） | bootstrap が無いか版が足りない（求める版と今の版を示す） | `diff` で `app` を選び ECR があるときは、bootstrap の版の段がイメージの push の後にあるため、push の済んだ版が自前の ECR に残ることがある（どのタスクの定義からも引かれない）。ほかは書いていない |
 | 6 | `BUILD`（直す） | 画面のビルド・イメージの作成と push・合成・差分の作成が失敗した | `diff` でイメージの作成と push の段か、その後の段で止まれば、push の済んだ版が自前の ECR に残ることがある（どのタスクの定義からも引かれない）。ほかは書いていない |
 
-`diff` で `app` を選ぶときの段の並びは、引数（2）・設定のファイル（3）・profile（4）・画面のビルド（6）・イメージの作成と push（6）・合成（6）・bootstrap の版（5）・差分の作成（6）になる。`setup.md` の「diff」の節の並びをこの順に直し、「どの段で止まっても AWS へは書かない」を「イメージの作成と push の段か、その後の段で止まったときは、push の済んだ版が自前の ECR に残ることがある。ほかの段では AWS へ書かない」に直す。「終了コード」の節の地の文「0 と 8 のほかは、AWS へ何も書いていない」を、「0・6・8 のほかは、AWS へ何も書いていない。0 の `diff` と `diff` の 6 は自前の ECR へ push していることがあるが、反映しなければどのタスクの定義からも引かれない」に直す。
+`diff` で `app` を選ぶときの段の並びは、引数（2）・設定のファイル（3）・profile（4）・画面のビルド（6）・イメージの作成と push（6）・合成（6）・bootstrap の版（5）・差分の作成（6）になる。bootstrap の求める版は合成の結果から読むため、bootstrap の版の段は合成の後に残し、push の前へ移さない。そのため、ECR が既にある設置先では push が成功した後に 5 で止まることがある。`setup.md` の「diff」の節の並びをこの順に直し、「どの段で止まっても AWS へは書かない」を「イメージの作成と push の段か、その後の段（合成・bootstrap の版・差分の作成）で止まったときは、push の済んだ版が自前の ECR に残ることがある。ほかの段では AWS へ書かない」に直す。「終了コード」の節の地の文「0 と 8 のほかは、AWS へ何も書いていない」を、「0・5・6・8 のほかは、AWS へ何も書いていない。0 の `diff` と `diff` の 5・6 は自前の ECR へ push していることがあるが、反映しなければどのタスクの定義からも引かれず、push の新しい 30 版を超えると規則で消える」に直す。運用の手順には、5 で止まったら bootstrap を求める版へ上げてから同じ設定で `diff` を打ち直すこと（前の push の版は残ったまま数に入り、打ち直しで新しい版がもう 1 つ push される）を足す。
 
 ### 初めての設置の手順
 
