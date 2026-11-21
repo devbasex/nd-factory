@@ -16,7 +16,8 @@ async function kyFailure(fetch: (input: Request) => Promise<Response>): Promise<
   throw new Error("ky が投げなかった");
 }
 
-const answer = (status: number) => () => Promise.resolve(new Response("{}", { status, headers: { "content-type": "application/json" } }));
+// 304 は本文を持てない
+const answer = (status: number) => () => Promise.resolve(new Response(status === 304 ? null : "{}", { status, headers: { "content-type": "application/json" } }));
 
 describe("classifyFailure", () => {
   it.each([
@@ -26,6 +27,10 @@ describe("classifyFailure", () => {
     [502, "retryable"],
     [503, "retryable"],
     [504, "retryable"],
+    [301, "rejected"],
+    [304, "rejected"],
+    [307, "rejected"],
+    [308, "rejected"],
     [409, "conflict"],
     [404, "not_found"],
     [400, "rejected"],
@@ -38,7 +43,7 @@ describe("classifyFailure", () => {
   ])("HTTP の状態 %i は %s", async (status, expected) => {
     expect(classifyFailure(status)).toBe(expected);
     expect(classifyFailure({ status })).toBe(expected);
-    if (status >= 400) {
+    if (status >= 300) {
       const error = await kyFailure(answer(status));
       expect(error).toBeInstanceOf(HTTPError);
       expect(classifyFailure(error)).toBe(expected);

@@ -31,11 +31,12 @@ const NETWORK_CODES = new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTF
 // 原因の鎖の深さの上限（循環する cause で止まらないことを防ぐ）
 const MAX_CAUSE_DEPTH = 5;
 
+// 3xx は rejected。callHttp は転送に従わず（redirect: "manual"）、同じ要求を送り直しても同じ応答のため、location を見て決めるのは呼び手（304 も同じ）
 function classOfStatus(status: number): FailureClass {
   if (status === 409) return "conflict";
   if (status === 404) return "not_found";
   if (RETRYABLE_STATUS.has(status)) return "retryable";
-  if (status === 501 || (status >= 400 && status < 500)) return "rejected";
+  if (status === 501 || (status >= 300 && status < 500)) return "rejected";
   return "unknown";
 }
 
