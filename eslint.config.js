@@ -75,13 +75,21 @@ const boundaryRules = {
           allowTypeImports: true,
         })),
         { name: "uuid", message: `ID と冪等の鍵の生成${BOUNDARY}`, allowTypeImports: true },
-        // ID と冪等の鍵の生成の関数（`randomUUID`・`randomBytes`・`getRandomValues`）と、それらを持つ `webcrypto` の
+        // ID と冪等の鍵の生成の関数（`randomUUID`・`randomBytes`・`randomFill`・`randomFillSync`・`getRandomValues`）と、それらを持つ `webcrypto` の
         // 名前つきの import と名前つきの再書き出しを落とす。`importNames` を持つと名前空間の import と `export *`・
         // `export * as` は丸ごと落ち、`default` で既定の import も落ちる。モジュールの値を持たせないので、移した先を
         // 追わずに済む。`createHash` などほかの名前の名前つきの import と名前つきの再書き出しは落とさない
         ...["node:crypto", "crypto"].map((name) => ({
           name,
-          importNames: ["randomUUID", "randomBytes", "getRandomValues", "webcrypto", "default"],
+          importNames: [
+            "randomUUID",
+            "randomBytes",
+            "randomFill",
+            "randomFillSync",
+            "getRandomValues",
+            "webcrypto",
+            "default",
+          ],
           message: `ID と冪等の鍵の生成${BOUNDARY}`,
           allowTypeImports: true,
         })),
