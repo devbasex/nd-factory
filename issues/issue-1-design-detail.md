@@ -30,6 +30,8 @@ nd-factory/
     ├── package.json                       依存 @nd-factory/contracts・ajv・ajv-formats・yaml
     ├── tsconfig.json                      checks/src を含める
     ├── checks/src/ndf-contract-check.ts * NDF の契約の照合（CLI）
+    ├── checks/leak-scan.sh              * gitleaks の 1 回の探し（除外を効かなくする。`leak-check` のジョブと結合のテストが打つ）
+    ├── checks/gitleaks-default.toml     * 既定の規則で探す設定（`[extend] useDefault = true`）と、既定の規則の正当な当たりの許可
     └── test/
         ├── ndf-contract-check.test.ts   *
         ├── contracts-round-trip.test.ts *  形の正本の往復と I14 の表の照らし
@@ -109,25 +111,45 @@ nd-factory/
 
 | 欄 | 中身 |
 | --- | --- |
-| （`[extend]` を持たない） | 既定の規則と既定の全体の許可を読まない。既定の規則は別の 1 回の実行（設定を渡さない）で探す |
+| （`[extend]` を持たない） | 既定の規則と既定の全体の許可を読まない。既定の規則は別の 1 回の実行で `tools/checks/gitleaks-default.toml` を渡して探す（設定を省くと、gitleaks は探す木の根の `.gitleaks.toml` を読み、既定の規則が抜けるため。v8.30.1 の `cmd/root.go` の `initConfig`） |
 | `[[rules]]` `nd-aws-account-id` | 前後が英数字でない 12 桁の数（`secretGroup` で数の部分） |
 | `[[rules]]` `nd-aws-arn` | `arn:` とパーティション（`aws`・`aws-cn`・`aws-us-gov`）で始まり、アカウントの欄が 12 桁のもの |
 | `[[rules]]` `nd-aws-arn-s3` | アカウントとリージョンの欄の無い S3 の ARN（`arn:<パーティション>:s3:::`）の資源の名前 |
 | `[[rules]]` `nd-aws-resource-id` | AWS の資源の ID の頭（`vpc-`・`subnet-`・`sg-`・`i-`・`vol-`・`snap-`・`ami-`・`igw-`・`rtb-`・`eni-`・`nat-`・`eipalloc-`・`lt-`）と 8 か 17 桁の 16 進 |
 | `[[rules]]` `nd-aws-endpoint` | 資源ごとに名前の付く AWS の端点（`*.execute-api.<リージョン>.amazonaws.com`・`*.lambda-url.<リージョン>.on.aws`・`*.cloudfront.net`・`*.auth.<リージョン>.amazoncognito.com`・`*.rds.amazonaws.com`・`*.s3.amazonaws.com`）の資源の部分 |
-| `[[allowlists]]`（5 つの `nd-aws-*` の規則に掛ける。`targetRules`） | 値が作り物の `123456789012`・頭が `acme`・`us-west-2`・`example.com`・置き場所の記号（`<…>`・`${…}`）。作り物の UUID（`00000000-0000-7000-8000-…` の形）の 12 桁の部分 |
-| `[[allowlists]]`（`nd-aws-*` の規則に掛ける） | 値に作り物の印 `EXAMPLE` を含む |
+| 5 つの `nd-aws-*` の規則それぞれの `[[rules.allowlists]]` | 値が作り物の `123456789012`・頭が `acme`・`us-west-2`・`example.com`・置き場所の記号（`<…>`・`${…}`）。作り物の UUID（`00000000-0000-7000-8000-…` の形）の 12 桁の部分 |
+| 5 つの `nd-aws-*` の規則それぞれの `[[rules.allowlists]]` | 値に作り物の印 `EXAMPLE` を含む |
+
+許可は規則の中の `[[rules.allowlists]]` に書き、最上位の `[[allowlists]]` の `targetRules` を使わない。gitleaks v8.30.1 は `targetRules` の許可を最上位で読んだ設定にだけ付け、`[extend] path` で読まれた側の `targetRules` を捨てる（`config/config.go` の `Translate` は `extendDepth` が 0 のときだけ対象の規則へ付ける）。`LEAK_CHECK_PATTERN` を重ねた設定は `.gitleaks.toml` を `[extend] path` で読むので、`targetRules` では重ねた設定で作り物の値が当たる。規則の中の許可は重ねても規則と一緒に引き継がれる。
+
+`tools/checks/gitleaks-default.toml`:
+
+| 欄 | 中身 |
+| --- | --- |
+| `[extend] useDefault = true` | gitleaks の既定の規則と既定の全体の許可を読む。nd-factory の規則は持たない |
+| `[[rules]]` `id = "<既定の規則の id>"` と、その `[[rules.allowlists]]` | 既定の規則の正当な当たりを外すときだけ足す（規則の欄は id だけ書き、正規表現は既定から引き継ぐ）。今の木は当たり 0 件なので置かない |
 
 ジョブ `leak-check` の手順:
 
 1. `actions/checkout`（`fetch-depth: 0`・`persist-credentials: false`）
 2. 環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の版の linux の資産を取り、`sha256sum` を `GITLEAKS_SHA256` と直接比べ、一致したときだけ展開して `PATH` へ置く（配布元のチェックサムのファイルと比べない。固定にならないため）
 3. 実際の値の規則を重ねる: 秘密 `LEAK_CHECK_PATTERN` があれば、一時のディレクトリに `[extend] path = "<リポジトリ>/.gitleaks.toml"` と規則 `nd-real-value`（`regex` に秘密の正規表現を `'''` で囲んで置く）の 2 つだけを持つ設定を書く。無ければ `.gitleaks.toml` をそのまま使い、`LEAK_CHECK_REQUIRE_PATTERN` が `1` で同じリポジトリの枝からの実行（参照の検査と同じ式。fork の Pull Request は秘密を受けないので必須にしない）なら手順を失敗にする
-4. 今の木を 2 回探す: `gitleaks dir . --redact=100 --no-banner --exit-code 1`（既定の規則）と、同じ引数に `--config <設定>`（nd-factory の規則）。依存を入れる前なので、追跡していないファイルは木に無い
-5. Pull Request では、分岐点（`git merge-base <base.sha> <head.sha>`）から head までのコミットを、同じ 2 つで `gitleaks git . --log-opts="<分岐点>..<head.sha>"` で探す
+4. 今の木を 2 回探す: `tools/checks/leak-scan.sh dir tools/checks/gitleaks-default.toml`（既定の規則）と `tools/checks/leak-scan.sh dir <設定>`（nd-factory の規則）。依存を入れる前なので、追跡していないファイルは木に無い
+5. Pull Request では、分岐点（`git merge-base <base.sha> <head.sha>`）から head までのコミット（マージのコミットの差分を含む）を、同じ 2 つの設定で `tools/checks/leak-scan.sh git <設定> --range "<分岐点>..<head.sha>"` で探す
 6. 一時の設定のファイルを消す。`LEAK_CHECK_PATTERN` は手順の環境変数でだけ渡し、ほかの手順に渡さない
 
-- 当たりは gitleaks の出力のまま（規則・ファイル・行・伏せた秘密）。正当な当たりは gitleaks の標準の除外（値の行の `gitleaks:allow` か `.gitleaksignore`）に、注か理由を添えて置く。今の木は既定の規則で当たり 0 件（設計文書の LIB1）
+`tools/checks/leak-scan.sh`（`<dir|git> <設定> [--range <範囲>]`）は、gitleaks の除外を効かなくして 1 回探す。gitleaks のすべての実行はこのスクリプトを通す（ジョブの手順に `gitleaks` を直に書かない）。設定は必ず渡し、無ければ探さずに失敗する（省くと gitleaks が探す木の根の `.gitleaks.toml` を読み、既定の規則で探したつもりで nd-factory の規則だけになるため）。
+
+| 除外 | 効かなくする方法 |
+| --- | --- |
+| 値の行の `gitleaks:allow` | 引数 `--ignore-gitleaks-allow` |
+| `--gitleaks-ignore-path`（既定は `.`）の `.gitleaksignore` | 引数 `--gitleaks-ignore-path <空の一時のディレクトリ>` |
+| 探す木の根の `.gitleaksignore` | gitleaks は引数によらず、探す木の根の `.gitleaksignore` を読む（v8.30.1 の `cmd/root.go`）。スクリプトは探す前に `git ls-files --error-unmatch .gitleaksignore` と `test -e .gitleaksignore` を照らし、どちらかで在れば、名前を示して探さずに失敗する |
+| 前の報告（`--baseline-path`） | 渡さない |
+
+打つ引数は `gitleaks <dir . | git . --log-opts="-m <範囲>"> --redact=100 --no-banner --exit-code 1 --ignore-gitleaks-allow --gitleaks-ignore-path <空> --config <設定>` で、空の一時のディレクトリは終わりに消す。`-m` は、gitleaks が範囲を `git log -p -U0 <範囲>` に渡すだけで、そのままではマージのコミットの差分を出さないため（v8.30.1 の `sources/git.go`）に付ける。付けないと、競合の解消で入れて後のコミットで消した値が、今の木にも履歴の探しにも現れない。`-m` はマージのコミットを親ごとの差分で出す。
+
+- 当たりは gitleaks の出力のまま（規則・ファイル・行・伏せた秘密）。正当な当たりは、当てた規則の `[[rules.allowlists]]` に、理由と課題の番号の注を添えて足す（設定の変更なのでレビューで見える）。`nd-*` の規則の当たりは `.gitleaks.toml` の規則の中に、既定の規則の当たりは `tools/checks/gitleaks-default.toml` にその規則の id の `[[rules]]` を置いて、その中に足す。最上位の `[[allowlists]]` の `targetRules` は重ねた設定で効かないので使わない。値の行の注と除外のファイルでは外せない。今の木は既定の規則で当たり 0 件（設計文書の LIB1）
 
 ## knip の設定
 
@@ -155,20 +177,26 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | --- | --- | --- | --- | --- |
 | `loadWorkflows` | `tools/test/ci-definition.test.ts` | 新設 | `(root: string) => { path: string; text: string; doc: Workflow }[]` | `.github/workflows/` の `*.yml`・`*.yaml` を読み、解いた値と元の文字列を返す。解けなければ失敗 |
 | `jobNames` | 同上 | 変更 | `(doc: Workflow) => string[]` | `jobs` の鍵の名前を返す（今は文字列を行で読む） |
+| `checkNames` | 同上 | 新設 | `(doc: Workflow) => string[]` | ジョブが GitHub へ報告するチェックの名前を返す（`name` があればその値、無ければ `jobs` の鍵。行列のジョブは行列の値が足されるため宣言と合わない名前） |
 | `triggersPullRequest` | 同上 | 新設 | `(doc: Workflow) => boolean` | `on` が `pull_request` を持つか（文字列・配列・鍵の 3 つの書き方） |
 | `permissionBlocks` | 同上 | 新設 | `(doc: Workflow) => { scope: string; value: unknown }[]` | 最上位と各ジョブの `permissions` を、場所と値の組で返す |
 | `credentialWords` | 同上 | 変えない | `(yaml: string) => string[]` | 元の文字列で AWS の資格情報の語を探す |
 
-テストが照らすこと: Pull Request で起動するワークフローのジョブの名前の和集合が必須のチェックの宣言と等しい・ジョブの名前がワークフローの間で重ならない・どのワークフローにも AWS の資格情報の語が無い・最上位の `permissions` が `{ contents: read }` だけで、ジョブの `permissions` は持たないか同じ。参照の検査（`tools/ref-check`）は追跡しているファイルをすべて読むので変えず、ワークフローの文字列に NDF の版を読む式と比べを同じ行に置くと当たるテストを `tools/test/ref-check.test.ts` に足す。
+テストが照らすこと: Pull Request で起動するワークフローのジョブが報告するチェックの名前（`checkNames`。ブランチの保護が待つ名前）の和集合が必須のチェックの宣言と等しい・ジョブの名前がワークフローの間で重ならない・どのワークフローにも AWS の資格情報の語が無い・最上位の `permissions` が `{ contents: read }` だけで、ジョブの `permissions` は持たないか同じ。参照の検査（`tools/ref-check`）は追跡しているファイルをすべて読むので変えず、ワークフローの文字列に NDF の版を読む式と比べを同じ行に置くと当たるテストを `tools/test/ref-check.test.ts` に足す。
 
 ### 単体テストの観点
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `loadWorkflows`・`triggersPullRequest`・`jobNames` | 2 つのワークフローを読み、Pull Request で起動するものを選ぶ | `on: pull_request`・`on: [pull_request]`・`on:` の下の鍵の 3 つの書き方 | 解けない YAML で失敗する。片方のワークフローにだけ資格情報の語・`id-token: write` を足すと当たる |
+| `loadWorkflows`・`triggersPullRequest`・`jobNames`・`checkNames` | 2 つのワークフローを読み、Pull Request で起動するものを選ぶ | `on: pull_request`・`on: [pull_request]`・`on:` の下の鍵の 3 つの書き方。鍵と同じ `name` | 解けない YAML で失敗する。鍵が宣言と同じでも `name` を上書きしたジョブ・行列のジョブは宣言と合わない。片方のワークフローにだけ資格情報の語・`id-token: write` を足すと当たる |
 | `permissionBlocks` | 今のワークフローで違反 0 件 | ジョブの `permissions: { contents: read }` は通る | ジョブに `pull-requests: write`・`write-all` を足すと場所つきで当たる |
-| `leak-scan.integration.test.ts`（gitleaks を起こす。`leak-check` のジョブで打つ） | 作り物の値だけの一時の木で当たり 0 件 | 作り物の UUID・置き場所の記号・13 桁の数で当たらない。`package-lock.json` の名前のファイルに置いた作り物でない 12 桁も当たる（既定の全体の許可が効かない） | 実行の時に組み立てた作り物でない 12 桁・ARN・S3 の ARN・端点・token と、重ねた規則の語を `docs/` の下に置くと当たり、報告に値が現れない。途中のコミットで足して消した値が `git` の探しで当たる |
+| `leak-scan.integration.test.ts` の nd-factory の規則（`tools/checks/leak-scan.sh` を子のプロセスで打ち、gitleaks を起こす。`leak-check` のジョブで打つ） | 作り物の値だけの一時の木で、`.gitleaks.toml` と重ねた設定（`[extend] path` で `.gitleaks.toml` を読み `nd-real-value` を足したもの）の両方で当たり 0 件 | 作り物の UUID・置き場所の記号・13 桁の数・`123456789012`・`EXAMPLE` の印の値が、`.gitleaks.toml` と重ねた設定の両方で当たらない（規則の中の許可が重ねても効く）。`package-lock.json` の名前のファイルに置いた許可の値に合わない 12 桁も当たる（既定の全体の許可が効かない） | 実行の時に生成した架空の値（許可の値に合わず検出の規則に合う 12 桁・ARN・S3 の ARN・端点）を `docs/` の下に置くと `.gitleaks.toml` と重ねた設定の両方で当たり、重ねた規則の語は重ねた設定で当たる。報告と標準出力に値が現れない。途中のコミットで足して消した値が `git` の探しで当たる |
+| `leak-scan.integration.test.ts` の既定の規則 | — | 根に nd-factory の規則だけの `.gitleaks.toml` を置いた木でも、`tools/checks/gitleaks-default.toml` を渡すと、`dir` と `git` の両方で架空の token（形だけ合わせたもの）が既定の規則で当たる | 設定を渡さずにスクリプトを打つと、探さずに失敗する |
+| `leak-scan.integration.test.ts` のマージのコミット | — | — | 2 つの枝で同じファイルを変えて競合させ、マージのコミットの競合の解消でだけ架空の値を足し、後のコミットで消した木で、分岐点からの `git` の探しがその値をマージのコミットの当たりとして報告する（`-m` を外すと落ちる） |
+| `leak-scan.integration.test.ts` の除外の拒み（`dir` と `git` のそれぞれで、次の 2 つを別のケースにする） | — | 値の行に `gitleaks:allow` を付け、`.gitleaksignore` を置かない木で、その値が対象の規則の当たりとして報告される（終了コードだけでなく、報告の規則の id とファイルを照らす。`--ignore-gitleaks-allow` を外すと落ちる） | 当たりの指紋を書いた `.gitleaksignore` を根に置いた木（`dir` は追跡していないファイル、`git` は追跡しているファイル）で、スクリプトが `.gitleaksignore` の名前を示して失敗し、gitleaks を起こさない（報告のファイルが無い。根の照らしを外すと落ちる） |
 | `workflow-audit.integration.test.ts`（zizmor を起こす。`workflow-audit` のジョブで打つ） | 今のワークフローを写した木で当たり 0 件 | — | 書き込みの権限・`persist-credentials` を外した取得・枝の名前で参照した動作で当たる |
+
+`leak-scan.integration.test.ts` が当てる値は、すべて実行の時に生成した架空の値にする（乱数の 12 桁・架空の ARN と端点・形だけ合わせた token・重ねた規則の語）。生成した値が許可の値（`123456789012` など）に合わず、検出の規則に合うことをテストの中で確かめてから木に置く。実在のアカウント・資源・端点の値と有効な token は使わず、値をリポジトリにも置かない（ソースには組み立ての手順だけを書く）。
 
 ## 形の正本の往復のテスト
 
@@ -192,12 +220,34 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | 5 | 利用者向けの操作の要求と応答の形が配列（I12） |
 | 6 | 名前が `_at` で終わる項目が UTC の日時の形、`amount_minor` を持つ要素が `currency` を必須にする（I15） |
 | 7 | HTTP の経路の登録の経路の集まりが、操作の表の経路の集まりと等しい |
+| 8 | 合成したテンプレートの `AWS::ApiGatewayV2::Route` の経路（方法と経路）から除外の旧経路を引いた集まりが、経路の登録（`generated/routes.json`）から除外の受け口の経路を引いた集まり（反映済みの経路）と等しい。除外が要らなくなった行があれば落ちる。経路の登録が無い間は比べを「相手が無い」で飛ばし、テンプレートから経路を 1 本以上取り出せることだけを確かめる（設計 PR #49 の承認で足した） |
+
+照らすこと 8 の除外の表（`ROUTE_EXCLUSIONS`。テストの中の定数）は、行ごとに外すものと、外すのを終える課題の番号を持つ。
+
+| 外すもの | 終える課題 | 理由 | 要らなくなったと見る条件（テストが落ちる） |
+| --- | --- | --- | --- |
+| 旧経路 `PUT /v1/users` | #4 | 骨組みの経路で、操作の表に無い（#2 の設計の「骨組みの経路」の行） | 合成の経路に無い |
+| 受け口 `user`・`runner`・`machine`（受け口ごとに 1 行） | #4 | #2 は `api-fn` と `ApiRoutes` をスタックへ入れず、登録の経路が合成に無い（#2 の決定 11） | その受け口の経路が合成に 1 本でもある、または登録にその受け口の経路が無い |
+| 受け口 `db_prep`（`/v1/db_prep/exchanges/create`・`/v1/db_prep/completions/create` の 2 本） | #13 | #2 の登録に 2 本あるが、合成に無い。#13 が DB の用意を Lambda へ移し、この 2 本を全体の設計と操作の表から無くす（#13 の本文の 2026-11-21 の変更） | その受け口の経路が合成に 1 本でもある、または登録にその受け口の経路が無い |
+
+全経路の完全一致へは、除外の表が空になったときに切り替わる（表が空なら、照らすこと 8 は合成の経路の集まりと登録の経路の集まりの完全一致）。#4 が `api-fn` を反映して `PUT /v1/users` を消す Pull Request で、要らなくなった行が落ちるので、その行を消す。受け口を一部だけ反映したときは、その受け口の行だけを消す。#13 が `db_prep` の 2 本を操作の表から消す Pull Request で、`db_prep` の行が「登録にその受け口の経路が無い」で落ちるので、その行を消す。除外の表は、#2 の登録にある受け口（`user`・`runner`・`machine`・`db_prep`）をすべて持つ。表に無い受け口の経路が登録にあれば、照らすこと 8 は「登録にだけある経路」で落ちる。
+
+合成の打ち方: `infra/bin/app.ts` を子のプロセスで `node` で打ち、環境変数で次を渡す。クリーンなチェックアウトの `check` のジョブは画面をビルドしないため、既定の `apps/web/dist` に頼らない。
+
+| 環境変数 | 値 |
+| --- | --- |
+| `ND_WEB_DIST` | テストが作る一時のディレクトリ（`index.html` を 1 つだけ置く。`infra/test/support.ts` の `tempWebDist` と同じ形） |
+| `ND_SETTINGS` | `infra/test/fixtures/settings.json`（`npm run synth` と同じ作り物の設定） |
+| `CDK_DEFAULT_ACCOUNT`・`CDK_DEFAULT_REGION` | 作り物の `123456789012`・`us-west-2` |
+| `CDK_OUTDIR` | テストが作る一時のディレクトリ。テンプレートはここの `*.template.json` をファイルとして読む（`tools` は `infra` を import しない） |
+| `CDK_CONTEXT_JSON` | `{"aws:cdk:bundling-stacks": []}`（Lambda の束ねを飛ばす。経路の比べに束ねは要らない） |
 
 ### 単体テストの観点
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | 照らすこと 1〜7（作り物の操作の表をテストの中で組む） | 揃った表で 0 件 | 人だけの操作は 3 つの形で比べる。空の配列の見本 | 照らすことごとに、1 か所を壊した表（JSON Schema だけ必須の項目を外す・道具を 1 つ消す・人だけの操作の読み出しを消す・機能を消す・配列でない要求・時刻帯の無い日時・通貨の無い金額・表に無い経路）で 1 件 |
+| 照らすこと 8（作り物のテンプレートと登録をテストの中で組む。合成を打つテストは 1 本） | 除外を引いて揃った組で 0 件。除外の表が空で完全に揃った組で 0 件。クリーンなチェックアウトで画面をビルドせずに合成でき、経路を 1 本以上取り出す | 登録が無いと比べを飛ばす | 登録にだけある反映済みの経路・合成にだけある除外に無い経路で 1 件。旧経路が合成に無い・除外の受け口の経路が合成にある・除外の受け口が登録に無い、のそれぞれで除外の行が要らないと 1 件 |
 
 ## NDF の契約の照合
 

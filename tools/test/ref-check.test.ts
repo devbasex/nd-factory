@@ -170,6 +170,29 @@ describe("findVersionCompare", () => {
     expect(await findVersionCompare(root)).toEqual([{ kind: "version-compare", file: "src/a.ts", line: 2 }]);
   });
 
+  it("ワークフローで版を読む式と大小の比べを同じ行に置くと 1 件", async () => {
+    const root = makeRepo({
+      ".github/workflows/ci.yml": [
+        "on: pull_request",
+        "jobs:",
+        "  check:",
+        `    if: \${{ env.${READ_WORD} >= '11.0.0' }}`,
+        "    runs-on: ubuntu-24.04",
+        "",
+      ].join("\n"),
+    });
+    expect(await findVersionCompare(root)).toEqual([
+      { kind: "version-compare", file: ".github/workflows/ci.yml", line: 4 },
+    ]);
+  });
+
+  it("ワークフローで版を読む式だけの行は空", async () => {
+    const root = makeRepo({
+      ".github/workflows/ci.yml": `on: pull_request\njobs:\n  check:\n    steps:\n      - run: echo "\${{ env.${READ_WORD} }}"\n`,
+    });
+    expect(await findVersionCompare(root)).toEqual([]);
+  });
+
   it("版の比べの関数も 1 件", async () => {
     const root = makeRepo({ "src/b.ts": `semver.gte(pin.${PIN_KEY}, "11.0.0");\n` });
     expect(await findVersionCompare(root)).toHaveLength(1);
