@@ -43,7 +43,7 @@ package-lock.json
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `packages/contracts/src/settings.ts` | 変更 | 設定のファイルの形に 5 つのキーを足し、既定を解く | zod | モジュール | `settingsSchema`（変更）・`infraValues`（新設） |
-| `packages/contracts/src/db-prep.ts` | 新設 | DB の用意の関数の呼び出しの値と終わりの結果の形 | zod | モジュール | `dbPrepInvocation`・`dbPrepOutcome`・`PROGRESS_DB_IDENT_SHAPE`・`DB_PREP_FAILURE_REASONS` |
+| `packages/contracts/src/db-prep.ts` | 新設 | DB の用意の関数の呼び出しの値と終わりの結果の形 | zod | モジュール | `dbPrepInvocation`・`dbPrepOutcome`・`PROGRESS_DB_IDENT_SHAPE`・`DB_PREP_FAILURE_REASONS`・`DB_PREP_TIMING` |
 | `infra/lib/naming.ts` | 変更 | 足す資源の名前（DB の用意の関数 `<prefix>-<environment>-db-prep` を含む） | — | モジュール | `appResourceNames`（変更） |
 | `infra/lib/network.ts` | 新設 | VPC・サブネット・エンドポイント・SG | aws-cdk-lib | `Network` | `constructor`・`subnetMask` |
 | `infra/lib/progress-db.ts` | 新設 | Aurora のクラスタ（Data API を有効）と管理の役割の秘密の器 | aws-cdk-lib・`Network` | `ProgressDb` | `constructor` |
@@ -93,6 +93,7 @@ package-lock.json
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `INFRA_DEFAULTS` | 定数 | `packages/contracts/src/settings.ts` | 上の 5 つの既定 |
+| `DB_PREP_TIMING` | 定数 | `packages/contracts/src/db-prep.ts` | `{ maxEventAgeSeconds: 60, functionTimeoutSeconds: 300, dataApiCallSeconds: 45, dataApiTxIdleSeconds: 180, prepDeadlineSeconds: 900 }`。`DbPrepFunction` が最初の 2 つを、#6 の見回りと API が `prepDeadlineSeconds` を読む。後の 2 つは Data API が決める値（全体の設計の LIB90）で、関数は変えない |
 | `DB_PREP_FAILURE_REASONS` | 定数 | `packages/contracts/src/db-prep.ts` | `data_api_unavailable`・`guard_conflict`・`connections_remain`・`sql_failed` |
 
 ### 単体テストの観点
@@ -102,6 +103,7 @@ package-lock.json
 | `settingsSchema` | 5 つのキーを持つ・持たない設定のファイル | CIDR の接頭辞 16 と 20 は通り 15 と 21 は落ちる。ACU の 1・16 は通り 0.5・16.5・1.25 は落ちる。予算の 1 は通り 0 は落ちる。範囲は `tags`・`account` が通り `tag` は落ちる | 未知のキー・メールでない宛先 |
 | `infraValues` | キーの無い設定で既定 | — | — |
 | `dbPrepInvocation` | `create` と `rotate` | — | `create` で `rotation_seq` がある・`rotate` で無い・ほかの項目（`password` など）を持つ |
+| `DB_PREP_TIMING` | `maxEventAgeSeconds + functionTimeoutSeconds + max(dataApiCallSeconds, dataApiTxIdleSeconds) < prepDeadlineSeconds`（540 < 900） | `maxEventAgeSeconds` が 60（`MaximumEventAgeInSeconds` の最小）。和と期限の差が見回りの間隔 300 秒以上 | 期限を 540 以下に、または関数の時間切れを 541 秒以上に変えると落ちる |
 | `dbPrepOutcome` | 3 つの `result` | — | `rotation_superseded` で `recorded_seq` が無い・`failed` で `reason` が無い・一覧に無い理由 |
 
 ## ネットワーク
@@ -220,7 +222,7 @@ package-lock.json
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `DbPrepFunction` の `constructor` | `infra/lib/db-prep-function.ts` | 新設 | `(scope, id, props: { db: ProgressDb; names: AppResourceNames; secretPrefix: string })` | `NodejsFunction`（起点 `DB_PREP_ENTRY`・名前 `<prefix>-<environment>-db-prep`・Node 24・ARM64・VPC の外・時間切れ 5 分・非同期の呼び出しの `retryAttempts: 0` と `maxEventAge` 60 秒・ログの群）。役割は、クラスタへの `rds-data:ExecuteStatement`・`BeginTransaction`・`CommitTransaction`・`RollbackTransaction` と、管理の役割の秘密の器と `<prefix>/<environment>/progress-db/*` への `secretsmanager:GetSecretValue`、`<prefix>/<environment>/progress-db/*` への `secretsmanager:DescribeSecret`・`secretsmanager:UpdateSecretVersionStage`（[データの文書のパスワードの版](../docs/design/data.md#パスワードの版) の 4）だけ。クラスタと管理の秘密の器の ARN と秘密の器の頭は環境変数で渡す（合成の出力では参照） |
+| `DbPrepFunction` の `constructor` | `infra/lib/db-prep-function.ts` | 新設 | `(scope, id, props: { db: ProgressDb; names: AppResourceNames; secretPrefix: string })` | `NodejsFunction`（起点 `DB_PREP_ENTRY`・名前 `<prefix>-<environment>-db-prep`・Node 24・ARM64・VPC の外・時間切れ `DB_PREP_TIMING.functionTimeoutSeconds`・非同期の呼び出しの `retryAttempts: 0` と `maxEventAge` `DB_PREP_TIMING.maxEventAgeSeconds`・ログの群）。役割は、クラスタへの `rds-data:ExecuteStatement`・`BeginTransaction`・`CommitTransaction`・`RollbackTransaction` と、管理の役割の秘密の器と `<prefix>/<environment>/progress-db/*` への `secretsmanager:GetSecretValue`、`<prefix>/<environment>/progress-db/*` への `secretsmanager:DescribeSecret`・`secretsmanager:UpdateSecretVersionStage`（[データの文書のパスワードの版](../docs/design/data.md#パスワードの版) の 4）だけ。クラスタと管理の秘密の器の ARN と秘密の器の頭は環境変数で渡す（合成の出力では参照） |
 | `DB_PREP_ENTRY` | 同上 | 新設 | 定数（`apps/api/src/entries/db-prep.ts` のパス） | 起点のパス。コードは import しない |
 | `DbPrepFunction` の公開の値 | 同上 | 新設 | `fn` | #6 が API の関数と見回りの関数に呼ぶ権限（`lambda:InvokeFunction`）を許す |
 | `DbPrepFunction.grantCompletionAccess` | 同上 | 新設 | `(tables: { projects: dynamodb.ITableV2; audit: dynamodb.ITableV2 }) => void` | 終わりの記録の口（`PrepCompletionPort`。同じ Lambda の中で動く）が要る DynamoDB の権限だけを関数の役割へ足す。プロジェクトの表（`db-projects`）の表の ARN だけへ `dynamodb:GetItem`（`isCurrent`・`readTarget` の強い整合の読み）・`dynamodb:UpdateItem`・`dynamodb:ConditionCheckItem`（`record` の条件つきの書き込み。`TransactWriteItems` は項目ごとにこの 2 つで照らされる）、操作の記録の表（`db-audit`）の表の ARN だけへ `dynamodb:PutItem`（3 つの処理の記録の行。[API の文書の DB の用意の関数の処理](../docs/design/api.md#ランナー手元のマシンの-http-の経路)）。索引の ARN・`Query`・`Scan`・`DeleteItem`・ほかの表は許さない |
@@ -232,7 +234,7 @@ package-lock.json
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `DbPrepFunction` | 合成の出力の関数が `VpcConfig` を持たず、`Timeout` 300・`Architectures` が `arm64`。`AWS::Lambda::EventInvokeConfig` の `MaximumRetryAttempts` 0・`MaximumEventAgeInSeconds` 60。役割の文が上の操作と資源だけで、DynamoDB の文を持たない | テスト用の 2 つの表で `grantCompletionAccess` を呼んだ合成の出力で、DynamoDB の文が上の 4 つの操作と 2 つの表の ARN だけ（#6 は同じテストの期待を `AppStack` の合成の出力へ移す） | 再試行を 1 以上にする・最大の年齢を外す・`rds-data:*` か `secretsmanager:*` か `dynamodb:*` にする・資源を `*` か索引の ARN に広げる・`Query` か `Scan` を足すと落ちる |
+| `DbPrepFunction` | 合成の出力の関数が `VpcConfig` を持たず、`Timeout` が `DB_PREP_TIMING.functionTimeoutSeconds`（300）・`Architectures` が `arm64`。`AWS::Lambda::EventInvokeConfig` の `MaximumRetryAttempts` 0・`MaximumEventAgeInSeconds` が `DB_PREP_TIMING.maxEventAgeSeconds`（60）。役割の文が上の操作と資源だけで、DynamoDB の文を持たない | テスト用の 2 つの表で `grantCompletionAccess` を呼んだ合成の出力で、DynamoDB の文が上の 4 つの操作と 2 つの表の ARN だけ（#6 は同じテストの期待を `AppStack` の合成の出力へ移す） | 再試行を 1 以上にする・最大の年齢を外す・`rds-data:*` か `secretsmanager:*` か `dynamodb:*` にする・資源を `*` か索引の ARN に広げる・`Query` か `Scan` を足すと落ちる |
 
 ## 設置のコマンド
 
@@ -281,7 +283,7 @@ package-lock.json
 | `createDbPrepHandler` | `apps/api/src/db-prep/handler.ts` | 新設 | `(deps: PrepDeps) => (event: unknown) => Promise<void>` | 呼び出しを `dbPrepInvocation` で照らす → 口の `isCurrent(prep_id)` で用意の ID を読み直し、違えば何もせずに終える → `claimPrepRun(prep_id)` が `duplicate` なら何もせずに終える → 口の `readTarget(project_id)` でデータベースと役割と秘密の器の名前と版の ID を読み、`readPassword` でその版のパスワードを読む → `kind` で用意か差し替え → 結果が `applied` か記した番号 = n の `rotation_superseded` なら `promote` でその版へ `AWSCURRENT` を移して確かめる → 結果を口の `record` へ渡す。`PrepDeps` は `{ sql: SqlExecutor; completion: PrepCompletionPort; readPassword: (secret: string, versionId: string) => Promise<string>; promote: (secret: string, versionId: string) => Promise<void>; logger; now: () => number }` |
 | `PrepCompletionPort` | 同上 | 新設（型） | `{ isCurrent(prepId: string): Promise<boolean>; readTarget(projectId: string): Promise<{ database: string; role: string; secret: string; secretVersion: string }>; record(inv: DbPrepInvocation, outcome: DbPrepOutcome, secretVersion: string): Promise<"recorded" \| "mismatch"> }` | 終わりの記録の口。実装は #6（プロジェクトのモジュールの操作。`record` は用意の ID・差し替えの番号・版の ID が今の値と合うときだけ書く条件つきの書き込み） |
 | `SqlExecutor` | `apps/api/src/db-prep/sql-executor.ts` | 新設（型） | `{ execute(sql: string, params: SqlParam[] \| undefined, opts: { database: string; transactionId?: string }): Promise<Row[]>; begin(opts: { database: string }): Promise<string>; commit(transactionId: string): Promise<void>; rollback(transactionId: string): Promise<void> }` | 用意と差し替えの SQL を打つ口。`transactionId` の無い `execute` は自動の確定で打つ（`CREATE DATABASE` はこれで打つ）。`database` で `postgres` かプロジェクトのデータベースを選ぶ |
-| `createDataApiExecutor` | 同上 | 新設 | `(opts: { client: RDSDataClient; resourceArn: string; secretArn: string; retry: { attempts: number; delayMs: number; deadlineMs: number; now: () => number } }) => SqlExecutor` | `ExecuteStatement`（`database`・`transactionId`・`formatRecordsAs: "JSON"`）・`BeginTransaction`・`CommitTransaction`・`RollbackTransaction` を打つ。`transactionId` の無い `execute` と `begin` だけ、`RESUME_WAIT_ERRORS`（`DatabaseResumingException`）の例外を `p-retry` で繰り返す（下の箇条）。尽きたら `DataApiUnavailableError` を投げる |
+| `createDataApiExecutor` | 同上 | 新設 | `(opts: { client: RDSDataClient; resourceArn: string; secretArn: string; retry: { attempts: number; delayMs: number; deadlineMs: number; now: () => number } }) => SqlExecutor` | `ExecuteStatement`（`database`・`transactionId`・`formatRecordsAs: "JSON"`・`continueAfterTimeout: false`。偽を明示し、45 秒で終わらない文は Data API が取り消す。PostgreSQL の DDL は取り消すと巻き戻る）・`BeginTransaction`・`CommitTransaction`・`RollbackTransaction` を打つ。`transactionId` の無い `execute` と `begin` だけ、`RESUME_WAIT_ERRORS`（`DatabaseResumingException`）の例外を `p-retry` で繰り返す（下の箇条）。尽きたら `DataApiUnavailableError` を投げる |
 | `readVersionPassword` | `apps/api/src/db-prep/secret-version.ts` | 新設 | `(client: SecretsManagerClient, secret: string, versionId: string) => Promise<string>` | `GetSecretValue` に `VersionId` を渡してその版の URL を読み、パスワードを返す。ラベル（`AWSPENDING`・`AWSCURRENT`）では読まない |
 | `promoteVersion` | 同上 | 新設 | `(client: SecretsManagerClient, secret: string, versionId: string) => Promise<void>` | `DescribeSecret` の `VersionIdsToStages` で、版に `AWSCURRENT` が付いていれば何もしない。付いていなければ `UpdateSecretVersionStage`（`VersionStage: AWSCURRENT`・`MoveToVersionId`・今 `AWSCURRENT` の付く版の `RemoveFromVersionId`）を打ち、`DescribeSecret` を読み直して付いていなければ投げる |
 | `createPgExecutor` | `apps/api/test/db-prep/pg-executor.ts` | 新設 | `(connect: (database: string) => Promise<pg.Client>) => SqlExecutor` | テスト用。データベースごとに接続を開き、`begin` は専用の接続に `BEGIN` を打ってその接続を `transactionId` に結ぶ |
@@ -296,6 +298,7 @@ package-lock.json
 - `createDbPrepHandler`
   - 事前条件: 環境変数でクラスタの ARN・管理の役割の秘密の器の ARN・秘密の器の頭が渡っている（`handler` が読む）
   - 副作用: Data API への SQL・秘密の器の結んだ版の読み取りと、その版への `AWSCURRENT` の移し・終わりの記録の口の呼び出し。ほかの AWS の API とファイルには触れない
+- `handler` は `RDSDataClient` を `requestHandler` の `requestTimeout` 60,000 ミリ秒で作る（Data API の 45 秒より長くし、SDK が先に時間切れを返して、Data API が終えた文を打ち直さないようにする。全体の設計の LIB90）
 - `createDataApiExecutor` の繰り返し
   - `p-retry` に `{ retries: attempts - 1, factor: 1, minTimeout: delayMs, maxTimeout: delayMs, randomize: false, maxRetryTime: deadlineMs }`（既定で `attempts` 12・`retries: 11`・`delayMs` 5,000・`deadlineMs` 60,000）を渡す。期限は呼び出しごとの最初の試行の開始から測り、`now`（既定 `performance.now`。`p-retry` が `maxRetryTime` を測るのと同じ時計）で測る
   - `p-retry` の `maxRetryTime` は待ちを残り時間に切り詰めるだけで、待った直後に期限を照らさずに次の試行を呼ぶ（設計文書の LIB8）。そのため、試行の関数の始めで期限を照らし、残りが 0 以下なら打たずに `AbortError` を投げる
