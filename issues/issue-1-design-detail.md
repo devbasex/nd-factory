@@ -9,12 +9,16 @@
 ```text
 nd-factory/
 ├── eslint.config.js                       規則の組を読み込む
-├── package.json                           スクリプト leak-check・ndf-contract
+├── package.json                           スクリプト leak-check・ndf-contract・route-check・test:integration
+├── vitest.config.ts                       tools の組から *.integration.test.ts を外す
+├── vitest.integration.config.ts         * 実物の gitleaks を起こす結合のテストだけを読む
 ├── .ndf/project.json                      必須のチェックに 2 つ足す
 ├── AGENTS.md                              LEAK_CHECK_TERMS の行
 ├── .github/workflows/
-│   ├── ci.yml                             ジョブ leak-check を足す
+│   ├── ci.yml                             ジョブ leak-check を足す。synth に経路の照らしを足す
 │   └── ndf-contract.yml                 * ジョブ ndf-contract
+├── apps/api/test/
+│   └── dispatch-routes.test.ts          * Lambda の振り分けの経路と操作の表の照らし
 ├── packages/contracts/
 │   ├── package.json                       書き出し ./secret-shapes
 │   ├── data/secret-shapes.json          * 秘密の形・インフラの値の形・作り物の値
@@ -31,10 +35,13 @@ nd-factory/
     │       ├── leak-check.ts            * 漏れの検査（CLI）
     │       ├── round-trip.ts            * 形の往復と I15・I12 の形
     │       ├── operation-coverage.ts    * I14 の対応
+    │       ├── deployed-routes.ts       * API Gateway の合成の結果の経路の照らし（CLI）
     │       └── ndf-contract-check.ts    * NDF の契約の照合（CLI）
     └── test/
         ├── lint-rules.test.ts           *
-        ├── leak-check.test.ts           *
+        ├── leak-check.test.ts           *   gitleaks を起こさない単体のテスト（check で走る）
+        ├── leak-check.integration.test.ts * 実物の gitleaks を起こす結合のテスト（leak-check で走る）
+        ├── deployed-routes.test.ts      *
         ├── round-trip.test.ts           *
         ├── operation-coverage.test.ts   *
         ├── ndf-contract-check.test.ts   *
@@ -50,6 +57,8 @@ nd-factory/
 | `tools/checks/src/leak-check.ts` | 新設 | gitleaks の設定を組んで起こし、報告を外しで絞って、値を出さずに当たりを出す | `@nd-factory/contracts/secret-shapes`・gitleaks の実行ファイル | `leak-check` | `loadLeakTerms`・`buildGitleaksConfig`・`snapshotTracked`・`runGitleaks`・`applyAllow`・`maskPath`・`mainLeakCheck`（新設） |
 | `tools/checks/src/round-trip.ts` | 新設 | 4 つの形の検証の結果を比べる | `@nd-factory/contracts`・ajv・ajv-formats | `round-trip` | `mutate`・`representationsOf`・`findRoundTripMismatches`・`findValueShapeFindings`（新設） |
 | `tools/checks/src/operation-coverage.ts` | 新設 | 操作の表と画面・MCP・HTTP の経路・機能を突き合わせる | `@nd-factory/contracts`・`typescript` | `operation-coverage` | `screenOperationNames`・`loadScreenPending`・`findCoverageFindings`（新設） |
+| `tools/checks/src/deployed-routes.ts` | 新設 | 合成した CloudFormation の雛形から API Gateway の経路を読み、操作の表と照らす | `@nd-factory/contracts` | `deployed-routes` | `readGatewayRoutes`・`findGatewayRouteFindings`・`mainRouteCheck`（新設） |
+| `apps/api/test/dispatch-routes.test.ts` | 新設 | Lambda の振り分けが実際に受ける経路を、操作の表の経路と照らす | `apps/api/src` の振り分け・`@nd-factory/contracts` | テスト | — |
 | `tools/checks/src/ndf-contract-check.ts` | 新設 | 固定の点と既定の枝の先端の契約を照らす | `@nd-factory/contracts`（NDF の契約の使い方） | `ndf-contract-check` | `pinChanged`・`fetchContract`・`compareContract`・`renderSummary`・`mainNdfContractCheck`（新設） |
 | `packages/contracts/src/secret-shapes.ts` | 新設 | 秘密の形のデータの形と読み手 | zod | `secret-shapes` | `secretShapesSchema`・`loadSecretShapes`（新設） |
 | `tools/test/ci-definition.test.ts` | 変更 | すべてのワークフローを YAML として読んで照らす | `yaml` | テスト | `loadWorkflows`・`triggersPullRequest`・`permissionBlocks`（新設）、`jobNames`（YAML の `jobs` の鍵から取るように変える）、`credentialWords`（変えない） |
@@ -107,7 +116,7 @@ nd-factory/
 | --- | --- | --- | --- |
 | `LintException` | 型 `{ file: string; group: string; issue: string; reason: string }` | `tools/checks/src/lint-rules.ts` | — |
 | `RuleGroup` | 型 `{ id: string; files: string[]; ignores: string[]; rules: Record<規則, 選び方[]> }` | 同上 | — |
-| 控え | データ | `tools/checks/data/lint-exceptions.json` | 下の 4 行 |
+| 控え | データ | `tools/checks/data/lint-exceptions.json` | 下の 5 行 |
 
 控えの最初の行（実装で ESLint を走らせ、当たる組だけを置く）:
 
@@ -117,6 +126,9 @@ nd-factory/
 | `apps/api/src/user-store.ts` | `boundary.outbound`・`boundary.conditional-write`・`boundary.retry`（当たれば） | #2 |
 | `apps/web/src/main.ts` | `boundary.outbound` | #2 |
 | `apps/web/src/users-client.ts` | `screen.route` | #4 |
+| `infra/lib/app-stack.ts` | `routes.generated`（`api.addRoutes` の `path: "/v1/users"`） | #2（API Gateway の経路を生成した登録から読むように変える。K2-3） |
+
+`infra/lib/app-stack.ts` の行が無いと、#1 の Pull Request の `check` が今の `/v1/users` の経路で落ちる。#2 が API Gateway の定義を生成した登録へ移した Pull Request でこの行を消し、残すと控えの照らしが落とす。
 
 ### 異常系の処理
 

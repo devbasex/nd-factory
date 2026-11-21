@@ -25,7 +25,7 @@ flowchart LR
 | 参照の検査（`tools/ref-check/src/ref-check.ts`） | `git grep` で追跡しているファイルをすべて読む。照合の語（作り直す前の旧いリポジトリの名前や組織の名前など、参照の検査が残っていないかを探す語）は CI の秘密 `REF_CHECK_TERMS` から受け、当たりは「種類・ファイル・行」だけを出し、語を出さない。語を必須にするのは変数で有効にした正本のリポジトリの中の実行だけ |
 | CI の定義のテスト（`tools/test/ci-definition.test.ts`） | `ci.yml` のジョブの名前の集合と `.ndf/project.json` の `ci.required_checks` を照らし、`ci.yml` の中の AWS の資格情報の語を落とす |
 | ESLint（`eslint.config.js`、`check` の中の `npm run lint`） | 推奨の規則と型の import の規則だけ。置き場ごとの規則は無い |
-| 骨組みのコード | `apps/api/src/users-handler.ts` が AWS SDK のクライアントを直に作り、引数なしの `new Date()` と `console.log` を使う。`apps/web/src/main.ts` が `window.fetch` を、`apps/web/src/users-client.ts` が `/v1/users` を直に書く。#2 が横断の部品へ移す（#2 の本文の「骨組みのコードから引き継ぐ形」）、#4 が `PUT /v1/users` を置き換える |
+| 骨組みのコード | `apps/api/src/users-handler.ts` が AWS SDK のクライアントを直に作り、引数なしの `new Date()` と `console.log` を使う。`apps/web/src/main.ts` が `window.fetch` を、`apps/web/src/users-client.ts` が `/v1/users` を直に書く。`infra/lib/app-stack.ts` が API Gateway の経路 `/v1/users` を `addRoutes` に手で書く。#2 が横断の部品と生成した経路の登録へ移す（#2 の本文の「骨組みのコードから引き継ぐ形」）、#4 が `PUT /v1/users` を置き換える |
 | 照らす相手 | 操作の表・生成した MCP の道具の一覧と HTTP の経路の登録・横断の部品（`packages/core`）・料金プランの値・受ける契約の組は、まだ無い（#2・#29）。形の正本は、型・JSON Schema・OpenAPI・MCP の道具の一覧などを生成する元になる zod の定義と操作の表を置く `packages/contracts` である。横断の部品は、時計・ID・ログと伏せ字・外部の呼び出し・再試行・認可の判定などを 1 か所にまとめ、`apps/` が直に使わずに通す `packages/core` の部品である |
 | NDF の契約 | #41 の設計（PR #42、承認待ち）で、固定の点は ndf v11.0.12、置き場は `plugins/ndf/contracts/`、受ける組（nd-factory が受け入れる契約の版と、その版の契約の中身の sha256 の対の集まり）は `{版 8, ed8b0365…}`、F23 が予告として読む先は ai-plugins の既定の枝の先端になる（#41 の決定 104・107・108） |
 
