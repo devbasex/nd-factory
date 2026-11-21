@@ -220,8 +220,8 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `main` | `infra/setup/images-cli.ts` | 新設 | `(argv: string[], deps: ImageDeps) => Promise<number>` | `push --settings <file> --out <dir>` を打つ。パイプラインの CodeBuild の資格情報（既定の解き方）で動く |
 | `synthesize` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 選んだスタックに `app` が含まれるときだけ、画面のビルドの後、合成の前に `buildAndPushImages` を打ち、一覧のファイルのパスを `cdk synth -c nd:images=<パス>` で合成へ渡す。一覧は合成の結果の置き場にあるため要約値に入る。`app` を含まない（`--stack pipeline` だけ）ときは push せず、一覧も書かない |
 
-- `SetupDeps` と `ImageDeps` に `docker: (args: string[]) => Promise<{ code: number; stdout: string }>` と `ecr`（`DescribeRepositories`・`GetAuthorizationToken`・`DescribeImages` の包み）を置く（テストは本物の Docker と AWS を呼ばない）
-- push の前の `docker login` は `GetAuthorizationToken` の値を標準入力で渡し、値をログ・出力に出さない
+- `SetupDeps` と `ImageDeps` に同じ型の `docker: (args: string[], opts?: { stdin?: string }) => Promise<{ code: number; stdout: string }>` と `ecr`（`DescribeRepositories`・`GetAuthorizationToken`・`DescribeImages` の包み）を置く（テストは本物の Docker と AWS を呼ばない）。`ImageDeps` は `SetupDeps` から `docker`・`ecr` を取り出した部分の型にし、2 つで形を分けない。本物の `docker` は `opts.stdin` があれば子のプロセスの標準入力へ書いて閉じ、無ければ標準入力を開かない。`opts.stdin` の値はログ・出力・例外の文に入れない（失敗の出力は `docker` の終了コードと標準エラーだけ）
+- push の前の `docker login` は `docker(["login", "--username", "AWS", "--password-stdin", <レジストリ>], { stdin: <トークンを復号したパスワード> })` で打ち、パスワードを `args` に入れない
 - `AppStack` の props に `images: ImageDigests` を足し、`bin/app.ts` が `readImageDigests(app)` で渡す。`AppStack` はキーごとにタスクの定義を作るかを決める（新しいリポジトリ（#6 の `runner`）を足す初回の反映でも、`db-prep` のタスクの定義は残る）。組の `repository` が `imageRepositoryName` の値と違えば合成を誤りにする。CI の合成は context `nd:images` を持たず、タスクの定義を作らない版になる。スタックのテストは作り物の組（`digest` は `sha256:` と 0 を 64 桁）を渡して、タスクの定義を持つ版を照らす
 - ビルドはビット単位で再現しない前提に置く（設計文書の決定 2）。中身を変えない `diff` や準備でも、毎回ダイジェストの違う版が push され、30 の数に入る
 - `deploy` と反映のアクションは、引くイメージの在りかを確かめない（設計文書の決定 2）
@@ -241,7 +241,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `ImageRepository` | 合成の出力のリポジトリの名前が `imageRepositoryName` の値で、タグ書き換え不可のリポジトリと、`imageCountMoreThan` が 30 の規則 1 つがある | — | 規則が日数になる・数が変わると落ちる |
 | `AppStack`（ダイジェストあり） | DB の用意のタスクの定義のイメージが `<リポジトリ>@sha256:…` | ダイジェストなしでタスクの定義を作らない。一覧が `db-prep` だけでも DB の用意のタスクの定義を作る | ダイジェストを変えると要約値が変わる（合成の結果の要約値の比べ）。組の `repository` が違うと合成が投げる |
 | `readImageDigests` | 一覧の組をキーごとに返す | context `nd:images` が無ければ空 | `digest` か `repository` の無い組・`sha256:` で始まらないダイジェストで投げる |
-| `buildAndPushImages` | リポジトリがあれば作って push し、一覧を書く | リポジトリが 1 つも無ければ何もしない。`db-prep` のリポジトリだけがあると `db-prep` だけを push し、`noRepository` が `runner` になる | Docker の失敗・push の失敗で投げ、一覧を書かない。login の値が出力に出ない |
+| `buildAndPushImages` | リポジトリがあれば作って push し、一覧を書く | リポジトリが 1 つも無ければ何もしない。`db-prep` のリポジトリだけがあると `db-prep` だけを push し、`noRepository` が `runner` になる | Docker の失敗・push の失敗で投げ、一覧を書かない。login の値が作り物の `docker` の `args` に無く `opts.stdin` にだけあり、login が失敗したときも出力と例外の文に出ない |
 | `synthesize` | `--stack app` と既定で `buildAndPushImages` を呼ぶ | `--stack pipeline` だけで呼ばず、置き場に一覧が無い | — |
 
 ## 設置のコマンド
