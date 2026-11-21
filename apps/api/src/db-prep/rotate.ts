@@ -246,7 +246,9 @@ export async function terminateRoleConnections(
       if (starting.length > 0 && startingLimit === undefined) {
         startingLimit = Math.min(start + (await authTimeoutMs(sql, opts)) + STARTING_GRACE_MS, hardLimit);
       }
-      const limit = Math.max(deadline, starting.length > 0 ? (startingLimit ?? deadline) : graceLimit);
+      // 追う対象が減った後の余裕は、追う対象が残る間も効かせる（認証の時間切れの近くで一部が古い接続として載ったとき、
+      // ほかがまだ起動の途中でも、載ったものを切って読み直してから決める）。どれも hardLimit で切り詰めてある
+      const limit = Math.max(deadline, starting.length > 0 ? (startingLimit ?? deadline) : -Infinity, graceLimit);
       const left = limit - now();
       if (left <= 0) return { kind: "done", remaining };
       await sleep(Math.min(pollMs, left));

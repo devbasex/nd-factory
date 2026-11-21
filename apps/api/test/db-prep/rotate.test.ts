@@ -428,6 +428,31 @@ describe("terminateRoleConnections（作り物の SqlExecutor）", () => {
     expect(clock.now()).toBe(16_500);
   });
 
+  it("延ばした所の近くで追う対象の一部が古い接続として載り、ほかが起動の途中で残っても、余裕の内で切って読み直す", async () => {
+    // 認証の時間切れ 30 秒で延ばす所は 32 秒。101 は 32 秒の読みで古い接続として載り、次の切りで終わる。
+    // 102 はほかのプロジェクトの認証の途中で、33 秒にサーバーに切られて鎖を放す
+    const clock = fakeClock();
+    let state: "starting" | "visible" | "gone" = "starting";
+    const fake = fakeDb({
+      recorded: current,
+      holders: ["101,102"],
+      authTimeoutS: 30,
+      stillStarting: (given) => given.filter((pid) => (pid === "101" ? state === "starting" : clock.now() < 33_000)),
+    });
+    const inner = fake.respond;
+    fake.respond = (sql, params) => {
+      if (sql.includes("AS signalled") && state === "visible") state = "gone";
+      if (sql.includes("AS remaining")) {
+        if (state === "starting" && clock.now() >= 32_000) state = "visible";
+        const [row] = inner(sql, params);
+        return [{ ...row, remaining: state === "visible" ? 1 : 0 }];
+      }
+      return inner(sql, params);
+    };
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options())).toEqual({ kind: "done", remaining: 0 });
+    expect(clock.now()).toBe(33_000);
+  });
+
   it("認証の時間切れが読めない形なら投げて巻き戻す", async () => {
     for (const authTimeoutS of [null, "60", 0, 1.5]) {
       const fake = fakeDb({ recorded: current, holders: ["101"], stillStarting: (given) => given, authTimeoutS });
