@@ -326,16 +326,21 @@ async function terminateSessions(
   const deadline = now() + deadlineMs;
   for (;;) {
     // 読み直しの間に載った接続にも送る（取り消しの後に照らす接続は、CONNECT を持つ役割だけが繋げる）
-    await sql.execute(stmts.signal, params.length > 0 ? params : undefined, ADMIN);
+    await sql.execute(stmts.signal, paramsOrUndefined(params), ADMIN);
     // 期限を過ぎていても、読み直しを 1 回打ってから決める
-    const [row] = await sql.execute(stmts.pending, pendingParams.length > 0 ? pendingParams : undefined, ADMIN);
+    const [row] = await sql.execute(stmts.pending, paramsOrUndefined(pendingParams), ADMIN);
     const pending = typeof row?.pending === "number" ? row.pending : Number.POSITIVE_INFINITY;
-    const { remaining } = await readCount(sql, stmts.remaining, params.length > 0 ? params : undefined, ADMIN);
+    const { remaining } = await readCount(sql, stmts.remaining, paramsOrUndefined(params), ADMIN);
     if (pending === 0 && remaining === 0) return;
     const left = deadline - now();
     if (left <= 0) throw new Error("ほかの接続が期限の内に終わらなかった");
     await sleep(Math.min(pollMs, left));
   }
+}
+
+// 空の引数は渡さない（undefined にする）
+function paramsOrUndefined(params: SqlParam[]): SqlParam[] | undefined {
+  return params.length > 0 ? params : undefined;
 }
 
 // 用意の手順の 4。渡したデータベースで、CATALOG_READS のうち版にあるものの読み取りを PUBLIC から外し、外れたことを読み直す。
