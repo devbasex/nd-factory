@@ -227,6 +227,31 @@ async function runRotate(
     : { outcome: { result: "rotation_superseded", recorded_seq: rotated.recorded } };
 }
 
+// 終わりを記した後のログ。記録が今の値と合わなければ warn、合って結果が failed なら error、ほかは info
+function logFinished(
+  logger: PrepLogger,
+  base: Pick<PrepLogFields, "prep_id" | "kind">,
+  ran: Ran,
+  recorded: "recorded" | "mismatch",
+  durationMs: number,
+): void {
+  const fields: PrepLogFields = {
+    ...base,
+    result: ran.outcome.result,
+    ...(ran.outcome.result === "failed" ? { reason: ran.outcome.reason } : {}),
+    ...(ran.error === undefined ? {} : errFields(ran.error)),
+    duration_ms: durationMs,
+    record_result: recorded,
+  };
+  if (recorded === "mismatch") {
+    logger.warn(fields, PREP_LOG_MESSAGES.mismatch);
+  } else if (ran.outcome.result === "failed") {
+    logger.error(fields, PREP_LOG_MESSAGES.finished);
+  } else {
+    logger.info(fields, PREP_LOG_MESSAGES.finished);
+  }
+}
+
 // 呼び出しを照らし、用意の ID を読み直し、重複の配信を除き、用意か差し替えを打って、結果を終わりの記録の口へ渡す
 export function createDbPrepHandler(deps: PrepDeps): (event: unknown) => Promise<void> {
   const { sql, completion, logger } = deps;
@@ -284,21 +309,7 @@ export function createDbPrepHandler(deps: PrepDeps): (event: unknown) => Promise
       stage = "record";
       const recorded = await completion.record(inv, ran.outcome, target.secretVersion);
 
-      const fields: PrepLogFields = {
-        ...base,
-        result: ran.outcome.result,
-        ...(ran.outcome.result === "failed" ? { reason: ran.outcome.reason } : {}),
-        ...(ran.error === undefined ? {} : errFields(ran.error)),
-        duration_ms: elapsed(),
-        record_result: recorded,
-      };
-      if (recorded === "mismatch") {
-        logger.warn(fields, PREP_LOG_MESSAGES.mismatch);
-      } else if (ran.outcome.result === "failed") {
-        logger.error(fields, PREP_LOG_MESSAGES.finished);
-      } else {
-        logger.info(fields, PREP_LOG_MESSAGES.finished);
-      }
+      logFinished(logger, base, ran, recorded, elapsed());
     } catch (caughtError) {
       // 自動の再試行は 0 回で、見回りが期限の後に扱う
       const failedStage = caughtError instanceof StageFailure ? caughtError.stage : stage;
