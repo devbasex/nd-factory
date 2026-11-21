@@ -57,6 +57,7 @@ flowchart TB
     end
     check --> lint["ESLint の置き場ごとの規則<br/>境界・依存の向き・I8・画面の HTTP の経路・React と TSX"]
     check --> unit["リポジトリを読む単体テスト<br/>形の往復・I14・CI の定義（すべてのワークフロー）"]
+    synth --> routes["合成の結果の API Gateway の経路と操作の表の照らし"]
     leak --> gl["gitleaks（既定の規則と、組んだ規則）"]
     gl --> shapes["packages/contracts/data/secret-shapes.json<br/>と CI の秘密 LEAK_CHECK_TERMS"]
     ndfc --> up["devbasex/ai-plugins の<br/>固定の点と既定の枝の先端の契約"]
@@ -66,7 +67,7 @@ flowchart TB
 ```
 
 - 構文で見つかる破れ（横断の部品の外での直の利用・依存の向きに反する import・料金プランの値の判定の外での import と名前の比べ・画面の HTTP の経路の直書き・API の振り分けと API Gateway の定義への HTTP の経路の手書き・画面の外での React の import と TSX のファイル）は、`eslint.config.js` が `tools/checks/` の規則の組を置き場ごとに読み込み、今の `check` が落とす
-- 形の往復と I14 の対応は、形の正本と生成物を読む単体テスト（`tools/test/`）が落とす。I15（日時は時刻帯つきの UTC で、金額は `amount_minor` と `currency` の組で受ける）と I12（利用者向けの操作の要求と応答は配列で、1 件も配列の 1 要素として扱う）の形もここで照らす（どちらも [API と MCP の文書](../docs/design/api.md) の不変条件）
+- 形の往復と I14 の対応は、形の正本と生成物を読む単体テスト（`tools/test/`）が落とす。実際に使う HTTP の経路は、`synth` が合成した API Gateway の経路と、`apps/api` の振り分けのテストで操作の表と照らす。I15（日時は時刻帯つきの UTC で、金額は `amount_minor` と `currency` の組で受ける）と I12（利用者向けの操作の要求と応答は配列で、1 件も配列の 1 要素として扱う）の形もここで照らす（どちらも [API と MCP の文書](../docs/design/api.md) の不変条件）
 - 漏れの検査は新しいジョブ `leak-check` が、gitleaks の既定の規則と、秘密の形のデータと CI の秘密の実際の値から組んだ規則で、`docs/` を含む追跡しているファイルと、Pull Request の途中のコミットを探す
 - NDF の契約の照合は新しいワークフローのジョブ `ndf-contract` が、固定の点を変えた Pull Request・main への push・毎日 1 回・手動で照らし、ほかの Pull Request では照らさずに通る
 - 必須のチェックは 6 つ（`check`・`synth`・`e2e`・`ref-check`・`leak-check`・`ndf-contract`）になり、CI の定義のテストがすべてのワークフローを読んで宣言との食い違いと資格情報の語を落とす
@@ -79,7 +80,8 @@ flowchart TB
 | 漏れの検査（`tools/checks/src/leak-check.ts`、新設） | gitleaks（LIB1）の設定を秘密の形のデータと CI の秘密から実行の時に組んで起こし、報告を外しで絞って、「規則・ファイル・行」だけを出す。探す処理そのものは gitleaks が持つ | `leak-check` |
 | 秘密の形のデータ（`packages/contracts/data/secret-shapes.json` と形 `packages/contracts/src/secret-shapes.ts`、新設） | 値の形（私有鍵の頭・token の頭）と、漏れの検査が使うインフラの値の形（アカウント ID・ARN・資源の ID・端点）と、作り物の値の一覧を持つ。#2 の伏せ字も同じファイルを読む | — |
 | 形の往復の検査（`tools/checks/src/round-trip.ts`、新設） | 操作ごとの見本とその変形を、zod の形・生成した JSON Schema・OpenAPI の要素の形・MCP の道具の入力の形の 4 つで検証し、結果が食い違う組を返す。I15 と I12 の形も照らす | `check`（単体テスト） |
-| I14 の対応の検査（`tools/checks/src/operation-coverage.ts`、新設） | 操作の表・MCP の道具の一覧・HTTP の経路の登録・画面が呼ぶ操作の名前・機能 F1〜F20 を突き合わせ、欠けと余りを返す | `check`（単体テスト） |
+| I14 の対応の検査（`tools/checks/src/operation-coverage.ts`、新設） | 操作の表・MCP の道具の一覧・HTTP の経路の登録・画面が実際に呼ぶ操作の名前・人だけの操作の対になる読み出し・機能 F1〜F20 を突き合わせ、欠けと余りを返す | `check`（単体テスト） |
+| 実際の経路の照らし（`tools/checks/src/deployed-routes.ts` と `apps/api/test/dispatch-routes.test.ts`、新設） | API Gateway の合成の結果（`cdk.out` の雛形）の経路と、Lambda の振り分けが受ける経路を、操作の表の経路と照らす。文字列の lint だけでは、CDK の別の登録の方法を生成した登録に限定できないため | `synth`（合成の照らし）・`check`（振り分けのテスト） |
 | NDF の契約の照合（`tools/checks/src/ndf-contract-check.ts`、新設） | 固定の点と既定の枝の先端の契約を取り、形の正本の NDF の契約の使い方（#2）と照らす。固定の点の食い違いで失敗し、先端だけの食い違いは要約に並べる | `ndf-contract` |
 | CI の定義のテスト（`tools/test/ci-definition.test.ts`、変更） | `.github/workflows/` のすべてのワークフローを `yaml`（LIB12）で解いて読み、Pull Request で走るジョブの集合と必須のチェックの宣言の一致・資格情報の語の無さ・足したジョブの権限を照らす | `check` |
 | 参照の検査（`tools/ref-check`、変えない） | 追跡しているファイルをすべて読むため、足すワークフローも今のまま対象に入る。テストだけを足す | `ref-check` |
@@ -122,7 +124,7 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 | --- | --- | --- |
 | 生成 | 型・JSON Schema・OpenAPI・MCP の道具の一覧・HTTP の経路の登録・ダミーデータの生成と、生成物が古いと `check` が落ちること | — |
 | 往復 | — | 生成物の間で検証の結果が同じであること（決定 8）。I15・I12 の形の照らし |
-| 操作の表の項目 | 項目の型と名前 | 読む項目（名前・エンティティ・読むか書くか・人だけか・HTTP の経路・機能・見本・要素と結果の形） |
+| 操作の表の項目 | 項目の型と名前 | 読む項目（名前・エンティティ・読むか書くか・人だけか・人だけの操作の対になる読み出しの名前・HTTP の経路・機能・見本・要素と結果の形） |
 | 画面の呼び出し | 生成した呼び出しの形 | 画面が呼ぶ操作の名前を静的に読み、表と照らす（I14） |
 | 秘密の形のデータ | 鍵の名前の形を足し、伏せ字が読む | ファイルと形を作り、値の形とインフラの値の形を埋める（決定 9） |
 | NDF の契約の使い方 | 受ける組・使う口・渡す環境変数・読むファイルと項目・区間の報告から読む項目のデータと、呼び出しの判定 | データと判定を契約と照らす（決定 7） |
@@ -132,11 +134,13 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 | # | 欠け | なぜ要るか |
 | --- | --- | --- |
 | K2-1 | 操作の定義に機能（F1〜F20 の配列）を持たせる。全体の設計の操作の一覧の「機能」の列にあたる | I14 の「機能の対応」を照らす |
-| K2-2 | 画面が操作を呼ぶ形は、静的に操作の名前を読める形にする（生成した関数の名前が操作の名前から決まるか、呼び出しの第 1 引数が操作の名前の文字列の定数） | I14 の「画面と操作の対応」を照らす |
-| K2-3 | 操作の表・生成した JSON Schema と OpenAPI・MCP の道具の一覧・HTTP の経路の登録を、`packages/contracts` の書き出し（export）から読めるようにし、利用者向けの操作と機械向けの経路（ランナー・手元のマシン・DB の用意のタスク）を分けて読めるようにする。`apps/api` の振り分けと `infra/` の API Gateway の定義は、HTTP の経路をこの登録の書き出しからだけ読む | 検査は `packages/contracts` だけを import する。I14 の画面と MCP の照らしは利用者向けの操作だけを数える。手書きの経路は規則の組 `routes.generated` が落とすので、生成した登録を照らせば両方の実際の登録を照らしたことになる |
+| K2-2 | 画面が操作を呼ぶ形は、静的に操作の名前を読める形にする（生成した関数の名前が操作の名前から決まるか、呼び出しの第 1 引数が操作の名前の文字列の定数） | I14 の「画面と操作の対応」を照らす。検査は import でなく呼び出しの式を数える |
+| K2-3 | 操作の表・生成した JSON Schema と OpenAPI・MCP の道具の一覧・HTTP の経路の登録を、`packages/contracts` の書き出し（export）から読めるようにし、利用者向けの操作と機械向けの経路（ランナー・手元のマシン・DB の用意のタスク）を分けて読めるようにする。`apps/api` の振り分けと `infra/` の API Gateway の定義は、HTTP の経路をこの登録の書き出しからだけ読み、API Gateway の経路は経路ごとの `AWS::ApiGatewayV2::Route` として合成する（OpenAPI の取り込み・`$default`・`{proxy+}` を使わない） | 検査は `packages/contracts` だけを import する。I14 の画面と MCP の照らしは利用者向けの操作だけを数える。手書きの経路の文字列は規則の組 `routes.generated` が落とし、実際に使う経路は合成の結果と振り分けのテストで照らす（詳細設計の「I14 の対応」） |
 | K2-4 | 日時の項目の名前を `_at` で終え、金額は `amount_minor` と `currency` の組にする（全体の設計の値の形） | I15 の形の照らしが名前で項目を見分ける |
 | K2-5 | 形の正本の要素と結果の形に、JSON Schema に表せない制約（変換・独自の検査）を使わない | 形の往復が食い違いとして落とす |
 | K2-6 | NDF の契約の使い方のデータと呼び出しの判定を `packages/contracts` に置く（決定 7。受ける組を置くことは実行計画で #2 にある） | F23 が照らす相手 |
+| K2-7 | 人だけの操作の定義に、対になる読み出しの操作の名前（`paired_read`）を持たせる。値は全体の設計の操作の一覧の「MCP の道具か」の列の「依頼と材料の読み出しだけ（`<操作の名前>`）」の名前（例 `approvals.answer` は `approvals.get`、`sessions.create` は `users.get`） | I14 の人だけの操作の照らしが、同じエンティティの無関係な読む操作でなく、指定された読み出しが MCP にあることを照らす |
+| K2-8 | `apps/api` の振り分けの入口を書き出し、受けた `routeKey` を生成した登録で引き、登録に無い経路は `route_unknown` で返す | `apps/api/test/dispatch-routes.test.ts` が、振り分けが実際に受ける経路を操作の表と照らす |
 
 #29 へ渡す欠け: 料金プランの名前を形の正本の閉じた語の集まりとして、料金プランの値を `packages/contracts/data/` のデータとして置き、値を読む書き出しを 1 つにする（I8 の検査がその書き出しの import を判定の外で落とし、名前を画面で落とす）。#6 へ渡す欠け: ランナーは NDF を起こす前に形の正本の呼び出しの判定を通す（決定 7）。
 
@@ -308,7 +312,7 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 | 受け入れ条件 2 | 漏れの検査の出力と標準エラーに、渡した実際の値と当たった文字が現れない。実際の値をパスに含むファイルでも、パスの当たりと本文の当たりと読み込みの誤りのどの出力にも値が現れない。コミットのメッセージに語を含む履歴でも、出力と一時のディレクトリに語が現れない（報告をファイルに書かない）。作り物の値だけのファイルでは当たりが 0 件。語を必須にした実行で語が無ければ終了コード 2 | 当たった行の中身を出力に足す・パスを伏せずに出す・報告を一時のファイルに書くと落ちる |
 | 受け入れ条件 3 | 作り物でない 12 桁を `docs/` の下のファイルに置いた作業の木で当たる | `docs/` を探す範囲から外すと落ちる |
 | 受け入れ条件 4（I8） | 判定のモジュールの外で料金プランの値の書き出しを import する・画面で料金プランの名前の文字列を使うと誤りが出る。判定のモジュールの中では出ない | 判定のモジュールも対象にする・画面の名前の照らしを外すと落ちる |
-| 受け入れ条件 5（I14） | 画面だけが呼ぶ操作・MCP の道具の無い人だけでない操作・対になる読み出しの無い人だけの操作・表に無い HTTP の経路・どの操作にも無い機能を、それぞれ足した表を渡すと欠けとして返る。`apps/api` と `infra/` に HTTP の経路を手で書くと規則の組 `routes.generated` の誤りが出る。画面の控えに載せた操作は `screen-missing` にならず、画面から呼ばれるようになった控えの行で落ちる | 片方向だけを照らす・手書きの経路を許す・控えの照らしを消すと落ちる |
+| 受け入れ条件 5（I14） | 画面だけが呼ぶ操作・MCP の道具の無い人だけでない操作・対になる読み出し（`paired_read`）が無いか MCP に無い人だけの操作・表に無い HTTP の経路・どの操作にも無い機能を、それぞれ足した表を渡すと欠けとして返る。同じエンティティに無関係な読む操作があっても、指定された読み出しが MCP に無ければ返る。画面で import しただけで呼ばない操作の関数は呼んだと数えない。合成の雛形に表に無い経路・`$default`・OpenAPI の取り込みを足すと `synth` の経路の照らしが落ち、表に無い経路の事象を振り分けが受けると振り分けのテストが落ちる。`apps/api` と `infra/` に HTTP の経路を手で書くと規則の組 `routes.generated` の誤りが出る。画面の控えに載せた操作は `screen-missing` にならず、画面から呼ばれるようになった控えの行で落ちる | 片方向だけを照らす・手書きの経路を許す・控えの照らしを消す・import を呼び出しと数える・同じエンティティの読む操作で人だけの操作を通す・合成の結果を照らさないと落ちる |
 | 受け入れ条件 6 | `apps/` の 5 つの置き場で「置き場の外で直に使わないもの」の印ごとに誤りが出て、`packages/core`・`infra/`・`tools/`・テストのファイルでは出ない | 対象の置き場を広げる・狭めると落ちる |
 | 受け入れ条件 7 | `packages/core` から `apps/*`・`apps/*` どうし・`infra` から `apps/*` の import で誤りが出る。型だけの import も同じ。画面の外で `react` を import する・画面の外に `*.tsx` を置くと誤りが出て、`apps/web/src` の `*.tsx` では出ない | 置き場の 1 つの規則を外す・画面の組を `*.ts` にだけ掛けると落ちる |
 | 受け入れ条件 8（旧い名前） | 照合の語（旧い名前）を含む追跡しているファイルで、参照の検査が終了コード 1 で終わる。既存の `tools/test/ref-check.test.ts` の `mainRefCheck` の「当たりがあれば 1 で、種類とファイルと行を出し語そのものは出さない」と、`findOldRefs` の「文書にだけ当たりがあれば 1 件」「リポジトリの名前は大文字小文字を問わず当たる」（`.github/workflows/ci.yml` の当たり）が縛る。#1 はこのテストを変えない | 照合の語の照らしを外す・ワークフローを読む範囲から外すと落ちる |
@@ -324,7 +328,7 @@ MVV 版 2 の Value 10〜16 と、この設計の決定を照らした。食い�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1 | 実装する | — | `eslint.config.js`、`tools/checks/src/lint-rules.ts`、`tools/checks/data/lint-exceptions.json`、`tools/checks/data/screen-pending.json`、`tools/checks/src/leak-check.ts`、`tools/checks/data/leak-allow.json`、`tools/checks/src/round-trip.ts`、`tools/checks/src/operation-coverage.ts`、`tools/checks/src/ndf-contract-check.ts`、`packages/contracts/data/secret-shapes.json`、`packages/contracts/src/secret-shapes.ts`、`packages/contracts/package.json`、`tools/test/lint-rules.test.ts`、`tools/test/leak-check.test.ts`、`tools/test/round-trip.test.ts`、`tools/test/operation-coverage.test.ts`、`tools/test/ndf-contract-check.test.ts`、`tools/test/ci-definition.test.ts`、`tools/test/ref-check.test.ts`、`tools/package.json`、`tools/tsconfig.json`、`package.json`、`package-lock.json`、`.github/workflows/ci.yml`、`.github/workflows/ndf-contract.yml`、`.ndf/project.json`、`AGENTS.md` |
+| #1 | 実装する | — | `eslint.config.js`、`tools/checks/src/lint-rules.ts`、`tools/checks/data/lint-exceptions.json`、`tools/checks/data/screen-pending.json`、`tools/checks/src/leak-check.ts`、`tools/checks/data/leak-allow.json`、`tools/checks/src/round-trip.ts`、`tools/checks/src/operation-coverage.ts`、`tools/checks/src/deployed-routes.ts`、`tools/checks/src/ndf-contract-check.ts`、`packages/contracts/data/secret-shapes.json`、`packages/contracts/src/secret-shapes.ts`、`packages/contracts/package.json`、`tools/test/lint-rules.test.ts`、`tools/test/leak-check.test.ts`、`tools/test/round-trip.test.ts`、`tools/test/operation-coverage.test.ts`、`tools/test/deployed-routes.test.ts`、`tools/test/leak-check.integration.test.ts`、`apps/api/test/dispatch-routes.test.ts`、`tools/test/ndf-contract-check.test.ts`、`tools/test/ci-definition.test.ts`、`tools/test/ref-check.test.ts`、`tools/package.json`、`tools/tsconfig.json`、`package.json`、`package-lock.json`、`vitest.config.ts`、`vitest.integration.config.ts`、`.github/workflows/ci.yml`、`.github/workflows/ndf-contract.yml`、`.ndf/project.json`、`AGENTS.md` |
 
 ## 人へ残す判断
 

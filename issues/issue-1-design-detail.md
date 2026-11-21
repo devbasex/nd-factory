@@ -270,7 +270,7 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
   - 事後条件: MCP の道具の入力は `{"items": [...]}` に包んで検証する（API と MCP の文書の道具の入力の形）。人だけの操作は MCP の形を持たないので 3 つで比べる
   - 副作用: 無し（ajv のコンパイルは関数の中で閉じる）
 
-`OperationView` と `GeneratedView` は、#2 の操作の表と生成物の書き出しから、この検査が読む項目（名前・エンティティ・読むか書くか・人だけか・HTTP の経路・機能・見本・要素と結果の形、生成した JSON Schema・OpenAPI・MCP の道具の一覧・HTTP の経路の登録）だけを写した型である。書き出しの名前は #2 の詳細設計が決め、実装の最初のタスクで写す（設計文書の K2-3）。
+`OperationView` と `GeneratedView` は、#2 の操作の表と生成物の書き出しから、この検査が読む項目（名前・エンティティ・読むか書くか・人だけか・人だけの操作の対になる読み出しの名前（`paired_read`）・HTTP の経路・機能・見本・要素と結果の形、生成した JSON Schema・OpenAPI・MCP の道具の一覧・HTTP の経路の登録）だけを写した型である。書き出しの名前は #2 の詳細設計が決め、実装の最初のタスクで写す（設計文書の K2-3）。
 
 ### 異常系の処理
 
@@ -296,18 +296,22 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `screenOperationNames` | `tools/checks/src/operation-coverage.ts` | 新設 | `(files: { path: string; text: string }[], clientModule: string) => Set<string>` | 画面のコード（`apps/web/src` のテストでない `*.ts` と `*.tsx`。`*.tsx` は TSX として読む）を TypeScript の構文木で読み、生成した呼び出しの書き出しから import した操作の関数の名前か、呼び出しの第 1 引数の文字列の定数を操作の名前として集める（#2 へ渡す K2-2 の形） |
+| `screenOperationNames` | `tools/checks/src/operation-coverage.ts` | 新設 | `(files: { path: string; text: string }[], clientModule: string) => ScreenCalls` | 画面のコード（`apps/web/src` のテストでない `*.ts` と `*.tsx`。`*.tsx` は TSX として読む）を TypeScript の構文木で読み、実際の呼び出しの式だけから操作の名前を集める（#2 へ渡す K2-2 の形）。import は呼び出し先を見分けるためだけに使い、import しただけで呼ばない名前は数えない。数える呼び出しは、(a) 生成した呼び出しの書き出しから import した操作の関数（別名の `as` は元の名前へ戻す）を呼ぶ式と、名前空間の import（`import * as api`）の性質を呼ぶ式 `api.<操作の関数>(…)`、(b) 同じ書き出しから import した汎用の呼び出しの関数の、第 1 引数が文字列の定数の呼び出し。(b) の第 1 引数が文字列の定数でない呼び出しは名前に入れず、場所つきの診断にする |
+| `ScreenCalls` | 同上 | 新設（型） | `{ names: Set<string>; diagnostics: ScreenDiagnostic[] }`。`ScreenDiagnostic` は `{ path: string; line: number; kind: "non-constant-operation-name" }` | 名前と、名前を読めなかった呼び出しの場所を分けて返す。`findCoverageFindings` は `names` だけを読み、診断は 1 件ごとに `screen-unknown` の欠けとしてファイルと行つきで出す |
 | `loadScreenPending` | 同上 | 新設 | `(path: string) => ScreenPending[]` | 画面の控え `tools/checks/data/screen-pending.json` を読み、形を照らして返す。`ScreenPending` は `{ operation: string; issue: string; reason: string }` |
-| `findCoverageFindings` | 同上 | 新設 | `(input: CoverageInput) => CoverageFinding[]` | 下の 8 つの欠けと余りを返す。`CoverageInput` は操作の表・MCP の道具の一覧・HTTP の経路の登録・画面が呼ぶ名前・画面の控え |
+| `findCoverageFindings` | 同上 | 新設 | `(input: CoverageInput) => CoverageFinding[]` | 下の 8 つの欠けと余りを返す。`CoverageInput` は操作の表・MCP の道具の一覧・HTTP の経路の登録・画面の呼び出し（`ScreenCalls`）・画面の控え |
+| `readGatewayRoutes` | `tools/checks/src/deployed-routes.ts` | 新設 | `(cdkOut: string) => GatewayRoutes` | 合成の出力（`cdk.out`。入れ子のステージの組み立て `assembly-*` を含む）のすべての雛形（`*.template.json`）を JSON として読み、`AWS::ApiGatewayV2::Route` の `RouteKey` を集める。経路を表に出さずに登録する資源（`AWS::ApiGatewayV2::Api` の `Body`・`BodyS3Location`（OpenAPI の取り込み）・`AWS::ApiGateway::*`（REST の API）・`$default` の経路・`{proxy+}` を含む経路）は、経路の代わりに `unsupported` として場所つきで返す。`GatewayRoutes` は `{ routes: { routeKey: string; template: string; logicalId: string }[]; unsupported: { template: string; logicalId: string; kind: string }[] }` |
+| `findGatewayRouteFindings` | 同上 | 新設 | `(gateway: GatewayRoutes, operations: OperationView[]) => CoverageFinding[]` | `gateway-route-unknown`（雛形の経路のうち、操作の表の経路（利用者向けと機械向けの両方）に無いもの）・`gateway-route-missing`（操作の表の経路のうち、雛形に無いもの）・`gateway-route-unsupported`（`unsupported` の 1 件ごと）を返す |
+| `mainRouteCheck` | 同上 | 新設 | `(argv: string[]) => Promise<number>` | 引数 `--cdk-out <合成の出力>`。スクリプト `npm run route-check`。操作の表の書き出しが無ければ `skip: no-operation-table` の 1 行を出して 0。あれば上の 2 つをつなぎ、欠けがあれば行を出して 1 |
 
 | 欠けと余りの種類 | 当たり |
 | --- | --- |
 | `screen-missing` | 利用者向けの操作のうち、画面のどこからも呼ばれず、画面の控えにも無いもの |
 | `screen-pending-stale` | 画面の控えの操作のうち、画面から呼ばれるようになったもの（直したのに残った控え） |
 | `screen-pending-unknown` | 画面の控えの操作のうち、操作の表の利用者向けの操作に無いもの |
-| `screen-unknown` | 画面が呼ぶのに操作の表に無い名前 |
+| `screen-unknown` | 画面が呼ぶのに操作の表に無い名前と、`ScreenCalls.diagnostics` の 1 件ごと（名前を定数で読めない呼び出し。ファイルと行を出す） |
 | `mcp-mismatch` | MCP の道具の一覧の名前の集まりと、人だけでない操作の集まりの差（両方の向き） |
-| `human-only-without-read` | 人だけの操作のうち、同じエンティティに人だけでない読む操作が無いもの |
+| `human-only-without-read` | 人だけの操作のうち、対になる読み出し（`paired_read`。API と MCP の文書の操作の一覧の「依頼と材料の読み出しだけ（`<操作の名前>`）」の名前）が、無い・操作の表に無い・読む操作でない・人だけの操作である・MCP の道具の一覧に無い、のどれかに当たるもの |
 | `route-unknown` | HTTP の経路の登録のうち、操作の表に無い経路 |
 | `feature-missing` | F1〜F20 のうち、どの操作の機能にも無いもの |
 
@@ -325,21 +329,32 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | 操作を足す Pull Request | 画面を同じ Pull Request で足すか、控えに行を足す（足す行はレビューで見る） | 同上 |
 | 画面を作る課題の Pull Request | 自分の番号の行を消す。画面から呼ぶようになった操作の行を残すと `screen-pending-stale` で落ちる | その操作の `screen-missing` |
 
-`HTTP の経路の登録` の照らしは #2 の生成した登録を読む。`apps/api` の振り分けと `infra/` の API Gateway の定義に経路を手で書くことは規則の組 `routes.generated` が落とすので、両方の実際の登録は生成した登録からだけ作られる（設計文書の K2-3）。
+`HTTP の経路の登録` は 3 か所で照らす。文字列の lint（規則の組 `routes.generated`）は手書きの経路の文字列を落とすが、CDK の別の登録の方法（`HttpRoute` の構成要素・`CfnRoute`・OpenAPI の取り込みなど）や、文字列を組み立てる書き方までは生成物に限定できないので、実際に使う経路を次の 2 つで操作の表と照らす。
+
+| 照らす場所 | 読むもの | 何を落とすか | 走るジョブ |
+| --- | --- | --- | --- |
+| 生成した登録（`findCoverageFindings` の `route-unknown`） | #2 の生成した経路の登録の書き出し | 登録の中の、操作の表に無い経路 | `check`（単体テスト） |
+| API Gateway の合成の結果（`mainRouteCheck`） | `npm run synth` の出力 `infra/cdk.out` の雛形の `AWS::ApiGatewayV2::Route` | 雛形の経路と操作の表の経路の差（両方の向き）と、経路を表に出さない登録の方法 | `synth`（合成の後の手順。`npm run route-check -- --cdk-out infra/cdk.out`） |
+| Lambda の振り分け（`apps/api/test/dispatch-routes.test.ts`） | `apps/api` の振り分けの入口（#2 の K2-8）に、操作の表のすべての経路の `routeKey` と、表に無い `routeKey` 1 つの API Gateway の事象を渡した結果 | 表の経路を `route_unknown` で返す・表に無い経路を `route_unknown` 以外で受ける | `check`（`apps/api` の単体テスト） |
+
+振り分けの照らしは、`tools` が `apps/` を import できない（依存の向き）ので、`apps/api` 自身のテストに置く。振り分けの入口か操作の表の書き出しが無い間は、テストの名前に「相手が無い」と出して通る。合成の照らしも、操作の表の書き出しが無い間は `skip: no-operation-table` で通る。今の `infra/lib/app-stack.ts` の `PUT /v1/users` は、操作の表が入った時点で `gateway-route-unknown` になるので、操作の表を置く #2 の Pull Request が API Gateway の定義を生成した登録へ移す（控えの `routes.generated` の行と同じ Pull Request）。
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | テスト | 操作の表か生成物の書き出しが無い | #2 がまだ置いていない | 動的な import | 既定値で続ける（リポジトリへの適用を「相手が無い」として通し、作り物の表のテストだけを走らせる） | テストの名前に「相手が無い」 | — |
-| `screenOperationNames` | 呼び出しの第 1 引数が文字列の定数でない | 名前を変数で渡した | 構文木 | 呼び出し元へ返す（`screen-unknown` として場所を出す） | vitest の失敗にファイルと行 | 定数で書き直す |
+| `screenOperationNames` | 呼び出しの第 1 引数が文字列の定数でない | 名前を変数で渡した | 構文木 | 呼び出し元へ返す（`ScreenCalls.diagnostics` に場所を入れ、`findCoverageFindings` が `screen-unknown` として出す） | vitest の失敗にファイルと行 | 定数で書き直す |
+| `readGatewayRoutes` | 合成の出力が無い・雛形が JSON でない | 合成の前に打った・合成の失敗 | 読み込み | 止める | 標準エラーに誤りの種類とパス、終了コード 2 | 合成してから打ち直す |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `screenOperationNames` | import した関数と文字列の定数の両方を拾う | 別名の import（`as`）も元の名前で拾う。テストのファイルを読まない | 変数で渡した名前を `screen-unknown` にする |
-| `findCoverageFindings` | 揃った作り物の表で 0 件 | 機械向けの経路を数えない。画面の無い操作を控えに置くと `screen-missing` にならない | 8 つの種類ごとに、1 行を足すか消した表で 1 件 |
+| `screenOperationNames` | import した操作の関数の呼び出し・名前空間の import の性質の呼び出し・汎用の呼び出しの文字列の定数の 3 つを拾う | 別名の import（`as`）も元の名前で拾う。import しただけで呼ばない関数は拾わない（その操作は `screen-missing` のまま残り、控えにあれば `screen-pending-stale` にならない）。生成した書き出しの外から import した同じ名前の関数の呼び出しは拾わない。テストのファイルを読まない | 変数で渡した名前は `names` に入らず、`diagnostics` にファイルと行が 1 件入る |
+| `findCoverageFindings` | 揃った作り物の表で 0 件 | 機械向けの経路を数えない。画面の無い操作を控えに置くと `screen-missing` にならない | 8 つの種類ごとに、1 行を足すか消した表で 1 件。`human-only-without-read` は、`paired_read` を消す・表に無い名前にする・書く操作を指す・人だけの操作を指す・MCP の道具の一覧から消す、のそれぞれで 1 件（同じエンティティに無関係な読む操作が MCP にあっても出る） |
+| `readGatewayRoutes`・`findGatewayRouteFindings` | 作り物の雛形（テストの中で組む）の経路が操作の表と揃って 0 件 | 入れ子のステージの組み立ての雛形も読む | 表に無い `RouteKey` で `gateway-route-unknown`、表の経路を雛形から消して `gateway-route-missing`、`Body` を持つ `AWS::ApiGatewayV2::Api`・`$default`・`ANY /{proxy+}` でそれぞれ `gateway-route-unsupported` |
+| `dispatch-routes.test.ts`（`apps/api`） | 表のすべての経路が `route_unknown` 以外で受けられる | — | 表に無い経路の事象が `route_unknown` で返る（表の外の経路は合成の照らしが API Gateway に置かせないので、振り分けの側は表の経路を受けることと表の外を拒むことを照らす） |
 | `loadScreenPending` | 正しい形を読む | 空の配列 | 項目の欠けで例外 |
 
 ## NDF の契約の照合
@@ -425,7 +440,7 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 
 | ファイル | 変える中身 |
 | --- | --- |
-| `.github/workflows/ci.yml` | ジョブ `leak-check` を足す。取得は履歴をすべて取り（`fetch-depth: 0`。分岐点からのコミットを探すため）、Node の用意と `npm ci` の後に、`GITLEAKS_VERSION` の版の配布の資産 `gitleaks_<版>_linux_x64.tar.gz` だけを取り、その `sha256sum` を環境変数 `GITLEAKS_SHA256` に固定した値と直接比べ（`echo "$GITLEAKS_SHA256  <資産>" \| sha256sum -c -`）、一致したときだけ展開して `PATH` へ置く。配布のチェックサムのファイルは取らない（同じ配布元から取った値と比べても、配布元を信じることにしかならず、固定にならないため）。続けて `npm run test:integration`（実物の gitleaks を起こす結合のテスト）を打ち、最後に `npm run leak-check` を打つ（Pull Request では `-- --base <分岐点>`）。gitleaks の版と要約値はこのジョブの環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の 1 か所にだけ書く。環境変数 `LEAK_CHECK_TERMS`（秘密）と `LEAK_CHECK_REQUIRE_TERMS`（`ref-check` と同じ式で変数 `LEAK_CHECK_REQUIRE_TERMS` から作る）を渡す |
+| `.github/workflows/ci.yml` | ジョブ `synth` の「作り物の値で合成する」の後に、`npm run route-check -- --cdk-out infra/cdk.out`（API Gateway の合成の結果の経路の照らし）の手順を足す。ジョブ `leak-check` を足す。取得は履歴をすべて取り（`fetch-depth: 0`。分岐点からのコミットを探すため）、Node の用意と `npm ci` の後に、`GITLEAKS_VERSION` の版の配布の資産 `gitleaks_<版>_linux_x64.tar.gz` だけを取り、その `sha256sum` を環境変数 `GITLEAKS_SHA256` に固定した値と直接比べ（`echo "$GITLEAKS_SHA256  <資産>" \| sha256sum -c -`）、一致したときだけ展開して `PATH` へ置く。配布のチェックサムのファイルは取らない（同じ配布元から取った値と比べても、配布元を信じることにしかならず、固定にならないため）。続けて `npm run test:integration`（実物の gitleaks を起こす結合のテスト）を打ち、最後に `npm run leak-check` を打つ（Pull Request では `-- --base <分岐点>`）。gitleaks の版と要約値はこのジョブの環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の 1 か所にだけ書く。環境変数 `LEAK_CHECK_TERMS`（秘密）と `LEAK_CHECK_REQUIRE_TERMS`（`ref-check` と同じ式で変数 `LEAK_CHECK_REQUIRE_TERMS` から作る）を渡す |
 | `.github/workflows/ndf-contract.yml`（新設） | `on` は `pull_request`・`push`（main）・`schedule`（毎日 1 回）・`workflow_dispatch`。`permissions: contents: read`。ジョブ `ndf-contract` は Pull Request のとき、既定の取得（マージした結果のコミット）に加えて `base.sha` と `head.sha` を分岐点が求まる深さまで取り（`fetch-depth: 0`）、`npm run ndf-contract -- --base <base.sha> --head <head.sha> --summary "$GITHUB_STEP_SUMMARY"` を打つ。ほかの起動では `--base` と `--head` を渡さない。動作の版はコミットの SHA で固定する（`ci.yml` と同じ） |
 | `.ndf/project.json` | `ci.required_checks` に `leak-check`・`ndf-contract` を足す。`ci.workflows` に `ndf-contract.yml` の行を足す |
 | `package.json` | スクリプト `leak-check`・`ndf-contract`・`route-check`・`test:integration`（`vitest run -c vitest.integration.config.ts`） |
