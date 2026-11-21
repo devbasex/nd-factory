@@ -157,14 +157,15 @@ graph TD
 | `dbPrepInvocation` | API と見回り → 関数（`Invoke` の `InvocationType: Event`） | `prep_id`（用意の ID）・`project_id`・`kind`（`create` か `rotate`）・`rotation_seq`（`rotate` だけ。番号 n）。パスワード・管理の値・データベースと役割の名前を載せない |
 | `dbPrepOutcome` | 関数 → 終わりの記録の口 | `result`（`applied`・`rotation_superseded`・`failed`）・`recorded_seq`（`rotation_superseded` だけ。DB に記してあった番号）・`reason`（`failed` だけ。下の表） |
 
-関数は SQL の前に、終わりの記録の口（`PrepCompletionPort`）の `isCurrent(prep_id)` で用意の ID が今の値であることを読み、違えば何もせずに終える（[全体の設計の決定 96](../docs/design/platform.md#決定の記録)）。データベースと役割の名前と秘密の器の名前は口の `readTarget(project_id)` でプロジェクトの行から読み、新しいパスワードは、口が同じ行から返す秘密の器の版の ID（`progress_db_secret_version`）で、その版の URL から読む（ラベルの `AWSPENDING` では読まない）。SQL の結果が `applied` か記した番号 = n の `rotation_superseded` なら、関数はその版へ `AWSCURRENT` を移して読み直し、その後に口の `record` へ呼び出しと結果と版の ID を渡して記す。口は用意の ID・差し替えの番号・版の ID が今の値と合うときだけ書く条件つきの書き込みで、合わなければ書かずに `mismatch` を返す。秘密の器の版とサービスの表を 1 つの書き込みにできないため、この順で、保留を下ろす前に `AWSCURRENT` が結んだ版にあるようにする（[データの文書のパスワードの版](../docs/design/data.md#パスワードの版)）。口の実装（プロジェクトのモジュールの操作）は #6 が作る。
+関数は SQL の前に、終わりの記録の口（`PrepCompletionPort`）の `isCurrent(project_id, prep_id)` で、そのプロジェクトの行（プロジェクトの表の主キーはプロジェクトの ID で、用意の ID は行の属性）を強い整合で読み、行の用意の ID が今の値であることを照らし、違えば何もせずに終える（[全体の設計の決定 96](../docs/design/platform.md#決定の記録)）。データベースと役割の名前と秘密の器の名前は口の `readTarget(project_id)` でプロジェクトの行から強い整合で読み、同じ読みで返る行の用意の ID と差し替えの番号が呼び出しと合わなければ（`isCurrent` の後に別の呼び出しが番号 n を終え、行が次の用意の版を結んだ）、その版を読まずに何もせずに終える。新しいパスワードは、口が同じ行から返す秘密の器の版の ID（`progress_db_secret_version`）で、その版の URL から読む（ラベルの `AWSPENDING` では読まない）。SQL の結果が `applied` か記した番号 = n の `rotation_superseded` なら、関数はその版へ `AWSCURRENT` を移して読み直し（差し替えでは、古い接続を切るトランザクションの中で差し替えの鎖を持ったまま移し、重なった古い番号の呼び出しが新しい版から古い版へ戻せないようにする。移した直後の読みは結果整合で移す前を返しうるため、移しは打ち直さずに期限まで読み直す）、その後に口の `record` へ呼び出しと結果と版の ID を渡して記す。口は用意の ID・差し替えの番号・版の ID が今の値と合うときだけ書く条件つきの書き込みで、合わなければ書かずに `mismatch` を返す。秘密の器の版とサービスの表を 1 つの書き込みにできないため、この順で、保留を下ろす前に `AWSCURRENT` が結んだ版にあるようにする（[データの文書のパスワードの版](../docs/design/data.md#パスワードの版)）。口の実装（プロジェクトのモジュールの操作）は #6 が作る。
 
 | `reason` | 起きたこと |
 | --- | --- |
 | `data_api_unavailable` | Data API の再開の待ち（`DatabaseResumingException`）が再試行の後も続いた |
 | `guard_conflict` | データベースか役割が、別のプロジェクトの結び付きに記されていた、または別の役割・別のデータベースへ結ばれていた（I10） |
-| `connections_remain` | 役割の古い接続（境の時刻より前に始まった接続）を切った後も残っていた（I17） |
 | `sql_failed` | ほかの SQL の失敗 |
+
+役割の古い接続（境の時刻より前に始まった接続）を切った後も残っていたときは、`failed` を含めて終わりを記さずに関数の誤りで終え、保留を残して見回りの呼び直し（I22）に任せる（I17）。
 
 パスワード・URL・管理の値は、呼び出し・結果・ログ・合成の出力に出さない。
 
@@ -188,7 +189,10 @@ flowchart TD
     B -->|違う| X[何もせずに終える]
     B -->|今の値| Q{用意の ID を受け取りの表へ一意に記せたか}
     Q -->|既にある（重複の配信）| X
-    Q -->|記せた| C[名前と秘密の器と版の ID を読み、その版からパスワードを読む]
+    Q -->|記せた| T[readTarget の 1 つの強い整合の読みで、名前・秘密の器・版の ID と、用意の ID・差し替えの番号を読む]
+    T --> TC{同じ読みの用意の ID が呼び出しと同じか。差し替えなら番号も n か}
+    TC -->|違う（行が次の用意へ進んだ）| X
+    TC -->|同じ| C[同じ読みの版の ID で、その版からパスワードを読む]
     C --> D{kind}
     D -->|create| G[結び付きを記して照らし、I10 の守りを照らす]
     G -->|別のプロジェクトの結び付き・別のものに結ばれている| F2["failed: guard_conflict"]
@@ -196,16 +200,22 @@ flowchart TD
     H --> OK[applied]
     OK --> P[結んだ版へ AWSCURRENT を移して読み直す]
     H -->|SQL の失敗| F4["failed: sql_failed"]
-    D -->|rotate| R[排他の鎖の下で記した番号と n を照らす]
-    R -->|記した番号 < n| W[パスワードと番号 n を書く] --> K[境の時刻より前に始まった役割の接続だけを切り、残りを読む]
-    R -->|記した番号 = n| K
+    D -->|rotate| R[1 つ目のトランザクションで排他の鎖を取り、記した番号と n を照らす]
+    R -->|記した番号 < n| W[パスワードと番号 n を書く]
+    W --> C1[1 つ目のトランザクションを確定し、鎖を放す]
+    R -->|記した番号 = n| C1
     R -->|記した番号 > n| S[rotation_superseded]
-    K -->|残る| F3["failed: connections_remain"]
-    K -->|残らない| OK2[applied か rotation_superseded]
-    OK2 --> P
+    C1 --> L2[2 つ目のトランザクションで鎖を取り直し、記した番号と n を照らし直す]
+    L2 -->|記した番号 > n| S
+    L2 -->|記した番号 = n| K[境の時刻より前に始まった役割の接続だけを切り、残りを読む]
+    K -->|期限まで残る| E4[境の時刻を記したまま 2 つ目のトランザクションを確定し、鎖を放し、終わりを記さずに関数の誤りで終える。呼び直しは同じ境の時刻で切る]
+    K -->|残らない| P2[鎖を持ったまま結んだ版へ AWSCURRENT を移して読み直す]
+    P2 -->|移せない| E3[2 つ目のトランザクションを巻き戻し、終わりを記さずに関数の誤りで終える]
+    P2 --> C2[2 つ目のトランザクションを確定し、鎖を放す]
+    C2 --> OK2[applied か rotation_superseded]
 ```
 
-結果は終わりの記録の口へ渡す。用意の ID を受け取りの表へ記せた後の段で Data API の呼び出しが再開の待ちを超えたら、`failed`・`data_api_unavailable` を渡す。受け取りの段（`claimPrepRun`）で再開の待ちを超えたか、確定の応答が届かず記せたかを確かめられないときは、`failed` も記さずに関数の誤りで終え、期限の後の見回りに委ねる。同じ用意の ID のもう一方の配信が受け取って DDL を打っている間に、こちらの `failed` が作成を `無い` へ戻し、次の開始と重なるのを防ぐためである。名前・秘密の器を読めないとき・結んだ版へ `AWSCURRENT` を移せないとき・口の呼び出しが失敗したときは、終わりを記さずに関数の誤りで終え、見回りが期限の後に扱う（自動の再試行は 0 回）。版を移した後に記せずに落ちても、呼び直しは同じ版を読み、移し済みを読み直してから記す。
+結果は終わりの記録の口へ渡す。用意の ID を受け取りの表へ記せた後の段で Data API の呼び出しが再開の待ちを超えたら、`failed`・`data_api_unavailable` を渡す。受け取りの段（`claimPrepRun`）で再開の待ちを超えたか、確定の応答が届かず記せたかを確かめられないときは、`failed` も記さずに関数の誤りで終え、期限の後の見回りに委ねる。同じ用意の ID のもう一方の配信が受け取って DDL を打っている間に、こちらの `failed` が作成を `無い` へ戻し、次の開始と重なるのを防ぐためである。名前・秘密の器を読めないとき・結んだ版へ `AWSCURRENT` を移せないとき・差し替えで古い接続が残ったとき・口の呼び出しが失敗したときは、終わりを記さずに関数の誤りで終え、見回りが期限の後に扱う（自動の再試行は 0 回）。版を移した後に記せずに落ちても、呼び直しは同じ版を読み、移し済みを読み直してから記す。
 
 差し替えで切るのは「古い接続」だけである。古い接続とは、番号 n のパスワードを書いたトランザクションが確定した後に記す境の時刻より前に始まった、その役割の接続をいう。同じ番号 n の呼び直しが先に終わりを記して保留が下り、新しいパスワードでレーンが接続を始めた後に、時間切れの守り（全体の設計の決定 96）が外れて遅れた前の呼び出しが切りに来ても、新しい接続は境の時刻より後に始まっているため切られない。境の時刻は、どの呼び出しも終わりを記す前に必ず記す（切りの段で記されていなければ記す）ため、保留が下りる前に定まる（詳細設計の「並行と排他」）。境の時刻は [差し替えの番号](../docs/design/data.md#差し替えの番号) の表に足す 1 列で、読み書きするのは DB の用意の関数だけである（表の置き場・書き手・読み手は変えない）。
 
@@ -398,11 +408,11 @@ flowchart TD
 ### 決定 17: 役割のパスワードを DB の側のログに残さないため、関数が SCRAM-SHA-256 の検証子を作り、平文を SQL の文に載せない
 
 - **質問**: `CREATE ROLE … PASSWORD`・`ALTER ROLE … PASSWORD` は引数を束縛できず、パスワードは文の中の文字列になる。PostgreSQL は既定で失敗した文をサーバーのログに書くため（LIB24）、関数のログを伏せても Aurora の側に資格情報が残りうる。どう防ぐか
-- **選んだ案**: 関数は秘密の器から読んだ平文を、SQL に載せる前に SCRAM-SHA-256 の検証子（RFC 7677。塩 16 バイト・回数 4096）へ変え、検証子を文字列として渡す。PostgreSQL は SCRAM の形の文字列をそのまま保存し（LIB23）、平文での接続はそのまま通る。Data API も Aurora PostgreSQL 14 以上では `scram-sha-256` だけを受けるため、方式は変わらない（[全体の設計の LIB91](../docs/design/platform.md#ライブラリとサービス)）。検証子は `node:crypto` の `pbkdf2Sync`・`createHmac`・`createHash`・`randomBytes` で組む。SCRAM の検証子は塩が無作為で、同じ平文でも作るたびに違うため、正しさは次の 2 つで CI の PostgreSQL に照らす。(1) PostgreSQL が平文から作った役割の検証子（`pg_authid.rolpassword`）から塩と回数を取り出し、同じ平文・塩・回数で自前の関数が組んだ値と文字列で比べる。(2) 自前の検証子で作った役割へ、平文のパスワードで接続が通る（差し替えの後は新しい平文で通り、古い平文で落ちる）。文がログに残っても検証子だけで、32 バイトの乱数のパスワードは検証子から求められない
-- 採らなかった案: パスワードを含む文の前に `SET LOCAL log_min_error_statement = PANIC`・`log_statement = none` を打つ（どちらも superuser か SET の権限が要り、Aurora の管理の役割で打てるかが分からない。打てても、クラスタのパラメータで `log_statement` を上げた設置先や、文の前の失敗では効かない）
+- **選んだ案**: 関数は秘密の器から読んだ平文を、SQL に載せる前に SCRAM-SHA-256 の検証子（RFC 7677。塩 16 バイト・回数 4096）へ変え、検証子を文字列として渡す。PostgreSQL は SCRAM の形の文字列をそのまま保存し（LIB23）、平文での接続はそのまま通る。Data API も Aurora PostgreSQL 14 以上では `scram-sha-256` だけを受けるため、方式は変わらない（[全体の設計の LIB91](../docs/design/platform.md#ライブラリとサービス)）。検証子は `node:crypto` の `pbkdf2Sync`・`createHmac`・`createHash`・`randomBytes` で組む。SCRAM の検証子は塩が無作為で、同じ平文でも作るたびに違うため、正しさは次の 2 つで CI の PostgreSQL に照らす。(1) PostgreSQL が平文から作った役割の検証子（`pg_authid.rolpassword`）から塩と回数を取り出し、同じ平文・塩・回数で自前の関数が組んだ値と文字列で比べる。(2) 自前の検証子で作った役割へ、平文のパスワードで接続が通る（差し替えの後は新しい平文で通り、古い平文で落ちる）。文がログに残っても検証子だけで、32 バイトの乱数のパスワードは検証子から求められない。検証子も認証に使う秘密のため文の本文に載せず、引数で渡す。引数の値は通常の文のログ（`log_statement` が `all`・`log_min_duration_statement` の対象）では `log_parameter_max_length`（既定 -1 で全部書く）に従って書かれるため、検証子を送る前に `log_parameter_max_length` と `log_parameter_max_length_on_error` が 0 であることを確かめ、0 でなければ検証子を送らずに止める。`log_parameter_max_length` は SUSET で、Aurora の管理の役割（superuser でない）はセッションで変えられず、AWS が管理の役割へ開く設定にも含まれないため、スタックがクラスタのパラメータで両方を 0 に置き、関数は読んで照らす（USERSET の `log_parameter_max_length_on_error` はトランザクションの中だけでも 0 に置く）。pgAudit は PostgreSQL のログの設定と別に、`pgaudit.log_parameter` が有効なら引数の値を、`pgaudit.log` が `role` を含めば `EXECUTE` で打つ役割の文の本文を監査のログに書くため、同じ文でこの 2 つを読み、どちらかに当たれば検証子を送らずに止める（pgAudit を読み込まないクラスタでは値が無く、通る。詳細設計の `prepareRolePassword`）
+- 採らなかった案: 平文のパスワードを含む文の前に `SET LOCAL log_min_error_statement = PANIC`・`log_statement = none` を打つだけにする（クラスタのパラメータで `log_statement` を上げた設置先や、文の前の失敗では効かない。引数の値を記録しない設定は、検証子を引数で渡す文の守りとしてクラスタのパラメータに置き、関数が読んで照らす）
 - 採らなかった案: クラスタのパラメータの群で `log_min_error_statement` を `PANIC` にする（ランナーの NDF の失敗した文もログに残らなくなり、調べる手がかりを失う。平文を送らなければ要らない）
 - 採らなかった案: 検証子の部品に `scram_sha_256`（LIB25）を使う（版が 0.0 のまま 2024 年から更新が無い。`node:crypto` の標準の関数だけで 20 行ほどで組め、正しさは CI で PostgreSQL と照らせる）
-- **代償**: 自前の暗号の計算が 1 つ増える（Value 15）。パスワードに印字できない文字を受けない（PostgreSQL の SASLprep を持たないため。API が作るパスワードは base64url の文字だけ）。Aurora のログに検証子が残ることは許す
+- **代償**: 自前の暗号の計算が 1 つ増える（Value 15）。パスワードに印字できない文字を受けない（PostgreSQL の SASLprep を持たないため。API が作るパスワードは base64url の文字だけ）。クラスタのパラメータで文のログの引数の値を誰の文でも書かなくなる（失敗した文を調べる手がかりが値の分だけ減る）。設置する人がクラスタのパラメータを 0 でなくするか、pgAudit で引数の値か役割の文を書く設定にすると、用意と差し替えが止まる（設置の手順書に書く。Aurora で 0 と読めることは #44 で確かめる）
 - 作り方: 標準に倣う・自前で作る（RFC 7677・PostgreSQL の SCRAM の形を `node:crypto` で組む）
 - 比べた候補: LIB23 / LIB24 / LIB25
 - 根拠: Value 7 / Value 9（MVV 版 1）
@@ -443,7 +453,8 @@ flowchart TD
 | Docker の前提 | `diff` を打つ端末と準備のアクションに Docker が要る。無ければ `diff` が合成の前に止まる（終了コード 6） |
 | `setup.md` と終了コード | 前提の表に Docker と、profile に要る ECR の許しを足す。終了コード 0・5・6 の「AWS へ書いたか」を自前の ECR への push に合わせる（`packages/contracts/data/exit-codes.json`） |
 | DB の用意の関数を呼ぶ側 | 用意の ID と新しい版の ID を条件つきの書き込みで置き、勝ったときだけ秘密の器へその版の ID でパスワードを入れ、`Invoke`（`InvocationType: Event`）で `dbPrepInvocation` を渡す（[データの文書のパスワードの版](../docs/design/data.md#パスワードの版)）。負けた要求は秘密の器へ書かない。差し替えの呼び直しの前に、見回りは結んだ版が秘密の器にあるかを読み、無ければ同じ版の ID で新しいパスワードを入れる（見回りの役割に `secretsmanager:DescribeSecret`・`PutSecretValue` を `<prefix>/<environment>/progress-db/*` に許す）。#6 のテストは、同じプロジェクトの 2 つの開始を並べて、負けた方が `PutSecretValue` を呼ばないことを照らす。呼べるのは API の関数と見回りの関数だけ（`lambda:InvokeFunction` を許す） |
-| 終わりの記録の口 | `PrepCompletionPort`（`isCurrent`・`readTarget`・`record`）を、プロジェクトのモジュールの 3 つの処理（`db_prep.is_current`・`db_prep.read_target`・`db_prep.record`。[API の文書の DB の用意の関数の処理](../docs/design/api.md#ランナー手元のマシンの-http-の経路)）で作り、`apps/api/src/entries/db-prep.ts` で渡す。3 つとも認可の判定と操作の記録の書き手を通す。口をつなぐまで、#13 の版の `handler` は呼ばれたら投げる口を渡し、関数を呼ぶ側も無いため誰も呼ばない |
+| 引き換えの URL の読み方 | 引き換えは、プロジェクトの行を強い整合で読んで `有る` で差し替えの保留が無いことを照らし、同じ読みで返る結んだ版の ID（`progress_db_secret_version`）を `GetSecretValue` の `VersionId` に渡して URL を読む。`AWSCURRENT` のラベルでは読まない（保留を下ろした直後のラベルの読みが前の版を返しうるため。[データの文書の進行表の DB](../docs/design/data.md#進行表の-db)） |
+| 終わりの記録の口 | `PrepCompletionPort`（`isCurrent`・`readTarget`・`record`）を、プロジェクトのモジュールの 3 つの処理（`db_prep.is_current`・`db_prep.read_target`・`db_prep.record`。[API の文書の DB の用意の関数の処理](../docs/design/api.md#ランナー手元のマシンの-http-の経路)）で作り、`apps/api/src/entries/db-prep.ts` で渡す。`isCurrent(projectId, prepId)` はプロジェクトの表を `project_id` の `GetItem` で強い整合で読み、その行の用意の ID と照らす（許された `GetItem` で行を特定でき、認可もそのプロジェクトに限れる）。3 つとも認可の判定と操作の記録の書き手を通す。口をつなぐまで、#13 の版の `handler` は呼ばれたら投げる口を渡し、関数を呼ぶ側も無いため誰も呼ばない |
 | 口が要る DynamoDB の権限 | 口をつなぐ同じ変更で、`AppStack` から `DbPrepFunction.grantCompletionAccess` をプロジェクトの表と操作の記録の表で呼ぶ。許すのはプロジェクトの表への `GetItem`・`UpdateItem`・`ConditionCheckItem` と、操作の記録の表への `PutItem` だけ（詳細設計の「DB の用意の関数の資源」）。`DbPrepFunction` の合成のテストの DynamoDB の期待を、`AppStack` の合成の出力で照らす形へ移す |
 | 見回り | 作成の時間切れ（I18）と差し替えの呼び直し（I22）。期限 15 分・間隔 5 分・呼び直しの上限 3 回（決定 9） |
 | ランナーのタスクの大きさ | 1 vCPU・2 GB・x86_64・一時の保存 20 GiB（決定 5） |
@@ -483,7 +494,7 @@ flowchart TD
 | --- | --- |
 | Aurora の一時停止 | 接続の無い間に一時停止に入り続けること・保守で起きる回数（骨組みの環境で数日。この課題） |
 | 単価 | EventBridge のスケジュール（無料の枠の外の単価）・DynamoDB の PITR とストリーム（この課題） |
-| 接続して確かめる項目 | 時間切れの後の DB への働き（関数が排他の鎖を持ったまま時間切れになった後、3 分のうちに巻き戻って鎖が外れること。決定 9）・パスワードを含む文の DB の側のログ（作り物のパスワードで `CREATE ROLE` を既にある役割へ打って失敗させ、Aurora の PostgreSQL のログのファイルを `DownloadDBLogFilePortion` で読み、平文が現れず検証子だけであること。決定 17）・戻しの後もプロジェクトのデータベースが残ること（決定 10）・再開の待ち・カタログの分け方（Aurora の管理の役割は superuser でなく、CI の PostgreSQL の結果と違いうる）・`ALTER ROLE` と排他の鎖を 1 つの Data API のトランザクションで打てること・Data API で用意の手順の文が打てて接続を残さないこと（用意の後に一時停止へ入るまでの時間）・文の長さの上限と値の型が `pg` の実装と同じに扱えること・`pg_stat_clear_snapshot()` と `pg_terminate_backend` が Data API のトランザクションの中で `pg` の実装と同じに動くこと・DBOS と PostgreSQL 16.13・ACU の平均と既定 2 ACU。関数を呼ぶ API の側と終わりの記録の口が #6 までできないため、#44 へ分けた（決定 13） |
+| 接続して確かめる項目 | 時間切れの後の DB への働き（関数が排他の鎖を持ったまま時間切れになった後、3 分のうちに巻き戻って鎖が外れること。決定 9）・パスワードを含む文の DB の側のログ（作り物のパスワードで `CREATE ROLE` を既にある役割へ打って失敗させ、`log_statement` を `all` にして成功させた文と合わせて、Aurora の PostgreSQL のログのファイルを `DownloadDBLogFilePortion` で読み、平文も検証子も現れないこと。クラスタのパラメータの引数の値を記録しない設定が Data API の接続で 0 と読めること。決定 17）・戻しの後もプロジェクトのデータベースが残ること（決定 10）・再開の待ち・カタログの分け方（Aurora の管理の役割は superuser でなく、CI の PostgreSQL の結果と違いうる）・`ALTER ROLE` と排他の鎖を 1 つの Data API のトランザクションで打てること・Data API で用意の手順の文が打てて接続を残さないこと（用意の後に一時停止へ入るまでの時間）・文の長さの上限と値の型が `pg` の実装と同じに扱えること・`pg_stat_clear_snapshot()` と `pg_terminate_backend` が Data API のトランザクションの中で `pg` の実装と同じに動くこと・DBOS と PostgreSQL 16.13・ACU の平均と既定 2 ACU。関数を呼ぶ API の側と終わりの記録の口が #6 までできないため、#44 へ分けた（決定 13） |
 
 ## 外部の調査
 

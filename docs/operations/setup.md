@@ -148,6 +148,19 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 - パイプラインのスタックを初めて反映した後は、GitHub との接続を有効にし、承認を拒む方針を AI の主体へ付けて確かめるまで、起点のブランチへ push しない（[pipeline-approval.md](pipeline-approval.md)）
 - 設定を変えるときの手順は [settings.md](settings.md) にある
 
+### 進行表の DB のログと監査の設定
+
+DB の用意の関数は、プロジェクトの役割のパスワードを SCRAM-SHA-256 の検証子にして引数で渡す。検証子も認証に使う秘密のため、関数は送る前に次の設定を読み、1 つでも外れていれば検証子を送らずに止まる（用意と差し替えが通らない）。
+
+| 設定 | 求める値 | 置く所 |
+| --- | --- | --- |
+| `log_parameter_max_length` | `0`（文のログに引数の値を書かない） | スタックがクラスタのパラメータの群で置く。管理の役割はセッションで変えられない |
+| `log_parameter_max_length_on_error` | `0`（失敗のログに引数の値を書かない） | スタックがクラスタのパラメータの群で置き、関数もトランザクションの中だけで置く |
+| `pgaudit.log_parameter` | 無いか `off` | pgAudit を使うときに、クラスタのパラメータの群か役割の設定で守る |
+| `pgaudit.log` | 無いか、`role` を含まない（`all` も `role` を含む。`all, -role` は通る） | 同上。役割の文は本文に検証子を持つため |
+
+クラスタのパラメータの群をスタックの外で書き換えて上の値から外すと、次の用意か差し替えで止まる。
+
 ## アプリのスタックを消した後に作り直す
 
 データを失わないため、アプリのスタックを消しても次の資源は消えずに残る（CloudFormation の `DeletionPolicy` と `UpdateReplacePolicy` が `Retain`）。

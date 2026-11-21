@@ -24,12 +24,8 @@ export const dbPrepInvocation = z.discriminatedUnion("kind", [
   z.strictObject({ prep_id: prepId, project_id: projectId, kind: z.literal("rotate"), rotation_seq: seq }),
 ]);
 
-export const DB_PREP_FAILURE_REASONS = Object.freeze([
-  "data_api_unavailable",
-  "guard_conflict",
-  "connections_remain",
-  "sql_failed",
-] as const);
+// 古い接続が残った差し替えは終わりを記さずに落ちる（I17）ため、記す理由に無い
+export const DB_PREP_FAILURE_REASONS = Object.freeze(["data_api_unavailable", "guard_conflict", "sql_failed"] as const);
 
 // recorded_seq は DB の側に記してあった差し替えの番号
 export const dbPrepOutcome = z.discriminatedUnion("result", [
@@ -63,6 +59,17 @@ export const DB_PREP_TIMING: DbPrepTiming = Object.freeze({
   prepDeadlineSeconds: 900,
   patrolIntervalSeconds: 300,
 });
+
+// DB の用意の関数へ渡す環境変数の名前。資源（infra/lib/db-prep-function.ts、#13 の U7）が値を入れ、
+// 起点（apps/api/src/entries/db-prep.ts）が読む。両方がこの定数を参照し、名前を写さない
+export const DB_PREP_ENV = Object.freeze({
+  // 進行表の DB のクラスタの ARN（Data API の resourceArn）
+  clusterArn: "DB_PREP_CLUSTER_ARN",
+  // 管理の役割の秘密の器の ARN（Data API の secretArn）
+  adminSecretArn: "DB_PREP_ADMIN_SECRET_ARN",
+  // プロジェクトの秘密の器の名前の頭（<prefix>/<environment>/progress-db/）
+  secretPrefix: "DB_PREP_SECRET_PREFIX",
+} as const);
 
 export type DbPrepInvocation = z.infer<typeof dbPrepInvocation>;
 export type DbPrepOutcome = z.infer<typeof dbPrepOutcome>;

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { escapeIdentifier } from "pg";
+import { escapeIdentifier, escapeLiteral } from "pg";
 import { describe, expect, it } from "vitest";
 import {
   CATALOG_READS,
@@ -313,7 +313,8 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
       at("AS signalled"),
       at("d.datname = :database_name"),
       at("AS remaining FROM pg_catalog.pg_stat_activity s WHERE s.datname = :database_name"),
-      at(`CREATE ROLE ${role} WITH LOGIN PASSWORD`),
+      at("set_config('nd_prep.role_verifier'"),
+      at("'CREATE ROLE %I WITH LOGIN PASSWORD %L'"),
       at(`GRANT ${role} TO CURRENT_USER WITH SET TRUE, INHERIT FALSE`),
       at(`CREATE SCHEMA IF NOT EXISTS ${role} AUTHORIZATION ${role}`),
       at(`ALTER ROLE ${role} SET search_path TO ${role}`),
@@ -353,7 +354,7 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
     for (const state of [{ publicDatabaseRemaining: 1 }, { publicCatalogRemaining: 1 }]) {
       const fake = fakeDb(state);
       await expect(provisionProject(fake, { ...PROJECT, password: PASSWORD })).rejects.toThrow();
-      expect(fake.statements().some((x) => x.startsWith("CREATE ROLE") || x.startsWith("GRANT"))).toBe(false);
+      expect(fake.statements().some((x) => x.includes("CREATE ROLE %I") || x.startsWith("GRANT"))).toBe(false);
     }
     // 3 で残れば ALLOW_CONNECTIONS true を打たずに巻き戻す
     const fake = fakeDb();
@@ -570,7 +571,7 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
     ).rejects.toThrow();
     expect(waits).toEqual([500, 500, 200]);
     expect(fake.statements().filter((x) => x.includes("AS remaining FROM pg_catalog.pg_stat_activity s WHERE s.datname"))).toHaveLength(4);
-    expect(fake.statements().some((x) => x.startsWith("CREATE ROLE") || x.startsWith("GRANT"))).toBe(false);
+    expect(fake.statements().some((x) => x.includes("CREATE ROLE %I") || x.startsWith("GRANT"))).toBe(false);
   });
 
   it("6 は作り直しでも、スキーマの前に管理の役割へ SET できる所属を与える", async () => {
@@ -592,9 +593,19 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
   it("役割が既にあれば ALTER ROLE でパスワードを書き直す（作り直し）", async () => {
     const fake = fakeDb({ databaseExists: true, roleExists: true });
     await provisionProject(fake, { ...PROJECT, password: PASSWORD });
-    const role = escapeIdentifier(PROJECT.role);
-    expect(fake.statements().some((x) => x.startsWith(`ALTER ROLE ${role} WITH LOGIN PASSWORD 'SCRAM-SHA-256$4096:`))).toBe(true);
-    expect(fake.statements().some((x) => x.startsWith("CREATE ROLE"))).toBe(false);
+    const s = fake.statements();
+    const alter = s.findIndex((x) => x.startsWith("DO $nd_role_password$") && x.includes("'ALTER ROLE %I WITH LOGIN PASSWORD %L'"));
+    expect(alter).toBeGreaterThan(0);
+    expect(s[alter]).toContain(escapeLiteral(PROJECT.role));
+    expect(s.some((x) => x.includes("CREATE ROLE %I"))).toBe(false);
+    // 検証子は引数で渡し、同じトランザクションで打つ。どの文の本文にも検証子が無い
+    const ex = fake.calls.flatMap((c) => (c.kind === "execute" ? [c] : []));
+    const stage = ex[alter - 1]!;
+    expect(stage.sql).toContain("set_config('nd_prep.role_verifier', CAST(:verifier AS text), true)");
+    expect(stage.params).toEqual([{ name: "verifier", value: expect.stringMatching(/^SCRAM-SHA-256\$4096:/) }]);
+    expect(stage.transactionId).toBeDefined();
+    expect(ex[alter]!.transactionId).toBe(stage.transactionId);
+    for (const x of s) expect(x).not.toContain("SCRAM-SHA-256$");
   });
 
   it("文と引数のどれにもパスワードの平文が現れない（作る・作り直しの両方）", async () => {

@@ -94,10 +94,10 @@ describe("ProgressDb", () => {
     expect(ofType(template, "AWS::RDS::DBInstance").map(([, p]) => p.DBInstanceClass)).toEqual(["db.serverless"]);
   });
 
-  it("クラスタのパラメータの群は rds.force_ssl を 1 にする", () => {
+  it("クラスタのパラメータの群は rds.force_ssl を 1 にし、文のログに引数の値を書かない", () => {
     const [groupId, group] = ofType(template, "AWS::RDS::DBClusterParameterGroup")[0]!;
     expect(group.Family).toBe("aurora-postgresql16");
-    expect(group.Parameters).toEqual({ "rds.force_ssl": "1" });
+    expect(group.Parameters).toEqual({ "rds.force_ssl": "1", log_parameter_max_length: "0", log_parameter_max_length_on_error: "0" });
     template.hasResourceProperties("AWS::RDS::DBCluster", { DBClusterParameterGroupName: { Ref: groupId } });
   });
 

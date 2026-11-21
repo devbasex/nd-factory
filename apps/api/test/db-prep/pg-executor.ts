@@ -242,7 +242,8 @@ export type TestDatabase = {
   executor(): PgExecutor;
   // superuser でない管理の役割（CREATEDB・CREATEROLE・pg_signal_backend。Aurora の管理の役割に似せる）で打つ SqlExecutor。
   // 手順の 1 と 4 で外す権限の持ち主（接続の値の役割）の権限を受け継ぐ所属だけを持ち、superuser の属性は持たない。
-  // inheritOwner が偽なら、その所属も持たない（取り消す権限の無い管理の役割）
+  // inheritOwner が偽なら、その所属も持たない（取り消す権限の無い管理の役割）。
+  // 引数の値を記録しない設定（log_parameter_max_length。SUSET）を置く権限は与えない（Aurora の管理の役割と同じ）
   nonSuperuserExecutor(opts?: { inheritOwner?: boolean }): Promise<PgExecutor>;
   // 後始末で消す役割（役割はデータベースの外に残るため）
   dropRoleLater(role: string): void;
@@ -300,6 +301,8 @@ export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>, 
     // 使い捨てのデータベースも PUBLIC へ接続を開かないように、接続を許さずに作って外してから許す
     await admin.query(`CREATE DATABASE ${escapeIdentifier(name)} WITH ALLOW_CONNECTIONS false`);
     await admin.query(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier(name)} FROM PUBLIC`);
+    // スタックがクラスタのパラメータで置く、引数の値を記録しない設定に揃える（infra/lib/progress-db.ts）
+    await admin.query(`ALTER DATABASE ${escapeIdentifier(name)} SET log_parameter_max_length = 0`);
     await admin.query(`ALTER DATABASE ${escapeIdentifier(name)} WITH ALLOW_CONNECTIONS true`);
     const connect = async (database: string = name, credentials?: Credentials): Promise<Client> => {
       const c = await open(base, database, credentials);

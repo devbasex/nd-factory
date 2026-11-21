@@ -1,7 +1,6 @@
 import { PROGRESS_DB_IDENT_SHAPE } from "@nd-factory/contracts/db-prep";
-import { escapeIdentifier, escapeLiteral } from "pg";
 import type { ProjectIdent } from "./provision.ts";
-import { scramVerifier } from "./scram.ts";
+import { prepareRolePassword } from "./role-password.ts";
 import { ADMIN_DATABASE, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
 
 // 差し替えの結果。recorded は確定の後に記された番号（applied なら渡した番号）
@@ -18,6 +17,10 @@ export type TerminateOptions = {
   startingWaitCapMs?: number;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  // 残りが 0 と読んだときに、差し替えの鎖と番号 n の読みを持ったまま、確定の前に打つ（秘密の器の版へ AWSCURRENT を移す）。
+  // 鎖を放してから移すと、重なった古い呼び出しが新しい呼び出しの移した後に古い版へ戻しうるため、鎖の中で打つ。
+  // 投げたらトランザクションを巻き戻し、その例外をそのまま投げる
+  whileLocked?: () => Promise<void>;
 };
 
 // 認証の時間切れに足す余裕。時間切れで切られた接続が終わるまでと、認証を終えて載った古い接続へシグナルを送って
@@ -153,14 +156,14 @@ async function readSeq(sql: SqlExecutor, params: SqlParam[], opts: TxOpts): Prom
 }
 
 // 記した番号が n より小さいときだけ、パスワード（SCRAM-SHA-256 の検証子）と番号 n と書いた時刻を 1 つのトランザクションで書き、
-// 境の時刻を空にする（I17）。パスワードの平文は SQL の文にも引数にも載せない（失敗した文は DB の側のログに書かれうるため）
+// 境の時刻を空にする（I17）。パスワードの平文は SQL の文にも引数にも載せず、検証子も文の本文に載せない
+// （失敗した文は DB の側のログに書かれうるため。role-password.ts）
 export async function rotateRole(sql: SqlExecutor, project: ProjectIdent & { password: string; seq: number }): Promise<RotateResult> {
   if (project.projectId.length === 0) throw new Error("プロジェクトの ID が空");
   assertRole(project.role);
   assertSeq(project.seq);
   // 文を打つ前に作る。印字できない文字のパスワードはここで投げ、何も打たない
-  const verifier = escapeLiteral(scramVerifier(project.password));
-  const role = escapeIdentifier(project.role);
+  const writePassword = prepareRolePassword(project.role, project.password, "alter");
   const roleParam = [{ name: "role_name", value: project.role }];
   return inTransaction(sql, async (opts) => {
     // 鎖は確定か巻き戻しまで持つ
@@ -169,7 +172,7 @@ export async function rotateRole(sql: SqlExecutor, project: ProjectIdent & { pas
     const got = await readSeq(sql, roleParam, opts);
     if (got !== undefined && got.recorded > project.seq) return { kind: "superseded_greater", recorded: got.recorded };
     if (got !== undefined && got.recorded === project.seq) return { kind: "superseded_equal", recorded: got.recorded };
-    await sql.execute(`ALTER ROLE ${role} WITH PASSWORD ${verifier}`, undefined, opts);
+    await writePassword(sql, opts);
     await sql.execute(WRITE_SEQ, [...roleParam, { name: "seq", value: project.seq }], opts);
     return { kind: "applied", recorded: project.seq };
   });
@@ -177,7 +180,8 @@ export async function rotateRole(sql: SqlExecutor, project: ProjectIdent & { pas
 
 // rotateRole の確定の後に、別のトランザクションで同じ鎖を取り、境の時刻より前に始まった役割の接続を切る。
 // 記した番号が n より大きければ何も切らない。境の時刻が空なら記す。切りと読み直しは切り始めから 1 つの期限を共にし、
-// 期限を過ぎても読み直しを 1 回打ってから、その数を返す（1 以上なら呼ぶ側が connections_remain にする）。
+// 期限を過ぎても読み直しを 1 回打ってから、その数を返す（1 以上なら呼ぶ側が終わりを記さずに落ちる。I17）。
+// 0 なら、鎖を持ったまま whileLocked を打ってから確定する。
 // 確定の前に古い検証子を読んで起動の途中にありうる接続（役割が分からない）は、載るか終わるまで 0 を返さない
 // （0 を返した後に古いパスワードの接続が成り立たないように）。それが残る間だけ期限を認証の時間切れまで延ばし、
 // そこでも残るものを数に入れる。認証の時間切れは認証の交換の間だけ効き、認証の後のデータベースの鎖の待ちには効かない。
@@ -234,12 +238,17 @@ export async function terminateRoleConnections(
       // 延ばせば、ほかの役割の認証が止まっていても終わる。延ばした所でもまだ残るものだけを、古い検証子を持ちうるものとして
       // 残りに数える。成功は、載った古い接続と追う接続の両方が 0 のときだけ
       const remaining = visible + starting.length;
-      if (remaining === 0) return { kind: "done", remaining };
+      if (remaining === 0) {
+        if (options.whileLocked !== undefined) await options.whileLocked();
+        return { kind: "done", remaining };
+      }
       if (before !== undefined && starting.length < before) graceLimit = Math.min(now() + STARTING_GRACE_MS, hardLimit);
       if (starting.length > 0 && startingLimit === undefined) {
         startingLimit = Math.min(start + (await authTimeoutMs(sql, opts)) + STARTING_GRACE_MS, hardLimit);
       }
-      const limit = Math.max(deadline, starting.length > 0 ? (startingLimit ?? deadline) : graceLimit);
+      // 追う対象が減った後の余裕は、追う対象が残る間も効かせる（認証の時間切れの近くで一部が古い接続として載ったとき、
+      // ほかがまだ起動の途中でも、載ったものを切って読み直してから決める）。どれも hardLimit で切り詰めてある
+      const limit = Math.max(deadline, starting.length > 0 ? (startingLimit ?? deadline) : -Infinity, graceLimit);
       const left = limit - now();
       if (left <= 0) return { kind: "done", remaining };
       await sleep(Math.min(pollMs, left));
