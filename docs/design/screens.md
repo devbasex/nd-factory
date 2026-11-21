@@ -64,6 +64,7 @@ HTTP の経路は 14 本にする。機能ごとの一覧の画面・タブの H
 
 - サインインの戻り（認可コードと `state` の検索の値）は `/` で受け、受けたら履歴から検索の値を消す
 - サインインの手段をつなぐ戻りは、連携専用の戻り先 `/me/logins/return` で受ける（画面ではなく、受けたら履歴を R14 の `/me` へ置き換える）。IdP から戻ったブラウザーはこの path を直に開くため、CDN は地図の経路と同じにこの path へも `index.html` を返す（[プラットフォームの文書の CloudFront と画面の S3](platform.md#資源ごとの形)）。起動のときは通常のサインインの戻りより先にこの経路を見て、その `code` と `state` を `signinRedirectCallback` へ渡さない（連携の `state` はサーバーが作り、通常のサインインの状態の控えに無い）。`state` が `login_links.create` の後に `sessionStorage` へ控えた流れの ID と同じときだけ `logins.create` へ送る。手順は [詳細設計の `verifyLoginToLink`](detail.md#関数の仕様)
+- サインイン（R1）とサインインの手段をつなぐ（R14）で出す IdP は、画面の設定の値が持つ有効な IdP だけにする。GitHub は、Cognito が GitHub の利用者向けの OAuth を直には受けられない（Cognito の OIDC の IdP に要る署名つきの ID token を返さない）ため、[#86](https://github.com/devbasex/nd-factory/issues/86) が決める仲介の OIDC の IdP を登録した設置でだけ出す。それまでは Google だけを出す
 - GitHub App を入れた後の戻りは R10 で受ける（検索の値を保ったまま、登録の候補を読み直す）
 - 地図に無い HTTP の経路は `/` へ履歴を置き換えて移る。転送の表は持たない
 - チームを作る・委任を発行する・手元のマシンを登録するは、それぞれ R9・R14・R11 の中のダイアログにし、HTTP の経路を足さない

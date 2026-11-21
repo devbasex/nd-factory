@@ -214,7 +214,7 @@ graph TD
 | タスクの SG | 受け入れを空にする。行きは 443（任意の宛先）と 5432（Aurora の SG だけ） | 公開のサブネットに置くため、外から入る道筋を持たない |
 | Aurora Serverless v2 | PostgreSQL（自動の一時停止を持つ版、LIB80）。出口の無いサブネット。書き手 1 台・読み手なし。最小 0 ACU。最大 ACU は設定のファイルで受ける | Value 6（使わない間は計算の費用が 0） |
 | Aurora の SG | タスクの SG からの 5432 だけを受ける | DB に触れるのはタスクだけ |
-| Cognito | 利用者プール。自分の登録を止め、Google（と GitHub）の IdP からだけ入る。画面のアプリのクライアントは秘密を持たず（PKCE）、token の取り消しを有効にし、refresh token の回し（rotation）を使わない（寿命 30 日をサインインから数える）。サインアウトの戻り先（`logout_uri`）には専用の `/signed-out` だけを登録し、サインインの戻り先（`/`）と分ける（[画面の文書のサインアウトで消す](screens.md#サインアウトで消す)） | Value 9（だれが入れるかをサーバーの側で決める） |
+| Cognito | 利用者プール。自分の登録を止め、Google の IdP（GitHub は [#86](https://github.com/devbasex/nd-factory/issues/86) が決める仲介の OIDC の IdP を登録した設置でだけ）からだけ入る。画面のアプリのクライアントは秘密を持たず（PKCE）、token の取り消しを有効にし、refresh token の回し（rotation）を使わない（寿命 30 日をサインインから数える）。サインアウトの戻り先（`logout_uri`）には専用の `/signed-out` だけを登録し、サインインの戻り先（`/`）と分ける（[画面の文書のサインアウトで消す](screens.md#サインアウトで消す)） | Value 9（だれが入れるかをサーバーの側で決める） |
 | CloudFront と画面の S3 | 置き場は公開せず、配信は OAC で読む（LIB83）。料金は従量の課金（定額のプランに入らない）で、価格の区分は 100。画面の HTTP の経路を直に開けるよう、見る側の要求の段の CloudFront Function が、最後の区切りに `.` を持たない path（[画面の地図の 14 本](screens.md#http-の経路の一覧)と、サインインの手段をつなぐ戻り先 `/me/logins/return`。地図に無い path も画面が `/` へ移すため含める）の要求を `/index.html` に書き換えて S3 から返す。検索の値（`code`・`state`）は書き換えず画面へ渡す。`.` を持つ path（ビルドの出力・Service Worker・マニフェスト）はそのまま S3 から読み、無いファイルを `index.html` で隠さない（S3 の 403・404 を `index.html` に替える誤りの応答の設定は使わない）。検証は、`/me/logins/return?code=…&state=…` と地図の経路の 1 つを直に開いて `index.html` が返ることを配信の試しに入れる | Value 3（HTTPS の配信で Service Worker が動く）・Value 6 |
 | 状態の S3 | 公開を止め、暗号化し、TLS だけ。NDF のファイルは 14 日で消す規則 | Value 7・Value 6 |
 | ECR | ランナーと DB の用意のイメージ。ライフサイクルの規則で古い版を消す（LIB85） | Value 6（保管の費用を抑える） |
@@ -827,7 +827,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | ACU の平均 | 見込みは起きている間の平均を 1 ACU と置いた | 実測と、反映した後の請求 |
 | 1 か月の費用 | [見込み](#見込み) の額 | 反映した後の請求（タグ `app-prefix`・`app-env` で分けて読む） |
 | ルートのファイルシステムを読むだけにできるか（ECS.5） | NDF の作業場所の書き込みをボリュームへ寄せられるか | ランナーのイメージで確かめる |
-| GitHub の IdP | GitHub のログインを Cognito の IdP として直に受けられるか（外部の調査で試していない） | GitHub と Cognito の文書で確かめる |
+| GitHub の IdP | GitHub の利用者向けの OAuth はユーザーの access token を返し、Cognito の OIDC の IdP に要る署名つきの ID token を出さないため、Cognito は直には受けられない。仲介する OIDC の IdP の形と受け持ちが決まっていない。決まるまで GitHub のサインインと連携の選択肢を出さない | [#86](https://github.com/devbasex/nd-factory/issues/86) が仲介を決めて設計を直す |
 | `us-west-2` などの単価 | 見込みは `us-east-1` の単価で出した | 設置する人がリージョンの単価の頁で読む |
 | `ALTER ROLE` と advisory lock の同じトランザクション | パスワードの変更と差し替えの番号の書き込みを 1 つのトランザクションで確定できること（決定 95） | 反映した環境の Aurora で実測（#13 の用意の手順の試験） |
 | `StopTask` から `STOPPED` までの時間 | 見回りの 1 回の起動の中で停止を読めるか。読めなければ次の見回りで読む（決定 96） | 反映した環境で測る（#13） |
