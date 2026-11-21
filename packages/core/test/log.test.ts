@@ -62,8 +62,8 @@ describe("createLogger", () => {
 
   it("JSON にできない値は [unserializable] に替えて出す", () => {
     const out = capture();
-    createLogger(context, out.sink).info("変な値", { big: 10n, fn: () => 1, sym: Symbol("s") });
-    expect(out.records()[0]).toMatchObject({ big: "[unserializable]", fn: "[unserializable]", sym: "[unserializable]" });
+    createLogger(context, out.sink).info("変な値", { big: 10n, callback: () => 1, sym: Symbol("s") });
+    expect(out.records()[0]).toMatchObject({ big: "[unserializable]", callback: "[unserializable]", sym: "[unserializable]" });
   });
 
   it("循環する値でも呼び手が落ちない", () => {
@@ -80,5 +80,31 @@ describe("createLogger", () => {
     });
     expect(() => log.error("書けなくても続く", { n: 1 })).not.toThrow();
     expect(() => log.child({ a: 1 }).info("子も")).not.toThrow();
+  });
+
+  it("呼び手の項目と child の文脈は必須の項目を上書きできず、field. の頭を付けて残る", () => {
+    const out = capture();
+    const log = createLogger(context, out.sink);
+    log.warn("上書きしない", { request_id: "other", level: "info", time: "x", msg: "m", fn: "f", endpoint: "e" });
+    log.child({ request_id: "child", level: "error" }).info("子も");
+    for (const line of out.lines) expect(line.match(/"request_id":/g)).toHaveLength(1);
+    const [first, second] = out.records();
+    expect(first).toMatchObject({ level: "warn", msg: "上書きしない", request_id: "req-1", fn: "api", endpoint: "user" });
+    expect(first).toMatchObject({ "field.request_id": "other", "field.level": "info", "field.time": "x", "field.msg": "m", "field.fn": "f", "field.endpoint": "e" });
+    expect(first?.["time"]).not.toBe("x");
+    expect(second).toMatchObject({ level: "info", request_id: "req-1", "field.request_id": "child", "field.level": "error" });
+  });
+
+  it("child の項目を読めなくても、親のロガーで続ける", () => {
+    const out = capture();
+    const fields = Object.defineProperty({}, "bad", {
+      enumerable: true,
+      get() {
+        throw new Error("読めない");
+      },
+    });
+    const child = createLogger(context, out.sink).child(fields);
+    expect(() => child.info("親で続く")).not.toThrow();
+    expect(out.records()).toMatchObject([{ msg: "親で続く", request_id: "req-1" }]);
   });
 });
