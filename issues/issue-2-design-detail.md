@@ -644,7 +644,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
   - `RowCodecError` は固定の理由の符号 `code`（`codec_invalid`: `rowCodec` の引数の誤り・`shared_buffer`・`row_invalid`: `writeRow` の行が `latest` の形を通らない・`downgrade_invalid`: `downgrade` の結果が前の版の形を通らない・`previous_shape_invalid`: `rowUpdateOf` が読んだ前の版の行が前の版の形を通らない・`value_lost`: 版の変換で値が失われる・`key_mismatch`: 書き換え後の鍵が読んだ行の鍵と違う）を持つ。`message` は Zod の `issue.path`（`z.record` の検証に外れた鍵の値を含みうる）を載せるため、ログへは `message` でなく `code` を載せる
   - 書き手の決まり: 行を作る書き込み（`putIfAbsent`）は、行の列を `writeRow` の戻り値から作り、`schema_version` を必ず書く。書き換える書き込み（`updateIfVersion`・`updateIfSchemaVersion`）は、読んだ行と書き換えた後の形から `rowUpdateOf` で `set` と `remove` を作り、その 2 つを同じ書き込みに渡す（`set` は `schema_version` を含む）。これで、どの書き換えも `schema_version` を書き手の版にし、移しの条件（下）が同時の書き込みを見つけられる。また、2 段目の書き手が前の版の行を先に書き換えて `schema_version` を最新にしても、`latest` の版で消した列は同じ書き込みの `REMOVE` で消える。`migrateTable` は `schema_version` が最新の行を飛ばすため、書き手が消さなければ、消した列が索引（GSI）の鍵のときその行は移しの後も索引に残る。書き手を前の版へ戻した状態では、`rowUpdateOf` の `remove` が次の版だけの列を消す（行の zod は知らない列を落とすため読みでも捨てられるが、索引に残さないよう書き込みで消す）。消しても値を失わないよう、書き手を前の版へ戻せる間（版を上げる子の手順の 2 から 4 の前まで）は、次の版の行に前の版で表せる値（`upgrade(downgrade(行))` が元の行に戻る値）だけを書く。`writeRow` は `downgradable` の間、前の版で書くときも次の版で書くときも（2 段目）これを確かめ、戻らない行を書かずに投げる
 - `migrateTable`
-  - 事前条件: `deps` は `Db`・時計・ログ・残り時間の読み手・`TABLES`。`cursor` は前の呼び出しが返した値か `null`
+  - 事前条件: `deps` は `Db`・時計・ログ・残り時間の読み手・`TABLES`。`cursor` は前の呼び出しが返した値か `null`。`purpose` は `audit` でない（`MigrateEvent` と `migrateTable` の `purpose` の型を `Exclude<TablePurpose, "audit">` にし、移しの Lambda に記録の表の権限を与えない）
   - 処理の手順:
     1. `db.scan(table, { limit: MIGRATE_PAGE_SIZE, startKey: cursor, consistent: true })` で 1 ページ読む
     2. ページの行を順に、行ごとに次を行う。行に取りかかる前に残り時間が `MIGRATE_RESERVE_MS` 以下なら、そこで止めて `{ done: false, cursor: <最後に処理を終えた行の鍵> }` を返す（このページでまだ 1 行も終えていなければ、受け取った `cursor` をそのまま返す）
@@ -666,7 +666,9 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 - `updateIfSchemaVersion`
   - 事前条件: `set` は `schema_version` を含み、その値は `from` より大きい。`set` と `remove` に `pk`・`sk`・`version` を含まない。`remove` は `set` の鍵と重ならず、`schema_version` を含まない
   - 事後条件: 更新の式は `SET <set の列>` に、`remove` が空でなければ `REMOVE <remove の列>` を続けた 1 つの式で、`SET` と `REMOVE` は同じ条件の下で一緒に効くか一緒に外れる。消した列が索引（GSI）の鍵なら、DynamoDB はその行を索引から外す（`readRow` が列を捨てるだけでは索引に残る）。戻り値は `attribute_exists(pk) AND schema_version = :from`（`version` が `null` でなければ `AND version = :version` も）を条件にした 1 件。`version` を上げない（中身の意味を変えない書き換えのため。同時に読んだ書き手の `updateIfVersion` を外さない）。行が消えていれば条件が外れ、行を作り直さない
-  - `version` を持たない行（ログインの組・IdP の主体の一意の行・冪等の鍵・追記だけの行）は `version: null` で使う。追記だけの行は書き手が書き換えず、冪等の鍵の借りから済みへの書き換えは上の書き手の決まりで `schema_version` を書くため、`schema_version` の条件だけで同時の書き込みを見つけられる
+  - `version` を持たない行（ログインの組・IdP の主体の一意の行・冪等の鍵・記録の表でない追記だけの行）は `version: null` で使う。操作の記録の表（`audit`）の行は使わない（`writeAtomically` と `Db.transactWrite` が記録の表への書き換えを拒む。I9。下の「記録の表の版」）。追記だけの行は書き手が書き換えず、冪等の鍵の借りから済みへの書き換えは上の書き手の決まりで `schema_version` を書くため、`schema_version` の条件だけで同時の書き込みを見つけられる
+
+記録の表の版: 操作の記録の行は上書きしない（I9）ため移さず、前の版の行を TTL で消えるまで前の版のまま読む。記録の行の種類の版を上げるときは、手順の 1 と 2 のうち `writeVersion` を次の版へ上げる反映だけを行い（記録の書き手は `putIfAbsent` で次の版を書く）、`migrate` は起こさない。`previous` は、2 段目の反映から保存期間（`AUDIT_RETENTION_DAYS`。設置する人が設定のファイルで長くしていればその値）と TTL の削除の遅れの見込み（7 日）が過ぎるまで外さない。外す前に、記録の表の `schema_version` が前の版の行が残っていないことを運用者が走査で確かめ、残っていれば外さずに待つ（`readRow` が `version_unsupported` を返す行を作らない）。記録の行の種類は 2 段目を戻さない（前の版で書き直す経路が無い）ため、`downgradable` は次の版の反映から `false` にしてよい。
 
 ### 内部のデータと定数
 
