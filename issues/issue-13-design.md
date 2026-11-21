@@ -8,19 +8,19 @@
 
 ```mermaid
 graph LR
-    subgraph 今ある app のスタック
+    subgraph APP[今ある app のスタック]
         UP[利用者プール]
         CF[画面の配信]
         API[API の関数 1 本]
         T[(利用者の表)]
     end
-    subgraph この課題で足す
+    subgraph ADD[この課題で足す]
         VPC[自前の VPC]
         DB[(Aurora Serverless v2)]
         ECS[ECS のクラスタと DB の用意のタスク]
         BUD[予算と運用の知らせ]
     end
-    SETUP[設置のコマンド] -->|diff・deploy| 今ある app のスタック
+    SETUP[設置のコマンド] -->|diff・deploy| APP
     SETUP -.->|イメージの push・足りない設定の一覧を足す| SETUP
 ```
 
@@ -50,8 +50,8 @@ graph LR
 
 ```mermaid
 graph TD
-    subgraph app のスタック
-        subgraph 自前の VPC（既定 10.80.0.0/16）
+    subgraph STACK[app のスタック]
+        subgraph NET["自前の VPC（既定 10.80.0.0/16）"]
             PUB[公開のサブネット 2 つ<br/>DB の用意のタスク・ランナーのタスク]
             ISO[出口の無いサブネット 2 つ<br/>Aurora・書き手 1 台・0〜2 ACU]
             S3E[S3 の Gateway のエンドポイント]
