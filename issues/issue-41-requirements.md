@@ -86,7 +86,7 @@ NDF 11.0 が配布された（ndf v11.0.0 が 2026-11-18、最新の v11.0.12 �
 | 項目 | 手段 |
 | --- | --- |
 | テスト・静的解析・型検査 | Pull Request の CI の `check`（`npm run check`）と `ref-check`。このリポジトリはテストを CI に寄せる（`.ndf/project.json` の `test.ci.only`） |
-| 手動確認（マージ前） | `git grep -nE 'plugins/ndf-next/contracts\|spec-declarations\|table_id' -- docs/design` が 0 件。`gh api -H 'Accept: application/vnd.github.raw+json' 'repos/devbasex/ai-plugins/contents/plugins/ndf/contracts/version.json?ref=752a9cf48a6d36c00ffb3197c8668d1c898c32e2' \| jq -c '.history[-1]'` が出す版と sha256 が、全体の設計の版と sha256（64 桁）と一致する（raw の形で取らないと、応答は Base64 の `content` を持つメタデータになる） |
+| 手動確認（マージ前） | `git grep -nF -e 'plugins/ndf-next/contracts' -e 'spec-declarations' -e 'table_id' -- docs/design` が 0 件。`gh api -H 'Accept: application/vnd.github.raw+json' 'repos/devbasex/ai-plugins/contents/plugins/ndf/contracts/version.json?ref=752a9cf48a6d36c00ffb3197c8668d1c898c32e2' \| jq -c '.history[-1]'` が出す版と sha256 が、全体の設計の版と sha256（64 桁）と一致する（raw の形で取らないと、応答は Base64 の `content` を持つメタデータになる） |
 
 ## 前提とする取り決め
 
