@@ -291,7 +291,7 @@ infra/
 {"type": "object", "properties": {"items": {"type": "array", "minItems": 1, "maxItems": <MAX_ITEMS か allOrNothing.maxItems>}}, "required": ["items"]}
 ```
 
-- `buildMcpTools` の道具の出力の形は、結果の配列の JSON Schema である。注記は次の条件で付ける
+- `buildMcpTools` の道具の出力の形は、結果の配列の JSON Schema である。全体の設計（[api.md の MCP の出力の形](../docs/design/api.md) と STD40）が採る MCP の仕様 2026-07-28 版は、`structuredContent` に配列を含む任意の JSON の値を許す（2025-11-25 版はオブジェクトに限っていた）。#11 の `writeMcpResponse` も同じ配列を `structuredContent` に入れるため、出力の形と応答はそろっている。注記は次の条件で付ける
 
 | 注記 | 条件 |
 | --- | --- |
