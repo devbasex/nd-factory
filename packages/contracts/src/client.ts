@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isPending, type ItemOf, type OperationDef, type ResultOf, resultSchemaOf } from "./operation.ts";
 import { OPERATIONS } from "./operations/index.ts";
+import { requestProblemOf } from "./reasons.ts";
 
 // 画面とテストが操作を呼ぶ口と、生成したダミーを返す送り手（設計の決定 16）。
 // 画面の外のコードのため、zod と操作の表だけを読み、React・DOM・node: の組み込みを import しない
@@ -36,8 +37,6 @@ export type OperationClient<Ops extends readonly OperationDef[]> = {
 // 応答が結果の形に合わないとき。status 0 は HTTP の状態でなく呼び出しの口の判定であることを示す
 const RESPONSE_INVALID: RequestFailure = { ok: false, status: 0, reason: "response_invalid" };
 
-const problemReason = z.object({ reason: z.string() });
-
 // 要素の配列を送り、応答を結果の zod で検証して型つきで返す。応答の誤りは値で返し、例外を投げない。
 // 表は既定で操作の表で、テストは同じ defineOperation で組んだ操作の表を渡せる
 export function createOperationClient<const Ops extends readonly OperationDef[] = typeof OPERATIONS>(
@@ -51,8 +50,9 @@ export function createOperationClient<const Ops extends readonly OperationDef[] 
       if (op === undefined) throw new TypeError(`操作の表に無い操作: ${name}`);
       const res = await transport(op, items);
       if (res.status !== 200) {
-        const problem = problemReason.safeParse(res.body);
-        return problem.success ? { ok: false, status: res.status, reason: problem.data.reason } : RESPONSE_INVALID;
+        // 生成側と同じ problem の形で、正本に登録した理由と HTTP の状態の組だけを受ける
+        const problem = requestProblemOf(res.status, res.body);
+        return problem === null ? RESPONSE_INVALID : { ok: false, status: res.status, reason: problem.reason };
       }
       if (isPending(op.result) || !Array.isArray(res.body) || res.body.length !== items.length) return RESPONSE_INVALID;
       const parsed = z.array(resultSchemaOf(op)).safeParse(res.body);

@@ -70,6 +70,17 @@ describe("createOperationClient", () => {
     expect(await broken.call("fixture_notes.list", [LIST_ITEM])).toEqual({ ok: false, status: 0, reason: "response_invalid" });
   });
 
+  it.each([
+    ["正本に無い理由", 503, { type: "about:blank", status: 503, reason: "typo" }],
+    ["理由と状態の組が正本と違う", 503, { type: "about:blank", status: 503, reason: "body_not_array" }],
+    ["本文の status と HTTP の状態が違う", 503, { type: "about:blank", status: 400, reason: "body_not_array" }],
+    ["type の無い本文", 503, { status: 503, reason: "unavailable" }],
+    ["形の外の項目を持つ本文", 503, { type: "about:blank", status: 503, reason: "unavailable", detail: "x" }],
+  ])("%sの problem は response_invalid", async (_label, status, body) => {
+    const client = createOperationClient(replying(status, body), FIXTURE_OPERATIONS);
+    expect(await client.call("fixture_notes.list", [LIST_ITEM])).toEqual({ ok: false, status: 0, reason: "response_invalid" });
+  });
+
   it("既定の表は操作の表で、形の未定の操作の成功の応答は response_invalid", async () => {
     const client = createOperationClient(replying(200, [{ ok: true, item: {} }]));
     expect(await client.call("projects.get", [{} as never])).toEqual({ ok: false, status: 0, reason: "response_invalid" });
