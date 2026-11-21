@@ -46,7 +46,7 @@ graph TD
   auth --> fresh["行が無いか、外して失効を済ませた<br/>sessions.create だけに「まだ結んでいない人」"]
   fresh --> sc["sessions.create<br/>利用者とログインと対応の行を<br/>1 つのトランザクションで書く"]
   bound --> ll["login_links.create<br/>流れの行を今の利用者とセッションに結ぶ"]
-  ll --> lc["logins.create<br/>サーバーが認可コードを交換し<br/>流れの行を消すのと同じトランザクションで結ぶ"]
+  ll --> lc["logins.create<br/>サーバーが認可コードを交換し<br/>流れの行を used へ書き換えるのと<br/>同じトランザクションで結ぶ"]
   bound --> ld["logins.delete<br/>対応の行を失効の待ち（signing_out）へ"]
   ld --> so["失効の実行<br/>借りを取って AdminUserGlobalSignOut<br/>成功の後に外した（unlinked）へ"]
 ```
@@ -73,9 +73,10 @@ graph TD
 ### 決定 2: つなぐログインを今の利用者がそのセッションで始めた流れで得たものに限るため、`login_links.create` で流れを今の利用者とセッションに結び、認可コードをサーバーが交換して流れを 1 回だけ使う
 
 - **質問**: `logins.create` が結ぶログインが、今の利用者が自分のセッションで始めた連携で得たものであることを、どこで照らすか
-- **選んだ案**: 操作 `login_links.create` を足す（F1・人だけ・書く・受け持ちは #4）。ハンドラーは `code_verifier` と流れの ID を作り、ログインをつなぐ流れの行（`USER#<利用者>` / `LINK#<流れの ID>`）に今の利用者・要求の Cognito の `sub`・セッションの識別子（token の `origin_jti`）・`binding_epoch`・選んだ IdP・`code_verifier`・10 分（`LOGIN_LINK_TTL_MS`）の期限を書き、認可の URL を返す。URL は `identity_provider`（選んだ IdP）と `prompt=login` と PKCE を持つ。画面は連携専用の戻り先 `/me/logins/return` で戻りを受け、通常のサインインの戻りより先に見て、控えた流れの ID と `state` が同じときだけ `logins.create` へ送る。`logins.create` のハンドラーは流れの行を照らし、サーバーがその行の `code_verifier` と `client_id` で認可コードを交換し、得た token を `verifyLoginToLink` で照らす。利用者プールから得た IdP が流れの行の IdP と違えば、既に結んだことより先に要素の 409 `link_invalid` にする。選んだ IdP で既に結んだ主体は要素の 409 `already_linked` にする。流れの行は結ぶのと同じトランザクションで消し、開始元の対応の行が同じ利用者・同じ世代の `bound` であることを条件に照らす。CDN は `/me/logins/return` にも `index.html` を返す（最後の区切りに `.` を持たない path を `/index.html` に書き換える CloudFront Function）
+- **選んだ案**: 操作 `login_links.create` を足す（F1・人だけ・書く・受け持ちは #4）。ハンドラーは `code_verifier` と流れの ID を作り、ログインをつなぐ流れの行（`USER#<利用者>` / `LINK#<流れの ID>`）に今の利用者・要求の Cognito の `sub`・セッションの識別子（token の `origin_jti`）・`binding_epoch`・選んだ IdP・`code_verifier`・10 分（`LOGIN_LINK_TTL_MS`）の期限を書き、認可の URL を返す。URL は `identity_provider`（選んだ IdP）と `prompt=login` と PKCE を持つ。画面は連携専用の戻り先 `/me/logins/return` で戻りを受け、通常のサインインの戻りより先に見て、控えた流れの ID と `state` が同じときだけ `logins.create` へ送る。`logins.create` のハンドラーは流れの行を照らし、サーバーがその行の `code_verifier` と `client_id` で認可コードを交換し、得た token を `verifyLoginToLink` で照らす。利用者プールから得た IdP が流れの行の IdP と違えば、既に結んだことより先に要素の 409 `link_invalid` にする。選んだ IdP で既に結んだ主体は要素の 409 `already_linked` にする。流れの行は結ぶのと同じトランザクションで `open` から `used` へ書き換え（`code_verifier` を消し、確定した要素の冪等の鍵と結んだログインを残す）、開始元の対応の行が同じ利用者・同じ世代の `bound` であることを条件に照らす。結果の分からない送り直しには、ハンドラーが `used` の流れの行から、同じ冪等の鍵のときだけ初回の成功を返す。CDN は `/me/logins/return` にも `index.html` を返す（最後の区切りに `.` を持たない path を `/index.html` に書き換える CloudFront Function）
 - 採らなかった案: 画面がつなぐログインの token を要求で渡し、`state` と PKCE を画面の側だけで照らす（別の流れで得た直近の token を API へ直に渡すと、別の利用者へ結べる）
 - 採らなかった案: 流れを Cognito の `sub` だけに結ぶ（`sub` は同じログインの別のサインインでも同じで、認可コードの交換の間に開始元のログインが外されても結べる）
+- 採らなかった案: 結果の分からない送り直しの成否を、画面がログインの一覧の増減で決める（別のタブや端末が同じ時に同じ IdP の別のアカウントをつなぐと、失敗した流れまで成功と出す）
 - 採らなかった案: 連携の戻りも通常のサインインの戻り先 `/` で受ける（連携の `state` はサーバーが作り、通常のサインインの状態の控えに無いため、通常のサインインの戻りの処理が受けられない）
 - 採らなかった案: 認可の URL で IdP と認証し直しを指定しない（Cognito が既存のブラウザーセッションを使い、既に結んだ主体か 5 分を過ぎたサインインの token が返って、つなげない）
 - 採らなかった案: 流れの外れを要素の 401 で返し、既に結んだ主体と確定の衝突を同じ理由で返す（401 は要求全体の理由で要素に使えず、画面が「別のアカウントを選び直す」と「始め直す」を分けられない）
