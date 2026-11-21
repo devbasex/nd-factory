@@ -711,6 +711,42 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     expect(table.rows("idempotency")[0]).toMatchObject({ state: "settled", result: { ok: true, item: { title: "stored" } } });
   });
 
+  it("同じ連番の並行の再送で付随する書き込みの版も外れたら、版の違いでなく既にある行の結果を返す", async () => {
+    const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
+    const event: Handler = async (item) => {
+      const note = item as { project_id: string; title: string };
+      return {
+        result: { ok: true, item: { title: note.title } },
+        writes: [
+          putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: note.title }, onConflict: "return_existing" }),
+          updateIfVersion({ table: "sprints", key: NOTE_KEY(P_A), version: 1, set: { title: note.title }, onConflict: "version_mismatch" }),
+        ],
+        conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }) }],
+      };
+    };
+    const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
+    // 先に確定した要求が事象を足し、付随する行の版も進めた
+    table.seed("sprints", { ...eventKey, schema_version: 1, version: 1, title: "stored" });
+    table.seed("sprints", { ...NOTE_KEY(P_A), schema_version: 1, version: 2, title: "stored" });
+    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
+    expect(itemsOf(result)).toEqual([{ ok: true, item: { title: "stored" } }]);
+    expect(table.row("sprints", NOTE_KEY(P_A))).toMatchObject({ title: "stored", version: 2 });
+  });
+
+  it("同じ連番の再送でも、要求元の照らしが外れたら既にある行の結果より先に 409 state_mismatch", async () => {
+    const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
+    const event: Handler = async (item) => ({
+      result: { ok: true, item: { title: (item as { title: string }).title } },
+      writes: [putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: "x" }, onConflict: "return_existing" })],
+      conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }) }],
+    });
+    const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
+    table.seed("sprints", { ...eventKey, schema_version: 1, version: 1, title: "stored" });
+    revoke(table);
+    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
+    expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "state_mismatch" }]);
+  });
+
   it("結果の形に無い鍵は応答に残さない", async () => {
     const { deps } = setup();
     expect(itemsOf(await dispatch(call("notes.peek", [{ project_id: P_A }]), deps))).toEqual([{ ok: true, item: { title: "acme" } }]);

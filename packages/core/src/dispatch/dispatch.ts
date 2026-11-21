@@ -233,18 +233,23 @@ type Verdict = { readonly kind: "result"; readonly result: ItemResult } | { read
 // 1 つの要素の外れた件を結果へ訳す。要求元の照らし（同じ行へまとめた件を含む）を先に当て、残りはハンドラーが並べた件の順の最初の理由
 // （ハンドラーが conflicts に操作の契約の失敗の結果を置いた件はその結果、ほかは onConflict の version_mismatch・state_mismatch）。
 // 記録の行が外れたら 503 audit_unavailable、済みの行だけが外れたら（借りを失った）409 in_progress。
-// 外れた書き込みがどれも return_existing なら、最初の件の既にある行から結果を組む（existing）
+// 既にある行から結果を組める return_existing の件が外れたら、付随する書き込みの外れによらず、その件の既にある行から結果を組む（existing）。
+// 同じレーンの同じ連番の並行の再送では、先に確定した要求が付随する行（レーンの版など）も進めるため、付随する件も外れる。
+// 既にある行の結果では付随する書き込みを確定しないため、その外れは結果を決めない。再送そのものを拒む条件（要求元の照らし・記録の行・
+// 冪等の鍵の済みの行）は上で先に当て、既にある行の結果を確定するトランザクションでも同じ件を照らし直す
 function verdictOf(req: Request, failed: readonly Owner[], conflicts: readonly (WriteConflict | undefined)[]): Verdict {
   const result = (r: ItemResult): Verdict => ({ kind: "result", result: r });
   if (failed.some((f) => f.guarded)) return result(failure(409, "state_mismatch"));
   if (failed.some((f) => f.role === "audit")) throw halt(503, "audit_unavailable");
   const own = failed.filter((f) => f.role === "write").sort((a, b) => a.writeIndex - b.writeIndex);
-  const first = own[0];
-  if (first === undefined) return result(failure(409, "in_progress"));
+  if (own.length === 0) return result(failure(409, "in_progress"));
+  const replayable = own.find((f) => {
+    const conflict = conflicts[f.writeIndex];
+    return f.onConflict === "return_existing" && conflict !== undefined && "existing" in conflict;
+  });
+  if (replayable !== undefined) return { kind: "existing", writeIndex: replayable.writeIndex };
   const decisive = own.find((f) => f.onConflict !== "return_existing");
   if (decisive === undefined) {
-    const conflict = conflicts[first.writeIndex];
-    if (conflict !== undefined && "existing" in conflict) return { kind: "existing", writeIndex: first.writeIndex };
     req.log.error("既にある行から結果を組む手立ての無い return_existing の件が外れた", {});
     throw halt(503, "unavailable");
   }
