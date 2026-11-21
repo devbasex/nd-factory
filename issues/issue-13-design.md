@@ -88,7 +88,7 @@ graph TD
 
 ### 集約
 
-集約は足さない。進行表の DB の列はプロジェクトの集約（[データの文書のテーブル定義](../docs/design/data.md#テーブル定義)）にあり、この課題は値を読むだけである。DB の側の差し替えの番号の表（[差し替えの番号](../docs/design/data.md#差し替えの番号)）と、同じスキーマに置くプロジェクトと名前の結び付きの表（決定 8）は DB の用意の関数だけが書く。
+集約は足さない。進行表の DB の列はプロジェクトの集約（[データの文書のテーブル定義](../docs/design/data.md#テーブル定義)）にあり、この課題は値を読むだけである。DB の側の差し替えの番号の表（[差し替えの番号](../docs/design/data.md#差し替えの番号)）と、同じスキーマに置くプロジェクトと名前の結び付きの表（決定 8）・用意の ID の受け取りの表（決定 16）は DB の用意の関数だけが書く。
 
 ### 不変条件
 
@@ -186,7 +186,9 @@ graph TD
 flowchart TD
     A[呼び出しを形の正本で照らす] --> B{用意の ID が今の値か}
     B -->|違う| X[何もせずに終える]
-    B -->|今の値| C[名前と秘密の器と版の ID を読み、その版からパスワードを読む]
+    B -->|今の値| Q{用意の ID を受け取りの表へ一意に記せたか}
+    Q -->|既にある（重複の配信）| X
+    Q -->|記せた| C[名前と秘密の器と版の ID を読み、その版からパスワードを読む]
     C --> D{kind}
     D -->|create| G[結び付きを記して照らし、I10 の守りを照らす]
     G -->|別のプロジェクトの結び付き・別のものに結ばれている| F2["failed: guard_conflict"]
@@ -381,6 +383,17 @@ flowchart TD
 - 比べた候補: LIB14 / LIB12 / LIB3
 - 根拠: Value 15 / Value 16 / Value 6（MVV 版 2）。利用者の方針（2026-11-21。候補を比べるときは、より堅牢で長期的に良い方を選ぶ）
 
+### 決定 16: 同じ用意の ID の重複の配信が同じデータベースを並べて作り、片方の失敗が用意を「無い」へ戻さないよう、関数が SQL の最初に用意の ID を DB の表へ一意に記し、2 つ目の配信は何もせずに終える
+
+- **質問**: 非同期の呼び出しは再試行を 0 回にしても、同じ呼び出しを 2 回以上届けうる（[全体の設計の LIB91](../docs/design/platform.md#ライブラリとサービス)）。どちらも用意の ID の読み直しを通ると、2 つが同じデータベースを並べて作り、片方が並行の DDL の衝突を `failed` に記すと、もう片方が動いている間に `無い` へ戻り、次の開始が重なる。どう直列にするか
+- **選んだ案**: 関数は用意の ID を読み直した後、ほかの SQL の前に、管理のデータベースの `nd_prep.prep_runs`（`prep_id` が主キー）へ用意の ID を `INSERT … ON CONFLICT DO NOTHING` で記す。記せた配信だけが用意か差し替え・版の移し・終わりの記録へ進み、記せなかった配信は何も書かずに終える。同じ ID の 2 つの挿入は主キーの一意の索引で直列になり、ちょうど 1 つが記せる。やり直しはいつも新しい用意の ID で起きる（作るなら次の開始、差し替えなら見回りの呼び直し）ため、記した ID を打ち直す場面は無い
+- 採らなかった案: 終わりの記録の条件だけで重複を捨てる（用意の ID は 2 つの配信で同じため、`failed` と `applied` のどちらが先に書かれても通り、SQL の重なりも止まらない）
+- 採らなかった案: 排他の鎖（`pg_advisory_lock`）を関数の間じゅう持つ（Data API は呼び出しごとに池の接続を使い回し、使い回す前に `DISCARD ALL` でセッションの状態を消すため、トランザクションの外ではセッションの鎖を保てない（[全体の設計の LIB90](../docs/design/platform.md#ライブラリとサービス)）。`CREATE DATABASE` はトランザクションの中で打てない）
+- 採らなかった案: サービスの表に「受け取った」の印を条件つきで書く（関数の役割に表の書き込みを足し、口の外の書き込みが増える。DB の側で閉じれば SQL と同じ置き場で照らせる）
+- **代償**: 受け取りの表に行が積もるため、同じトランザクションで 7 日より古い行を消す。1 つ目の配信が記した直後に落ちると、その用意の ID では何も起きず、期限（15 分）の後の見回りで扱う
+- 作り方: 自前で作る（PostgreSQL の主キーの一意に乗る）
+- 根拠: Value 9 / Value 16（MVV 版 2）。[全体の設計の LIB91](../docs/design/platform.md#ライブラリとサービス)
+
 ## 影響と危険
 
 - **働く範囲**: このリポジトリの `app` のスタック・設置のコマンド・形の正本・`apps/api` の DB の用意の関数・CI の `check` のジョブ。全体の設計は `platform.md`・`data.md`・`api.md`・`overview.md`・`detail.md` と、`execution.md` のリンクの 1 か所を直した
@@ -447,7 +460,7 @@ flowchart TD
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #13 | 実装する | — | `packages/contracts/src/settings.ts`、`packages/contracts/src/db-prep.ts`（新設）、`packages/contracts/test/settings.test.ts`、`packages/contracts/test/db-prep.test.ts`（新設）、`packages/contracts/schema/settings.schema.json`、`infra/settings.example.json`、`docs/operations/settings.md`、`infra/lib/app-stack.ts`、`infra/lib/naming.ts`、`infra/lib/network.ts`（新設）、`infra/lib/progress-db.ts`（新設）、`infra/lib/tasks.ts`（新設）、`infra/lib/db-prep-function.ts`（新設）、`infra/lib/cost-watch.ts`（新設）、`infra/test/support.ts`、`infra/test/app-stack.test.ts`、`infra/test/stack-rules.test.ts`（新設）、`infra/test/db-prep-function.test.ts`（新設）、`infra/test/naming.test.ts`、`infra/setup/nd-setup.ts`、`infra/setup/missing-settings.ts`（新設）、`infra/setup/aws-reader.ts`、`infra/test/nd-setup.test.ts`、`infra/test/missing-settings.test.ts`（新設）、`apps/api/package.json`、`apps/api/src/entries/db-prep.ts`（新設）、`apps/api/src/db-prep/handler.ts`（新設）、`apps/api/src/db-prep/sql-executor.ts`（新設）、`apps/api/src/db-prep/pending-secret.ts`（新設）、`apps/api/src/db-prep/provision.ts`（新設）、`apps/api/src/db-prep/rotate.ts`（新設）、`apps/api/test/db-prep/pg-executor.ts`（新設）、`apps/api/test/db-prep/sql-executor.test.ts`（新設）、`apps/api/test/db-prep/pending-secret.test.ts`（新設）、`apps/api/test/db-prep/handler.test.ts`（新設）、`apps/api/test/db-prep/provision.test.ts`（新設）、`apps/api/test/db-prep/rotate.test.ts`（新設）、`.github/workflows/ci.yml`、`package-lock.json` |
+| #13 | 実装する | — | `packages/contracts/src/settings.ts`、`packages/contracts/src/db-prep.ts`（新設）、`packages/contracts/test/settings.test.ts`、`packages/contracts/test/db-prep.test.ts`（新設）、`packages/contracts/schema/settings.schema.json`、`infra/settings.example.json`、`docs/operations/settings.md`、`infra/lib/app-stack.ts`、`infra/lib/naming.ts`、`infra/lib/network.ts`（新設）、`infra/lib/progress-db.ts`（新設）、`infra/lib/tasks.ts`（新設）、`infra/lib/db-prep-function.ts`（新設）、`infra/lib/cost-watch.ts`（新設）、`infra/test/support.ts`、`infra/test/app-stack.test.ts`、`infra/test/stack-rules.test.ts`（新設）、`infra/test/db-prep-function.test.ts`（新設）、`infra/test/naming.test.ts`、`infra/setup/nd-setup.ts`、`infra/setup/missing-settings.ts`（新設）、`infra/setup/aws-reader.ts`、`infra/test/nd-setup.test.ts`、`infra/test/missing-settings.test.ts`（新設）、`apps/api/package.json`、`apps/api/src/entries/db-prep.ts`（新設）、`apps/api/src/db-prep/handler.ts`（新設）、`apps/api/src/db-prep/sql-executor.ts`（新設）、`apps/api/src/db-prep/secret-version.ts`（新設）、`apps/api/src/db-prep/prep-run.ts`（新設）、`apps/api/src/db-prep/provision.ts`（新設）、`apps/api/src/db-prep/rotate.ts`（新設）、`apps/api/test/db-prep/pg-executor.ts`（新設）、`apps/api/test/db-prep/sql-executor.test.ts`（新設）、`apps/api/test/db-prep/secret-version.test.ts`（新設）、`apps/api/test/db-prep/prep-run.test.ts`（新設）、`apps/api/test/db-prep/handler.test.ts`（新設）、`apps/api/test/db-prep/provision.test.ts`（新設）、`apps/api/test/db-prep/rotate.test.ts`（新設）、`.github/workflows/ci.yml`、`package-lock.json` |
 
 ## 未確認のまま残ること
 

@@ -30,9 +30,9 @@ apps/api/
 ├── package.json
 ├── src/entries/db-prep.ts      *
 ├── src/db-prep/                *
-│   └── handler.ts・sql-executor.ts・secret-version.ts・provision.ts・rotate.ts
+│   └── handler.ts・sql-executor.ts・secret-version.ts・prep-run.ts・provision.ts・rotate.ts
 └── test/db-prep/               *
-    └── pg-executor.ts・sql-executor.test.ts・secret-version.test.ts・handler.test.ts・provision.test.ts・rotate.test.ts
+    └── pg-executor.ts・sql-executor.test.ts・secret-version.test.ts・prep-run.test.ts・handler.test.ts・provision.test.ts・rotate.test.ts
 docs/operations/settings.md
 .github/workflows/ci.yml
 package-lock.json
@@ -60,6 +60,7 @@ package-lock.json
 | `apps/api/src/db-prep/handler.ts` | 新設 | 呼び出しを照らし、用意の ID を読み直し、用意か差し替えを打って結果を終わりの記録の口へ渡す | contracts・`provision`・`rotate`・`pino` | モジュール | `createDbPrepHandler`・`PrepCompletionPort`（型）・`createPrepLogger` |
 | `apps/api/src/db-prep/sql-executor.ts` | 新設 | SQL を打つ口と、その Data API の実装 | `@aws-sdk/client-rds-data`・`p-retry` | モジュール | `SqlExecutor`（型）・`createDataApiExecutor`・`RESUME_WAIT_ERRORS`・`DataApiUnavailableError` |
 | `apps/api/src/db-prep/secret-version.ts` | 新設 | プロジェクトの秘密の器の、行に結んだ版からパスワードを読み、SQL を終えた版へ `AWSCURRENT` を移して確かめる | `@aws-sdk/client-secrets-manager` | モジュール | `readVersionPassword`・`promoteVersion` |
+| `apps/api/src/db-prep/prep-run.ts` | 新設 | 同じ用意の ID の重複の配信のうち 1 つだけに SQL と終わりの記録を許す | `SqlExecutor` | モジュール | `claimPrepRun` |
 | `apps/api/src/db-prep/provision.ts` | 新設 | I10 の守り・用意の手順の 1〜6 | `SqlExecutor`・`pg`（`escapeIdentifier`・`escapeLiteral`） | モジュール | `claimBinding`・`checkIsolationGuard`・`provisionProject` |
 | `apps/api/src/db-prep/rotate.ts` | 新設 | 差し替えと古い接続の切り | `SqlExecutor`・`pg`（`escapeIdentifier`・`escapeLiteral`） | モジュール | `rotateRole`・`terminateRoleConnections` |
 | `apps/api/test/db-prep/pg-executor.ts` | 新設 | テストで使う `SqlExecutor` の `pg` の実装 | `pg` | モジュール | `createPgExecutor` |
@@ -276,13 +277,14 @@ package-lock.json
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `handler` | `apps/api/src/entries/db-prep.ts` | 新設 | `(event: unknown) => Promise<void>` | 本番の依存（`createDataApiExecutor`・`readVersionPassword`・`promoteVersion`・`createPrepLogger`・終わりの記録の口）を実行環境ごとに 1 回組み、`createDbPrepHandler` の結果を呼ぶ。口の本番の実装は #6 がこのファイルで渡す。この課題の版は、呼ばれたら投げる口を渡す（関数を呼ぶ側も #6 が作り、それまで誰も呼ばない） |
-| `createDbPrepHandler` | `apps/api/src/db-prep/handler.ts` | 新設 | `(deps: PrepDeps) => (event: unknown) => Promise<void>` | 呼び出しを `dbPrepInvocation` で照らす → 口の `isCurrent(prep_id)` で用意の ID を読み直し、違えば何もせずに終える → 口の `readTarget(project_id)` でデータベースと役割と秘密の器の名前と版の ID を読み、`readPassword` でその版のパスワードを読む → `kind` で用意か差し替え → 結果が `applied` か記した番号 = n の `rotation_superseded` なら `promote` でその版へ `AWSCURRENT` を移して確かめる → 結果を口の `record` へ渡す。`PrepDeps` は `{ sql: SqlExecutor; completion: PrepCompletionPort; readPassword: (secret: string, versionId: string) => Promise<string>; promote: (secret: string, versionId: string) => Promise<void>; logger; now: () => number }` |
+| `createDbPrepHandler` | `apps/api/src/db-prep/handler.ts` | 新設 | `(deps: PrepDeps) => (event: unknown) => Promise<void>` | 呼び出しを `dbPrepInvocation` で照らす → 口の `isCurrent(prep_id)` で用意の ID を読み直し、違えば何もせずに終える → `claimPrepRun(prep_id)` が `duplicate` なら何もせずに終える → 口の `readTarget(project_id)` でデータベースと役割と秘密の器の名前と版の ID を読み、`readPassword` でその版のパスワードを読む → `kind` で用意か差し替え → 結果が `applied` か記した番号 = n の `rotation_superseded` なら `promote` でその版へ `AWSCURRENT` を移して確かめる → 結果を口の `record` へ渡す。`PrepDeps` は `{ sql: SqlExecutor; completion: PrepCompletionPort; readPassword: (secret: string, versionId: string) => Promise<string>; promote: (secret: string, versionId: string) => Promise<void>; logger; now: () => number }` |
 | `PrepCompletionPort` | 同上 | 新設（型） | `{ isCurrent(prepId: string): Promise<boolean>; readTarget(projectId: string): Promise<{ database: string; role: string; secret: string; secretVersion: string }>; record(inv: DbPrepInvocation, outcome: DbPrepOutcome, secretVersion: string): Promise<"recorded" \| "mismatch"> }` | 終わりの記録の口。実装は #6（プロジェクトのモジュールの操作。`record` は用意の ID・差し替えの番号・版の ID が今の値と合うときだけ書く条件つきの書き込み） |
 | `SqlExecutor` | `apps/api/src/db-prep/sql-executor.ts` | 新設（型） | `{ execute(sql: string, params: SqlParam[] \| undefined, opts: { database: string; transactionId?: string }): Promise<Row[]>; begin(opts: { database: string }): Promise<string>; commit(transactionId: string): Promise<void>; rollback(transactionId: string): Promise<void> }` | 用意と差し替えの SQL を打つ口。`transactionId` の無い `execute` は自動の確定で打つ（`CREATE DATABASE` はこれで打つ）。`database` で `postgres` かプロジェクトのデータベースを選ぶ |
 | `createDataApiExecutor` | 同上 | 新設 | `(opts: { client: RDSDataClient; resourceArn: string; secretArn: string; retry: { attempts: number; delayMs: number; deadlineMs: number; now: () => number } }) => SqlExecutor` | `ExecuteStatement`（`database`・`transactionId`・`formatRecordsAs: "JSON"`）・`BeginTransaction`・`CommitTransaction`・`RollbackTransaction` を打つ。`transactionId` の無い `execute` と `begin` だけ、`RESUME_WAIT_ERRORS`（`DatabaseResumingException`）の例外を `p-retry` で繰り返す（下の箇条）。尽きたら `DataApiUnavailableError` を投げる |
 | `readVersionPassword` | `apps/api/src/db-prep/secret-version.ts` | 新設 | `(client: SecretsManagerClient, secret: string, versionId: string) => Promise<string>` | `GetSecretValue` に `VersionId` を渡してその版の URL を読み、パスワードを返す。ラベル（`AWSPENDING`・`AWSCURRENT`）では読まない |
 | `promoteVersion` | 同上 | 新設 | `(client: SecretsManagerClient, secret: string, versionId: string) => Promise<void>` | `DescribeSecret` の `VersionIdsToStages` で、版に `AWSCURRENT` が付いていれば何もしない。付いていなければ `UpdateSecretVersionStage`（`VersionStage: AWSCURRENT`・`MoveToVersionId`・今 `AWSCURRENT` の付く版の `RemoveFromVersionId`）を打ち、`DescribeSecret` を読み直して付いていなければ投げる |
 | `createPgExecutor` | `apps/api/test/db-prep/pg-executor.ts` | 新設 | `(connect: (database: string) => Promise<pg.Client>) => SqlExecutor` | テスト用。データベースごとに接続を開き、`begin` は専用の接続に `BEGIN` を打ってその接続を `transactionId` に結ぶ |
+| `claimPrepRun` | `apps/api/src/db-prep/prep-run.ts` | 新設 | `(sql: SqlExecutor, prepId: string) => Promise<"first" \| "duplicate">` | 管理のデータベースの 1 つのトランザクション（`begin`〜`commit`）で、`nd_prep.prep_runs`（`prep_id` 主キー・`claimed_at`）へ `INSERT … ON CONFLICT (prep_id) DO NOTHING RETURNING prep_id` を打ち、行を返せば `first`、返さなければ `duplicate`。同じ ID の 2 つの挿入は主キーの一意の索引で後の方が前の確定を待ち、前が確定すれば衝突で何も足さない。同じトランザクションで `claimed_at` が 7 日より古い行を消す（待ち行列の最大の年齢 60 秒より十分長い）。表が無ければ `pg_advisory_xact_lock(hashtext('nd-prep:schema'))` の下で作る |
 | `claimBinding` | `apps/api/src/db-prep/provision.ts` | 新設 | `(sql: SqlExecutor, project: ProjectIdent) => Promise<"bound" \| "retry" \| "conflict">` | 1 つのトランザクション（`begin`〜`commit`）で `pg_advisory_xact_lock(hashtext('nd-prep:bindings'))` を取り、`nd_prep.bindings`（`project_id` 主キー・`database_name` 一意・`role_name` 一意・`bound_at`）を `project_id`・`database_name`・`role_name` のどれかで引く。下の処理の手順の表で分ける。`bound` のときだけ行を足す。データベースと役割を作る前に打つ |
 | `checkIsolationGuard` | 同上 | 新設 | `(sql: SqlExecutor, project: ProjectIdent) => Promise<"ok" \| "conflict">` | データベースか役割が、渡されたもの以外へ `CONNECT` で結ばれていれば `conflict`（`claimBinding` の後に打つ二重の守り） |
 | `provisionProject` | 同上 | 新設 | `(sql: SqlExecutor, project: ProjectIdent & { password: string }) => Promise<void>` | [用意の手順](../docs/design/data.md#用意の手順) の 1〜6。2 の `CREATE DATABASE` は `transactionId` なしで打ち、4 は `database` にプロジェクトのデータベースを渡して打つ。6 は役割が無ければ `CREATE ROLE`、あれば（作り直し）`ALTER ROLE` で渡されたパスワードを書く。何度打っても、最後に渡したパスワードで同じ結果になる |
@@ -305,6 +307,7 @@ package-lock.json
 | --- | --- | --- |
 | `createDbPrepHandler` | 呼び出しが `dbPrepInvocation` に合わない | 口を呼ばずに終える。ログに形の誤りだけを出す |
 | `createDbPrepHandler` | `isCurrent` が偽 | SQL を打たず、`record` も呼ばずに終える（全体の設計の決定 96） |
+| `createDbPrepHandler` | `claimPrepRun` が `duplicate`（同じ用意の ID の 2 つ目の配信。LIB91） | 用意と差し替えの SQL を打たず、`readTarget`・`promote`・`record` も呼ばずに終える。ログに `duplicate_delivery` を出す。1 つ目の配信だけが結果を確定するため、2 つ目が並行の DDL の衝突を `failed` に記して `無い` へ戻すことは起きない |
 | `createDbPrepHandler` | `isCurrent`・`readTarget`・`readPassword`・`promote`・`record` のどれかが投げる | 終わりを記さずに投げる（関数の誤り。自動の再試行は 0 回で、見回りが期限の後に扱う）。`promote` が投げたら `record` を呼ばない |
 | `createDbPrepHandler` | `applied`、または `rotate` で記した番号 = n の `rotation_superseded` | `promote` が版を確かめた後にだけ `record` を呼ぶ。`failed` と、記した番号 > n の `rotation_superseded` では `promote` を呼ばない |
 | `createDbPrepHandler` | `record` が `mismatch` | 書かれずに終える。ログに出す |
@@ -337,6 +340,7 @@ package-lock.json
 | --- | --- | --- | --- |
 | 同じ役割の 2 つの差し替えの呼び出し | 役割のパスワードと `nd_prep.rotation_seq` | `pg_advisory_xact_lock`（STD83） | 番号の比べで古い方は書かない（I17） |
 | 同じ番号 n の呼び直しと、時間切れの守りが外れて遅れた前の呼び出し（順序が逆になる） | 役割の接続 | 切るのは境の時刻 `old_conn_cutoff` より前に始まった接続だけ。境の時刻は、パスワードを書いたトランザクションの確定の後に、最初に切りの段へ来た呼び出しが排他の鎖の下で記し、後から来た呼び出しは記された値を使う | 終わりを記すのは切りの段の後だけで、API は終わりの記録を受けてから保留を下ろす（I20）。そのため新しいパスワードの接続はどれも境の時刻より後に始まり、遅れた呼び出しの切りに当たらない。境の時刻より前に始まった接続は、確定の前に古いパスワードで認証したものだけである |
+| 同じ用意の ID の重複の配信（非同期の呼び出しは、再試行が 0 回でも同じ呼び出しを 2 回以上届けうる。LIB91） | データベースと役割・終わりの記録 | `claimPrepRun` が `nd_prep.prep_runs` の主キーで 1 つ目だけを `first` にする。用意と差し替えの SQL・版の移し・終わりの記録は `first` の配信だけが打つ | 1 つ目が途中で落ちても同じ用意の ID は打ち直さない。やり直しは新しい用意の ID で起きる（作るなら次の開始、差し替えなら見回りの呼び直し。I18・I22） |
 | 同じプロジェクトの作成の打ち直し | データベースと役割 | API の用意の ID（I18）と、関数が SQL の前に用意の ID を読み直すこと。手順は何度打っても同じ結果 | 次の開始で続く（`claimBinding` は `retry`） |
 | 2 つのプロジェクトの作成 | `nd_prep.bindings` | `pg_advisory_xact_lock(hashtext('nd-prep:bindings'))` と表の一意の制約 | 後に来た方が同じ名前を渡せば `conflict` |
 
@@ -364,6 +368,8 @@ package-lock.json
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `provisionProject`（`createPgExecutor`・PostgreSQL のサービスコンテナ） | 2 つのプロジェクトを作り、A の役割で A へ接続できる | 同じ値で 2 回打っても同じ結果 | A の役割で B・`postgres`・`template1` へ接続できると落ちる。A の役割で `pg_database` と `pg_roles` から B の名前が読めると落ちる |
+| `claimPrepRun`（`createPgExecutor`・PostgreSQL のサービスコンテナ） | 新しい用意の ID で `first`。表の無い DB で表を作って `first` | 同じ用意の ID の 2 回目は `duplicate`。8 日前の行は消え、6 日前の行は残る | 同じ用意の ID を 2 つの接続から同時に打ち、ちょうど 1 つだけが `first` になる（両方 `first` なら落ちる） |
+| `createDbPrepHandler`（`createPgExecutor`・PostgreSQL のサービスコンテナ・作り物の口） | — | — | 重複の配信: 同じ `create` の呼び出しを 2 つ同時に打ち、`CREATE DATABASE` と `CREATE ROLE` を打つのが 1 つだけで、`record` が 1 回だけ `applied` で呼ばれる。`failed` の `record` が 1 回でも呼ばれるか、`record` が 2 回呼ばれると落ちる |
 | `claimBinding`（`createPgExecutor`・PostgreSQL のサービスコンテナ） | 新しい名前で `bound` | A の作成をデータベースと役割を作った後・最後の `GRANT` の前で止め、A の打ち直しが `retry` で用意を終える | 途中で止まった A に対し、B が A のデータベースの名前と B の役割・B のデータベースと A の役割・A の 2 つの名前を渡すとどれも `conflict`。行の無い既存のデータベースで `conflict`。2 つを同時に打って片方だけが `bound` |
 | `checkIsolationGuard` | 新しい名前で `ok` | 作り直し（片方だけある）で `ok`。A の作成を `CREATE DATABASE … ALLOW_CONNECTIONS false` の直後・`REVOKE` の前で止め、同じ結び付きの打ち直しが `ok` になり、`provisionProject` が用意を終えて A の役割だけが `CONNECT` を持つ | B のデータベースに A の役割を渡す・A の役割に B のデータベースを渡すと `conflict`。`ALLOW_CONNECTIONS true` で `PUBLIC` が `CONNECT` を持つ既存のデータベースで `conflict` |
 | `rotateRole` | 記した番号 < n で書く | 記した番号 = n で書かない | 記した番号 > n で何も変えない。2 つを同時に打って番号の大きい方だけが残る |
