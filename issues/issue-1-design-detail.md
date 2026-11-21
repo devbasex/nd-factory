@@ -335,9 +335,9 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | --- | --- | --- | --- |
 | 生成した登録（`findCoverageFindings` の `route-unknown`） | #2 の生成した経路の登録の書き出し | 登録の中の、操作の表に無い経路 | `check`（単体テスト） |
 | API Gateway の合成の結果（`mainRouteCheck`） | `npm run synth` の出力 `infra/cdk.out` の雛形の `AWS::ApiGatewayV2::Route` | 雛形の経路と操作の表の経路の差（両方の向き）と、経路を表に出さない登録の方法 | `synth`（合成の後の手順。`npm run route-check -- --cdk-out infra/cdk.out`） |
-| Lambda の振り分け（`apps/api/test/dispatch-routes.test.ts`） | `apps/api` の振り分けの入口（#2 の K2-8）に、操作の表のすべての経路の `routeKey` と、表に無い `routeKey` 1 つの API Gateway の事象を渡した結果 | 表の経路を `route_unknown` で返す・表に無い経路を `route_unknown` 以外で受ける | `check`（`apps/api` の単体テスト） |
+| Lambda の振り分け（`apps/api/test/dispatch-routes.test.ts`） | `apps/api` が書き出す、振り分けの入口が `routeKey` を引く登録（#2 の K2-8。入口が実際に引く表そのもの）のキーの集まりと、入口に表に無い `routeKey` の API Gateway の事象を渡した結果 | 登録のキーと操作の表の経路の差（両方の向き。登録にあって表に無い経路・表にあって登録に無い経路）・表に無い経路の事象を `route_unknown` の応答以外で返す | `check`（`apps/api` の単体テスト） |
 
-振り分けの照らしは、`tools` が `apps/` を import できない（依存の向き）ので、`apps/api` 自身のテストに置く。振り分けの入口か操作の表の書き出しが無い間は、テストの名前に「相手が無い」と出して通る。合成の照らしも、操作の表の書き出しが無い間は `skip: no-operation-table` で通る。今の `infra/lib/app-stack.ts` の `PUT /v1/users` は、操作の表が入った時点で `gateway-route-unknown` になるので、操作の表を置く #2 の Pull Request が API Gateway の定義を生成した登録へ移す（控えの `routes.generated` の行と同じ Pull Request）。
+振り分けの照らしは、`tools` が `apps/` を import できない（依存の向き）ので、`apps/api` 自身のテストに置く。表の外の `routeKey` を 1 つ渡すだけでは、別の表の外の経路を受ける分岐を足しても見つからないので、経路の照らしは入口が実際に引く登録のキーの集まりと操作の表を比べて行い、表の外の事象は拒むときの応答（`route_unknown`）の形を確かめるためだけに使う。登録の外の経路を受ける分岐を入口に置かないことは K2-8 の約束で、登録を通らない分岐はこのテストでは見えないのでレビューで見る。振り分けの入口か操作の表の書き出しが無い間は、テストの名前に「相手が無い」と出して通る。合成の照らしも、操作の表の書き出しが無い間は `skip: no-operation-table` で通る。今の `infra/lib/app-stack.ts` の `PUT /v1/users` は、操作の表が入った時点で `gateway-route-unknown` になるので、操作の表を置く #2 の Pull Request が API Gateway の定義を生成した登録へ移す（控えの `routes.generated` の行と同じ Pull Request）。
 
 ### 異常系の処理
 
@@ -354,7 +354,7 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | `screenOperationNames` | import した操作の関数の呼び出し・名前空間の import の性質の呼び出し・汎用の呼び出しの文字列の定数の 3 つを拾う | 別名の import（`as`）も元の名前で拾う。import しただけで呼ばない関数は拾わない（その操作は `screen-missing` のまま残り、控えにあれば `screen-pending-stale` にならない）。生成した書き出しの外から import した同じ名前の関数の呼び出しは拾わない。テストのファイルを読まない | 変数で渡した名前は `names` に入らず、`diagnostics` にファイルと行が 1 件入る |
 | `findCoverageFindings` | 揃った作り物の表で 0 件 | 機械向けの経路を数えない。画面の無い操作を控えに置くと `screen-missing` にならない | 8 つの種類ごとに、1 行を足すか消した表で 1 件。`human-only-without-read` は、`paired_read` を消す・表に無い名前にする・書く操作を指す・人だけの操作を指す・MCP の道具の一覧から消す、のそれぞれで 1 件（同じエンティティに無関係な読む操作が MCP にあっても出る） |
 | `readGatewayRoutes`・`findGatewayRouteFindings` | 作り物の雛形（テストの中で組む）の経路が操作の表と揃って 0 件 | 入れ子のステージの組み立ての雛形も読む | 表に無い `RouteKey` で `gateway-route-unknown`、表の経路を雛形から消して `gateway-route-missing`、`Body` を持つ `AWS::ApiGatewayV2::Api`・`Target` を持つ `AWS::ApiGatewayV2::Api`（`RouteKey` の有る無しの両方）・`$default`・`ANY /{proxy+}` でそれぞれ `gateway-route-unsupported`。操作の表と揃った `AWS::ApiGatewayV2::Route` の雛形に `Target` を持つ別の `AWS::ApiGatewayV2::Api` を足すと、`gateway-route-unsupported` が 1 件出て通らない |
-| `dispatch-routes.test.ts`（`apps/api`） | 表のすべての経路が `route_unknown` 以外で受けられる | — | 表に無い経路の事象が `route_unknown` で返る（表の外の経路は合成の照らしが API Gateway に置かせないので、振り分けの側は表の経路を受けることと表の外を拒むことを照らす） |
+| `dispatch-routes.test.ts`（`apps/api`） | 振り分けの登録のキーの集まりが操作の表の経路（利用者向けと機械向けの両方）と等しい。表のすべての経路の事象が `route_unknown` 以外で受けられる | 登録のキーは入口が引く登録の書き出しから読み、テストの中で表から組み直さない（組み直すと入口と食い違っても通る） | 登録にあって表に無いキー・表にあって登録に無い経路をそれぞれ 1 件ずつ出す（作り物の登録と表で確かめる）。表に無い経路の事象が `route_unknown` の応答（状態の番号と理由のコード）で返る |
 | `loadScreenPending` | 正しい形を読む | 空の配列 | 項目の欠けで例外 |
 
 ## NDF の契約の照合
