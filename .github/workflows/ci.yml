@@ -63,7 +63,7 @@ jobs:
       - run: npm ci
       - name: ブラウザーを入れる
         run: npx playwright install --with-deps chromium
-      - name: 画面の e2e（利用者プールと API は網の手前で差し替える）
+      - name: 画面の e2e（利用者プールと API はネットワークの手前で差し替える）
         run: npm run e2e
 
   ref-check:

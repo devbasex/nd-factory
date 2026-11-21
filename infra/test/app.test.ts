@@ -32,7 +32,7 @@ function stackNames(app: App): string[] {
 }
 
 describe("buildApp", () => {
-  it("見本の設定では縦の切れ端のスタックだけ", () => {
+  it("見本の設定ではアプリのスタックだけ", () => {
     const app = newApp();
     buildApp(app, env(EXAMPLE));
     expect(stackNames(app)).toEqual(["acme-test-app"]);
@@ -50,7 +50,7 @@ describe("buildApp", () => {
     expect(stackNames(app)).toEqual(["acme-test-pipeline"]);
   });
 
-  it("ND_STACKS=app ではパイプラインのある設定でも縦の切れ端だけ", () => {
+  it("ND_STACKS=app ではパイプラインのある設定でもアプリのスタックだけ", () => {
     const app = newApp();
     buildApp(app, env(FIXTURE, { ND_STACKS: "app" }));
     expect(stackNames(app)).toEqual(["acme-test-app"]);

@@ -39,7 +39,7 @@ npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> 
 | `--profile` | 必須 | 反映する先の AWS の profile |
 | `--settings` | 必須 | 設定のファイルのパス |
 | `--out` | 必須 | 合成の結果を保存する置き場。打つたびに中身を消してから書く。`cdk.out/` の下（例 `cdk.out/test`）に置けばリポジトリに入らない |
-| `--stack` | 任意 | 合成して差分を見るスタック。`app`（縦の切れ端）か `pipeline`（反映のパイプライン）で、繰り返して渡せる。無ければ設定のファイルで作るスタックのすべて（`app` と、`pipeline` があれば `pipeline`） |
+| `--stack` | 任意 | 合成して差分を見るスタック。`app`（アプリのスタック）か `pipeline`（反映のパイプライン）で、繰り返して渡せる。無ければ設定のファイルで作るスタックのすべて（`app` と、`pipeline` があれば `pipeline`） |
 
 相対パスは、コマンドを打った場所から解く。
 
@@ -70,7 +70,7 @@ npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> 
 
 例: `3f2a9c0d1b7e:123456789012:us-west-2:app,pipeline`。スタックの一覧は渡した順に依らず `app`・`pipeline` の順に並ぶ。
 
-要約値は、置き場のすべてのファイル（テンプレート・manifest・画面と Lambda の資産・選んだスタックの一覧 `nd-setup-stacks.json`）の中身から作る SHA-256 である。そのため、次のどれかで値が変わり、`deploy` は終了コード 7 で止まる。
+要約値は、置き場のすべてのファイル（テンプレート・manifest・画面と Lambda のアセット・選んだスタックの一覧 `nd-setup-stacks.json`）の中身から作る SHA-256 である。そのため、次のどれかで値が変わり、`deploy` は終了コード 7 で止まる。
 
 - 置き場のファイルを 1 バイトでも書き換えた・足した・消した
 - `diff` と違うアカウントかリージョンの profile を `deploy` へ渡した
@@ -117,7 +117,7 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 
 ### 運用する環境
 
-- 設置のコマンドで反映するのはパイプラインのスタックだけにする。`diff` に `--stack pipeline` を渡す。縦の切れ端は反映のパイプラインが、人の承認の後に反映する（[pipeline-approval.md](pipeline-approval.md)）
+- 設置のコマンドで反映するのはパイプラインのスタックだけにする。`diff` に `--stack pipeline` を渡す。アプリのスタックは反映のパイプラインが、人の承認の後に反映する（[pipeline-approval.md](pipeline-approval.md)）
 - パイプラインのスタックの `diff` の差分をリリース承認ゲートで承認した後にだけ `deploy` を打つ（自動の承認では通さない）。設定を変えるときも同じ（[settings.md](settings.md) の「運用する環境で設定を変える」）
 - パイプラインのスタックを初めて反映した後は、GitHub との接続を有効にし、承認を拒む方針を AI の主体へ付けて確かめるまで、起点のブランチへ push しない（[pipeline-approval.md](pipeline-approval.md)）
 - 設定を変えるときの手順は [settings.md](settings.md) にある

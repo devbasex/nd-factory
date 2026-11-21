@@ -11,7 +11,7 @@
 | 形の版と切り戻し | [形の版と移し方](#形の版と移し方) |
 | 機能ごとの読み書き | [CRUD 図](#crud-図) |
 
-置き場とインフラを選んだ理由（決定 80〜99・140）と外部の調査（LIB80〜LIB85）は [土台](platform.md) にあり、この文書は答えだけを持つ。割り当てを移す流れの順は [全体の設計の割り当てを変える流れ](overview.md#割り当てを変える流れ)、実行の振る舞いは [実行](execution.md) が持つ。
+置き場とインフラを選んだ理由（決定 80〜99・140）と外部の調査（LIB80〜LIB85）は [プラットフォーム](platform.md) にあり、この文書は答えだけを持つ。割り当てを移す流れの順は [全体の設計の割り当てを変える流れ](overview.md#割り当てを変える流れ)、実行の振る舞いは [実行](execution.md) が持つ。
 値はすべて作り物か設計の既定値である。
 
 ## 置き場の分け方
@@ -34,25 +34,44 @@
 
 ```mermaid
 erDiagram
-    利用者 ||--o{ 席 : 持つ
-    チーム ||--|{ 席 : 持つ
-    利用者 ||--o{ 委任 : 発行する
-    チーム ||--o{ 手元のマシン : 登録する
-    プロジェクト ||--|{ リポジトリ : 持つ
-    プロジェクト ||--|{ 割り当て : 履歴を持つ
-    割り当て }o--|| チーム : 指す
-    プロジェクト ||--o{ スプリント : 持つ
-    スプリント ||--|{ レーン : 持つ
-    レーン ||--o{ 区間 : 持つ
-    レーン ||--o{ 進捗の事象 : 積む
-    スプリント ||--o{ 承認の依頼 : 出す
-    スプリント ||--o{ 問い : 出す
-    承認の依頼 ||--o{ 答え : 積む
-    問い ||--o{ 答え : 積む
-    利用者 ||--o{ 知らせ : 受ける
-    利用者 ||--o{ 通知先 : 持つ
-    プロジェクト ||--o{ 費用の記録 : 積む
-    プロジェクト ||--o{ 操作の記録 : 積む
+    User["利用者"]
+    Seat["席"]
+    Team["チーム"]
+    Delegation["委任"]
+    Machine["手元のマシン"]
+    Project["プロジェクト"]
+    Repository["リポジトリ"]
+    Assignment["割り当て"]
+    Sprint["スプリント"]
+    Lane["レーン"]
+    Segment["区間"]
+    ProgressEvent["進捗の事象"]
+    Approval["承認の依頼"]
+    Question["問い"]
+    Answer["答え"]
+    Notice["知らせ"]
+    Destination["通知先"]
+    CostRecord["費用の記録"]
+    AuditRecord["操作の記録"]
+    User ||--o{ Seat : "持つ"
+    Team ||--|{ Seat : "持つ"
+    User ||--o{ Delegation : "発行する"
+    Team ||--o{ Machine : "登録する"
+    Project ||--|{ Repository : "持つ"
+    Project ||--|{ Assignment : "履歴を持つ"
+    Assignment }o--|| Team : "指す"
+    Project ||--o{ Sprint : "持つ"
+    Sprint ||--|{ Lane : "持つ"
+    Lane ||--o{ Segment : "持つ"
+    Lane ||--o{ ProgressEvent : "積む"
+    Sprint ||--o{ Approval : "出す"
+    Sprint ||--o{ Question : "出す"
+    Approval ||--o{ Answer : "積む"
+    Question ||--o{ Answer : "積む"
+    User ||--o{ Notice : "受ける"
+    User ||--o{ Destination : "持つ"
+    Project ||--o{ CostRecord : "積む"
+    Project ||--o{ AuditRecord : "積む"
 ```
 
 多重度の決まり: 割り当ては履歴の行を積み、今の割り当ては 1 つだけ（I3）。リポジトリのうち主はちょうど 1 つ（I1）。レーンを動かすコンテナは同時に 1 つ（I7）。

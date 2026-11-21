@@ -4,18 +4,18 @@
 
 | 作るもの | 何に使うか | いつ要るか |
 | --- | --- | --- |
-| Google の OAuth クライアント | 縦の切れ端のログイン（利用者プールの外部の IdP） | 縦の切れ端を初めて反映した後 |
+| Google の OAuth クライアント | アプリのスタックのログイン（利用者プールの外部の IdP） | アプリのスタックを初めて反映した後 |
 | GitHub の OAuth App | GitHub でのログイン | GitHub のログインを足す変更が入ったとき |
 | GitHub App | リポジトリの読み書き | GitHub の連携を足す変更が入ったとき |
 | GitHub との接続（AWS CodeConnections） | 反映のパイプラインがリポジトリを取る | 反映のパイプラインのスタックを設置した後 |
 
 ## Google の OAuth クライアント
 
-秘密の器は縦の切れ端のスタックが作る。器ができる前にクライアントの ID を設定のファイルへ書かない。値の無い器でクライアントの ID を設定すると、ログインは Google の側で失敗する。
+秘密の器はアプリのスタックが作る。器ができる前にクライアントの ID を設定のファイルへ書かない。値の無い器でクライアントの ID を設定すると、ログインは Google の側で失敗する。
 
 ### 順序
 
-1. 設定のファイルに `"login": { "google": {} }` を置き（`client_id` は書かない）、縦の切れ端を反映する。器 `<prefix>/<environment>/google-oauth` が自動で作った値で作られ、画面は「設定の待ち」を示す
+1. 設定のファイルに `"login": { "google": {} }` を置き（`client_id` は書かない）、アプリのスタックを反映する。器 `<prefix>/<environment>/google-oauth` が自動で作った値で作られ、画面は「設定の待ち」を示す
 2. 設置のコマンドの `diff` が出した「Google のクライアントに登録する戻り先の URL」を控える。形は `https://<prefix>-<environment>-login.auth.<リージョン>.amazoncognito.com/oauth2/idpresponse` である
 3. Google Cloud のコンソールの「API とサービス > 認証情報」で、種類「ウェブ アプリケーション」の OAuth クライアントを作る
    - 承認済みの JavaScript 生成元: `https://<prefix>-<environment>-login.auth.<リージョン>.amazoncognito.com`
@@ -31,7 +31,7 @@
 
    シェルの履歴に残したくなければ、`--secret-string file://<一時のファイル>` で渡し、渡した後にファイルを消す
 5. 下の「器の値を確かめる」を通す
-6. 確かめが通ったときだけ、設定のファイルへ `"login": { "google": { "client_id": "<クライアントの ID>" } }` を書き、縦の切れ端を反映し直す。Google の IdP が作られ、画面はログインへ送るようになる
+6. 確かめが通ったときだけ、設定のファイルへ `"login": { "google": { "client_id": "<クライアントの ID>" } }` を書き、アプリのスタックを反映し直す。Google の IdP が作られ、画面はログインへ送るようになる
 
 ### 器の値を確かめる
 
