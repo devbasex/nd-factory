@@ -26,7 +26,7 @@ export class FakeSqlExecutor implements SqlExecutor {
     const rows = this.respond(sql, params);
     // 引数の値を記録しない設定の確かめ（role-password.ts）は、答えを差し込まなければ 0 で計画を書かず pgAudit が無いと返す
     if (rows.length === 0 && sql.includes("current_setting('log_parameter_max_length')")) {
-      return [{ normal: "0", on_error: "0", print_plan: "off", explain_min_duration: null, audit_log: null, audit_parameter: null }];
+      return [{ normal: "0", on_error: "0", print_plan: "off", print_parse: "off", print_rewritten: "off", explain_min_duration: null, audit_log: null, audit_parameter: null, stmts_track: null, stmts_track_utility: null }];
     }
     return rows;
   }

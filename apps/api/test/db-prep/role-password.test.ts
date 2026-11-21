@@ -57,7 +57,7 @@ describe("pgAudit の設定の読み", () => {
   });
 
   it("pgAudit が無いか、引数の値も役割の文も書かない設定なら通す", () => {
-    const safe = { normal: "0", on_error: "0", print_plan: "off", explain_min_duration: null };
+    const safe = { normal: "0", on_error: "0", print_plan: "off", print_parse: "off", print_rewritten: "off", explain_min_duration: null };
     for (const audit of [
       { audit_log: null, audit_parameter: null },
       { audit_log: "none", audit_parameter: "off" },
@@ -66,6 +66,24 @@ describe("pgAudit の設定の読み", () => {
       { audit_log: "ddl, none", audit_parameter: "off" },
     ]) {
       expect(paramLogProblem({ ...safe, ...audit })).toBeUndefined();
+    }
+  });
+
+  it("pg_stat_statements が無いか、入れ子の utility 文を追わない設定なら通し、追う設定なら止める", () => {
+    const safe = { normal: "0", on_error: "0", print_plan: "off", print_parse: "off", print_rewritten: "off", explain_min_duration: null };
+    for (const stmts of [
+      { stmts_track: null, stmts_track_utility: null },
+      { stmts_track: "top", stmts_track_utility: "on" },
+      { stmts_track: "none", stmts_track_utility: "on" },
+      { stmts_track: "all", stmts_track_utility: "off" },
+    ]) {
+      expect(paramLogProblem({ ...safe, ...stmts })).toBeUndefined();
+    }
+    for (const stmts of [
+      { stmts_track: "all", stmts_track_utility: "on" },
+      { stmts_track: "ALL", stmts_track_utility: null },
+    ]) {
+      expect(paramLogProblem({ ...safe, ...stmts })).toContain("pg_stat_statements");
     }
   });
 });
@@ -82,6 +100,10 @@ describe("prepareRolePassword（作り物の SqlExecutor）", () => {
     expect(ex[0]!.sql).not.toContain("set_config('log_parameter_max_length'");
     expect(ex[0]!.sql).toContain("set_config('log_parameter_max_length_on_error', '0', true)");
     expect(ex[0]!.sql).toContain("set_config('debug_print_plan', 'off', true)");
+    expect(ex[0]!.sql).toContain("set_config('debug_print_parse', 'off', true)");
+    expect(ex[0]!.sql).toContain("set_config('debug_print_rewritten', 'off', true)");
+    expect(ex[0]!.sql).toContain("current_setting('pg_stat_statements.track', true)");
+    expect(ex[0]!.sql).toContain("current_setting('pg_stat_statements.track_utility', true)");
     expect(ex[0]!.sql).toContain("current_setting('auto_explain.log_min_duration', true)");
     expect(ex[0]!.sql).toContain("current_setting('pgaudit.log', true)");
     expect(ex[0]!.sql).toContain("current_setting('pgaudit.log_parameter', true)");
@@ -97,12 +119,24 @@ describe("prepareRolePassword（作り物の SqlExecutor）", () => {
   });
 
   it("引数の値を記録しない設定か pgAudit の設定が安全と読めなければ、検証子を送らずに投げる", async () => {
-    const safe = { normal: "0", on_error: "0", print_plan: "off", explain_min_duration: null, audit_log: null, audit_parameter: null };
+    const safe = {
+      normal: "0",
+      on_error: "0",
+      print_plan: "off",
+      print_parse: "off",
+      print_rewritten: "off",
+      explain_min_duration: null,
+      audit_log: null,
+      audit_parameter: null,
+    };
     const rows: Row[] = [
       { ...safe, normal: "-1" },
       { ...safe, normal: "64B" },
       { ...safe, on_error: "64B" },
       { ...safe, print_plan: "on" },
+      { ...safe, print_parse: "on" },
+      { ...safe, print_rewritten: "on" },
+      { ...safe, stmts_track: "all", stmts_track_utility: "on" },
       { ...safe, explain_min_duration: "0" },
       { ...safe, explain_min_duration: "100ms" },
       { ...safe, audit_parameter: "on" },
@@ -272,10 +306,14 @@ describePg("prepareRolePassword のログ（PostgreSQL）", () => {
     });
   });
 
-  it("実行計画を書く設定（debug_print_plan）でも、トランザクションの中で切り、計画のログに検証子も平文も出ない", async () => {
+  it.each([
+    ["実行計画を書く設定（debug_print_plan）", "SET debug_print_plan = on", "PLANNEDSTMT"],
+    ["構文木を書く設定（debug_print_parse）", "SET debug_print_parse = on", "parse tree:"],
+    ["書き換えた構文木を書く設定（debug_print_rewritten）", "SET debug_print_rewritten = on", "rewritten parse tree:"],
+  ])("%sでも、トランザクションの中で切り、そのログに検証子も平文も出ない", async (_, stmt, marker) => {
     await withTestDatabase(async (db) => {
       const notices: string[] = [];
-      const sql = loggingExecutor(db, notices, "statement", ["SET debug_print_plan = on"]);
+      const sql = loggingExecutor(db, notices, "statement", [stmt]);
       const role = newRole(db);
       const password = newPassword();
       try {
@@ -283,8 +321,8 @@ describePg("prepareRolePassword のログ（PostgreSQL）", () => {
       } finally {
         await sql.close();
       }
-      // 確かめの文の計画はまだ書かれる（設定が効いていたことを確かめてから、値の無いことを見る）
-      expect(notices.some((n) => n.includes("PLANNEDSTMT"))).toBe(true);
+      // 確かめの文のログはまだ書かれる（設定が効いていたことを確かめてから、値の無いことを見る）
+      expect(notices.some((n) => n.includes(marker))).toBe(true);
       expectNoSecretIn(notices, password);
     });
   });
@@ -296,6 +334,10 @@ describePg("prepareRolePassword のログ（PostgreSQL）", () => {
     ["pgAudit が役割の文を書く設定", ["SET pgaudit.log = 'ddl, role'"]],
     ["pgAudit が none の後にも役割の文を書く設定", ["SET pgaudit.log = 'role, none'"]],
     ["pgAudit が引用符の付いた role で役割の文を書く設定", [`SET pgaudit.log = '"role"'`]],
+    [
+      "pg_stat_statements が入れ子の utility 文を追う設定",
+      ["SET pg_stat_statements.track = 'all'", "SET pg_stat_statements.track_utility = 'on'"],
+    ],
   ])("%sでは、検証子を送らずに止まり、パスワードを書かない", async (_, stmts) => {
     await withTestDatabase(async (db) => {
       const notices: string[] = [];
