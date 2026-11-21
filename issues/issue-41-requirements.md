@@ -27,6 +27,8 @@ NDF 11.0 が配布された（ndf v11.0.0 が 2026-11-18、最新の v11.0.12 �
 | 記録の口と ID・答えの語（#23 の改名） | `file-ledgers`・`ask-ledger`・`revise` | `file-journals`・`ask-journal`・`request_changes`（設計は既に新しい名前） |
 | 設定のスキーマの口 | `spec-declarations` | `spec-ndf_settings` |
 | `ndf answer` と `ndf progress` の位置引数 | `table_id`（進行表の ID） | `machine_id`（ステートマシンの ID） |
+| `ndf answer` と `ndf progress` の結果の ID（`schemas/io/answer.result.schema.json`・`progress.result.schema.json`） | `metrics.table_id` | `metrics.machine_id` |
+| 区間の報告の決まり（最後の `- 結果:` の行で読む規則・項目・値ごとに要る項目） | 契約のファイルに無い（NDF の手順の文書 `asking.md` だけ） | `hooks/unattended-report.json` が新しく入った（`report-unattended` の行の `source` は無い置き場 `forms/unattended-report.json` を指したまま） |
 | `ask-journal` の `fields` | 無い | 無いまま |
 | NDF を開発する枝 | `develop`（先端が固定の点と同じ `f37ea4c` のまま止まった） | 配布は `main` の上のタグ `ndf--v*` |
 
@@ -84,7 +86,7 @@ NDF 11.0 が配布された（ndf v11.0.0 が 2026-11-18、最新の v11.0.12 �
 | 項目 | 手段 |
 | --- | --- |
 | テスト・静的解析・型検査 | Pull Request の CI の `check`（`npm run check`）と `ref-check`。このリポジトリはテストを CI に寄せる（`.ndf/project.json` の `test.ci.only`） |
-| 手動確認（マージ前） | `git grep -nE 'plugins/ndf-next/contracts\|spec-declarations\|table_id' -- docs/design` が 0 件。`gh api 'repos/devbasex/ai-plugins/contents/plugins/ndf/contracts/version.json?ref=752a9cf48a6d36c00ffb3197c8668d1c898c32e2'` の `history` の最後の行が全体の設計の版と sha256 と一致する |
+| 手動確認（マージ前） | `git grep -nE 'plugins/ndf-next/contracts\|spec-declarations\|table_id' -- docs/design` が 0 件。`gh api -H 'Accept: application/vnd.github.raw+json' 'repos/devbasex/ai-plugins/contents/plugins/ndf/contracts/version.json?ref=752a9cf48a6d36c00ffb3197c8668d1c898c32e2' \| jq -c '.history[-1]'` が出す版と sha256 が、全体の設計の版と sha256（64 桁）と一致する（raw の形で取らないと、応答は Base64 の `content` を持つメタデータになる） |
 
 ## 前提とする取り決め
 
