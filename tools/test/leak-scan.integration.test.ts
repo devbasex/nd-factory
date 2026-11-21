@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { randomInt } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -65,12 +65,17 @@ const GIT_IDENTITY = {
   GIT_COMMITTER_EMAIL: "ops@example.com",
 };
 
-function git(cwd: string, ...args: string[]): string {
-  const result = spawnSync("git", ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], {
+/** git を打ち、失敗しても投げずに結果を返す */
+function gitResult(cwd: string, ...args: string[]): SpawnSyncReturns<string> {
+  return spawnSync("git", ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, ...GIT_IDENTITY },
   });
+}
+
+function git(cwd: string, ...args: string[]): string {
+  const result = gitResult(cwd, ...args);
   if (result.status !== 0) throw new Error(`git ${args.join(" ")} が失敗した: ${result.stderr}`);
   return result.stdout.trim();
 }
@@ -383,7 +388,7 @@ describe("履歴の探し", () => {
     write(root, "docs/a.md", "主の側\n");
     commitAll(root, "main");
     // 競合させ、解消の中でだけ値を足す
-    const merge = spawnSync("git", ["-c", "commit.gpgsign=false", "merge", "-q", "side"], { cwd: root, encoding: "utf8", env: { ...process.env, ...GIT_IDENTITY } });
+    const merge = gitResult(root, "merge", "-q", "side");
     expect(merge.status).not.toBe(0);
     write(root, "docs/a.md", `主の側\n枝の側\nアカウント ${fakeAccount()}\n`);
     git(root, "add", "-A");
