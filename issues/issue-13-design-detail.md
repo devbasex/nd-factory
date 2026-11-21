@@ -30,9 +30,9 @@ apps/api/
 ├── package.json
 ├── src/entries/db-prep.ts      *
 ├── src/db-prep/                *
-│   └── handler.ts・sql-executor.ts・pending-secret.ts・provision.ts・rotate.ts
+│   └── handler.ts・sql-executor.ts・secret-version.ts・provision.ts・rotate.ts
 └── test/db-prep/               *
-    └── pg-executor.ts・sql-executor.test.ts・pending-secret.test.ts・handler.test.ts・provision.test.ts・rotate.test.ts
+    └── pg-executor.ts・sql-executor.test.ts・secret-version.test.ts・handler.test.ts・provision.test.ts・rotate.test.ts
 docs/operations/settings.md
 .github/workflows/ci.yml
 package-lock.json
@@ -59,7 +59,7 @@ package-lock.json
 | `apps/api/src/entries/db-prep.ts` | 新設 | DB の用意の関数の起点。本番の依存を組んで `handler` を出す | 下の 3 つ・AWS SDK | モジュール | `handler` |
 | `apps/api/src/db-prep/handler.ts` | 新設 | 呼び出しを照らし、用意の ID を読み直し、用意か差し替えを打って結果を終わりの記録の口へ渡す | contracts・`provision`・`rotate`・`pino` | モジュール | `createDbPrepHandler`・`PrepCompletionPort`（型）・`createPrepLogger` |
 | `apps/api/src/db-prep/sql-executor.ts` | 新設 | SQL を打つ口と、その Data API の実装 | `@aws-sdk/client-rds-data`・`p-retry` | モジュール | `SqlExecutor`（型）・`createDataApiExecutor`・`RESUME_WAIT_ERRORS`・`DataApiUnavailableError` |
-| `apps/api/src/db-prep/pending-secret.ts` | 新設 | プロジェクトの秘密の器の保留の版からパスワードを読む | `@aws-sdk/client-secrets-manager` | モジュール | `readPendingPassword` |
+| `apps/api/src/db-prep/secret-version.ts` | 新設 | プロジェクトの秘密の器の、行に結んだ版からパスワードを読み、SQL を終えた版へ `AWSCURRENT` を移して確かめる | `@aws-sdk/client-secrets-manager` | モジュール | `readVersionPassword`・`promoteVersion` |
 | `apps/api/src/db-prep/provision.ts` | 新設 | I10 の守り・用意の手順の 1〜6 | `SqlExecutor`・`pg`（`escapeIdentifier`・`escapeLiteral`） | モジュール | `claimBinding`・`checkIsolationGuard`・`provisionProject` |
 | `apps/api/src/db-prep/rotate.ts` | 新設 | 差し替えと古い接続の切り | `SqlExecutor`・`pg`（`escapeIdentifier`・`escapeLiteral`） | モジュール | `rotateRole`・`terminateRoleConnections` |
 | `apps/api/test/db-prep/pg-executor.ts` | 新設 | テストで使う `SqlExecutor` の `pg` の実装 | `pg` | モジュール | `createPgExecutor` |
@@ -218,7 +218,7 @@ package-lock.json
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `DbPrepFunction` の `constructor` | `infra/lib/db-prep-function.ts` | 新設 | `(scope, id, props: { db: ProgressDb; names: AppResourceNames; secretPrefix: string })` | `NodejsFunction`（起点 `DB_PREP_ENTRY`・名前 `<prefix>-<environment>-db-prep`・Node 24・ARM64・VPC の外・時間切れ 5 分・非同期の呼び出しの `retryAttempts: 0` と `maxEventAge` 60 秒・ログの群）。役割は、クラスタへの `rds-data:ExecuteStatement`・`BeginTransaction`・`CommitTransaction`・`RollbackTransaction` と、管理の役割の秘密の器と `<prefix>/<environment>/progress-db/*` への `secretsmanager:GetSecretValue` だけ。クラスタと管理の秘密の器の ARN と秘密の器の頭は環境変数で渡す（合成の出力では参照） |
+| `DbPrepFunction` の `constructor` | `infra/lib/db-prep-function.ts` | 新設 | `(scope, id, props: { db: ProgressDb; names: AppResourceNames; secretPrefix: string })` | `NodejsFunction`（起点 `DB_PREP_ENTRY`・名前 `<prefix>-<environment>-db-prep`・Node 24・ARM64・VPC の外・時間切れ 5 分・非同期の呼び出しの `retryAttempts: 0` と `maxEventAge` 60 秒・ログの群）。役割は、クラスタへの `rds-data:ExecuteStatement`・`BeginTransaction`・`CommitTransaction`・`RollbackTransaction` と、管理の役割の秘密の器と `<prefix>/<environment>/progress-db/*` への `secretsmanager:GetSecretValue`、`<prefix>/<environment>/progress-db/*` への `secretsmanager:DescribeSecret`・`secretsmanager:UpdateSecretVersionStage`（[データの文書のパスワードの版](../docs/design/data.md#パスワードの版) の 4）だけ。クラスタと管理の秘密の器の ARN と秘密の器の頭は環境変数で渡す（合成の出力では参照） |
 | `DB_PREP_ENTRY` | 同上 | 新設 | 定数（`apps/api/src/entries/db-prep.ts` のパス） | 起点のパス。コードは import しない |
 | `DbPrepFunction` の公開の値 | 同上 | 新設 | `fn` | #6 が API の関数と見回りの関数に呼ぶ権限（`lambda:InvokeFunction`）を許す |
 | `DbPrepFunction.grantCompletionAccess` | 同上 | 新設 | `(tables: { projects: dynamodb.ITableV2; audit: dynamodb.ITableV2 }) => void` | 終わりの記録の口（`PrepCompletionPort`。同じ Lambda の中で動く）が要る DynamoDB の権限だけを関数の役割へ足す。プロジェクトの表（`db-projects`）の表の ARN だけへ `dynamodb:GetItem`（`isCurrent`・`readTarget` の強い整合の読み）・`dynamodb:UpdateItem`・`dynamodb:ConditionCheckItem`（`record` の条件つきの書き込み。`TransactWriteItems` は項目ごとにこの 2 つで照らされる）、操作の記録の表（`db-audit`）の表の ARN だけへ `dynamodb:PutItem`（3 つの処理の記録の行。[API の文書の DB の用意の関数の処理](../docs/design/api.md#ランナー手元のマシンの-http-の経路)）。索引の ARN・`Query`・`Scan`・`DeleteItem`・ほかの表は許さない |
@@ -275,22 +275,23 @@ package-lock.json
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `handler` | `apps/api/src/entries/db-prep.ts` | 新設 | `(event: unknown) => Promise<void>` | 本番の依存（`createDataApiExecutor`・`readPendingPassword`・`createPrepLogger`・終わりの記録の口）を実行環境ごとに 1 回組み、`createDbPrepHandler` の結果を呼ぶ。口の本番の実装は #6 がこのファイルで渡す。この課題の版は、呼ばれたら投げる口を渡す（関数を呼ぶ側も #6 が作り、それまで誰も呼ばない） |
-| `createDbPrepHandler` | `apps/api/src/db-prep/handler.ts` | 新設 | `(deps: PrepDeps) => (event: unknown) => Promise<void>` | 呼び出しを `dbPrepInvocation` で照らす → 口の `isCurrent(prep_id)` で用意の ID を読み直し、違えば何もせずに終える → 口の `readTarget(project_id)` でデータベースと役割と秘密の器の名前を読み、`readPassword` で保留の版のパスワードを読む → `kind` で用意か差し替え → 結果を口の `record` へ渡す。`PrepDeps` は `{ sql: SqlExecutor; completion: PrepCompletionPort; readPassword: (secret: string) => Promise<string>; logger; now: () => number }` |
-| `PrepCompletionPort` | 同上 | 新設（型） | `{ isCurrent(prepId: string): Promise<boolean>; readTarget(projectId: string): Promise<{ database: string; role: string; secret: string }>; record(inv: DbPrepInvocation, outcome: DbPrepOutcome): Promise<"recorded" \| "mismatch"> }` | 終わりの記録の口。実装は #6（プロジェクトのモジュールの操作。`record` は用意の ID と差し替えの番号が今の値と合うときだけ書く条件つきの書き込み） |
+| `handler` | `apps/api/src/entries/db-prep.ts` | 新設 | `(event: unknown) => Promise<void>` | 本番の依存（`createDataApiExecutor`・`readVersionPassword`・`promoteVersion`・`createPrepLogger`・終わりの記録の口）を実行環境ごとに 1 回組み、`createDbPrepHandler` の結果を呼ぶ。口の本番の実装は #6 がこのファイルで渡す。この課題の版は、呼ばれたら投げる口を渡す（関数を呼ぶ側も #6 が作り、それまで誰も呼ばない） |
+| `createDbPrepHandler` | `apps/api/src/db-prep/handler.ts` | 新設 | `(deps: PrepDeps) => (event: unknown) => Promise<void>` | 呼び出しを `dbPrepInvocation` で照らす → 口の `isCurrent(prep_id)` で用意の ID を読み直し、違えば何もせずに終える → 口の `readTarget(project_id)` でデータベースと役割と秘密の器の名前と版の ID を読み、`readPassword` でその版のパスワードを読む → `kind` で用意か差し替え → 結果が `applied` か記した番号 = n の `rotation_superseded` なら `promote` でその版へ `AWSCURRENT` を移して確かめる → 結果を口の `record` へ渡す。`PrepDeps` は `{ sql: SqlExecutor; completion: PrepCompletionPort; readPassword: (secret: string, versionId: string) => Promise<string>; promote: (secret: string, versionId: string) => Promise<void>; logger; now: () => number }` |
+| `PrepCompletionPort` | 同上 | 新設（型） | `{ isCurrent(prepId: string): Promise<boolean>; readTarget(projectId: string): Promise<{ database: string; role: string; secret: string; secretVersion: string }>; record(inv: DbPrepInvocation, outcome: DbPrepOutcome, secretVersion: string): Promise<"recorded" \| "mismatch"> }` | 終わりの記録の口。実装は #6（プロジェクトのモジュールの操作。`record` は用意の ID・差し替えの番号・版の ID が今の値と合うときだけ書く条件つきの書き込み） |
 | `SqlExecutor` | `apps/api/src/db-prep/sql-executor.ts` | 新設（型） | `{ execute(sql: string, params: SqlParam[] \| undefined, opts: { database: string; transactionId?: string }): Promise<Row[]>; begin(opts: { database: string }): Promise<string>; commit(transactionId: string): Promise<void>; rollback(transactionId: string): Promise<void> }` | 用意と差し替えの SQL を打つ口。`transactionId` の無い `execute` は自動の確定で打つ（`CREATE DATABASE` はこれで打つ）。`database` で `postgres` かプロジェクトのデータベースを選ぶ |
 | `createDataApiExecutor` | 同上 | 新設 | `(opts: { client: RDSDataClient; resourceArn: string; secretArn: string; retry: { attempts: number; delayMs: number; deadlineMs: number; now: () => number } }) => SqlExecutor` | `ExecuteStatement`（`database`・`transactionId`・`formatRecordsAs: "JSON"`）・`BeginTransaction`・`CommitTransaction`・`RollbackTransaction` を打つ。`transactionId` の無い `execute` と `begin` だけ、`RESUME_WAIT_ERRORS`（`DatabaseResumingException`）の例外を `p-retry` で繰り返す（下の箇条）。尽きたら `DataApiUnavailableError` を投げる |
-| `readPendingPassword` | `apps/api/src/db-prep/pending-secret.ts` | 新設 | `(client: SecretsManagerClient, secret: string) => Promise<string>` | 秘密の器の保留の版（`VersionStage: AWSPENDING`）の URL を読み、パスワードを返す |
+| `readVersionPassword` | `apps/api/src/db-prep/secret-version.ts` | 新設 | `(client: SecretsManagerClient, secret: string, versionId: string) => Promise<string>` | `GetSecretValue` に `VersionId` を渡してその版の URL を読み、パスワードを返す。ラベル（`AWSPENDING`・`AWSCURRENT`）では読まない |
+| `promoteVersion` | 同上 | 新設 | `(client: SecretsManagerClient, secret: string, versionId: string) => Promise<void>` | `DescribeSecret` の `VersionIdsToStages` で、版に `AWSCURRENT` が付いていれば何もしない。付いていなければ `UpdateSecretVersionStage`（`VersionStage: AWSCURRENT`・`MoveToVersionId`・今 `AWSCURRENT` の付く版の `RemoveFromVersionId`）を打ち、`DescribeSecret` を読み直して付いていなければ投げる |
 | `createPgExecutor` | `apps/api/test/db-prep/pg-executor.ts` | 新設 | `(connect: (database: string) => Promise<pg.Client>) => SqlExecutor` | テスト用。データベースごとに接続を開き、`begin` は専用の接続に `BEGIN` を打ってその接続を `transactionId` に結ぶ |
 | `claimBinding` | `apps/api/src/db-prep/provision.ts` | 新設 | `(sql: SqlExecutor, project: ProjectIdent) => Promise<"bound" \| "retry" \| "conflict">` | 1 つのトランザクション（`begin`〜`commit`）で `pg_advisory_xact_lock(hashtext('nd-prep:bindings'))` を取り、`nd_prep.bindings`（`project_id` 主キー・`database_name` 一意・`role_name` 一意・`bound_at`）を `project_id`・`database_name`・`role_name` のどれかで引く。下の処理の手順の表で分ける。`bound` のときだけ行を足す。データベースと役割を作る前に打つ |
 | `checkIsolationGuard` | 同上 | 新設 | `(sql: SqlExecutor, project: ProjectIdent) => Promise<"ok" \| "conflict">` | データベースか役割が、渡されたもの以外へ `CONNECT` で結ばれていれば `conflict`（`claimBinding` の後に打つ二重の守り） |
-| `provisionProject` | 同上 | 新設 | `(sql: SqlExecutor, project: ProjectIdent & { password: string }) => Promise<void>` | [用意の手順](../docs/design/data.md#用意の手順) の 1〜6。2 の `CREATE DATABASE` は `transactionId` なしで打ち、4 は `database` にプロジェクトのデータベースを渡して打つ。何度打っても同じ結果になる |
+| `provisionProject` | 同上 | 新設 | `(sql: SqlExecutor, project: ProjectIdent & { password: string }) => Promise<void>` | [用意の手順](../docs/design/data.md#用意の手順) の 1〜6。2 の `CREATE DATABASE` は `transactionId` なしで打ち、4 は `database` にプロジェクトのデータベースを渡して打つ。6 は役割が無ければ `CREATE ROLE`、あれば（作り直し）`ALTER ROLE` で渡されたパスワードを書く。何度打っても、最後に渡したパスワードで同じ結果になる |
 | `rotateRole` | `apps/api/src/db-prep/rotate.ts` | 新設 | `(sql: SqlExecutor, project: ProjectIdent & { password: string; seq: number }) => Promise<RotateResult>` | 1 つのトランザクションで `pg_advisory_xact_lock(hashtext('nd-rotate:' \|\| role))` を取り、`nd_prep.rotation_seq` の記した番号と n を比べ、小さいときだけパスワード・番号・書いた時刻を書き、境の時刻 `old_conn_cutoff` を空にする。結果は `applied`・`superseded_equal`・`superseded_greater` と記した番号 |
 | `terminateRoleConnections` | 同上 | 新設 | `(sql: SqlExecutor, role: string, seq: number, opts: { deadlineMs: number; pollMs: number; now: () => number }) => Promise<{ kind: "done"; remaining: number } \| { kind: "superseded_greater"; recorded: number }>` | `rotateRole` のトランザクションが確定した後に、別のトランザクションで同じ排他の鎖を取る。記した番号が n より大きければ何も切らずに `superseded_greater`。番号 n の行の `old_conn_cutoff` が空なら `clock_timestamp()` を記す。切りと読み直しは、切り始めの時刻から `deadlineMs`（既定 15,000）の 1 つの期限を共にする（`now` は既定 `performance.now`）。1. 切る: `pg_stat_activity` のうち、その役割で `backend_start` が `old_conn_cutoff` より前の接続へ、1 つの SQL で `pg_terminate_backend(pid, 0)` を送る（`timeout` 0 はシグナルを送るだけで待たない。0 より大きい待ちは呼び出しごとに掛かり、接続ごとに呼ぶと期限を食い尽くすため使わない。設計文書の LIB22）。2. 読み直す: 同じ条件の残りの数を読む。トランザクションの中の `pg_stat_activity` は、その中で最初に読んだ時点の写しを返し続ける（設計文書の LIB21）ため、毎回の読みの直前に `SELECT pg_stat_clear_snapshot()` を打って写しを捨てる。1 の接続の一覧を読む前にも打つ。3. 残りが 0 なら返す。0 でなく期限の内なら、`min(pollMs, 期限までの残り)`（`pollMs` の既定 500）待って 2 へ戻る。期限を過ぎていれば、その読みの数を返す。期限を過ぎた後でも、2 の読みを最低 1 回打ってから返す（1 で期限を過ぎていても、読まずに数を決めない）。返した数が 1 以上なら `createDbPrepHandler` が `connections_remain` にする |
 
 - `createDbPrepHandler`
   - 事前条件: 環境変数でクラスタの ARN・管理の役割の秘密の器の ARN・秘密の器の頭が渡っている（`handler` が読む）
-  - 副作用: Data API への SQL・秘密の器の保留の版の読み取り・終わりの記録の口の呼び出し。ほかの AWS の API とファイルには触れない
+  - 副作用: Data API への SQL・秘密の器の結んだ版の読み取りと、その版への `AWSCURRENT` の移し・終わりの記録の口の呼び出し。ほかの AWS の API とファイルには触れない
 - `createDataApiExecutor` の繰り返し
   - `p-retry` に `{ retries: attempts - 1, factor: 1, minTimeout: delayMs, maxTimeout: delayMs, randomize: false, maxRetryTime: deadlineMs }`（既定で `attempts` 12・`retries: 11`・`delayMs` 5,000・`deadlineMs` 60,000）を渡す。期限は呼び出しごとの最初の試行の開始から測り、`now`（既定 `performance.now`。`p-retry` が `maxRetryTime` を測るのと同じ時計）で測る
   - `p-retry` の `maxRetryTime` は待ちを残り時間に切り詰めるだけで、待った直後に期限を照らさずに次の試行を呼ぶ（設計文書の LIB8）。そのため、試行の関数の始めで期限を照らし、残りが 0 以下なら打たずに `AbortError` を投げる
@@ -304,7 +305,8 @@ package-lock.json
 | --- | --- | --- |
 | `createDbPrepHandler` | 呼び出しが `dbPrepInvocation` に合わない | 口を呼ばずに終える。ログに形の誤りだけを出す |
 | `createDbPrepHandler` | `isCurrent` が偽 | SQL を打たず、`record` も呼ばずに終える（全体の設計の決定 96） |
-| `createDbPrepHandler` | `isCurrent`・`readTarget`・`readPassword`・`record` のどれかが投げる | 終わりを記さずに投げる（関数の誤り。自動の再試行は 0 回で、見回りが期限の後に扱う） |
+| `createDbPrepHandler` | `isCurrent`・`readTarget`・`readPassword`・`promote`・`record` のどれかが投げる | 終わりを記さずに投げる（関数の誤り。自動の再試行は 0 回で、見回りが期限の後に扱う）。`promote` が投げたら `record` を呼ばない |
+| `createDbPrepHandler` | `applied`、または `rotate` で記した番号 = n の `rotation_superseded` | `promote` が版を確かめた後にだけ `record` を呼ぶ。`failed` と、記した番号 > n の `rotation_superseded` では `promote` を呼ばない |
 | `createDbPrepHandler` | `record` が `mismatch` | 書かれずに終える。ログに出す |
 | `createDbPrepHandler` | Data API の再開の待ちが尽きた（`DataApiUnavailableError`） | `failed`・`data_api_unavailable` |
 | `createDbPrepHandler` | `create` で `claimBinding` か `checkIsolationGuard` が `conflict` | 何も書かずに `failed`・`guard_conflict` |
@@ -325,7 +327,8 @@ package-lock.json
 | --- | --- | --- | --- | --- | --- | --- |
 | `createDataApiExecutor` | 再開の待ちが尽きた | Aurora の再開の遅れ | 期限か回数の尽き | `DataApiUnavailableError` を投げ、`failed`・`data_api_unavailable` を口へ渡す | ログに理由のコード | 作るなら `無い` へ戻り次の開始で、差し替えなら見回りの呼び直しで続く |
 | `provisionProject` | SQL の失敗 | 権限・名前の衝突 | SDK の例外（`pg` の実装では `pg` の例外） | `failed`・`sql_failed` を口へ渡す | ログに例外の名前と、取れるときの SQLSTATE だけ（値は出さない） | 手順は何度打っても同じ結果。次の開始か呼び直しで続く |
-| `readPendingPassword` | 読めない・形が違う | 保留の版が無い・権限・URL の形 | SDK の例外・形の照らし | 終わりを記さずに投げる | ログに例外の名前 | 何も書いていない。見回りが期限の後に扱う |
+| `readVersionPassword` | 読めない・形が違う | 版が無い・権限・URL の形 | SDK の例外・形の照らし | 終わりを記さずに投げる | ログに例外の名前 | 何も書いていない。見回りが期限の後に扱う |
+| `promoteVersion` | 移せない・読み直しで付いていない | 権限・ほかの書き手との競合 | SDK の例外・読み直し | 終わりを記さずに投げる | ログに例外の名前 | DB は書いた後で、`作成中` か保留が残る（I20 で URL を渡さない）。呼び直しか作り直しが、移しを打ち直してから記す |
 | `PrepCompletionPort` の `record` | 投げる | プロジェクトの表へ書けない | 例外 | 終わりを記さずに投げる | ログに例外の名前 | 見回りが期限の後に扱う（作るなら `無い` へ戻り、次の開始で同じ名前で打ち直す。手順は何度打っても同じ結果） |
 
 ### 並行と排他
@@ -366,8 +369,9 @@ package-lock.json
 | `rotateRole` | 記した番号 < n で書く | 記した番号 = n で書かない | 記した番号 > n で何も変えない。2 つを同時に打って番号の大きい方だけが残る |
 | `terminateRoleConnections`（`createPgExecutor`・PostgreSQL のサービスコンテナ） | 書く前に開いた役割の接続を 3 本の実際の PostgreSQL 16 で切り、同じトランザクションの中の読み直しで残り 0 を返す（`pg_stat_clear_snapshot()` を外すと、最初の写しの 3 を読み続けて落ちる） | 境の時刻が記されていれば記し直さない。作り物の `SqlExecutor` で次を照らす（時計は差し替える）: 残りの読みの直前ごとに `pg_stat_clear_snapshot()` を打つ。切りの SQL が `pg_terminate_backend(pid, 0)` の 1 回で、接続の数（1 本・10 本）で呼ぶ回数が変わらない。1 回目の読み直しが 1・2 回目が 0 なら 0 を返す。読みが 1 のまま期限の 15 秒を過ぎれば、最後の読みの 1 を返し、期限の後に次の読みを打たない。切りの SQL が戻るまでに時計を期限の後へ進めても、残りを 1 回読んでから返し、その数が 0 なら 0（`createDbPrepHandler` は `applied`）、1 以上ならその数（`createDbPrepHandler` は `connections_remain`）。待ちは毎回 `pollMs` と期限までの残りの小さい方 | 順序の逆転: 呼び出し T1 が番号 n を書いて切りの前で止まり、呼び直しの T2（同じ n）が `superseded_equal`・切り・終わりまで進み、その後に新しいパスワードで接続 C を開き、T1 を再開すると C が切られずに残る（C が切られると落ちる）。T1 が `rotateRole` の前で止まり、T2 が終わって C を開いた後に T1 を最初から打っても C が残る。記した番号が n+1 に上がった後の T1（n）は何も切らずに `superseded_greater` |
 | `createDataApiExecutor`（SDK のクライアントを差し替える） | `execute` が `database` と `transactionId` を `ExecuteStatement` へそのまま渡し、`transactionId` の無い `execute` は持たない。`begin` の返す ID を `commit`・`rollback` へ渡す。2 回目の試行で `DatabaseResumingException` が止めば返す。既定の値で `p-retry` に渡す値が `retries: 11`・`factor: 1`・`minTimeout: 5000`・`maxTimeout: 5000`・`randomize: false`・`maxRetryTime: 60000` | `DatabaseResumingException` が続くと 12 回試し、13 回目を打たない（最後の試行の始めは 55 秒）。`p-retry` の切り詰めた待ちが期限ちょうどで明けたとき、試行の関数が打たずに投げる（作り物のクライアントの呼ばれた回数が増えない。時計は差し替える）。`transactionId` を持つ `execute` は `DatabaseResumingException` でも繰り返さない | `RESUME_WAIT_ERRORS` に無い例外（`BadRequestException` など）は 1 回で投げる。尽きたら `DataApiUnavailableError` を投げ、`createDbPrepHandler` が `data_api_unavailable` を渡す |
-| `readPendingPassword` | 保留の版の URL からパスワードを返し、`VersionStage` に `AWSPENDING` を渡す | — | 保留の版が無い・URL にパスワードが無いと投げる。例外の文にパスワードと URL が現れない |
-| `createDbPrepHandler` | 処理の手順の表の各行（作り物の口と `SqlExecutor`）。`isCurrent` が偽なら、`SqlExecutor`・`readTarget`・`readPassword`・`record` のどれも呼ばれない | — | ログの出力（作り物の書き先に集めた全行）に、作り物のパスワード・URL・データベースと役割の名前のどれかが部分の文字列として現れると落ちる。作り物の `SqlExecutor` と `readPassword` が、それらの値を `message` に含む例外を投げる場合（再開の待ちの尽き・SQL の失敗・秘密の器の失敗）でも同じに照らす |
+| `readVersionPassword` | 版の URL からパスワードを返し、`VersionId` を渡して `VersionStage` を渡さない | — | 版が無い・URL にパスワードが無いと投げる。例外の文にパスワードと URL が現れない |
+| `promoteVersion` | `AWSCURRENT` の付かない版で `UpdateSecretVersionStage` に `MoveToVersionId` とそれまでの版の `RemoveFromVersionId` を渡し、読み直す | 既に付いていれば `UpdateSecretVersionStage` を呼ばない（中断からの再開） | 読み直しで付いていなければ投げる |
+| `createDbPrepHandler` | 処理の手順の表の各行（作り物の口と `SqlExecutor`）。`isCurrent` が偽なら、`SqlExecutor`・`readTarget`・`readPassword`・`promote`・`record` のどれも呼ばれない。中断からの再開: 1 回目の差し替えの呼び出しを `promote` の後・`record` の前で投げさせ、同じ番号 n・同じ版の ID・新しい用意の ID の呼び直しが、`rotation_superseded`（記した番号 = n）で `promote` を打ち（作り物の秘密の器は既に `AWSCURRENT` を版に持つため移さない）、その後に `record` を呼んで保留が下りる。どの呼び出しでも `record` は `promote` の後にだけ呼ばれる | `promote` が投げると `record` が呼ばれない（呼ばれると落ちる）。`failed` で `promote` が呼ばれると落ちる | ログの出力（作り物の書き先に集めた全行）に、作り物のパスワード・URL・データベースと役割の名前のどれかが部分の文字列として現れると落ちる。作り物の `SqlExecutor` と `readPassword` が、それらの値を `message` に含む例外を投げる場合（再開の待ちの尽き・SQL の失敗・秘密の器の失敗）でも同じに照らす |
 | ロガーの設定 | — | — | `paths` の各キーに値を入れた物を渡すと、出力にそのキーが無い |
 
 CI の `check` のジョブに `postgres:16`（要約値で固定）のサービスコンテナを置き、接続の値を `ND_TEST_PG_URL` で渡す。値が無いとき、`CI` が真なら DB のテストは落ち、手元では飛ばす（このリポジトリはテストを CI に寄せる）。

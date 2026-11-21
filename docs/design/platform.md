@@ -515,6 +515,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | LIB87 | `react`・`react-dom` | 19.3.1 | MIT | 2026-10-14 | 無し | 満たす。ただし実行の時の依存が 2 つ増え（`react-dom` の展開後 約 7.7 MiB）、部品を JSX で書くと Node の型の剥がしで打てない（STD84） | https://registry.npmjs.org/react ・ https://registry.npmjs.org/react-dom （2026-11-18） |
 | LIB88 | `preact` | 11.2.0 | MIT | 2026-11-06 | 無し | 満たす。小さいが、実行の時の依存が 1 つ増え、JSX は LIB87 と同じく型の剥がしで打てない | https://registry.npmjs.org/preact （2026-11-18） |
 | LIB89 | `lit` | 3.3.3 | BSD-3-Clause | 2026-05-14 | 無し | 満たす。Web Components の上で JSX を使わずに書ける。実行の時の依存が 1 つ増え、宣言の書き方の多くがデコレーターに寄る | https://registry.npmjs.org/lit （2026-11-18） |
+| LIB92 | Secrets Manager の版とラベル（`CreateSecret`・`PutSecretValue`・`UpdateSecretVersionStage`） | — | AWS のサービス | — | 無し | 満たす。値を持つ `CreateSecret` は最初の版を作り `AWSCURRENT` を付ける。`PutSecretValue` は `VersionStages` を渡さないと `AWSCURRENT` を新しい版へ移し、渡せばそのラベルだけを付ける（別の版に付いていたラベルは外れる）。`ClientRequestToken` が版の ID になり、同じ ID と同じ値の送り直しは何もしない（値が違えば失敗）。`UpdateSecretVersionStage` は `MoveToVersionId` と `RemoveFromVersionId` でラベルを移し、`AWSCURRENT` を移すと `AWSPREVIOUS` が自動で移る。ラベルを失った版は片付けの対象になるが、作って 24 時間の版は残る | https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_CreateSecret.html ・ https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_PutSecretValue.html ・ https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecretVersionStage.html （2026-11-21） |
 
 ### 確かめられなかったこと
 
