@@ -209,7 +209,7 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
 
 describe("受け入れ条件 1・6: apps/* の node:crypto（crypto）の ID と冪等の鍵の生成（決定 1）", () => {
   // 名前空間・既定の import と動的な import と export *（export * as）は丸ごと、名前つきの import と名前つきの再書き出しは
-  // randomUUID・randomBytes・randomFill・randomFillSync・getRandomValues・webcrypto だけを落とす
+  // randomUUID・randomBytes・randomFill・randomFillSync・randomInt・getRandomValues・webcrypto だけを落とす
   const CRYPTO_PATHS = ["apps/api/src/sample.ts", "apps/web/src/sample.ts"];
   const IMPORTS_RULE = "@typescript-eslint/no-restricted-imports";
   const banned: { name: string; code: string; ruleId: string }[] = [
@@ -229,6 +229,9 @@ describe("受け入れ条件 1・6: apps/* の node:crypto（crypto）の ID と
     { name: "node: を付けない crypto の randomFill の名前つきの import", code: 'import { randomFill } from "crypto";\nrandomFill(Buffer.alloc(16), () => undefined);\n', ruleId: IMPORTS_RULE },
     { name: "randomFillSync の名前つきの再書き出し", code: 'export { randomFillSync } from "node:crypto";\n', ruleId: IMPORTS_RULE },
     { name: "randomFill の名前つきの再書き出し", code: 'export { randomFill } from "crypto";\n', ruleId: IMPORTS_RULE },
+    { name: "randomInt の名前つきの import", code: 'import { randomInt } from "node:crypto";\nexport const id = randomInt(1_000_000).toString();\n', ruleId: IMPORTS_RULE },
+    { name: "node: を付けない crypto の randomInt の名前つきの import", code: 'import { randomInt } from "crypto";\nexport const id = randomInt(1_000_000).toString();\n', ruleId: IMPORTS_RULE },
+    { name: "randomInt の名前つきの再書き出し", code: 'export { randomInt } from "node:crypto";\n', ruleId: IMPORTS_RULE },
     { name: "export * の再書き出し", code: 'export * from "node:crypto";\n', ruleId: IMPORTS_RULE },
     { name: "export * as の再書き出し", code: 'export * as c from "node:crypto";\n', ruleId: IMPORTS_RULE },
     { name: "node: を付けない crypto の名前空間の import", code: 'import * as c from "crypto";\nexport const h = c.createHash("sha256");\n', ruleId: IMPORTS_RULE },
