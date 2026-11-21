@@ -53,7 +53,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `infra/lib/app-stack.ts` | 変更 | 4 つの部品を組み、AZ を `Fn::GetAZs` から返し、利用者の表に PITR を付ける | 上の 4 つ | `AppStack` | `availabilityZones`（新設の getter）・`constructor`（変更） |
 | `infra/lib/pipeline-stack.ts` | 変更 | 準備のアクションを特権にしてイメージを作らせ、自前の ECR への push を許す。反映のアクションは、反映の前に引くイメージが残す 10 版にあるかを読む | — | `PipelineStack` | `constructor`・`prepareBuildSpec`・`deployBuildSpec`（変更） |
 | `infra/setup/missing-settings.ts` | 新設 | 足りない設定の一覧を集めて出す | `aws-reader` | モジュール | `MISSING_CHECKS`・`collectMissingSettings`・`printMissingSettings` |
-| `infra/lib/images.ts` | 新設 | イメージごとの自前の ECR とライフサイクルの規則、合成の入力のダイジェストの読み方 | aws-cdk-lib | `ImageRepository` | `constructor`・`IMAGE_SPECS`・`readImageDigests`・`KEEP_IMAGES` |
+| `infra/lib/images.ts` | 新設 | イメージごとの自前の ECR とライフサイクルの規則、合成の入力のダイジェストの読み方 | aws-cdk-lib | `ImageRepository` | `constructor`・`IMAGE_SPECS`・`imageRepositoryName`・`readImageList`・`readImageDigests`・`KEEP_IMAGES` |
 | `infra/bin/app.ts` | 変更 | 合成の入力のダイジェストを読んで `AppStack` へ渡す | `images.ts` | モジュール | 最上位の処理（変更） |
 | `infra/setup/images.ts` | 新設 | 使用中の版を押し出さないかを照らし、イメージを作って push し、一覧を書く。反映の前に引くイメージが残す 10 版にあるかを確かめる | `images.ts`・AWS SDK（ECR・ECS） | モジュール | `buildAndPushImages`・`checkPushKeepsInUse`・`checkImagesKept` |
 | `infra/setup/images-cli.ts` | 新設 | パイプラインの準備のアクションから `buildAndPushImages` を打つ入口 | `setup/images.ts` | モジュール | `main` |
@@ -215,19 +215,20 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `KEEP_IMAGES` | 同上 | 新設 | 定数 `10` | リポジトリごとに残す版の数（設計文書の決定 2） |
 | `imageRepositoryName` | 同上 | 新設 | `(s: Settings, key: ImageKey) => string` | リポジトリの名前 `<prefix>-<environment>-<key>` を返す。`ImageRepository` と `buildAndPushImages` と `checkPushKeepsInUse` がこれで名前を作る（名前を作る所を 1 つにする） |
 | `ImageRepository` の `constructor` | 同上 | 新設 | `(scope, id, props: { name: string })` | ECR のリポジトリ（名前は `imageRepositoryName` の値・タグは書き換え不可・push の時の検査・`RemovalPolicy.RETAIN`）と、規則 1 つ（`tagStatus: any`・`imageCountMoreThan: KEEP_IMAGES`） |
-| `readImageDigests` | 同上 | 新設 | `(env: NodeJS.ProcessEnv) => ImageDigests` | 環境の値 `ND_IMAGES` が指す一覧のファイル（`nd-setup-images.json`）を読み、キーごとのダイジェストを返す。無ければ空。一覧の形は `{ "<key>": { "repository": "<リポジトリの名前>", "digest": "sha256:…" } }` で、リポジトリの名前を持つため、一覧だけで引く先が決まる（下の `checkImagesKept` と反映のアクションの確かめは設定のファイルを読まない） |
+| `readImageList` | 同上 | 新設 | `(path: string) => ImageDigests` | 一覧のファイルを読み、キーごとの `{ repository, digest }` の組を返す。一覧の形は `{ "<key>": { "repository": "<リポジトリの名前>", "digest": "sha256:…" } }` で、リポジトリの名前を持つため、一覧だけで引く先が決まる（下の `checkImagesKept` と反映のアクションの確かめは設定のファイルを読まない）。形が違えば投げる |
+| `readImageDigests` | 同上 | 新設 | `(env: NodeJS.ProcessEnv) => ImageDigests` | 環境の値 `ND_IMAGES` が指す一覧のファイル（`nd-setup-images.json`）を `readImageList` で読み、その組をそのまま返す。`ND_IMAGES` が無ければ空 |
 | `buildAndPushImages` | `infra/setup/images.ts` | 新設 | `(target: Target, s: Settings, out: string, deps: ImageDeps) => Promise<ImagesResult>` | `IMAGE_SPECS` のキーごとにリポジトリがあるかを読む。リポジトリのあるキーについて先に `checkPushKeepsInUse` を打ち、どれか 1 つでも押し出すなら何も push せずに投げる（9）。通れば、リポジトリのあるキーごとに `docker build --platform linux/amd64` → `build-<UTC の時刻>` のタグで push → ダイジェストを読み、得たキーだけを、キーごとのリポジトリの名前（`imageRepositoryName`）とダイジェストの組で `<out>/nd-setup-images.json` に書く。結果は `{ digests: ImageDigests; noRepository: ImageKey[] }`。リポジトリのあるキーが 1 つも無ければ一覧を書かない |
 | `checkPushKeepsInUse` | 同上 | 新設 | `(target: Target, key: ImageKey, deps: ImageDeps) => Promise<{ ok: true } \| { ok: false; inUse: string; newer: number }>` | 族 `<prefix>-<environment>-<key>` の最新の有効なタスクの定義（`DescribeTaskDefinition`）が引くダイジェストを使用中の版とし、リポジトリの版（`DescribeImages`）を push の時刻で並べて、使用中の版より後の版の数を数える。`KEEP_IMAGES - 1`（9）以上なら `ok: false`。族が無い・使用中の版がリポジトリに無いときは `ok: true` |
-| `checkImagesKept` | 同上 | 新設 | `(target: Target, assembly: string, deps: ImageDeps) => Promise<string[]>` | 合成の結果の一覧のキーごとに、一覧に書いたリポジトリの名前でリポジトリの版（`DescribeImages`）を push の時刻の新しい順に並べ、上から `KEEP_IMAGES` 件に入っていないダイジェスト（無いものを含む）を返す |
+| `checkImagesKept` | 同上 | 新設 | `(target: Target, assembly: string, deps: ImageDeps) => Promise<string[]>` | 合成の結果の一覧（`<assembly>/nd-setup-images.json`）を `readImageList` で読み（`readImageDigests` と同じ読み取り。環境の値は使わない）、キーごとに、組の `repository` の名前でリポジトリの版（`DescribeImages`）を push の時刻の新しい順に並べ、上から `KEEP_IMAGES` 件に入っていないダイジェスト（無いものを含む）を返す |
 | `main` | `infra/setup/images-cli.ts` | 新設 | `(argv: string[], deps: ImageDeps) => Promise<number>` | `push --settings <file> --out <dir>` を打つ。パイプラインの CodeBuild の資格情報（既定の解き方）で動く |
 | `synthesize` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 選んだスタックに `app` が含まれるときだけ、画面のビルドの後、合成の前に `buildAndPushImages` を打ち、一覧のファイルを `ND_IMAGES` で合成へ渡す。一覧は合成の結果の置き場にあるため要約値に入る。`app` を含まない（`--stack pipeline` だけ）ときは push せず、一覧も書かない |
 | `runDeploy` | 同上 | 変更 | 変えない | 確認の値を照らした後・反映の前に、置き場に一覧があれば `checkImagesKept` を打ち、外れたダイジェストがあれば反映しない（9） |
 
 - `SetupDeps` と `ImageDeps` に `docker: (args: string[]) => Promise<{ code: number; stdout: string }>` と `ecr`（`DescribeRepositories`・`DescribeImages`・`GetAuthorizationToken` の包み）と `ecs`（`DescribeTaskDefinition` の包み）を置く（テストは本物の Docker と AWS を呼ばない）
 - push の前の `docker login` は `GetAuthorizationToken` の値を標準入力で渡し、値をログ・出力に出さない
-- `AppStack` の props に `images: ImageDigests` を足し、`bin/app.ts` が `readImageDigests(process.env)` で渡す。CI の合成は `ND_IMAGES` を持たず、タスクの定義を作らない版になる。スタックのテストは作り物のダイジェスト（`sha256:` と 0 を 64 桁）を渡して、タスクの定義を持つ版を照らす
+- `AppStack` の props に `images: ImageDigests` を足し、`bin/app.ts` が `readImageDigests(process.env)` で渡す。CI の合成は `ND_IMAGES` を持たず、タスクの定義を作らない版になる。スタックのテストは作り物の組（`repository` は `imageRepositoryName` の値、`digest` は `sha256:` と 0 を 64 桁）を渡して、タスクの定義を持つ版を照らす
 - ビルドはビット単位で再現しない前提に置く（設計文書の決定 2）。中身を変えない `diff` や準備でも、毎回ダイジェストの違う版が push される。そのため版の数の守りは、再現に頼らず `checkPushKeepsInUse` と `checkImagesKept` で持つ
-- `ImageDigests` はキーごとの任意の値（`Partial<Record<ImageKey, string>>`）で、`readImageDigests` は一覧にあるキーだけを返す。`AppStack` はキーごとにタスクの定義を作るかを決めるため、新しいリポジトリ（#6 の `runner`）を足す初回の反映でも、リポジトリのある `db-prep` のタスクの定義は残る
+- `ImageDigests` はキーごとの任意の組（`Partial<Record<ImageKey, { repository: string; digest: string }>>`）で、一覧のファイルの形と同じである。`readImageDigests` は一覧にあるキーだけを返す。`ImagesResult.digests`・`AppStack` と `TaskPlatform` の props の `images` も同じ型で、組のまま渡す。`TaskPlatform` はイメージを引くのに `digest` だけを使い（リポジトリは `ImageRepository` の資源）、組の `repository` が `imageRepositoryName` の値と違えば合成を誤りにする（一覧と引く先の食い違いを合成で止める）。`AppStack` はキーごとにタスクの定義を作るかを決めるため、新しいリポジトリ（#6 の `runner`）を足す初回の反映でも、リポジトリのある `db-prep` のタスクの定義は残る
 
 ### 異常系の処理
 
@@ -245,7 +246,8 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | --- | --- | --- | --- |
 | `imageRepositoryName` | `prefix` `nd`・`environment` `prod`・キー `db-prep` で `nd-prod-db-prep` | — | — |
 | `ImageRepository` | 合成の出力のリポジトリの名前が `imageRepositoryName` の値で、タグ書き換え不可のリポジトリと、`imageCountMoreThan` が 10 の規則 1 つがある | — | 規則が日数になる・数が変わると落ちる |
-| `AppStack`（ダイジェストあり） | DB の用意のタスクの定義のイメージが `<リポジトリ>@sha256:…` | ダイジェストなしでタスクの定義を作らない | ダイジェストを変えると要約値が変わる（合成の結果の要約値の比べ） |
+| `AppStack`（ダイジェストあり） | DB の用意のタスクの定義のイメージが `<リポジトリ>@sha256:…` | ダイジェストなしでタスクの定義を作らない | ダイジェストを変えると要約値が変わる（合成の結果の要約値の比べ）。組の `repository` が `imageRepositoryName` の値と違うと合成が投げる |
+| `readImageList`・`readImageDigests` | 一覧の組をキーごとに返す。`checkImagesKept` は同じ `readImageList` で置き場の一覧を読む | `ND_IMAGES` が無ければ空 | `digest` か `repository` の無い組・`sha256:` で始まらないダイジェストで投げる |
 | `buildAndPushImages` | リポジトリがあれば作って push し、一覧を書く。一覧の各キーの `repository` が `imageRepositoryName` の値で、`DescribeRepositories` と push の先も同じ名前 | リポジトリが 1 つも無ければ何もしない。`IMAGE_SPECS` が `db-prep` と `runner` で `db-prep` のリポジトリだけがあると、`db-prep` だけを push して一覧に載せ、`noRepository` が `runner` になる | Docker の失敗・push の失敗で投げ、一覧を書かない。login の値が出力に出ない。`checkPushKeepsInUse` が `ok: false` のキーが 1 つでもあれば、どのキーも build も push も呼ばない |
 | `checkPushKeepsInUse` | 使用中の版より後の版が 8 で `ok: true` | 後の版が 9 で `ok: false`。族が無い・使用中の版がリポジトリに無いと `ok: true` | `DescribeTaskDefinition` か `DescribeImages` が `AccessDeniedException` を投げると、`buildAndPushImages` が build も push も呼ばずに 4 で終わり（9 にならない）、出力に足りない操作の名前が出る |
 | `AppStack`（一部のキーだけのダイジェスト） | 一覧が `db-prep` だけのとき、DB の用意のタスクの定義を作る | 前の版（`db-prep` だけ）の合成の出力と比べ、`runner` のリポジトリを足しても DB の用意のタスクの定義が消える差分にならない | — |
