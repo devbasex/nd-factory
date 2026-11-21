@@ -83,12 +83,12 @@ const userOps = OPERATIONS.filter((op) => op.endpoint === "user");
 const selfOps = OPERATIONS.filter((op) => op.endpoint !== "user");
 
 describe("OPERATIONS", () => {
-  it("利用者向けの 66 と自分向けの 9 を登録する", () => {
-    expect(USER_ROWS).toHaveLength(66);
+  it("利用者向けの 67 と自分向けの 9 を登録する", () => {
+    expect(USER_ROWS).toHaveLength(67);
     expect(SELF_ROUTES).toHaveLength(9);
-    expect(userOps).toHaveLength(66);
+    expect(userOps).toHaveLength(67);
     expect(selfOps).toHaveLength(9);
-    expect(OPERATIONS).toHaveLength(75);
+    expect(OPERATIONS).toHaveLength(76);
   });
 
   it("全体の設計の一覧の順に、利用者向け・自分向けの順で並ぶ", () => {
@@ -154,11 +154,11 @@ describe("OPERATIONS", () => {
     }
   });
 
-  it("全部か無かは projects.create（20）と repositories.add（25）だけ", () => {
+  it("全部か無かは projects.create（19）と repositories.add（24）だけ", () => {
     const marked = OPERATIONS.filter((op) => op.allOrNothing !== null).map((op) => [op.name, op.allOrNothing?.maxItems]);
     expect(marked).toEqual([
-      ["projects.create", 20],
-      ["repositories.add", 25],
+      ["projects.create", 19],
+      ["repositories.add", 24],
     ]);
   });
 

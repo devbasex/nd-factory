@@ -16,6 +16,10 @@
     "owner": "#4"
   },
   {
+    "operation": "login_links.create",
+    "owner": "#4"
+  },
+  {
     "operation": "logins.create",
     "owner": "#4"
   },
