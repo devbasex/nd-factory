@@ -99,6 +99,7 @@ export async function startApp(root: HTMLElement, deps: WebDeps): Promise<void> 
 const appRoot = typeof document === "undefined" ? null : document.getElementById("app");
 if (appRoot) {
   void startApp(appRoot, {
+    // eslint-disable-next-line no-restricted-globals -- #2 が横断の部品へ移す
     fetch: (input, init) => window.fetch(input, init),
     location: window.location,
     history: window.history,

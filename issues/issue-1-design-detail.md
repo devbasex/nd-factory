@@ -25,7 +25,7 @@ nd-factory/
 ├── apps/api/src/user-store.ts             除外の注釈（#2）
 ├── apps/web/src/main.ts                   除外の注釈（#2）
 ├── apps/web/src/users-client.ts           除外の注釈（#4）
-├── infra/lib/app-stack.ts                 除外の注釈（#2）
+├── infra/lib/app-stack.ts                 除外の注釈（#4。旧経路 `PUT /v1/users` の登録）
 └── tools/
     ├── package.json                       依存 @nd-factory/contracts・ajv・ajv-formats・yaml
     ├── tsconfig.json                      checks/src を含める
@@ -61,9 +61,10 @@ nd-factory/
 | 置き場 | 規則 | 落とすもの | 全体の設計の行 |
 | --- | --- | --- | --- |
 | `apps/*` | `no-restricted-properties` | `Date.now`・`Math.random`・`crypto.randomUUID`・`crypto.getRandomValues` | 時計・ID と冪等の鍵 |
-| `apps/*` | `no-restricted-syntax` | 引数なしの `new Date()`・鍵 `ConditionExpression` を持つオブジェクトの性質 | 時計・条件つきの書き込み |
-| `apps/*` | `no-restricted-globals`（`checkGlobalObject`） | `console`・`fetch` | ログと伏せ字・外部の呼び出し |
-| `apps/*` | `@typescript-eslint/no-restricted-imports`（`allowTypeImports`） | `@aws-sdk/*`・`node:http`・`node:https`・`node:crypto` の `randomUUID`・`randomBytes`・`uuid` | 外部の呼び出し・条件つきの書き込み・操作の記録の書き手・ID |
+| `apps/*` | `no-restricted-syntax` | 引数なしの `new Date()`・鍵 `ConditionExpression` を持つオブジェクトの性質・丸ごと落とす指定子（`@aws-sdk/*`・`node:http`・`http`・`node:https`・`https`・`uuid`・`node:console`・`console`）の動的な `import()`・大域のオブジェクト（`globalThis`・`global`・`window`・`self`）からの `console`・`fetch` の分割代入（`const { console } = globalThis`） | 時計・条件つきの書き込み・外部の呼び出し・ID・ログと伏せ字 |
+| `apps/*` | `no-restricted-globals`（`checkGlobalObject`・`globalObjects: ["global"]`） | `console`・`fetch`（`globalThis`・`global`・`window`・`self` からの性質の参照を含む。分割代入はこの規則では落ちないので上の `no-restricted-syntax` の行で落とす） | ログと伏せ字・外部の呼び出し |
+| `apps/*` | `@typescript-eslint/no-restricted-imports`（`allowTypeImports`） | `@aws-sdk/*`・`node:http`・`http`・`node:https`・`https`・`uuid`・`node:console`・`console`（Node.js が受け付ける `node:` を付けない表記も落とす） | 外部の呼び出し・条件つきの書き込み・操作の記録の書き手・ID・ログと伏せ字 |
+| `apps/*` | `@typescript-eslint/no-restricted-imports`（`node:crypto`・`crypto` の `importNames`）と `no-restricted-syntax`（動的な `import()`） | `node:crypto`（`crypto`）の名前空間の import・既定の import・動的な `import()`・`export * from`・`export * as … from` を丸ごと落とし、名前つきの import と名前つきの再書き出し（`export { … } from`）は `randomUUID`・`randomBytes`・`randomFill`・`randomFillSync`（渡したバッファを乱数で埋める）・`randomInt`（乱数の整数を返す）・`randomUUIDv7`・`getRandomValues`・`generatePrime`・`generatePrimeSync`（乱数で素数を作る）・`webcrypto`（`webcrypto.randomUUID` などを持つ）の名前だけを落とす。実行中の Node.js の `node:crypto` の書き出しから乱数の関数の名前を拾って照らすテストを置き、版が上がって増えた名前を落とし忘れない（`importNames` に `default` と合わせて並べる）。型だけの import と、`subtle`（`SubtleCrypto` で乱数の関数を持たない。`subtle.digest` などに使う）や `createHash` などほかの名前の名前つきの import・名前つきの再書き出し（`export { createHash } from "node:crypto"`）は落とさない。モジュールの値を持たせないので、移した先を追わずに済む | ID と冪等の鍵 |
 | `apps/web/src/**` | `no-restricted-syntax` | 料金プランの名前と同じ文字列（JSX の属性の値と `JSXText` を含む）。名前は #29 の書き出しから読み、無ければこの選び方を作らない | I8（画面） |
 | `apps/web/src/**`・`apps/api/src/**`・`infra/lib/**` | `no-restricted-syntax` | `/v1/` を含む文字列とテンプレートの文字列（経路は形の正本の登録の書き出しからだけ読む。K2-2・K2-3） | I14（画面の呼び出し・HTTP の経路の登録） |
 | `apps/web/**` の外の `*.tsx` | `no-restricted-syntax` の `Program` | ファイルそのもの（1 ファイル 1 件） | 言語と書き方の決まりの画面の行（決定 140） |
