@@ -165,17 +165,28 @@ async function withResumeWait<T>(op: () => Promise<T>, retry: DataApiRetry): Pro
   }
 }
 
-// Data API のクライアント。SDK の自動の再試行を止める（maxAttempts: 1）。SDK は通信の障害や絞りで文や commit を
-// 打ち直し、初回が確定して応答だけが失われると、打ち直しの失敗が返って確定したかが分からなくなる。再試行は再開の待ちだけを
-// この実装が受け持つ
+// createRdsDataClient が作ったクライアント。createDataApiExecutor はこれに含まれるクライアントだけを受ける
+const SINGLE_ATTEMPT_CLIENTS = new WeakSet<RDSDataClient>();
+
+// Data API のクライアント。SDK の自動の再試行を止める（maxAttempts: 1・SDK の既定の再試行の戦略）。SDK は通信の障害や
+// 絞りで文や commit を打ち直し、初回が確定して応答だけが失われると、打ち直しの失敗が返って確定したかが分からなくなる。
+// 再試行は再開の待ちだけをこの実装が受け持つ。型の外から渡された retryStrategy・retryMode・maxAttempts も捨てる
 export function createRdsDataClient(config: Omit<RDSDataClientConfig, "maxAttempts" | "retryStrategy" | "retryMode"> = {}): RDSDataClient {
-  return new RDSDataClient({ ...config, maxAttempts: 1 });
+  const { maxAttempts: _m, retryStrategy: _s, retryMode: _r, ...rest } = config as RDSDataClientConfig;
+  const client = new RDSDataClient({ ...rest, maxAttempts: 1 });
+  SINGLE_ATTEMPT_CLIENTS.add(client);
+  return client;
 }
 
-// 渡されたクライアントが SDK の再試行を止めているかを、最初の要求の前に確かめる
+// 渡されたクライアントが SDK の再試行を止めているかを、最初の要求の前に確かめる。maxAttempts だけを読むと、
+// maxAttempts: 1 と独自の retryStrategy を持つクライアントが通り、その戦略が文や commit を打ち直せる。
+// そのため作る経路を createRdsDataClient に限り、そこで作っていないクライアントは受けない
 async function assertSingleAttempt(client: RDSDataClient): Promise<void> {
+  if (!SINGLE_ATTEMPT_CLIENTS.has(client)) {
+    throw new Error("Data API のクライアントは createRdsDataClient で作る（SDK の再試行を止める）");
+  }
   const max = await client.config.maxAttempts();
-  if (max !== 1) throw new Error(`Data API のクライアントは SDK の再試行を止める（maxAttempts が ${max}。createRdsDataClient で作る）`);
+  if (max !== 1) throw new Error(`Data API のクライアントは SDK の再試行を止める（maxAttempts が ${max}）`);
 }
 
 // SqlExecutor の RDS Data API の実装。45 秒で終わらない文は Data API が取り消す（continueAfterTimeout を偽にする）
