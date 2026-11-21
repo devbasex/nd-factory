@@ -476,6 +476,134 @@ describe("createDbPrepHandler の作る", () => {
   });
 });
 
+// 作るときの promote の振る舞いを固定する（promote を runCreate の中へ移す前後で同じであること）
+describe("createDbPrepHandler の作るときの promote", () => {
+  // promote を差し替えた handler を組む（setup の handler は組んだときの promote を掴むため）
+  function withPromote(t: ReturnType<typeof setup>, promote: PrepDeps["promote"]): (event: unknown) => Promise<void> {
+    return createDbPrepHandler({
+      sql: t.db,
+      completion: t.world.port(),
+      readPassword: t.world.readPassword,
+      promote,
+      logger: createPrepLogger({ write: (s: string) => void t.lines.push(s) }),
+      now: t.clock.now,
+      sleep: t.clock.sleep,
+    });
+  }
+
+  it("promote は用意の SQL のトランザクションをすべて確定した後に、トランザクションの外で 1 回だけ、結んだ秘密の器と版の ID で打つ", async () => {
+    const t = setup();
+    const args: Array<[string, string]> = [];
+    let callsAtPromote = -1;
+    const handle = withPromote(t, async (secret, versionId) => {
+      args.push([secret, versionId]);
+      callsAtPromote = t.db.calls.length;
+      await t.world.promote(secret, versionId);
+    });
+    await handle(CREATE);
+    expect(args).toEqual([[SECRET, VERSION]]);
+    // promote の後に SQL を打たない
+    expect(callsAtPromote).toBe(t.db.calls.length);
+    const before = t.db.calls.slice(0, callsAtPromote);
+    expect(before.some((c) => c.kind === "execute" && c.sql.startsWith("CREATE DATABASE"))).toBe(true);
+    // promote の時点で開いたトランザクションが無い（begin の数と commit の数が同じ）
+    const kinds = before.map((c) => c.kind);
+    expect(kinds).toContain("begin");
+    expect(kinds.filter((k) => k === "begin").length).toBe(kinds.filter((k) => k === "commit").length);
+    expect(t.world.records).toEqual([{ inv: CREATE, outcome: { result: "applied" }, secretVersion: VERSION }]);
+  });
+
+  it("結んだ版に既に AWSCURRENT が付いていれば、移さずに確かめてから applied を記す", async () => {
+    const t = setup();
+    t.world.currentVersion = VERSION;
+    await t.handle(CREATE);
+    expect(t.world.events.slice(-2)).toEqual(["promote:kept", "record"]);
+    expect(t.world.records.map((r) => r.outcome)).toEqual([{ result: "applied" }]);
+  });
+
+  it("promote が投げたら、SQL を巻き戻さず、record を呼ばず、段 promote の誤りだけを出して投げる", async () => {
+    const t = setup();
+    t.world.fail.promote = leaky("AccessDeniedException");
+    const e = await caught(t.handle(CREATE));
+    expect(e).toBeInstanceOf(DbPrepFunctionError);
+    expect((e as DbPrepFunctionError).stage).toBe("promote");
+    expect((e as DbPrepFunctionError).errName).toBe("AccessDeniedException");
+    expect(t.db.calls.some((c) => c.kind === "rollback")).toBe(false);
+    // 開いたまま残したトランザクションが無い（begin の数と commit の数が同じ）
+    const kinds = t.db.calls.map((c) => c.kind);
+    expect(kinds.filter((k) => k === "begin").length).toBe(kinds.filter((k) => k === "commit").length);
+    expect(t.db.calls.some((c) => c.kind === "execute" && c.sql.startsWith("CREATE DATABASE"))).toBe(true);
+    expect(t.world.events.slice(-1)).toEqual(["promote"]);
+    expect(t.world.records).toEqual([]);
+    const logs = t.logs();
+    expect(logs.at(-1)).toMatchObject({ prep_id: PREP_ID, kind: "create", stage: "promote", err_name: "AccessDeniedException", level: 50 });
+    expect(logs.at(-1)?.msg).toBe("終わりを記さずに止まった");
+    expect(logs.at(-1)).not.toHaveProperty("result");
+    expect(logs.at(-1)).not.toHaveProperty("record_result");
+    expect(logs.some((l) => l.msg === "用意の結果を終わりの記録の口へ渡した")).toBe(false);
+    expectNoSecretIn(t.lines);
+  });
+
+  it("promote が再開の待ちの尽き（DataApiUnavailableError）で投げても、failed・data_api_unavailable と記さずに段 promote で投げる", async () => {
+    const t = setup();
+    t.world.fail.promote = new DataApiUnavailableError(12, leaky("DatabaseResumingException"));
+    const e = await caught(t.handle(CREATE));
+    expect((e as DbPrepFunctionError).stage).toBe("promote");
+    expect((e as DbPrepFunctionError).errName).toBe("DataApiUnavailableError");
+    expect(t.world.records).toEqual([]);
+    expect(t.world.events).not.toContain("record");
+  });
+
+  it("promote が SQLSTATE の形のコードを持つ例外で投げても、failed・sql_failed と記さずに段 promote で投げ、コードを出す", async () => {
+    const t = setup();
+    t.world.fail.promote = leaky("DatabaseError", { code: "42710" });
+    const e = await caught(t.handle(CREATE));
+    expect((e as DbPrepFunctionError).stage).toBe("promote");
+    expect(t.world.records).toEqual([]);
+    expect(t.logs().at(-1)).toMatchObject({ stage: "promote", err_name: "DatabaseError", sqlstate: "42710" });
+  });
+
+  it("promote が Error でない値を投げても、段 promote・名前 Unknown で投げる", async () => {
+    const t = setup();
+    const handle = withPromote(t, async () => {
+      throw `bad ${PASSWORD}`;
+    });
+    const e = await caught(handle(CREATE));
+    expect((e as DbPrepFunctionError).stage).toBe("promote");
+    expect((e as DbPrepFunctionError).errName).toBe("Unknown");
+    expect(t.world.records).toEqual([]);
+    expectNoSecretIn(t.lines);
+  });
+
+  it("作るのが failed（guard_conflict・data_api_unavailable・sql_failed）なら promote を呼ばずに記す", async () => {
+    const cases: Array<{ state: FakeState; failOn?: FakeSqlExecutor["failOn"]; reason: string }> = [
+      { state: { databaseExists: true }, reason: "guard_conflict" },
+      { state: { guardOthers: 1 }, reason: "guard_conflict" },
+      {
+        state: {},
+        failOn: (c) => (c.kind === "execute" && c.sql.startsWith("CREATE DATABASE") ? new DataApiUnavailableError(12, resumingError()) : undefined),
+        reason: "data_api_unavailable",
+      },
+      {
+        state: {},
+        failOn: (c) => (c.kind === "execute" && c.sql.includes("CREATE ROLE %I") ? leaky("DatabaseError", { code: "42710" }) : undefined),
+        reason: "sql_failed",
+      },
+    ];
+    for (const c of cases) {
+      const t = setup(c.state);
+      if (c.failOn) t.db.failOn = c.failOn;
+      let promoted = 0;
+      const handle = withPromote(t, async () => {
+        promoted += 1;
+      });
+      await handle(CREATE);
+      expect(promoted).toBe(0);
+      expect(t.world.records).toEqual([{ inv: CREATE, outcome: { result: "failed", reason: c.reason }, secretVersion: VERSION }]);
+    }
+  });
+});
+
 describe("createDbPrepHandler の差し替え", () => {
   it("記した番号 < n なら書いて古い接続を切り、残り 0 で promote の後に applied", async () => {
     const t = setup({ recorded: [{ recorded: 2, cutoff_recorded: false }, { recorded: 3, cutoff_recorded: false }] });
