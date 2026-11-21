@@ -178,7 +178,8 @@ infra/
     - `humanOnly` が `never` で `mcpRead` がある
     - `result` が `PendingShape` でなく、次の成功の封筒の規則のどれかを外れる（`checkResult` が照らす）
       - `ok` を `z.literal(true)` で持つ `z.strictObject` でない
-      - `verb` が `list` なら `ok`・`items`（配列）・`next_cursor`（文字列か `null`）を必ず持ち、`list` でなければ `ok`・`item` を必ず持って `item` がオブジェクトの形（`z.object` か、オブジェクトだけの和）でない
+      - `verb` が `list` で、`ok`・`items`・`next_cursor` のどれかが無いか省ける（optional）、または `items` が配列でないか、`next_cursor` が文字列か `null`（`z.string().nullable()`）でない
+      - `verb` が `list` でなく、`ok`・`item` のどちらかが無いか省ける（optional）、または `item` がオブジェクトの形（`z.object` か、オブジェクトだけの和）でない
       - 受け口 `user` の操作で、封筒が上の決まったキーのほかのキーを持つ（ほかの受け口は文書が応答に足す値を持つため、足したキーを許す）
       - 封筒が失敗の要素のキー（`status`・`reason`・`fields`）を持つ
   - 副作用: 無し
