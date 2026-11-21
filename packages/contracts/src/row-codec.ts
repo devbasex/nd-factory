@@ -18,6 +18,9 @@ export type RowCodec<L> = {
   readonly latest: { readonly version: number; readonly schema: z.ZodType<L> };
   readonly previous: PreviousVersion<L> | null;
   readonly writeVersion: number;
+  // 書き手を前の版へ戻せる間（版を上げる子の手順の 1 から 4 の前まで）は true。true の間、writeRow は writeVersion によらず、
+  // 前の版へ下げて失う値を書かずに投げる。previous が無ければ false
+  readonly downgradable: boolean;
   // 鍵の列は行の列から組む写しで、keyOf だけが組む（Value 13）
   keyOf(row: L): RowKey;
 };
@@ -51,9 +54,12 @@ export function rowCodec<L, P>(spec: {
   latest: { version: number; schema: z.ZodType<L> };
   previous?: { version: number; schema: z.ZodType<P>; upgrade: (row: P) => L; downgrade: (row: L) => P };
   writeVersion: number;
+  // 既定は true（previous があるとき）。false にするのは、次の版だけの列を使う機能を出す反映（版を上げる子の手順の 4）から
+  downgradable?: boolean;
   keyOf: (row: L) => RowKey;
 }): RowCodec<L> {
   const { latest, previous, writeVersion, keyOf } = spec;
+  const downgradable = previous !== undefined && spec.downgradable !== false;
   if (!isVersion(latest.version)) throw new RowCodecError(`latest.version は 1 以上の整数: ${latest.version}`);
   assertSchemaVersion("latest", latest.schema, latest.version);
   if (previous !== undefined) {
@@ -63,6 +69,7 @@ export function rowCodec<L, P>(spec: {
     assertSchemaVersion("previous", previous.schema, previous.version);
   }
   if (writeVersion !== latest.version && writeVersion !== previous?.version) throw new RowCodecError(`writeVersion は latest.version か previous.version: ${writeVersion}`);
+  if (previous !== undefined && !downgradable && writeVersion === previous.version) throw new RowCodecError("downgradable が false なら writeVersion は latest.version");
   return {
     latest,
     previous:
@@ -76,6 +83,7 @@ export function rowCodec<L, P>(spec: {
             downgrade: (row) => previous.downgrade(row),
           },
     writeVersion,
+    downgradable,
     keyOf,
   };
 }
@@ -102,20 +110,30 @@ function sameValue(a: unknown, b: unknown): boolean {
   return ea.length === eb.size && ea.every(([k, v]) => eb.has(k) && sameValue(v, eb.get(k)));
 }
 
-// 前の版で書くときは、下げた行を上げ直して元の行（latest の形）に戻ることを確かめ、戻らなければ投げる。
-// 次の版にだけ持てる値を前の版で書くと、その値が行から消える（rowUpdateOf の remove が次の版だけの列を消す）。
-// 書き手を前の版へ戻せる間は、次の版の値も前の版で表せる値だけを書く決まり（版を上げる子の手順）で、ここはその決まりが破られたときに書かずに止める
-function assertLosslessDowngrade<L>(codec: RowCodec<L>, previous: PreviousVersion<L>, row: L, downgraded: unknown): void {
-  const original = codec.latest.schema.safeParse(withSchemaVersion(row, codec.latest.version));
-  if (!original.success) throw new RowCodecError(`行が版 ${codec.latest.version} の形を通らない: ${issuePaths(original.error)}`);
+// downgrade と upgrade は引数をその場で書き換えうるため、どちらにも独立した写しを渡す（比べる元の行と、書く前の版の値を変えさせない）
+function copyOf<T>(value: T): T {
+  return structuredClone(value);
+}
+
+// 前の版の形の行（previous.schema を通した値）を返す。downgrade には latest の形の写しを渡す
+function downgradeOf<L>(previous: PreviousVersion<L>, latestRow: L): Record<string, unknown> {
+  const parsed = previous.schema.safeParse(withSchemaVersion(previous.downgrade(copyOf(latestRow)), previous.version));
+  if (!parsed.success) throw new RowCodecError(`行が版 ${previous.version} の形を通らない: ${issuePaths(parsed.error)}`);
+  return parsed.data as Record<string, unknown>;
+}
+
+// 書き手を前の版へ戻せる間（downgradable）は、下げた行を上げ直して元の行（latest の形）に戻ることを確かめ、戻らなければ投げる。
+// 次の版にだけ持てる値を書くと、書き手を前の版へ戻した後の書き換えでその値が行から消える（rowUpdateOf の remove が次の版だけの列を消す）か、
+// その行の書き換えをここが拒む。そのため writeVersion が次の版でも、書き込みの前にここで止める（版を上げる子の手順の 2）
+function assertLosslessDowngrade<L>(codec: RowCodec<L>, previous: PreviousVersion<L>, latestRow: L, downgraded: Record<string, unknown>): void {
   let back: unknown;
   try {
-    back = codec.latest.schema.safeParse(previous.upgrade(downgraded));
+    back = codec.latest.schema.safeParse(previous.upgrade(copyOf(downgraded)));
   } catch {
     back = null;
   }
   const restored = back as { success?: boolean; data?: unknown } | null;
-  if (restored?.success !== true || !sameValue(restored.data, original.data)) throw new RowCodecError(`版 ${previous.version} へ下げると版 ${codec.latest.version} の値が失われる`);
+  if (restored?.success !== true || !sameValue(restored.data, latestRow)) throw new RowCodecError(`版 ${previous.version} へ下げると版 ${codec.latest.version} の値が失われる`);
 }
 
 // latest の版はそのまま、previous の版は upgrade で latest の形へそろえて返し、ほかの版を拒む。writeVersion によらず同じ結果を返す。
@@ -143,17 +161,19 @@ export function readRow<L>(codec: RowCodec<L>, raw: unknown): ReadRowResult<L> {
 }
 
 // writeVersion の形の行（schema_version と鍵の列を含む）を返す。writeVersion が previous.version なら downgrade を通す。
+// downgradable なら writeVersion によらず、前の版へ下げて失う値を書かずに投げる。
 // 値が undefined の列は出さない（DynamoDB へ書く値に undefined を残さない）。版の形を通らなければ投げる（書き手の誤り）
 export function writeRow<L>(codec: RowCodec<L>, row: L): Record<string, unknown> {
   const key = codec.keyOf(row);
+  const parsed = codec.latest.schema.safeParse(withSchemaVersion(copyOf(row), codec.latest.version));
+  if (!parsed.success) throw new RowCodecError(`行が版 ${codec.latest.version} の形を通らない: ${issuePaths(parsed.error)}`);
+  const latestRow = parsed.data;
   const previous = codec.previous;
   const toPrevious = previous !== null && codec.writeVersion === previous.version;
-  const body = toPrevious ? previous.downgrade(row) : row;
-  const schema = toPrevious ? previous.schema : codec.latest.schema;
-  const parsed = schema.safeParse(withSchemaVersion(body, codec.writeVersion));
-  if (!parsed.success) throw new RowCodecError(`行が版 ${codec.writeVersion} の形を通らない: ${issuePaths(parsed.error)}`);
-  if (toPrevious) assertLosslessDowngrade(codec, previous, row, parsed.data);
-  const columns = Object.entries(parsed.data as Record<string, unknown>).filter(([, value]) => value !== undefined);
+  const downgraded = previous !== null && (toPrevious || codec.downgradable) ? downgradeOf(previous, latestRow) : null;
+  if (previous !== null && downgraded !== null && codec.downgradable) assertLosslessDowngrade(codec, previous, latestRow, downgraded);
+  const body = toPrevious && downgraded !== null ? downgraded : (latestRow as Record<string, unknown>);
+  const columns = Object.entries(body).filter(([, value]) => value !== undefined);
   return { ...Object.fromEntries(columns), pk: key.pk, ...(key.sk === null ? {} : { sk: key.sk }) };
 }
 
@@ -165,7 +185,9 @@ export function writeRow<L>(codec: RowCodec<L>, row: L): Record<string, unknown>
 export function rowUpdateOf<L>(codec: RowCodec<L>, raw: Readonly<Record<string, unknown>>, row: L): RowUpdate {
   const written = writeRow(codec, row);
   const rawSk = Object.hasOwn(raw, "sk") ? raw["sk"] : undefined;
-  if (raw["pk"] !== written["pk"] || rawSk !== written["sk"]) throw new RowCodecError(`書き換え後の鍵が読んだ行の鍵と違う: ${String(raw["pk"])} / ${String(rawSk)} → ${String(written["pk"])} / ${String(written["sk"])}`);
+  // 鍵の値はログインの組の IdP の主体や利用者の ID を含むため、例外には違った列の名前だけを載せる
+  const mismatched = [raw["pk"] !== written["pk"] ? "pk" : null, rawSk !== written["sk"] ? "sk" : null].filter((c) => c !== null);
+  if (mismatched.length > 0) throw new RowCodecError(`書き換え後の鍵が読んだ行の鍵と違う: ${mismatched.join(", ")}`);
   const set = Object.fromEntries(Object.entries(written).filter(([column]) => !NOT_UPDATED.has(column)));
   const remove = Object.keys(raw).filter((column) => !Object.hasOwn(written, column) && !NOT_UPDATED.has(column));
   return { set, remove };

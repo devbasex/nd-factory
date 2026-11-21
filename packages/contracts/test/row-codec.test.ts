@@ -100,19 +100,71 @@ describe("readRow と writeRow（受け入れ条件 9 の読み手）", () => {
     expect(readRow(stage1, after)).toEqual({ ok: true, row: { ...asV2, version: 4, display_name: "acme-2" }, from: 1 });
   });
 
-  it("前の版へ下げると失われる値は、書かずに投げる（書き手を戻せる間に次の版だけの値を書かない決まりの守り）", () => {
-    const v2n = v2.extend({ tags: z.array(z.string()).optional() });
-    type V2n = z.infer<typeof v2n>;
-    const lossy = (writeVersion: number) =>
-      rowCodec({ latest: { version: 2, schema: v2n }, previous: { version: 1, schema: v1, upgrade: (r: V1): V2n => upgrade(r), downgrade: (r: V2n) => downgrade(r) }, writeVersion, keyOf });
-    const tagged = { ...asV2, tags: ["x"] };
-    const written = writeRow(lossy(2), tagged);
-    expect(written["tags"]).toEqual(["x"]);
-    const read = readRow(lossy(1), written);
-    if (!read.ok) throw new Error("読めない");
-    expect(() => writeRow(lossy(1), read.row)).toThrow(/値が失われる/);
-    expect(() => rowUpdateOf(lossy(1), written, { ...read.row, display_name: "acme-2" })).toThrow(/値が失われる/);
+  const v2n = v2.extend({ tags: z.array(z.string()).optional() });
+  type V2n = z.infer<typeof v2n>;
+  const lossy = (writeVersion: number, downgradable?: boolean) =>
+    rowCodec({ latest: { version: 2, schema: v2n }, previous: { version: 1, schema: v1, upgrade: (r: V1): V2n => upgrade(r), downgrade: (r: V2n) => downgrade(r) }, writeVersion, ...(downgradable === undefined ? {} : { downgradable }), keyOf });
+  const tagged = { ...asV2, tags: ["x"] };
+
+  it("前の版へ下げると失われる値は、前の版で書くときも 2 段目に次の版で書くときも、書かずに投げる（書き手を戻せる間の守り）", () => {
+    expect(() => writeRow(lossy(1), tagged)).toThrow(/値が失われる/);
+    expect(() => writeRow(lossy(2), tagged)).toThrow(/値が失われる/);
+    expect(() => rowUpdateOf(lossy(2), rowV2, tagged)).toThrow(/値が失われる/);
     expect(writeRow(lossy(1), asV2)).toEqual(rowV1);
+    expect(writeRow(lossy(2), asV2)).toEqual(rowV2);
+  });
+
+  it("downgradable を false にした後（手順の 4）は次の版だけの値を書け、前の版で書く組は作れない", () => {
+    expect(lossy(2).downgradable).toBe(true);
+    expect(lossy(2, false).downgradable).toBe(false);
+    expect(onlyV1.downgradable).toBe(false);
+    expect(writeRow(lossy(2, false), tagged)["tags"]).toEqual(["x"]);
+    expect(() => lossy(1, false)).toThrow(/downgradable が false なら writeVersion は latest.version/);
+  });
+
+  it("downgrade が引数の列をその場で消しても、値を失う書き込みを通さない", () => {
+    const deleting = (writeVersion: number) =>
+      rowCodec({
+        latest: { version: 2, schema: v2n },
+        previous: {
+          version: 1,
+          schema: v1,
+          upgrade: (r: V1): V2n => upgrade(r),
+          downgrade: (r: V2n) => {
+            delete r.tags;
+            return downgrade(r);
+          },
+        },
+        writeVersion,
+        keyOf,
+      });
+    const row = { ...asV2, tags: ["x"] };
+    expect(() => writeRow(deleting(1), row)).toThrow(/値が失われる/);
+    expect(() => writeRow(deleting(2), row)).toThrow(/値が失われる/);
+    expect(row.tags).toEqual(["x"]);
+  });
+
+  it("upgrade が引数の列をその場で改めても、書く前の版の行は前の版の形のまま", () => {
+    const renaming = rowCodec({
+      latest: { version: 2, schema: v2 },
+      previous: {
+        version: 1,
+        schema: v1,
+        upgrade: (r: V1): V2 => {
+          const m = r as unknown as Record<string, unknown>;
+          m["display_name"] = m["nick"];
+          delete m["nick"];
+          m["schema_version"] = 2;
+          return m as unknown as V2;
+        },
+        downgrade,
+      },
+      writeVersion: 1,
+      keyOf,
+    });
+    const written = writeRow(renaming, asV2);
+    expect(written).toEqual(rowV1);
+    expect(readRow(renaming, written)).toEqual({ ok: true, row: asV2, from: 1 });
   });
 
   it("upgrade が投げた前の版の行は、投げずに shape_invalid を返す", () => {
@@ -224,7 +276,7 @@ describe("rowUpdateOf", () => {
   });
 
   it("書き換え後の鍵が読んだ行の鍵と違えば投げる（pk・sk のどちらでも、読んだ行に sk が無くても）", () => {
-    expect(() => rowUpdateOf(stage2, rowV2, { ...asV2, item_id: "b" })).toThrow(/書き換え後の鍵が読んだ行の鍵と違う/);
+    expect(() => rowUpdateOf(stage2, rowV2, { ...asV2, item_id: "b" })).toThrow(/書き換え後の鍵が読んだ行の鍵と違う: pk$/);
     const otherSk = rowCodec({ latest: { version: 2, schema: v2 }, writeVersion: 2, keyOf: (row) => ({ pk: `ITEM#${row.item_id}`, sk: "OTHER" }) });
     expect(() => rowUpdateOf(otherSk, rowV2, asV2)).toThrow(RowCodecError);
     const { sk: _sk, ...noSk } = rowV2;
@@ -243,6 +295,23 @@ describe("rowUpdateOf", () => {
     expect(() => rowUpdateOf(codec, raw, { ...row, user_id: id("usr", 99) })).toThrow(RowCodecError);
   });
 
+  it("鍵の不一致の例外は違った列の名前だけを載せ、鍵の値を載せない", () => {
+    const codec = ROW_CODECS["login"];
+    const sample = ROW_CASES["login"]?.sample;
+    if (codec === undefined || sample === undefined) throw new Error("ログインの組の行が無い");
+    const row = codec.latest.schema.parse(sample);
+    const raw = { ...writeRow(codec, row), pk: "LOGIN#secret-subject", sk: "SECRET-SK" };
+    let message = "";
+    try {
+      rowUpdateOf(codec, raw, row);
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/鍵と違う: pk, sk$/);
+    expect(message).not.toContain("secret-subject");
+    expect(message).not.toContain(String(writeRow(codec, row)["pk"]));
+  });
+
   it("raw が持っていても、set と remove のどちらにも pk・sk・version が出ない", () => {
     const update = rowUpdateOf(stage2, { ...rowV1, version: 9 }, asV2);
     for (const column of ["pk", "sk", "version"]) {
@@ -259,6 +328,7 @@ describe("表の行の種類の RowCodec", () => {
         expect(row.codec.latest.version).toBe(1);
         expect(row.codec.previous).toBeNull();
         expect(row.codec.writeVersion).toBe(1);
+        expect(row.codec.downgradable).toBe(false);
         expect(ROW_CODECS[row.name]).toBe(row.codec);
       }
     }
