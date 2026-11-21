@@ -64,8 +64,9 @@ HTTP の経路は 14 本にする。機能ごとの一覧の画面・タブの H
 
 - サインインの戻り（認可コードと `state` の検索の値）は `/` で受け、受けたら履歴から検索の値を消す
 - サインインの手段をつなぐ戻りは、連携専用の戻り先 `/me/logins/return` で受ける（画面ではなく、受けたら履歴を R14 の `/me` へ置き換える）。IdP から戻ったブラウザーはこの path を直に開くため、CDN は地図の経路と同じにこの path へも `index.html` を返す（[プラットフォームの文書の CloudFront と画面の S3](platform.md#資源ごとの形)）。起動のときは通常のサインインの戻りより先にこの経路を見て、その `code` と `state` を `signinRedirectCallback` へ渡さない（連携の `state` はサーバーが作り、通常のサインインの状態の控えに無い）。`state` が `login_links.create` の後に `sessionStorage` へ控えた流れの ID と同じときだけ `logins.create` へ送る。手順は [詳細設計の `verifyLoginToLink`](detail.md#関数の仕様)
+- サインアウトの戻り（Cognito の `/logout` からの戻りと、`/oauth2/authorize` の `prompt=none` の確かめの戻り。検索の値 `error`・`code`・`state`）は、サインアウトの専用の戻り先 `/signed-out` で受ける（画面ではなく、[サインアウトで消す](#サインアウトで消す) の「サインアウトの完了」の処理が受ける）。`/` へ移さず、検索の値を保ったままその処理へ渡し、処理が分けた後に履歴から消す。CDN はこの path へも `index.html` を返す（[プラットフォームの文書の CloudFront と画面の S3](platform.md#資源ごとの形)）。起動のときは、通常のサインインの戻りと連携の戻りより先にこの経路を見て、その `code` と `state` を `signinRedirectCallback` へ渡さない
 - GitHub App を入れた後の戻りは R10 で受ける（検索の値を保ったまま、登録の候補を読み直す）
-- 地図に無い HTTP の経路は `/` へ履歴を置き換えて移る。転送の表は持たない
+- 地図に無い HTTP の経路は `/` へ履歴を置き換えて移る（連携の戻り先 `/me/logins/return` とサインアウトの戻り先 `/signed-out` は除く。上のとおり検索の値を保って専用の処理で受ける）。転送の表は持たない
 - チームを作る・委任を発行する・手元のマシンを登録するは、それぞれ R9・R14・R11 の中のダイアログにし、HTTP の経路を足さない
 
 ### 遷移
@@ -732,7 +733,7 @@ API が利用者の言語で文を返す形は、言語の判定と文面が API
 
 ### 決定 38: 知らせと Slack から直に画面を開けるよう、HTTP の経路を URL の path で持ち、地図の HTTP の経路には CDN が `index.html` を返す
 
-Web Push の知らせと Slack の文面は URL だけを運ぶ。path の HTTP の経路なら、`/p/:projectId/approvals/:approvalId` を開くだけで承認の詳細が出る。オフラインでは Service Worker が控えた画面の殻を返す。CDN が地図の HTTP の経路と連携の戻り先 `/me/logins/return` へ `index.html` を返す設定は[プラットフォームの文書](platform.md#資源ごとの形)が受ける（拡張子の無い path を `index.html` へ書き換える CloudFront Function）。
+Web Push の知らせと Slack の文面は URL だけを運ぶ。path の HTTP の経路なら、`/p/:projectId/approvals/:approvalId` を開くだけで承認の詳細が出る。オフラインでは Service Worker が控えた画面の殻を返す。CDN が地図の HTTP の経路と連携の戻り先 `/me/logins/return` とサインアウトの戻り先 `/signed-out` へ `index.html` を返す設定は[プラットフォームの文書](platform.md#資源ごとの形)が受ける（拡張子の無い path を `index.html` へ書き換える CloudFront Function）。
 
 `#` の後ろに HTTP の経路を置く形は採らなかった。得るのは CDN の設定が 1 つ減ることだけである。知らせと Slack に載せる URL が読みにくくなり、サインインの戻りの検索の値と並べて扱う所が増える。
 
