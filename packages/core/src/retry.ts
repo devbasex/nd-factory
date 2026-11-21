@@ -5,6 +5,8 @@ import { isHTTPError } from "ky";
 
 export type FailureClass = "retryable" | "conflict" | "not_found" | "rejected" | "unknown";
 
+// retryable は失敗の性質（一時の失敗で、時を置けば通り得る）で、ライブラリが繰り返したかは表さない。
+// 冪等でない要求の 408・5xx・時間切れは届いたか分からず繰り返さないが、相手が断ったのでもないため retryable にし、繰り返すかは呼び手が決める
 // 408 は callHttp が繰り返す状態（RETRY_STATUS_CODES）と揃える。使い切った 408 は相手が断ったのでなく時間切れ
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 

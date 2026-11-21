@@ -1,14 +1,13 @@
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
-import { DescribeTableCommand, DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { RETRY_POLICIES } from "@nd-factory/contracts/data";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClock } from "../src/clock.ts";
 import { createLogger } from "../src/log.ts";
-import { awsClient, awsClientConfigOf, callHttp, InsecureUrlError, kyOptionsOf, type AwsClientConfig, type OutboundRequest } from "../src/outbound.ts";
+import { awsClient, awsClientConfigOf, callHttp, DeadlineHttpHandler, InsecureUrlError, kyOptionsOf, type AwsClientConfig, type OutboundRequest } from "../src/outbound.ts";
 import { leakedSecrets, SECRET_SAMPLES } from "./fixtures/secrets.ts";
 
-// HTTP は fetch の差し替えと偽のタイマーで確かめる。AWS は呼ばない
+// HTTP は fetch の差し替えと偽のタイマーで確かめる。AWS は呼ばず、クライアントの設定だけを照らす。
+// 実のソケットと実のタイマーで AWS SDK の期限を確かめるテストは outbound-socket.test.ts に置く
 
 type Call = { at: number; method: string; url: string; headers: Headers; body: string; redirect: Request["redirect"] };
 
@@ -197,7 +196,19 @@ describe("callHttp", () => {
     const result = await settle(callHttp(get(), "http-github", { log, clock: createClock(), fetch }));
     expect(calls).toHaveLength(4);
     expect(result).toMatchObject({ status: 408, class: "retryable" });
-    expect(records().at(-1)).toMatchObject({ level: "error", status: 408, class: "retryable" });
+    expect(records().at(-1)).toMatchObject({ level: "error", msg: "外への呼び出しが再試行を使い切った", status: 408, class: "retryable", retries: 3 });
+  });
+
+  it.each([
+    ["408", json(408, {})],
+    ["503", json(503, {})],
+  ])("冪等でない POST の %s は繰り返さずに retryable で返し、ログは使い切ったと書かない", async (status, answer) => {
+    const { calls, fetch } = fakeFetch(answer);
+    const { log, records } = logs();
+    const result = await settle(callHttp(post(), "http-github", { log, clock: createClock(), fetch }));
+    expect(calls).toHaveLength(1);
+    expect(result).toMatchObject({ status: Number(status), class: "retryable" });
+    expect(records()).toMatchObject([{ level: "error", msg: "外への呼び出しが一時の失敗で、繰り返さずに返した", retries: 0 }]);
   });
 
   it.each([
@@ -265,52 +276,20 @@ describe("callHttp", () => {
 describe("awsClient", () => {
   const makeDynamo = (config: AwsClientConfig) => new DynamoDBClient({ region: "us-west-2", ...config });
 
-  async function requestTimeoutOf(client: DynamoDBClient): Promise<number | undefined> {
-    const handler = client.config.requestHandler as unknown as { configProvider?: Promise<{ requestTimeout?: number }> };
-    return (await handler.configProvider)?.requestTimeout;
-  }
-
-  it("方針の retryMode・回数・要求の時間切れを持つクライアントを作る", async () => {
+  it("方針の retryMode・回数・要求の期限を持つクライアントを作る", async () => {
     const client = awsClient(makeDynamo, "dynamodb");
     expect(client.config.retryMode).toBe("standard");
     expect(await client.config.maxAttempts()).toBe(3);
-    expect(await requestTimeoutOf(client)).toBe(2_000);
+    expect(client.config.requestHandler).toBeInstanceOf(DeadlineHttpHandler);
+    expect((client.config.requestHandler as unknown as DeadlineHttpHandler).requestTimeout).toBe(2_000);
   });
 
   it("構築子へ渡す設定は方針のデータの値", () => {
-    expect(awsClientConfigOf("dynamodb")).toEqual({ retryMode: "standard", maxAttempts: 3, requestHandler: { requestTimeout: 2_000, throwOnRequestTimeout: true } });
-    expect(awsClientConfigOf("aws-control")).toEqual({ retryMode: "standard", maxAttempts: 3, requestHandler: { requestTimeout: 5_000, throwOnRequestTimeout: true } });
-  });
-
-  describe("応答しない相手", () => {
-    let server: Server;
-    beforeEach(async () => {
-      // 要求を受けても応答しない
-      server = createServer(() => undefined);
-      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    });
-    afterEach(async () => {
-      server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
-    });
-
-    it("要求の期限を過ぎると、警告だけで待ち続けず TimeoutError で切る", async () => {
-      const { port } = server.address() as AddressInfo;
-      const config = awsClientConfigOf("dynamodb");
-      // 繰り返しを 1 回にし、期限 1 回分だけで確かめる
-      const client = new DynamoDBClient({
-        region: "us-west-2",
-        ...config,
-        maxAttempts: 1,
-        endpoint: `http://127.0.0.1:${port}`,
-        credentials: { accessKeyId: "AKIDTEST", secretAccessKey: "test" },
-      });
-      const started = Date.now();
-      const error = await client.send(new DescribeTableCommand({ TableName: "t" })).catch((e: unknown) => e);
-      client.destroy();
-      expect(error).toMatchObject({ name: "TimeoutError" });
-      expect(Date.now() - started).toBeLessThan(config.requestHandler.requestTimeout + 1_500);
-    }, 10_000);
+    for (const name of ["dynamodb", "aws-control"] as const) {
+      const config = awsClientConfigOf(name);
+      expect(config).toMatchObject({ retryMode: "standard", maxAttempts: RETRY_POLICIES[name].max_attempts });
+      expect(config.requestHandler.requestTimeout).toBe(RETRY_POLICIES[name].request_timeout_ms);
+    }
   });
 
   it("同じ構築子と方針の 2 回目は同じインスタンスで、構築子を 1 回だけ呼ぶ", () => {
