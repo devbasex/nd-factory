@@ -294,7 +294,7 @@ infra/
 | `buildDummy` | 同上 | 新設 | `(op) => DummyDoc \| null` | 1 つの操作のダミーデータ（形の未定は `null`）。`normal` と `edge` は `examples` があればそれを、無ければ `fakeExamples` の値を使う。`empty` は `examples.empty` があればそれを、無ければ下の生成物の表の既定を使う |
 | `fakeExamples` | 同上 | 新設 | `(op) => { normal: unknown[]; edge: unknown[] }` | 結果の zod の形から `zod-schema-faker`（`zod-schema-faker/v4` の `fake`）で見本を作る。種は操作の名前の SHA-256 の頭 8 桁、`normal` は 3 件、`edge` は上の端（文字列を上限の長さ・配列を上限の件数・数を上限・省ける項目を置く）と下の端（文字列を下限の長さ・配列を下限の件数・数を下限・省ける項目を省く）の 2 件（形の `max`・`min` を受け取る faker の関数を端へ寄せたものに差し替えて寄せる。文字列の元は形の中の最も長い上限か 1024 字の長い方、倍数の数は端そのものが倍数なら端を、そうでなければ範囲の内側で端に最も近い倍数を選ぶ。倍数かは Zod の `multipleOf` と同じ判定で照らし、小数の倍数の丸めの誤差は倍数の小数の桁でそろえるため、`min(0.1).max(0.3).multipleOf(0.1)` の上の端は `0.3`）。メール・アカウント ID の形（`values.ts` の `awsAccountId`）・接頭辞（`settings.ts` の `PREFIX_SHAPE`）は、生成の前に形の木を写してそれぞれの作り物の値（`ops@example.com`・`123456789012`・`acme`）の literal へ置き換える（`zod-schema-faker` の `custom` は `z.custom` の形にしか効かず、メールは内部の randexp で作るため、faker の上書きでは届かない）。再帰する形（`z.lazy` と shape に getter を持つ object）は、子を写す前に写しを作り、子は初めて読まれたときに写すため、循環で戻った深い層も作り物の値になる |
 | `buildPending` | 同上 | 新設 | `(ops) => PendingDoc[]` | 形の未定の操作と受け持つ子 |
-| `generateArtifacts` | `scripts/generate.ts` | 変更 | `(root: string, mode: "write" \| "check") => Promise<string[]>`（変えない） | 今の 3 つに上の生成物を足す。`generated/dummy/` の中の、どの操作にも当たらないファイルは `check` で差に数え、`write` で消す |
+| `generateArtifacts` | `scripts/generate.ts` | 変更 | `(root: string, mode: "write" \| "check") => Promise<string[]>`（変えない） | 今の 3 つに上の生成物を足す。`generated/dummy/` の直下の `.json` で終わる通常のファイルのうち、どの操作にも当たらないもの（古いダミー）は `check` で差に数え、`write` で消す。サブディレクトリと `.json` でないファイルは生成物でないため数えず、消さない |
 
 - `checkExamples`
   - 事前条件: 無し

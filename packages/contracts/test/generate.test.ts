@@ -108,6 +108,20 @@ describe("generateArtifacts", () => {
     expect(await generateArtifacts(root, "check")).toEqual([]);
   });
 
+  it("古いダミーの掃除は生成したダミー JSON だけを消し、サブディレクトリと .json でないファイルを残す", async () => {
+    await generateArtifacts(root, "write");
+    const dir = join(root, DUMMY_DIR);
+    mkdirSync(join(dir, "notes"), { recursive: true });
+    writeFileSync(join(dir, "notes", "keep.json"), "{}\n");
+    writeFileSync(join(dir, "README.md"), "メモ\n");
+    writeFileSync(join(dir, "gone.json"), "{}\n");
+    expect(await generateArtifacts(root, "check")).toEqual([`${DUMMY_DIR}/gone.json`]);
+    await generateArtifacts(root, "write");
+    expect(existsSync(join(dir, "gone.json"))).toBe(false);
+    expect(existsSync(join(dir, "notes", "keep.json"))).toBe(true);
+    expect(existsSync(join(dir, "README.md"))).toBe(true);
+  });
+
   it("見本の誤り（通貨の無い金額）で書かずに投げる", async () => {
     const bad = defineOperation({
       name: "fixture_bills.update",
