@@ -61,6 +61,8 @@ type OperationView = {
   humanOnly: HumanOnly;
   mcpRead: string | null;
   features: readonly string[];
+  /** 要求の要素の数の上限。全部か無かの操作は `allOrNothing.maxItems`、ほかは #2 の既定の `MAX_ITEMS`（#2 の生成物の `maxItemsOf` と同じ） */
+  maxItems: number;
   shapes: OperationShapes | null;
 };
 
@@ -234,28 +236,32 @@ function agreementIssues(label: string, reps: readonly Representation[], example
 }
 
 /**
- * MCP の道具の入力の包みを、OpenAPI の要求の配列と同じ件数の境目で比べる。要素は通る見本だけを並べ、件数と包みの形だけを違える。
- * 包みは `items` の無い入力と、`items` が配列でない入力を拒む
+ * OpenAPI の要求の配列と MCP の道具の入力の包み（道具がある操作だけ）を、操作の定義の上限（`maxItems`）の件数の境目で照らす。
+ * 基準を生成物に置かないので、どちらかの形から上限が欠けても上限ちょうどと上限超過を並べて食い違いを見つける（人だけの操作の OpenAPI も照らす）。
+ * 要素は通る見本だけを並べ、件数と包みの形だけを違える。MCP の包みは `items` の無い入力と、`items` が配列でない入力を拒む
  */
-function mcpWrapperIssues(op: OperationView, generated: GeneratedView, element: unknown): string[] {
-  const tool = generated.mcpTools.find((t) => t.name === op.name);
+function requestCountIssues(op: OperationView, generated: GeneratedView, element: unknown): string[] {
   const openapi = openApiOf(op, generated);
-  if (tool === undefined || openapi === undefined) return [];
-  const label = `${op.name} の MCP の包み`;
-  const wrapper = jsonValidator(tool.inputSchema);
-  const body = bodySchema(openapi.requestBody);
-  const api = jsonValidator(openApiSchema(body, generated.openapi.components.schemas));
-  const max = typeof body.maxItems === "number" ? body.maxItems : undefined;
-  const counts = [0, 1, ...(max === undefined ? [] : [max, max + 1])];
+  if (openapi === undefined) return [];
+  const tool = hasMcp(op) ? generated.mcpTools.find((t) => t.name === op.name) : undefined;
+  const api = jsonValidator(openApiSchema(bodySchema(openapi.requestBody), generated.openapi.components.schemas));
+  const wrapper = tool === undefined ? undefined : jsonValidator(tool.inputSchema);
+  const forms: { form: Form; accepts: (items: unknown[]) => boolean }[] = [
+    { form: "openapi", accepts: api },
+    ...(wrapper === undefined ? [] : [{ form: "mcp" as const, accepts: (items: unknown[]) => wrapper({ items }) }]),
+  ];
+  const label = `${op.name} の要求の件数`;
+  const max = op.maxItems;
   const issues: string[] = [];
-  for (const n of counts) {
+  for (const n of [0, 1, max, max + 1]) {
     const items = Array.from({ length: n }, () => element);
-    const byMcp = wrapper({ items });
-    const byApi = api(items);
-    if (byMcp !== byApi) issues.push(`${label}（${n} 件）: ${byMcp ? "mcp" : "openapi"} は通し ${byMcp ? "openapi" : "mcp"} は拒む`);
+    const expected = n >= 1 && n <= max;
+    const wrong = forms.filter((f) => f.accepts(items) !== expected).map((f) => f.form);
+    if (wrong.length > 0) issues.push(`${label}（${n} 件、上限 ${max}）: ${wrong.join("・")} が${expected ? "拒む" : "通す"}`);
   }
-  if (wrapper({})) issues.push(`${label}: items の無い入力を通す`);
-  if (wrapper({ items: element })) issues.push(`${label}: items が配列でない入力を通す`);
+  if (wrapper === undefined) return issues;
+  if (wrapper({})) issues.push(`${op.name} の MCP の包み: items の無い入力を通す`);
+  if (wrapper({ items: element })) issues.push(`${op.name} の MCP の包み: items が配列でない入力を通す`);
   return issues;
 }
 
@@ -283,9 +289,9 @@ function roundTripIssues(ops: readonly OperationView[], generated: GeneratedView
         issues.push(...agreementIssues(label, reps.filter((r) => r.part === part), example));
       });
     }
-    // 包みの件数の境目は、要素の検査を通る見本だけを並べて照らす（見本を拒む形は上で当たりにしている）
+    // 要求の件数の境目は、要素の検査を通る見本だけを並べて照らす（見本を拒む形は上で当たりにしている）
     const valid = shapes.examples.item.find((e) => shapes.item.safeParse(e).success);
-    if (hasMcp(op) && valid !== undefined) issues.push(...mcpWrapperIssues(op, generated, valid));
+    if (hasOpenApi(op) && valid !== undefined) issues.push(...requestCountIssues(op, generated, valid));
   }
   return issues;
 }
@@ -346,7 +352,16 @@ function featureIssues(ops: readonly OperationView[], features: readonly string[
   return features.filter((f) => !used.has(f)).map((f) => `どの操作の機能にも無い: ${f}`);
 }
 
-/** 照らすこと 5（I12）: 利用者向けの操作の要求と応答の形が配列 */
+/** 配列の形が持つ件数の下限と上限が、1 件と操作の定義の上限に等しいか。違えば当たりを返す */
+function countLimitIssues(label: string, schema: JsonSchema | undefined, max: number): string[] {
+  if (schema?.minItems === 1 && schema.maxItems === max) return [];
+  return [`${label}の件数の範囲が操作の定義（1〜${String(max)} 件）と違う: ${String(schema?.minItems)}〜${String(schema?.maxItems)}`];
+}
+
+/**
+ * 照らすこと 5（I12）: 利用者向けの操作の要求と応答の形が配列で、要求の配列と MCP の道具の入力の `items` の件数の範囲が
+ * 操作の定義の上限（`allOrNothing.maxItems` か `MAX_ITEMS`）と等しい。形が未定の操作も照らす（件数の境目の往復は形が確定した操作だけ）
+ */
 function arrayShapeIssues(ops: readonly OperationView[], generated: GeneratedView): string[] {
   const issues: string[] = [];
   for (const op of ops.filter(hasOpenApi)) {
@@ -355,8 +370,14 @@ function arrayShapeIssues(ops: readonly OperationView[], generated: GeneratedVie
       issues.push(`${op.name} の形が OpenAPI に無い`);
       continue;
     }
-    if (bodySchema(openapi.requestBody).type !== "array") issues.push(`${op.name} の要求の形が配列でない`);
+    const request = bodySchema(openapi.requestBody);
+    if (request.type !== "array") issues.push(`${op.name} の要求の形が配列でない`);
     if (bodySchema(openapi.responses["200"]).type !== "array") issues.push(`${op.name} の応答の形が配列でない`);
+    issues.push(...countLimitIssues(`${op.name} の OpenAPI の要求`, request, op.maxItems));
+    const tool = hasMcp(op) ? generated.mcpTools.find((t) => t.name === op.name) : undefined;
+    if (tool !== undefined) {
+      issues.push(...countLimitIssues(`${op.name} の MCP の道具の入力の items `, asSchema(asSchema(tool.inputSchema.properties)?.items), op.maxItems));
+    }
   }
   return issues;
 }
@@ -504,6 +525,7 @@ type ContractOperation = {
   humanOnly: HumanOnly;
   mcpRead: string | null;
   features: readonly string[];
+  allOrNothing: { maxItems: number } | null;
   item: unknown;
   result: unknown;
 };
@@ -516,6 +538,8 @@ type ContractsInput = {
   operations: readonly ContractOperation[];
   resultSchemaOf: (op: ContractOperation) => z.ZodType;
   isPending: (shape: unknown) => boolean;
+  /** #2 の既定の要素の数の上限（`operation.ts` の `MAX_ITEMS`） */
+  maxItems: number;
   dummy: Record<string, DummyEntry | null>;
   itemExamples: (item: z.ZodType, name: string) => unknown[];
 };
@@ -537,6 +561,7 @@ function operationViews(input: ContractsInput): { views: OperationView[]; issues
       humanOnly: op.humanOnly,
       mcpRead: op.mcpRead,
       features: op.features,
+      maxItems: op.allOrNothing?.maxItems ?? input.maxItems,
     };
     if (input.isPending(op.item) || input.isPending(op.result)) return { ...base, shapes: null };
     const item = op.item as z.ZodType;
@@ -568,6 +593,7 @@ function parseOperations(raw: unknown): ContractOperation[] {
     (v.mcpRead === null || typeof v.mcpRead === "string") &&
     Array.isArray(v.features) &&
     v.features.every((f) => typeof f === "string") &&
+    (v.allOrNothing === null || (isRecord(v.allOrNothing) && Number.isInteger(v.allOrNothing.maxItems))) &&
     "item" in v &&
     "result" in v;
   if (!Array.isArray(raw) || raw.length === 0 || !raw.every(isOperation)) throw new Error(`操作の表の形が違う（${OPERATIONS} の OPERATIONS）`);
@@ -601,13 +627,16 @@ function readJson(path: string): unknown {
  */
 async function loadContracts(): Promise<ContractsInput> {
   const operations = (await import(pathToFileURL(join(ROOT, OPERATIONS)).href)) as { OPERATIONS?: unknown };
-  const operation = (await import(pathToFileURL(join(ROOT, OPERATION)).href)) as { resultSchemaOf?: unknown; isPending?: unknown };
-  const { resultSchemaOf, isPending } = operation;
-  if (typeof resultSchemaOf !== "function" || typeof isPending !== "function") throw new Error(`${OPERATION} に resultSchemaOf・isPending が無い`);
+  const operation = (await import(pathToFileURL(join(ROOT, OPERATION)).href)) as { resultSchemaOf?: unknown; isPending?: unknown; MAX_ITEMS?: unknown };
+  const { resultSchemaOf, isPending, MAX_ITEMS: maxItems } = operation;
+  if (typeof resultSchemaOf !== "function" || typeof isPending !== "function" || typeof maxItems !== "number") {
+    throw new Error(`${OPERATION} に resultSchemaOf・isPending・MAX_ITEMS が無い`);
+  }
   return {
     operations: parseOperations(operations.OPERATIONS),
     resultSchemaOf: (op) => (resultSchemaOf as (op: unknown) => z.ZodType)(op),
     isPending: (shape) => (isPending as (shape: unknown) => boolean)(shape),
+    maxItems,
     dummy: parseDummy(readJson(GENERATED.dummy)),
     itemExamples: fakeItems,
   };
@@ -626,6 +655,7 @@ function loadGenerated(): GeneratedView {
 // ---- 作り物の操作の表と生成物（#2 の生成物と同じ包み方） ----
 
 const MAX_ITEMS = 100;
+const ALL_OR_NOTHING_MAX_ITEMS = 25;
 const teamRef = z.strictObject({ team_id: z.string().min(1) });
 /** 結果の中で 2 か所から使う形。JSON Schema では `$defs` に出て `$ref` で指される */
 const member = z.strictObject({ user_id: z.string().min(1) });
@@ -642,15 +672,16 @@ function resultOf(success: z.ZodObject): z.ZodType {
   return z.discriminatedUnion("ok", [success as z.ZodObject<{ ok: z.ZodLiteral<true> }>, failure]);
 }
 
-type FakeInput = Omit<OperationView, "entity" | "method" | "route" | "mcpRead" | "shapes"> & {
+type FakeInput = Omit<OperationView, "entity" | "method" | "route" | "mcpRead" | "maxItems" | "shapes"> & {
   mcpRead?: string;
+  maxItems?: number;
   item: z.ZodType;
   success: z.ZodObject;
   examples: Record<Part, unknown>;
 };
 
 function fakeOperations(): OperationView[] {
-  const op = ({ item, success, examples, mcpRead, ...o }: FakeInput): OperationView => {
+  const op = ({ item, success, examples, mcpRead, maxItems, ...o }: FakeInput): OperationView => {
     const parts = o.name.split(".");
     return {
       ...o,
@@ -658,6 +689,7 @@ function fakeOperations(): OperationView[] {
       method: "POST",
       route: `/v1/${parts.join("/")}`,
       mcpRead: mcpRead ?? null,
+      maxItems: maxItems ?? MAX_ITEMS,
       shapes: { item, result: resultOf(success), examples: { item: [examples.item], result: [examples.result, { ...NOT_FOUND }] } },
     };
   };
@@ -700,6 +732,8 @@ function fakeOperations(): OperationView[] {
       endpoint: "user",
       access: "write",
       humanOnly: "never",
+      // 全部か無かの操作の上限（#2 の `allOrNothing.maxItems`）。既定の MAX_ITEMS と違う上限でも照らす
+      maxItems: ALL_OR_NOTHING_MAX_ITEMS,
       features: FEATURES.slice(10, 15),
       item: z.strictObject({ team_id: z.string().min(1), name: z.string().min(1) }),
       success: z.strictObject({ ok: z.literal(true), item: z.strictObject({ team_id: z.string(), updated_at: z.iso.datetime() }) }),
@@ -817,7 +851,7 @@ function fakeGenerated(ops: readonly OperationView[]): GeneratedView {
     paths[op.route] = {
       [op.method.toLowerCase()]: {
         operationId: op.name,
-        requestBody: jsonBody({ type: "array", minItems: 1, maxItems: MAX_ITEMS, items: ref(defKey(op.name, "item")) }),
+        requestBody: jsonBody({ type: "array", minItems: 1, maxItems: op.maxItems, items: ref(defKey(op.name, "item")) }),
         responses: { "200": jsonBody({ type: "array", items: ref(defKey(op.name, "result")) }) },
       },
     };
@@ -828,7 +862,7 @@ function fakeGenerated(ops: readonly OperationView[]): GeneratedView {
       name: op.name,
       inputSchema: {
         type: "object",
-        properties: { items: { type: "array", minItems: 1, maxItems: MAX_ITEMS } },
+        properties: { items: { type: "array", minItems: 1, maxItems: op.maxItems } },
         required: ["items"],
       },
       outputSchema: { type: "array", items: rebaseRefs(defs[key], `#/$defs/${key}`, "#/items") as JsonSchema },
@@ -1000,7 +1034,34 @@ describe("照らすこと 1: 見本と変形を 4 つの形で検証し、通る
     const generated = fakeGenerated(ops);
     const tool = generated.mcpTools.find((t) => t.name === "teams.update") as McpTool;
     delete schemaAt(tool.inputSchema, ["properties", "items"]).maxItems;
-    expect(roundTripIssues(ops, generated)).toEqual([`teams.update の MCP の包み（${String(MAX_ITEMS + 1)} 件）: mcp は通し openapi は拒む`]);
+    const n = ALL_OR_NOTHING_MAX_ITEMS + 1;
+    expect(roundTripIssues(ops, generated)).toEqual([`teams.update の要求の件数（${String(n)} 件、上限 ${String(ALL_OR_NOTHING_MAX_ITEMS)}）: mcp が通す`]);
+  });
+
+  it("OpenAPI の要求の maxItems だけが欠けると、MCP に上限が残っていても、上限を越える件数で 1 件", () => {
+    const ops = fakeOperations();
+    const generated = fakeGenerated(ops);
+    const post = generated.openapi.paths["/v1/teams/list"]?.post as OpenApiOperation;
+    delete bodySchema(post.requestBody).maxItems;
+    expect(roundTripIssues(ops, generated)).toEqual([`teams.list の要求の件数（${String(MAX_ITEMS + 1)} 件、上限 ${String(MAX_ITEMS)}）: openapi が通す`]);
+  });
+
+  it("人だけの操作（MCP の道具が無い）の OpenAPI の要求の maxItems が欠けても 1 件", () => {
+    const ops = fakeOperations();
+    const generated = fakeGenerated(ops);
+    const post = generated.openapi.paths["/v1/teams/delete"]?.post as OpenApiOperation;
+    delete bodySchema(post.requestBody).maxItems;
+    expect(roundTripIssues(ops, generated)).toEqual([`teams.delete の要求の件数（${String(MAX_ITEMS + 1)} 件、上限 ${String(MAX_ITEMS)}）: openapi が通す`]);
+  });
+
+  it("生成物の上限が両方とも操作の定義の上限と違うと、形どうしが揃っていても 1 件", () => {
+    const ops = fakeOperations();
+    find(ops, "teams.update").maxItems = MAX_ITEMS;
+    const generated = fakeGenerated(ops);
+    find(ops, "teams.update").maxItems = ALL_OR_NOTHING_MAX_ITEMS;
+    expect(roundTripIssues(ops, generated)).toEqual([
+      `teams.update の要求の件数（${String(ALL_OR_NOTHING_MAX_ITEMS + 1)} 件、上限 ${String(ALL_OR_NOTHING_MAX_ITEMS)}）: openapi・mcp が通す`,
+    ]);
   });
 
   it("MCP の包みが items を必須にしないと 1 件", () => {
@@ -1130,7 +1191,29 @@ describe("照らすこと 5: 利用者向けの操作の要求と応答の形が
     const generated = fakeGenerated(ops);
     const post = generated.openapi.paths["/v1/teams/update"]?.post as OpenApiOperation;
     post.requestBody = jsonBody({ $ref: "#/components/schemas/teams.update.item" });
-    expect(arrayShapeIssues(ops, generated)).toEqual(["teams.update の要求の形が配列でない"]);
+    expect(arrayShapeIssues(ops, generated)).toEqual([
+      "teams.update の要求の形が配列でない",
+      `teams.update の OpenAPI の要求の件数の範囲が操作の定義（1〜${String(ALL_OR_NOTHING_MAX_ITEMS)} 件）と違う: undefined〜undefined`,
+    ]);
+  });
+
+  it("形が未定の操作でも、OpenAPI の要求の maxItems が欠けると 1 件", () => {
+    const ops = fakeOperations();
+    find(ops, "teams.delete").shapes = null;
+    const generated = fakeGenerated(ops);
+    const post = generated.openapi.paths["/v1/teams/delete"]?.post as OpenApiOperation;
+    delete bodySchema(post.requestBody).maxItems;
+    expect(arrayShapeIssues(ops, generated)).toEqual(["teams.delete の OpenAPI の要求の件数の範囲が操作の定義（1〜100 件）と違う: 1〜undefined"]);
+  });
+
+  it("MCP の道具の入力の上限が全部か無かの上限と違うと 1 件", () => {
+    const ops = fakeOperations();
+    const generated = fakeGenerated(ops);
+    const tool = generated.mcpTools.find((t) => t.name === "teams.update") as McpTool;
+    schemaAt(tool.inputSchema, ["properties", "items"]).maxItems = MAX_ITEMS;
+    expect(arrayShapeIssues(ops, generated)).toEqual([
+      `teams.update の MCP の道具の入力の items の件数の範囲が操作の定義（1〜${String(ALL_OR_NOTHING_MAX_ITEMS)} 件）と違う: 1〜100`,
+    ]);
   });
 });
 
@@ -1200,6 +1283,7 @@ describe("#2 の書き出しと生成物を照らしの入力へ写す", () => {
       humanOnly: "never",
       mcpRead: null,
       features: endpoint === "user" ? ["F1"] : [],
+      allOrNothing: null,
       item: shaped ? teamRef : PENDING,
       result: shaped ? z.strictObject({ ok: z.literal(true), item: teamRef }) : PENDING,
     };
@@ -1209,6 +1293,7 @@ describe("#2 の書き出しと生成物を照らしの入力へ写す", () => {
     operations: ops,
     resultSchemaOf: (op) => resultOf(op.result as z.ZodObject),
     isPending,
+    maxItems: MAX_ITEMS,
     dummy: entries,
     itemExamples: fakeItems,
   });
@@ -1233,6 +1318,15 @@ describe("#2 の書き出しと生成物を照らしの入力へ写す", () => {
     expect(issues).toEqual(FEATURES.slice(1).map((f) => `どの操作の機能にも無い: ${f}`));
   });
 
+  it("要素の数の上限は、全部か無かの操作は allOrNothing.maxItems、ほかは既定の MAX_ITEMS", () => {
+    const allOrNothing = { ...contract("teams.update", "user", false), access: "write" as const, allOrNothing: { maxItems: 7 } };
+    const { views } = operationViews(input([contract("teams.get", "user", false), allOrNothing], {}));
+    expect(views.map((v) => [v.name, v.maxItems])).toEqual([
+      ["teams.get", MAX_ITEMS],
+      ["teams.update", 7],
+    ]);
+  });
+
   it("形が確定した操作にダミーの見本が無いと 1 件", () => {
     const { issues } = operationViews(input([contract("teams.get", "user", true)], { "teams.get": null }));
     expect(issues).toEqual(["teams.get: 形が確定しているが、ダミーの見本が無い"]);
@@ -1242,6 +1336,7 @@ describe("#2 の書き出しと生成物を照らしの入力へ写す", () => {
     expect(parseOperations([contract("teams.get", "user", false)])).toHaveLength(1);
     expect(() => parseOperations([{ ...contract("teams.get", "user", false), endpoint: "admin" }])).toThrow(/操作の表の形が違う/);
     expect(() => parseOperations([])).toThrow(/操作の表の形が違う/);
+    expect(() => parseOperations([{ ...contract("teams.get", "user", false), allOrNothing: undefined }])).toThrow(/操作の表の形が違う/);
     expect(parseDummy({ "teams.get": dummy, "teams.list": null })).toEqual({ "teams.get": dummy, "teams.list": null });
     expect(() => parseDummy({ "teams.get": { normal: [] } })).toThrow(/ダミーの見本の形が違う/);
   });
