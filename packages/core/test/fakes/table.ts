@@ -116,8 +116,13 @@ function matchesKey(row: Mutable, keyCond: KeyCondition): boolean {
   return compare(sort.op, value, sort.value);
 }
 
+// 文字列の符号単位の順（DynamoDB の鍵の順と同じく大文字と小文字を区別する）。整列と続きの位置の探索の両方がこれを使う
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function bySortKey(column: string) {
-  return (a: Mutable, b: Mutable): number => String(a[column] ?? "").localeCompare(String(b[column] ?? ""));
+  return (a: Mutable, b: Mutable): number => compareText(String(a[column] ?? ""), String(b[column] ?? ""));
 }
 
 export function fakeTable() {
@@ -155,8 +160,10 @@ export function fakeTable() {
       return { items: structuredClone(items.slice(0, opts.limit ?? items.length)), lastKey: null };
     },
     async scan(table, opts) {
-      const all = [...tableOf(table).values()].sort((a, b) => rowKey(a as unknown as RowKey).localeCompare(rowKey(b as unknown as RowKey)));
-      const start = opts.startKey === null ? 0 : all.findIndex((row) => rowKey(row as unknown as RowKey) > rowKey(opts.startKey as RowKey));
+      const keyOfRow = (row: Mutable): string => rowKey({ pk: String(row["pk"]), sk: typeof row["sk"] === "string" ? row["sk"] : null });
+      const all = [...tableOf(table).values()].sort((a, b) => compareText(keyOfRow(a), keyOfRow(b)));
+      const after = opts.startKey === null ? null : rowKey(opts.startKey);
+      const start = after === null ? 0 : all.findIndex((row) => compareText(keyOfRow(row), after) > 0);
       const page = start < 0 ? [] : all.slice(start, start + opts.limit);
       const last = page.at(-1);
       const more = start >= 0 && start + opts.limit < all.length;
