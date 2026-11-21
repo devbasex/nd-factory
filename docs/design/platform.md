@@ -142,7 +142,7 @@ graph TD
 | 形の正本 | 設定のファイル・操作の表・事象・値の形・終了コードを zod で持ち、型・JSON Schema・OpenAPI・MCP の道具・ダミーデータ・文書の表を作る | 組み立ての時（`packages/contracts/`） |
 | 設置のコマンド | 確かめ・合成・差分・確認の値・反映（`npm run nd-setup`） | 設置する人の端末 |
 | 反映のパイプライン | 起点のブランチへの push → 準備 → 人の承認 → 反映 | CodePipeline と CodeBuild |
-| 検査 | 漏れ・参照・形の往復・境界・I8・I14・CI の資格情報・NDF の契約の照合・使っていないコード・ワークフローの点検 | GitHub の workflow |
+| 検査 | 漏れ・参照・形の往復・境界・I8・I14・CI の資格情報・NDF の契約の照合 | GitHub の workflow |
 
 ### 配置の図
 
@@ -214,7 +214,7 @@ graph TD
 | Aurora Serverless v2 | PostgreSQL（自動の一時停止を持つ版、LIB80）。出口の無いサブネット。書き手 1 台・読み手なし。最小 0 ACU。最大 ACU は設定のファイルで受ける | Value 6（使わない間は計算の費用が 0） |
 | Aurora の SG | タスクの SG からの 5432 だけを受ける | DB に触れるのはタスクだけ |
 | Cognito | 利用者プール。自分の登録を止め、Google（と GitHub）の IdP からだけ入る | Value 9（だれが入れるかをサーバーの側で決める） |
-| CloudFront と画面の S3 | 置き場は公開せず、配信は OAC で読む（LIB83）。価格の区分は 100 | Value 3（HTTPS の配信で Service Worker が動く）・Value 6 |
+| CloudFront と画面の S3 | 置き場は公開せず、配信は OAC で読む（LIB83）。料金は従量の課金（定額のプランに入らない）で、価格の区分は 100 | Value 3（HTTPS の配信で Service Worker が動く）・Value 6 |
 | 状態の S3 | 公開を止め、暗号化し、TLS だけ。NDF のファイルは 14 日で消す規則 | Value 7・Value 6 |
 | ECR | ランナーと DB の用意のイメージ。ライフサイクルの規則で古い版を消す（LIB85） | Value 6（保管の費用を抑える） |
 | Secrets Manager | 器は CDK が作り、値は人か API が入れる。名前は `<prefix>/<environment>/<用途>`（決定 90） | Value 7 |
@@ -288,7 +288,7 @@ Security Hub の ECS.2 は、ECS のサービス（`AWS::ECS::Service`）で公�
 | Aurora の計算 | 0 | 接続 0 本で 300 秒の後に一時停止（LIB80）。保守のために起きることがある（起きた後 20 分以上は止まらない） |
 | DynamoDB | 保存の量だけ | 要求の数の課金（LIB81） |
 | Cognito | 0 | 月の利用者 10,000 までは無料（下の単価の出典） |
-| CloudFront | ほぼ 0 | 量の課金 |
+| CloudFront | 0 | 従量の課金。アカウントごとに毎月 1 TB・1,000 万回の要求までは無料（LIB83） |
 | 掛かり続けるもの | 秘密の器の数・Aurora のストレージ・ECR の保管・ログの保管・S3 の保管 | 量に比例する。秘密の器が最も大きい（1 つ月 0.40 ドル） |
 
 ### 見込み
@@ -406,10 +406,8 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 | 境界の検査（横断の部品の外での直の利用） | 下の [横断の部品の置き場の基準](#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」 | Value 1・Value 7 |
 | 使える量の判定の外の比べ | 判定の外で上限の値と比べるコード・料金プランの名前で分ける画面 | I8 |
 | 操作の一覧と画面と MCP の対応 | 形の正本の操作の表に、画面の操作か MCP の道具の無い行がある・表に無い画面の操作がある（F1〜F20） | I14・Value 4 |
-| NDF の契約の照合（定期） | 固定の NDF の契約の見本と、ランナーの翻訳の食い違い（F23）。固定の点の契約はすべての PR・main への push・毎日 1 回・手動の起動で照らし、先端の契約は `ndf-pin.json` を変える PR・main への push・毎日 1 回・手動の起動で照らす（[実行の契約の照合の定期の検査](execution.md#契約の照合の定期の検査)） | F23 |
+| NDF の契約の照合（定期） | 固定の NDF の契約の見本と、ランナーの翻訳の食い違い（F23）。毎日 1 回と `ndf-pin.json` を変える PR で走らせる（[実行の契約の照合の定期の検査](execution.md#契約の照合の定期の検査)） | F23 |
 | 依存の向き | `packages/contracts` → `packages/core` → `apps/*` の一方向に反する import・`apps/*` どうしの import・`infra` から `apps/*` への import（[詳細設計の依存の表](detail.md#クラスと関数の構造)）。検査の CI は #1 が足す | Value 1・Value 7 |
-| 使っていないコード | どこからも読まれないファイル・使われない書き出し・使われない依存（knip。入口のファイルの書き出しも照らす）。今の当たりは検査を足す Pull Request で直す。消せない依存だけを依存の名前ごとの控えに置き、ファイルの単位の控えを置かない。検査の CI は #1 が足す | Value 13 |
-| ワークフローの点検 | ワークフローの危うい書き方（広すぎる権限・資格情報の持ち出し・固定していない動作の参照・テンプレートの注入など。zizmor のネットワークなしの点検を、自動で探した設定を読まず、明示した 1 つの設定で打つ）。検査の CI は #1 が足す | Value 8・Value 7 |
 | スタックのテストに足す行 | NAT が 1 件以上・タスクの SG に受け入れの規則・Lambda が VPC の中・`AWS::ECS::Service` か `TaskSet` が 1 件以上・タスクの役割に許可の文・Aurora の最小が 0 でない・表とバケットが消せる設定・PITR が無い | Value 6・I11 |
 
 NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の定義のテスト）は基本の検査が受け持つ。設計の決まりを縛る検査は CI の必須のチェック（`.ndf/project.json` の宣言）に載せ、CI の定義のテストが食い違いを落とす。
@@ -445,16 +443,16 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 ## 言語と書き方の決まり
 
-子の課題が詳細設計で引く、言語と画面の組み方と TypeScript の書き方の細則の正本である（決定 140）。値は今のリポジトリの設定と同じで、縛るのは根の `tsconfig.json`・`eslint.config.js`・`apps/web/package.json`・`apps/web/vite.config.ts` である。`AGENTS.md` は手順（`npm run generate`・`npm run check`）だけを持ち、細則はこの節を指す。
+子の課題が詳細設計で引く、言語と画面の組み方と TypeScript の書き方の細則の正本である（決定 140）。縛るのは共通の `tsconfig.base.json`（各置き場の `tsconfig.json` が `extends` で引く）・`apps/web/tsconfig.json`・`eslint.config.js`・`apps/web/package.json`・`apps/web/vite.config.ts` である。画面の組み方の行（React と TSX）を除き、値は今のリポジトリの設定と同じである。React と TSX の規約は #12 で入れ、その PR が `apps/web/package.json` の依存（LIB87・LIB90）、`apps/web/tsconfig.json` の `jsx` と `include` の `.tsx`、`apps/web/vite.config.ts` の React のプラグイン、画面の外から React と `.tsx` を import すると落とす ESLint の規則を整える。それまでの画面は今の骨組み（素の TypeScript）のままである。`AGENTS.md` は手順（`npm run generate`・`npm run check`）だけを持ち、細則はこの節を指す。
 
 | 項目 | 決まり | 縛るもの |
 | --- | --- | --- |
-| 言語 | コードは TypeScript だけで書く。Node 24 の型の剥がし（STD84）で直に打ち、出力のための変換の段を持たない（Lambda の束ねは esbuild、画面は Vite） | 根の `tsconfig.json`（`noEmit`） |
+| 言語 | コードは TypeScript だけで書く。画面の外（API・インフラ・設置のコマンド・検査）は Node 24 の型の剥がし（STD84）で直に打ち、出力のための変換の段を持たない（Lambda の束ねは esbuild）。画面は TSX で書き、Vite と vitest が変換する | `tsconfig.base.json`（`noEmit`） |
 | 使う構文 | 型の注釈を消すだけで JavaScript に戻る構文だけを使う。enum・引数のプロパティ・namespace を使わない。閉じた語の集まりは zod の列挙で持つ（[定数とデータの置き場の基準](#定数とデータの置き場の基準)） | `erasableSyntaxOnly`（型検査が落とす） |
-| 型の厳しさ | `strict` と `noUncheckedIndexedAccess` を外さない | 根の `tsconfig.json` |
-| import | 型だけの import は `import type` で書く。相対の import は拡張子 `.ts` まで書く | `verbatimModuleSyntax`・`allowImportingTsExtensions`、ESLint の `consistent-type-imports` |
+| 型の厳しさ | `strict` と `noUncheckedIndexedAccess` を外さない | `tsconfig.base.json` |
+| import | 型だけの import は `import type` で書く。相対の import は実ファイルの拡張子（`.ts` か `.tsx`）まで書く。画面や単体テストから部品を import するときは `.tsx` を書く | `verbatimModuleSyntax`・`allowImportingTsExtensions`、ESLint の `consistent-type-imports` |
 | 使わない名前 | 使わない引数と変数は `_` で始める | ESLint の `no-unused-vars` |
-| 画面の組み方 | UI のフレームワークを入れず、素の TypeScript と DOM の API で部品を組む。JSX を使わない。束ねと開発のサーバーは Vite（LIB86） | `apps/web/package.json` の実行の時の依存。足すときは [費用が増える構成を足すとき](#費用が増える構成を足すとき) の表と決定 140 の見直し |
+| 画面の組み方 | #12 から、部品は React 19（LIB87）の関数の部品として TSX で書く。束ねと開発のサーバーは Vite（LIB86）と React の Vite のプラグイン（LIB90）。部品の単体テストは vitest で書く。画面の外のコードは TSX と React を import しない | `apps/web/package.json` の依存・`apps/web/tsconfig.json` の `jsx`・`eslint.config.js` の置き場ごとの規則 |
 | テスト | 振る舞いを足すときは先に落ちるテストを書く。単体は vitest、画面は Playwright の e2e | `npm run check`・`npm run e2e`（[基本の検査](#基本の検査)） |
 | NDF の版 | NDF の版の数字を読んで大小を比べない | 参照の検査 |
 
@@ -496,6 +494,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | STD82 | Security Hub の自動化ルール | 条件に合う検出結果の workflow の状態（`SUPPRESSED` など）と注記を自動で変える。作れるのは Security Hub の管理者のアカウントだけで、作ったリージョンにだけ効く | 今は作らない。ECS のサービスを足す日に比べる（決定 86） | https://docs.aws.amazon.com/securityhub/latest/userguide/automation-rules.html （2026-11-17） |
 | STD83 | PostgreSQL 16 の advisory lock | `pg_advisory_xact_lock` はトランザクションの単位の排他の鎖を取り、要れば待つ。トランザクションの終わりで外れる | 差し替えの番号を照らして書く間、同じ役割の差し替えを DB の側で 1 つにする（決定 95） | https://www.postgresql.org/docs/16/functions-admin.html （2026-11-18） |
 | STD84 | Node の型の剥がし（type stripping）と TypeScript の `erasableSyntaxOnly` | Node は型の注釈を消すだけで `.ts` を打つ。enum・引数のプロパティ・namespace のような JavaScript へ消すだけでは戻らない構文と、`.tsx` の JSX は打てない。`erasableSyntaxOnly` はそれらの構文を型検査で落とす | 書き方の細則を「消すだけで打てる構文だけを使う」にそろえ、型検査で縛る（決定 140） | https://nodejs.org/api/typescript.html ・ https://www.typescriptlang.org/tsconfig/#erasableSyntaxOnly （2026-11-18） |
+| STD85 | Lighthouse の通信の絞り | スマートフォンの既定の絞りは Slow 4G を模した RTT 150 ミリ秒・下り 1,638.4 Kbps と、CPU の 4 倍の遅さ | 配る束の転送の時間を LCP の目標と比べる目安に使う（決定 140） | https://github.com/GoogleChrome/lighthouse/blob/main/docs/throttling.md （2026-11-21） |
 
 ### ライブラリとサービス
 
@@ -504,13 +503,30 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | LIB80 | Aurora Serverless v2 の自動の一時停止（PostgreSQL） | PostgreSQL 16.3・15.7・14.12・13.15 以上 | AWS のサービス | — | 無し | 満たす。最小 0 ACU で、利用者の接続が無い状態が既定 300 秒（300〜86,400 秒）続くと止まり、止まる間の計算の費用は 0。再開は通常 約 15 秒、24 時間を超えた後は 30 秒以上。利用者の接続が 1 本でも開いていると止まらない。RDS Proxy を付けると止まらない。保守で起き、起きた後 20 分以上は止まらない | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html （2026-11-17） |
 | LIB81 | DynamoDB（要求の数の課金・TTL・条件式・ストリーム） | — | AWS のサービス | — | 無し | 満たす。要求の数の課金は使った分だけ。TTL は期限の後に数日のうちに書き込みの量を使わずに消す。条件式は鍵で指した 1 行を照らして外れたら書かない。ストリームを Lambda が 1 秒に 4 回読み、失敗は記録が切れるまでやり直す（1 つのストリームに 2 つの関数まで）。`TransactWriteItems` は 100 件までの書き込みを表をまたいで 1 つにまとめ、書かない行の条件は `ConditionCheck` で照らす。1 つのトランザクションで同じ行を 2 回指せない | https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/capacity-mode.html ・ 同 TTL.html ・ 同 Expressions.ConditionExpressions.html ・ 同 Streams.Lambda.html ・ https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html （2026-11-17・2026-11-18） |
 | LIB82 | ECS Fargate のタスク（ネットワーク・`RunTask`・`StopTask`・`DescribeTasks`・`ListTasks`・タスクのメタデータの端点） | プラットフォームの版 1.4.0 | AWS のサービス | — | 無し | 満たす。イメージを取るには外への道筋が要り、公開のサブネットで公開 IP を付けるか、NAT か、ECR の Interface 型のエンドポイント。1.4.0 からは ECR・ログ・秘密の取得もタスクのネットワークを通る。`StopTask` は SIGTERM を送り、既定 30 秒の後に SIGKILL で止める。`DescribeTasks` はタスクの `lastStatus` を返す。`RunTask` の `startedBy` に付けた値で `ListTasks` を絞れるが、ほかの絞り（`desiredStatus` を含む）と併せられず、`desiredStatus` の既定は `RUNNING` のため止まりかけ・止まったタスクは返らない。`clientToken` は起動の要求の冪等の鍵（64 字まで）。ECS の API は結果整合で、起動の直後は一覧に出ないことがある。タスクはメタデータの端点（`ECS_CONTAINER_METADATA_URI_V4` の `/task`）から自分の `TaskARN` を読める | https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-task-networking.html （2026-11-17）・ https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_StopTask.html ・ 同 API_DescribeTasks.html ・ 同 API_RunTask.html ・ 同 API_ListTasks.html ・ https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-metadata-endpoint-v4-fargate.html （2026-11-18） |
-| LIB83 | CloudFront の OAC | — | AWS のサービス | — | 無し | 満たす。OAI より OAC を推す（全リージョンの S3・SSE-KMS）。定額の Free プランは配信ごとに月 100 万回・100 GB | https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html ・ https://aws.amazon.com/cloudfront/pricing/ （2026-11-17） |
+| LIB83 | CloudFront の OAC | — | AWS のサービス | — | 無し | 満たす。OAI より OAC を推す（全リージョンの S3・SSE-KMS）。従量の課金は、毎月 1 TB の転送と 1,000 万回の HTTP(S) の要求までが常に無料で、超えた分は米国・メキシコ・カナダで HTTPS の要求 1 万回 0.0100 ドル・転送 1 GB 0.085 ドル（次の 9 TB まで）。定額のプランは配信ごとの月額で、超えた分の課金を持たない。Free（0 ドル）の目安の量は月 100 万回・100 GB で、目安は固い上限ではなく、50%・80%・100% でメールが届き、初めて 3 倍までを超えた月は影響しない。何か月も大きく超え続けると、遠い拠点から配るなど配信が調整されることがあり、上の段（Pro は月 15 ドル・1,000 万回・50 TB）へ上げると戻る。AWS の無料の利用枠を使うアカウントは定額のプランに入れない | https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html ・ https://aws.amazon.com/cloudfront/pricing/ （2026-11-17）・ https://aws.amazon.com/cloudfront/pricing/pay-as-you-go/ ・ https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/flat-rate-pricing-plan.html （2026-11-21） |
 | LIB84 | AWS Budgets と Amazon SNS（運用の知らせ） | — | AWS のサービス | — | 無し | 満たす。予算の監視と知らせは無料。動作つきの予算は 2 つまで無料。SNS は時間の課金を持たず、月 100 万回の要求とメールの 1,000 通までは無料の枠 | https://aws.amazon.com/aws-cost-management/aws-budgets/pricing/ （2026-11-17）・ https://aws.amazon.com/sns/pricing/ （2026-11-18） |
 | LIB85 | ECR のライフサイクルの規則 | — | AWS のサービス | — | 無し | 満たす。押した数（`imageCountMoreThan`）か日数で古いイメージを 24 時間のうちに消す | https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html （2026-11-17） |
-| LIB86 | `vite` | 8.3.8 | MIT | 2026-11-11 | 無し | 満たす。素の TypeScript の画面を束ね、開発のサーバーを持つ。開発の依存だけで、配る画面に実行の時の依存を足さない。今の `apps/web` が使っている | https://registry.npmjs.org/vite （2026-11-18） |
-| LIB87 | `react`・`react-dom` | 19.3.1 | MIT | 2026-10-14 | 無し | 満たす。ただし実行の時の依存が 2 つ増え（`react-dom` の展開後 約 7.7 MiB）、部品を JSX で書くと Node の型の剥がしで打てない（STD84） | https://registry.npmjs.org/react ・ https://registry.npmjs.org/react-dom （2026-11-18） |
-| LIB88 | `preact` | 11.2.0 | MIT | 2026-11-06 | 無し | 満たす。小さいが、実行の時の依存が 1 つ増え、JSX は LIB87 と同じく型の剥がしで打てない | https://registry.npmjs.org/preact （2026-11-18） |
-| LIB89 | `lit` | 3.3.3 | BSD-3-Clause | 2026-05-14 | 無し | 満たす。Web Components の上で JSX を使わずに書ける。実行の時の依存が 1 つ増え、宣言の書き方の多くがデコレーターに寄る | https://registry.npmjs.org/lit （2026-11-18） |
+| LIB86 | `vite` | 8.3.8 | MIT | 2026-11-11 | 無し | 満たす。画面を束ね、開発のサーバーを持つ。開発の依存だけで、配る画面に実行の時の依存を足さない。今の `apps/web` が使っている | https://registry.npmjs.org/vite （2026-11-18） |
+| LIB87 | `react`・`react-dom` | 19.3.1 | MIT | 2026-10-14 | 無し | 満たす。採る（決定 140）。2026 年 10 月の npm の取得数は約 8.5 億回で、比べた候補の中で最も多い（preact 約 1.8 億回・lit 約 3,200 万回）。実行の時の依存が 2 つ増える（`react-dom` の展開後 約 7.7 MiB。React と `react-dom` だけを描く最小の画面を束ねると 1 つの JS のファイルで 219,469 バイト、gzip で 68.57 kB（Vite の表示。1 kB は 1,000 バイト）。測り方は下の [束の大きさの測り方](#束の大きさの測り方)）。TSX は Node の型の剥がしで打てないため、画面のコードは Vite と vitest で変換する（STD84） | https://registry.npmjs.org/react ・ https://registry.npmjs.org/react-dom （2026-11-18）・ https://api.npmjs.org/downloads/point/2026-10-01:2026-10-31/react （同 preact・lit。2026-11-21） |
+| LIB88 | `preact` | 11.2.0 | MIT | 2026-11-06 | 無し | 満たす。React と書き方が近く小さい。React の周りの部品は互換の層 `preact/compat` を通して使う。互換の層は React との 100% の互換を目指す薄い層で、Preact は React の再実装ではなく、合成のイベントを持たないなどの違いが残る。最小の画面を束ねると 11,481 バイト、gzip で 4.95 kB（[束の大きさの測り方](#束の大きさの測り方)） | https://registry.npmjs.org/preact （2026-11-18）・ https://preactjs.com/guide/v10/differences-to-react ・ https://preactjs.com/guide/v10/switching-to-preact （2026-11-21） |
+| LIB89 | `lit` | 3.3.3 | BSD-3-Clause | 2026-05-14 | 無し | 満たす。Web Components の上で JSX を使わずに書ける。宣言の書き方の多くがデコレーターに寄る。2026 年 10 月の npm の取得数は約 3,200 万回で、React の 4% ほど | https://registry.npmjs.org/lit （2026-11-18） |
+| LIB90 | `@vitejs/plugin-react` | 6.3.0 | MIT | 2026-11-09 | 無し | 満たす。Vite で TSX を変換し、開発のサーバーで部品を差し替える。開発の依存だけ | https://registry.npmjs.org/@vitejs/plugin-react （2026-11-21） |
+
+### 束の大きさの測り方
+
+2026-11-21 に Linux（Node 26.13.1・npm）の空の作業場所で測った。大きさの単位はバイトで、kB は 1,000 バイトである。
+
+| 項目 | React（LIB87） | Preact（LIB88） |
+| --- | --- | --- |
+| 依存（版を固定） | `react`・`react-dom` 19.3.1、開発の依存 `vite` 8.3.8・`@vitejs/plugin-react` 6.3.0 | `preact` 11.2.0、開発の依存 `vite` 8.3.8 |
+| `index.html` | `<div id="root">` と `<script type="module" src="/src/main.tsx">` だけ | 同じ |
+| `src/main.tsx` | `createRoot(document.getElementById("root")!).render(<p>hello</p>)`（`react-dom/client` から import） | `render(<p>hello</p>, document.getElementById("root")!)`（`preact` から import） |
+| `vite.config.ts` | `plugins: [react()]` | `oxc: { jsx: { runtime: "automatic", importSource: "preact" } }` |
+| 束ね方 | `npm install --ignore-scripts` の後に `npx vite build`（既定の設定。圧縮あり） | 同じ |
+| 出た JS | 1 ファイル 219,469 バイト | 1 ファイル 11,481 バイト |
+| gzip | Vite の表示で 68.57 kB。`gzip -c -9` で 67,652 バイト | Vite の表示で 4.95 kB。`gzip -c -9` で 4,943 バイト |
+
+下の計算は Vite の表示の gzip の値（68,570 バイト）を使う。
 
 ### 確かめられなかったこと
 
@@ -524,7 +540,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | `ALTER ROLE … PASSWORD` を advisory lock と同じトランザクションの中で打てること | 試していない | PostgreSQL の `ALTER ROLE` の頁を取得していない。[未確認のまま残ること](#未確認のまま残ること)へ移した |
 | AWS のクォータ（Lambda の同時実行・Fargate の vCPU）の既定の値 | 試していない | 値はアカウントとリージョンで違い、設置する人が Service Quotas で読む |
 
-調べた量: 候補 9 件・取得の試み 24 回（2026-11-17）。#32 で候補 8 件・取得の試み 13 回を足し、同じサービスの行（LIB81・LIB82・LIB84）は 1 行に畳んだ（2026-11-18）。
+調べた量: 候補 9 件・取得の試み 24 回（2026-11-17）。#32 で候補 8 件・取得の試み 13 回を足し、同じサービスの行（LIB81・LIB82・LIB84）は 1 行に畳んだ（2026-11-18）。CloudFront の料金の頁 2 つの取得と、束の大きさの測りを 2 回足した（2026-11-21）。
 
 ## 決定の記録
 
@@ -764,18 +780,39 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 根拠: Value 9（MVV 版 1）
 
-### 決定 140: 子の課題が言語と画面の組み方を 1 か所から読めるよう、書き方の細則をプラットフォームの文書に置き、画面は UI のフレームワークを入れずに素の TypeScript で組む
+### 決定 140: 子の課題が言語と画面の組み方を 1 か所から読めるよう、書き方の細則をプラットフォームの文書に置き、画面は React 19 と TSX で組む
 
-結論: 書き方の細則を [言語と書き方の決まり](#言語と書き方の決まり) に置き、`AGENTS.md` はそこを指す。画面は UI のフレームワークを入れず、素の TypeScript と DOM の API で部品を組み、Vite で束ねる。
+結論: 書き方の細則を [言語と書き方の決まり](#言語と書き方の決まり) に置き、`AGENTS.md` はそこを指す。画面は React 19（LIB87）の関数の部品を TSX で書き、Vite（LIB86）と React の Vite のプラグイン（LIB90）で束ねる。画面の外のコードは今までどおり Node の型の剥がしで直に打ち、TSX と React を持たない。
 
-理由: 画面の部品は画面の基盤として先に固める（Value 2）。部品の数は画面の文書の部品の一覧に収まり、状態の持ち方も確定待ちと控えに限られるため、フレームワークの仮想 DOM や状態の管理の仕組みを使う場面が少ない。フレームワークを入れると配る画面に実行の時の依存が増え（Value 6）、JSX で書いた部品は Node の型の剥がしで打てず、単体テストに変換の段が要る（STD84）。
+理由: Value 2 は画面の基盤（画面の地図・共通の部品・端末の幅・オフライン・国際化）を先に固め、20 の機能の画面をダミーデータで作り切ることを求める。オフラインの確定待ちと控え・国際化・部品の組み合わせを DOM の API で自前に書くと、DOM の差分の更新と状態の扱いを作り直すことになる。実績のある最新のフレームワークを使えば、その部分を書かずに部品と画面へ手を回せ、周りの部品（国際化・PWA・テスト）も選べる。React は比べた候補の中で最も多く使われている（2026 年 10 月の npm の取得数で約 8.5 億回。LIB87）。国際化・PWA・テストの個々の部品が React 19 に対応するかは確かめていない（[未確認のまま残ること](#未確認のまま残ること)）。Value 6 は運用の費用が増える構成や依存を足すときに理由と代わりの案を示すことを求め、依存を足すこと自体は禁じていない。React で配る束は gzip で 68.57 kB 増えるが、CloudFront の従量の課金の無料の枠（毎月 1 TB・1,000 万回、LIB83）の中に収まり、見込みの利用量では月の費用は 0 ドルのまま変わらない（下の表と費用の見積もり）。TSX は Node の型の剥がしで打てないが（STD84）、画面は Vite と vitest が変換するため、変換の段を持たない決まりは画面の外に限れば保てる。
 
-採らなかった案: React（LIB87）は依存が 2 つ増え、JSX が型の剥がしで打てない。Preact（LIB88）は小さいが JSX の事情が同じ。Lit（LIB89）は JSX を使わずに書けるが、依存が 1 つ増え、宣言の書き方の多くがデコレーターに寄る。どれも要件は満たすが、部品の数と状態の範囲に対して依存を足す分の得が無い。
+| 欄 | この決定で足すもの |
+| --- | --- |
+| 足すもの | 実行の時の依存 `react`・`react-dom`（LIB87）と、開発の依存 `@vitejs/plugin-react`（LIB90） |
+| 増える額 | 見込みの利用量で月 0 ドル（下の費用の見積もり）。配る束は gzip で 68.57 kB 増える（LIB87 で測った最小の画面）。要求の数は増えない（Vite の既定では React は画面の JS と同じファイルに束ねられ、測った最小の画面でも JS は 1 ファイル）。S3 の保管は 0.22 MB 増え、[見込み](#見込み) の無料の枠の中 |
+| 理由 | Value 2 の画面の基盤（オフライン・国際化・共通の部品）を自前で書かずに組む |
+| 代案 | 素の TypeScript と DOM の API・Preact・Lit（下の採らなかった案） |
+| 使わない間 | 配る量に比例し、使わない月は 0 ドル。固定の額は無い |
 
-見直す条件: 部品の一覧が画面の文書の範囲を超えて増え、DOM の差分の更新を自前で書く箇所が出てきたとき。足すときは [費用が増える構成を足すとき](#費用が増える構成を足すとき) の表を置き、この決定を改める。
+費用の見積もり: 料金は CloudFront の従量の課金とし、定額のプランに入らない。定額の Free は目安の量（月 100 万回）が従量の課金の無料の枠（1,000 万回）の 10 分の 1 で、超え続けると配信が調整され、AWS の無料の利用枠を使うアカウントは入れない（LIB83）。従量の課金は [CloudFront と画面の S3](#資源ごとの形) の価格の区分の設定とも合う。見積もりは Service Worker の控えに頼らず（控えの設計は #12 以降）、画面を開くたびに全部を CloudFront から取ると置く。
 
-- 作り方: 自前で作る
-- 比べた候補: LIB86 / LIB87 / LIB88 / LIB89 / STD84
+| 前提と結果 | 1 人のチーム | 5 人のチーム |
+| --- | --- | --- |
+| 画面を開く回数（1 人 1 日 100 回 × 30 日と置いた） | 3,000 回 | 15,000 回 |
+| 1 回の要求（HTML・JS・CSS・manifest・アイコン・Service Worker・翻訳のファイルを多めに 10 回と置いた） | 3 万回 | 15 万回（無料の枠の 1.5%） |
+| React で増える転送（68,570 バイト × 回数） | 0.21 GB | 1.03 GB（無料の枠の 0.1%） |
+| 増える額 | 0 ドル | 0 ドル |
+
+無料の枠は要求の数が先に当たる。1 回 10 の要求なら月 100 万回の開く回数で 1,000 万回に達し、転送の 1 TB は React の分だけなら約 1,460 万回まで当たらない。React は要求の数を増やさないため、枠に達する時期を早めない。枠を超えると止まらずに従量で課金され、米国では要求 100 万回で 1.00 ドル、React の分の転送は開く 100 万回で約 5.8 ドル（68,570 バイト × 0.085 ドル/GB）増える（LIB83）。超えたことは [月の予算](#予算と知らせ) の知らせで分かる。
+
+画面の性能への効き: 68,570 バイトの転送は、Lighthouse のスマートフォンの絞り（下り 1,638.4 Kbps、STD85）で約 0.33 秒と計算でき（1 Kbps を 1,000 ビットとして 0.335 秒、1,024 ビットとして 0.327 秒）、LCP の目標 2.5 秒（決定 94）の 13% ほどに当たる。解析と実行の時間を含む LCP は測っていない（[未確認のまま残ること](#未確認のまま残ること)）。
+
+採らなかった案: UI のフレームワークを入れず、素の TypeScript と DOM の API で組む形（この決定の直す前の結論。骨組みの画面の形をそのまま決まりにしたもので、Value 6 を「依存を足さない」と読んでいた）は、画面の基盤の範囲に対して自前で書く量が多い。Preact（LIB88）は束が 63.62 kB 小さく、上の絞りで転送が約 0.31 秒短い。費用はどちらも無料の枠の中で変わらない。周りの部品が動くかはどちらも確かめていない（React は React 19 への対応で、[未確認のまま残ること](#未確認のまま残ること)に置く。Preact は互換の層 `preact/compat` の上で動くか）。確かめた事実で違うのは、使われる数が React の約 21%（npm の取得数、LIB87）であることと、Preact の文書自身が互換の層の上でも React との違いが残る（合成のイベントを持たないなど）と書くことである。転送の 0.31 秒は LCP の目標の中で、使われる数と、部品が対象にする本体をそのまま使えることを採った。Lit（LIB89）は JSX を使わずに書けるが、宣言の書き方がデコレーターに寄り、使われる数が React の 4% ほどである。
+
+見直す条件: React の大きな版が出て、今の版の保守が終わるとき。または配る束の大きさが画面の性能の目標（決定 94）を損なうと測れたとき。
+
+- 作り方: 既存の部品を使う
+- 比べた候補: LIB86 / LIB87 / LIB88 / LIB89 / LIB90 / STD84 / STD85
 
 根拠: Value 2 / Value 6（MVV 版 1）
 
@@ -794,4 +831,6 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | `ALTER ROLE` と advisory lock の同じトランザクション | パスワードの変更と差し替えの番号の書き込みを 1 つのトランザクションで確定できること（決定 95） | 反映した環境の Aurora で実測（#13 の用意の手順の試験） |
 | `StopTask` から `STOPPED` までの時間 | 見回りの 1 回の起動の中で停止を読めるか。読めなければ次の見回りで読む（決定 96） | 反映した環境で測る（#13） |
 | `ListTasks` に起動したタスクが出るまでの時間 | 片付けで拾い漏らす割合。止めの正しさには効かない（決定 96） | 反映した環境で測る（#13） |
+| 画面の周りの部品の React 19 への対応 | 国際化・PWA・テストの部品のうち使うものが React 19 で動くこと（決定 140） | #12 で部品を選ぶときに、各部品の対応の版を読み、単体テストで確かめる |
+| React を入れた画面の LCP | 束の転送は計算で約 0.33 秒。解析と実行を含む LCP が 2.5 秒以内に収まること（決定 94・決定 140） | #12 の e2e で端末の幅と回線を絞って測る |
 | AWS のクォータの値 | Lambda の同時実行と Fargate の vCPU の既定の値は、アカウントとリージョンで違う | 設置する人が Service Quotas で読む（#14 の設置の予行） |
