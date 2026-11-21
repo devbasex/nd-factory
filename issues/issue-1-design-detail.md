@@ -27,7 +27,7 @@ nd-factory/
 ├── apps/web/src/users-client.ts           除外の注釈（#4）
 ├── infra/lib/app-stack.ts                 除外の注釈（#4。旧経路 `PUT /v1/users` の登録）
 └── tools/
-    ├── package.json                       依存 @nd-factory/contracts・ajv・ajv-formats・yaml
+    ├── package.json                       依存 @nd-factory/contracts・ajv・ajv-formats・yaml・zod・zod-schema-faker・@faker-js/faker
     ├── tsconfig.json                      checks/src を含める
     ├── checks/src/ndf-contract-check.ts * NDF の契約の照合（CLI）
     ├── checks/leak-scan.sh              * gitleaks の 1 回の探し（除外を効かなくする。`leak-check` のジョブと結合のテストが打つ）
@@ -49,7 +49,7 @@ nd-factory/
 | パス | 種類 | 役割 1 文 | 依存する先 | 最上位の関数 |
 | --- | --- | --- | --- | --- |
 | `tools/checks/src/ndf-contract-check.ts` | 新設 | 固定の点と既定の枝の先端の NDF の契約を、形の正本の判定とデータで照らす | `@nd-factory/contracts`（NDF の契約の使い方） | `fetchContract`・`compareContract`・`renderSummary`・`mainNdfContractCheck`（新設） |
-| `tools/test/contracts-round-trip.test.ts` | 新設 | 見本と変形を 4 つの形で検証して比べ、I14・I12・I15 の表の照らしを行う | `@nd-factory/contracts`・ajv・ajv-formats | `mutate`・`representationsOf`（新設。テストの中の関数） |
+| `tools/test/contracts-round-trip.test.ts` | 新設 | 見本と変形を 4 つの形で検証して比べ、I14・I12・I15 の表の照らしを行う | `@nd-factory/contracts`・ajv・ajv-formats・zod-schema-faker | `mutate`・`representationsOf`・`operationViews`（新設。テストの中の関数） |
 | `tools/test/ci-definition.test.ts` | 変更 | すべてのワークフローを `yaml` で読んで照らす | `yaml` | `loadWorkflows`・`triggersPullRequest`・`permissionBlocks`（新設）、`jobNames`（変更）、`credentialWords`（変えない） |
 
 ## ESLint の設定
@@ -210,18 +210,34 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 
 `tools/test/contracts-round-trip.test.ts` は、#2 の書き出し（K2-3）から操作の表と生成物を読む。書き出しが無い間は、リポジトリの表を照らすテストを「相手が無い」の名前で飛ばし、作り物の表のテストだけを走らせる。
 
+読むもの: 操作の表は `packages/contracts/src/operations/index.ts` の `OPERATIONS`、結果の zod は `packages/contracts/src/operation.ts` の `resultSchemaOf`（成功と失敗を `ok` で分けた和）、形の未定は同じファイルの `isPending` で見分ける。生成物は `packages/contracts/generated/` の `operations.schema.json`・`openapi.json`・`mcp-tools.json`・`routes.json`・`dummy/index.json`。`tools` は #2 の書き出しが入る前も型の検査を通るよう、2 つのファイルを実行の時に import し、読んだ値の形をテストの中で照らす。
+
+#2 では形が未定の操作も表に載る。形が未定の操作（要素か結果のどちらかが `PendingShape`）は、照らすこと 2〜7（名前・機能・経路）には入れ、照らすこと 1（見本の往復）には入れない。形が確定した操作の見本は、要素が zod-schema-faker で要素の zod から作る 3 件（種は操作の名前から決める。#2 の `operations-roundtrip.test.ts` と同じ作り方）、結果がダミーの見本（`dummy/index.json`）の成功（正常・境目・空）と失敗の見本である。確定した操作にダミーの見本が無ければ落ちる。
+
+形ごとの公開の範囲と包み方は #2 の生成物に合わせる。
+
+| 形 | 持つ操作 | 要素の検証 | 結果の検証 |
+| --- | --- | --- | --- |
+| zod | すべて | 要素の zod | `resultSchemaOf` |
+| JSON Schema | すべて | `$defs` の `<名前>.item` | `$defs` の `<名前>.result` |
+| OpenAPI | 受け口 `user` の操作だけ（#2 の OpenAPI は機械向けの操作を公開しない） | 要求の本文の配列に要素 1 つを包む | 応答の配列に結果 1 つを包む |
+| MCP | 人だけでない受け口 `user` の操作だけ | `{"items": [要素]}` を道具の入力の形に通し、包みが受けた要素を dispatch と同じ要素の zod で検証する | 道具の出力の配列に結果 1 つを包む |
+
+MCP の道具の入力の形（承認済みの `createMcpHandler` と #2 の生成物）は配列の包みと件数だけを持ち、要素の形を持たない。要素の検査は dispatch が担う。このため包みの検査は要素の変形と別に照らす: 要素の検査を通る見本を 0 件・1 件・OpenAPI の要求の上限の件数・上限より 1 件多い数だけ並べ、道具の入力の形と OpenAPI の要求の配列の通すか拒むかが揃うこと、`items` の無い入力と `items` が配列でない入力を道具の入力の形が拒むことを照らす。
+
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `mutate` | `tools/test/contracts-round-trip.test.ts` | 新設 | `(value: unknown, schema: JsonSchema) => Mutation[]` | 見本から変形（見本にある項目を 1 つずつ消す・項目の型を変える・知らない項目を足す・配列を最初の 1 件の値にする）を作る。消す項目は見本から選び、どれかの形の `required` から選ばない（1 つの形だけ必須を外した食い違いを見落とさないため） |
-| `representationsOf` | 同上 | 新設 | `(op: OperationView, generated: GeneratedView) => Representation[]` | 1 つの操作の要素と結果の形を、zod・JSON Schema・OpenAPI の要素の形・MCP の道具の入力と出力の形の検証の関数として返す。MCP の入力は `{"items": [...]}` に包む。人だけの操作は MCP の形を持たない |
+| `mutate` | `tools/test/contracts-round-trip.test.ts` | 新設 | `(value: unknown) => Mutation[]` | 見本から変形（見本にある項目を 1 つずつ消す・項目の型を変える・知らない項目を足す・配列を最初の 1 件の値にする）を作る。見本のオブジェクトと配列の最初の 1 件を辿って入れ子にも同じ変形を掛け、形を辿らない（結果は成功と失敗の和で、`$ref` も含むため、形の `properties` と `items` を辿ると内側の変形を作れない）。消す項目は見本から選び、どれかの形の `required` から選ばない（1 つの形だけ必須を外した食い違いを見落とさないため） |
+| `representationsOf` | 同上 | 新設 | `(op: OperationView, shapes: OperationShapes, generated: GeneratedView) => Representation[]` | 1 つの操作の要素と結果の形を、上の表の形ごとの検証の関数として返す。OpenAPI の形は受け口 `user` の操作だけ、MCP の形は人だけでない受け口 `user` の操作だけが持つ |
+| `operationViews` | 同上 | 新設 | `(input: ContractsInput) => { views: OperationView[]; issues: string[] }` | #2 の操作の表を照らしの入力へ写す。形が確定した操作だけが形と見本を持ち、確定した操作にダミーの見本が無いと当たりを返す |
 
 テストが照らすこと:
 
 | # | 照らすこと |
 | --- | --- |
-| 1 | 見本と変形を 4 つの形で検証し、通るか拒むかが違う組が無い。変形していない見本はすべての形で通る |
+| 1 | 形が確定した操作の見本（要素と、結果の成功と失敗）と変形を、その操作が持つ形で検証し、通るか拒むかが違う組が無い。変形していない見本はすべての形で通る。MCP の道具の入力の包みの件数の境目が OpenAPI の要求と揃う |
 | 2 | MCP の道具の名前の集まりが、利用者向けの人だけでない操作の名前の集まりと等しい |
-| 3 | 人だけの操作ごとに、同じエンティティの人だけでない読む操作がある |
+| 3 | 人だけの操作ごとに、`mcpRead` が指す読み出しが操作の表にあり、受け口 `user` の人だけでない読む操作で、MCP の道具として公開されている。読み出しのエンティティは問わない（承認済みの `sessions.create`・`logins.create` → `users.get`） |
 | 4 | F1〜F20 がどれかの操作の機能にある |
 | 5 | 利用者向けの操作の要求と応答の形が配列（I12） |
 | 6 | 名前が `_at` で終わる項目が UTC の日時の形、`amount_minor` を持つ要素が `currency` を必須にする（I15） |
@@ -254,7 +270,7 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| 照らすこと 1〜7（作り物の操作の表をテストの中で組む） | 揃った表で 0 件 | 人だけの操作は 3 つの形で比べる。空の配列の見本 | 照らすことごとに、1 か所を壊した表（JSON Schema だけ必須の項目を外す・道具を 1 つ消す・人だけの操作の読み出しを消す・機能を消す・配列でない要求・時刻帯の無い日時・通貨の無い金額・表に無い経路）で 1 件 |
+| 照らすこと 1〜7（作り物の操作の表と、#2 と同じ包み方の生成物をテストの中で組む。結果は成功と失敗の和で、2 か所から使う形は `$ref`） | 揃った表で 0 件。別のエンティティの読み出しを指す人だけの操作が通る。MCP の包みが必須の項目を消した要素を受けても食い違わない。#2 の形の表（形の未定を含む）を写して 0 件 | 人だけの操作は 3 つ、機械向けの操作は 2 つの形で比べる。形が未定の操作は往復に入れない。空の配列の見本 | 照らすことごとに、1 か所を壊した表（JSON Schema だけ要素の必須の項目を外す・成功の item の内側の必須の項目を外す・`$ref` の先の必須の項目を外す・失敗の見本が形に合わない・MCP の包みの件数の上限が違う・利用者向けの操作が OpenAPI に無い・道具を 1 つ消す・`mcpRead` の指す読み出しを消す（同じエンティティの読む操作が残っても）・指す読み出しの道具を消す・機能を消す・配列でない要求・時刻帯の無い日時・通貨の無い金額・表に無い経路・確定した操作のダミーの見本が無い）で当たる |
 | 照らすこと 8（作り物のテンプレートと登録をテストの中で組む。合成を打つテストは 1 本） | 除外を引いて揃った組で 0 件。除外の表が空で完全に揃った組で 0 件。クリーンなチェックアウトで画面をビルドせずに合成でき、経路を 1 本以上取り出す | 登録が無いと比べを飛ばす | 登録にだけある反映済みの経路・合成にだけある除外に無い経路で 1 件。旧経路が合成に無い・除外の受け口の経路が合成にある・除外の受け口が登録に無い、のそれぞれで除外の行が要らないと 1 件（除外の受け口の経路が合成にある組は、その経路が合成にだけある経路にも出る） |
 
 ## NDF の契約の照合

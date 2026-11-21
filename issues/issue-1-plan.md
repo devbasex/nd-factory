@@ -65,7 +65,7 @@
 
 ### Task 7: 形の正本の往復のテストと、合成した API Gateway の経路の照らし
 
-- **対象ファイル:** `tools/test/contracts-round-trip.test.ts`・`tools/package.json`（`ajv`・`ajv-formats`）・`issues/issue-1-design.md`・`issues/issue-1-design-detail.md`（承認で足したこと 2）
+- **対象ファイル:** `tools/test/contracts-round-trip.test.ts`・`tools/package.json`（`ajv`・`ajv-formats`・`zod`・要素の見本を作る `zod-schema-faker`・`@faker-js/faker`）・`issues/issue-1-design.md`・`issues/issue-1-design-detail.md`（承認で足したこと 2）
 - **変更内容:** 詳細設計書の「形の正本の往復のテスト」の照らすこと 1〜7 に、照らすこと 8（合成した経路と経路の登録の比べ）を足し、「合成の打ち方」のとおりに合成する。照らすこと 8 と合成の打ち方は承認の後に詳細設計書へ書き足した（このタスクで設計文書の該当する節を変えるときも、ここと揃える）。要点は次のとおり
   - 比べる範囲: 合成したテンプレートの `AWS::ApiGatewayV2::Route` の経路（方法と経路）から除外の旧経路を引いた集まりが、経路の登録（#2 の `generated/routes.json`）から除外の受け口の経路を引いた集まり（反映済みの経路）と等しい
   - 期限付きの除外: テストの中の表に、行ごとに外すもの（旧経路 `PUT /v1/users`、または受け口 `user`・`runner`・`machine`・`db_prep` の 1 つ）と、外すのを終える課題の番号（`db_prep` は #13、ほかは #4）を置く。除外が要らなくなった行で落ちる（旧経路が合成に無い・受け口の経路が合成に 1 本でもある・受け口が登録に無い）。#2 は `api-fn` と `ApiRoutes` をスタックへ入れないため、登録が入った時点の合成の経路は旧経路の 1 本だけで、#2 の登録にある 4 つの受け口がすべて除外に入る。`db_prep` の 2 本（`/v1/db_prep/exchanges/create`・`/v1/db_prep/completions/create`）は #13 が DB の用意を Lambda へ移して操作の表から消すので、その Pull Request で `db_prep` の行が落ち、その行を消す
@@ -92,7 +92,7 @@
 | U2 ESLint | Task 2 | 1:1・1:4・1:5・1:6・1:14 | 約 400 | 697 |
 | U3 依存の向きと使っていないもの | Task 3・4 | 1:1・1:4・1:7・1:12 | 約 450 | 994 |
 | U4 漏れとワークフローの点検 | Task 5・6 | 1:1・1:2・1:3・1:13 | 約 500 | 1114 |
-| U5 形の正本の往復 | Task 7 | 1:1・1:5 | 約 450 | 891 |
+| U5 形の正本の往復 | Task 7 | 1:1・1:5 | 約 450 | 1443 |
 | U6 NDF の契約の照合 | Task 8 | 1:1・1:9 | 約 600 | |
 
 受け入れ条件 11（詳細設計）は設計 PR #49 で満たした。
