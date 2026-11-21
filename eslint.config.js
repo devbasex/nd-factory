@@ -207,6 +207,11 @@ export function buildConfig({ planNames }) {
     js.configs.recommended,
     ...tseslint.configs.recommended,
     {
+      // CommonJS の設定のファイル（.dependency-cruiser.cjs）。Node.js の module と require を知らせる
+      files: ["**/*.cjs"],
+      languageOptions: { sourceType: "commonjs", globals: { module: "writable", require: "readonly" } },
+    },
+    {
       files: ["**/*.ts", "**/*.tsx"],
       rules: {
         "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],

@@ -25,10 +25,10 @@ import { applyTags, pipelineResourceNames, settingsParameterName } from "./namin
 // このスタック自身は設置のコマンドで反映する（push だけで反映の役割の権限を広げられないようにする）
 
 // CodeStar の接続の名前の上限
-export const MAX_CONNECTION_NAME = 32;
+const MAX_CONNECTION_NAME = 32;
 
 // 準備のアクションの変数の名前空間。承認と反映の設定から #{Prepare.<名前>} で読む
-export const PREPARE_NAMESPACE = "Prepare";
+const PREPARE_NAMESPACE = "Prepare";
 
 // 既定の qualifier の bootstrap の役割。CodeBuild の役割はこれを引き受けるだけで、ほかの権限を持たない
 const BOOTSTRAP_QUALIFIER = "hnb659fds";

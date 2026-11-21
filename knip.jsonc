@@ -1,0 +1,27 @@
+// 使っていないファイル・書き出し・依存を落とす（#1 の決定 4・8）。中身は issues/issue-1-design-detail.md の「knip の設定」にある。
+// 入口は、ワークスペースごとに knip の標準の手掛かり（package.json のスクリプトと exports・ツールの設定のファイル）が
+// 拾わないものだけを書く。拾うものを重ねて書くと、設定の手掛かりが誤りになる
+{
+  "$schema": "./node_modules/knip/schema-jsonc.json",
+  // 使われない除外・当たらない入口などの設定の手掛かりを誤りにする
+  "treatConfigHintsAsErrors": true,
+  // 画面がまだ無い操作の生成した呼び出しは、生成が JSDoc の `@screenPending` を付ける（K2-2）
+  "tags": ["-screenPending"],
+  "workspaces": {
+    ".": {},
+    "packages/*": {},
+    "apps/api": {
+      // Lambda の起点。infra がパスの文字列で渡すので import では辿れない
+      "entry": ["src/users-handler.ts"]
+    },
+    // 画面の起点（index.html の script）は knip が vite の設定から拾う
+    "apps/web": {},
+    // 合成の起点（cdk.json の app）と設置のコマンド（ルートのスクリプト nd-setup）は knip が拾う
+    "infra": {
+      // CDK の NodejsFunction が合成の時に実行ファイルとして読み、import では辿れない（#1）
+      "ignoreDependencies": ["esbuild"]
+    },
+    // 参照の検査の CLI（ルートのスクリプト ref-check）は knip が拾う
+    "tools": {}
+  }
+}

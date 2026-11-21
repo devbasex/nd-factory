@@ -2,7 +2,7 @@ import { type WebConfig, webConfigSchema } from "@nd-factory/contracts/web-confi
 
 // 画面の設定の値を同じ配信元の /config.json から読む。値は反映のときにスタックが書くので、ビルドに焼き込まない
 
-export const CONFIG_PATH = "/config.json";
+const CONFIG_PATH = "/config.json";
 
 export class RuntimeConfigError extends Error {
   override name = "RuntimeConfigError";
