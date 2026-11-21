@@ -39,7 +39,7 @@ type FakeState = {
   exposedRemaining?: number;
   // 手順の 1 で切る権限の無い接続の残りの読みが、呼ばれるたびに返す数（REMAINING_UNAUTHORIZED）。尽きたら最後の数を返し続ける
   unauthorizedSessions?: number[];
-  // 起動の途中の接続の読みが、呼ばれるたびに返す数（PENDING_REVOKED・PENDING_PROJECT）。尽きたら最後の数を返し続ける
+  // 起動の途中の接続の読みが、呼ばれるたびに返す数（PENDING_ANY・PENDING_PROJECT）。尽きたら最後の数を返し続ける
   pendingStartups?: number[];
   // 手順の 5 の残りの読みが、呼ばれるたびに返す数。尽きたら最後の数を返し続ける
   remainingSessions?: number[];
@@ -405,12 +405,10 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
     expect(signal?.kind === "execute" && signal.sql).toContain("NOT pg_catalog.has_database_privilege(s.usesysid, d.oid, 'CONNECT')");
     expect(signal?.kind === "execute" && signal.sql).not.toContain(":oids");
     expect(signal).toMatchObject({ database: ADMIN_DATABASE, transactionId: undefined });
-    // 起動の途中の接続は、postgres・template1 と外したデータベースで読む。OID は引数で渡す
+    // 起動の途中の接続は、外したデータベースに限らず、すべてのデータベースで読む
     const pending = fake.calls.find((c) => c.kind === "execute" && c.sql.includes("AS pending"));
-    expect(pending?.kind === "execute" && pending.params).toEqual([
-      { name: "names", value: "postgres,template1" },
-      { name: "oids", value: "16401,16402" },
-    ]);
+    expect(pending?.kind === "execute" && pending.params).toBeUndefined();
+    expect(pending?.kind === "execute" && pending.sql).not.toMatch(/:names|:oids|:database_name/);
     // 例外の文に名前を入れない
     await provisionProject(fakeDb({ publicOtherDatabases: exposed }), { ...PROJECT, password: PASSWORD }).catch((e: Error) => {
       expect(e.message).not.toContain("acme_b_db");
@@ -450,10 +448,7 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
     const remaining = fake.calls.filter((c) => c.kind === "execute" && c.sql.includes("has_database_privilege(s.usesysid"));
     expect(remaining.at(-1)).toMatchObject({ database: ADMIN_DATABASE, transactionId: undefined });
     const pending = fake.calls.find((c) => c.kind === "execute" && c.sql.includes("AS pending"));
-    expect(pending?.kind === "execute" && pending.params).toEqual([
-      { name: "names", value: "postgres,template1" },
-      { name: "oids", value: "" },
-    ]);
+    expect(pending?.kind === "execute" && pending.params).toBeUndefined();
     // 期限まで残れば何も作らずに投げる
     let t = 0;
     const stuck = fakeDb({ unauthorizedSessions: [1] });
@@ -471,7 +466,7 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
     const s = fake.statements();
     // 1 の切り: 送り → 起動の途中 → 残り を 2 回
     const sweep = s.filter(
-      (x) => x.includes("AS unauthorized_signalled") || (x.includes("AS pending") && x.includes(":names")) || x.includes("has_database_privilege(s.usesysid"),
+      (x) => x.includes("AS unauthorized_signalled") || (x.includes("AS pending") && !x.includes(":database_name")) || x.includes("has_database_privilege(s.usesysid"),
     );
     expect(sweep.map((x) => (x.includes("AS pending") ? "pending" : x.includes("AS unauthorized_signalled") ? "signal" : "remaining"))).toEqual([
       "signal",
@@ -494,6 +489,48 @@ describe("provisionProject（作り物の SqlExecutor）", () => {
       ).rejects.toThrow("期限の内に終わらなかった");
       expect(stuck.statements().some((x) => x.startsWith("CREATE") || x.startsWith("GRANT"))).toBe(false);
     }
+  });
+
+  it("前の用意が B の取り消しを確定した直後に止まった打ち直しでも、B への起動の途中の接続が載るまで待ってから切る相手を読む", async () => {
+    // 1 回目: B の PUBLIC の CONNECT を外して確定し、切りの前に止まる。取り消しの前に照らしを通った A の接続は起動の途中
+    const exposed = [{ exposed_oid: "16401", exposed_name: "acme_b_db" }];
+    const first = fakeDb({ publicOtherDatabases: exposed });
+    first.respond = ((inner) => (sql, params) => {
+      if (sql.includes("AS unauthorized_signalled")) throw new Error("止めた");
+      return inner(sql, params);
+    })(first.respond);
+    await expect(provisionProject(first, { ...PROJECT, password: PASSWORD })).rejects.toThrow("止めた");
+    expect(first.statements()).toContain(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier("acme_b_db")} FROM PUBLIC`);
+
+    // 打ち直し: B はもう PUBLIC の CONNECT を持たず、照らしに現れない。A の接続は 1 回目の読みではまだ統計に載らず、
+    // 鎖だけを持つ。載った後の読みで切る相手として現れ、切れてから先へ進む
+    const retry = fakeDb({ pendingStartups: [1, 0], unauthorizedSessions: [0, 1, 0] });
+    const waits: number[] = [];
+    await provisionProject(retry, { ...PROJECT, password: PASSWORD }, { now: () => 0, sleep: async (ms) => void waits.push(ms) });
+    const s = retry.statements();
+    const sweep = s.filter(
+      (x) => x.includes("AS unauthorized_signalled") || (x.includes("AS pending") && !x.includes(":database_name")) || x.includes("has_database_privilege(s.usesysid"),
+    );
+    // 起動の途中が 1 の間は残りが 0 でも終えず、載った接続を切り、残りが 0 と読んでから終える
+    expect(sweep.map((x) => (x.includes("AS pending") ? "pending" : x.includes("AS unauthorized_signalled") ? "signal" : "remaining"))).toEqual([
+      "signal",
+      "pending",
+      "remaining",
+      "signal",
+      "pending",
+      "remaining",
+      "signal",
+      "pending",
+      "remaining",
+    ]);
+    expect(waits.slice(0, 2)).toEqual([500, 500]);
+    // 起動の途中の読みは、今回取り消したデータベースに限らない（B の名前も OID も渡さない）
+    const pending = retry.calls.filter((c) => c.kind === "execute" && c.sql.includes("AS pending") && !c.sql.includes(":database_name"));
+    for (const c of pending) {
+      expect(c.kind === "execute" && c.params).toBeUndefined();
+      expect(c.kind === "execute" && c.sql).not.toMatch(/:names|:oids/);
+    }
+    expect(s.findIndex((x) => x.includes("AS unauthorized_signalled"))).toBeLessThan(s.findIndex((x) => x.startsWith("CREATE DATABASE")));
   });
 
   it("取り消しの読み直しで見つかるデータベースの数が足りなければ投げる", async () => {

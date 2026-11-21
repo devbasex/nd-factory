@@ -251,10 +251,10 @@ const PENDING_STARTUPS = (target: string) =>
   " WHERE l.locktype = 'object' AND l.database = 0 AND l.classid = 'pg_catalog.pg_database'::regclass AND l.granted" +
   ` AND l.pid <> pg_backend_pid() AND (${target})` +
   " AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity s WHERE s.pid = l.pid)";
-// 手順の 1 で取り消すデータベース（postgres・template1 と、見つけて外したほかのデータベース）
-const PENDING_REVOKED = PENDING_STARTUPS(
-  "d.datname = ANY (string_to_array(:names, ',')) OR d.oid = ANY (string_to_array(:oids, ',')::oid[])",
-);
+// 手順の 1 では、すべてのデータベースで読む。今回の用意が取り消したデータベースに限ると、前の用意が取り消しを確定した後に
+// 止まった打ち直しでは、そのデータベースがもう PUBLIC の CONNECT を持たず、取り消しの前に照らしを通って起動の途中にある接続を
+// 見落とす（切る相手を毎回すべてのデータベースで読むのと同じ理由）
+const PENDING_ANY = PENDING_STARTUPS("true");
 // 手順の 3 で取り消すプロジェクトのデータベース
 const PENDING_PROJECT = PENDING_STARTUPS("d.datname = :database_name");
 // PUBLIC がまだ表か列のどれかを読めるカタログの数（表の権限の取り消しは同じ種類の列の権限も外す）
@@ -325,12 +325,9 @@ async function closeUnauthorizedAccess(sql: SqlExecutor, names: readonly string[
   const left = exposed.length > 0 ? (await sql.execute(EXPOSED_STILL_PUBLIC, [{ name: "oids", value: oids }], ADMIN))[0] : undefined;
   await terminateSessions(
     sql,
-    { signal: SIGNAL_UNAUTHORIZED, remaining: REMAINING_UNAUTHORIZED, pending: PENDING_REVOKED },
+    { signal: SIGNAL_UNAUTHORIZED, remaining: REMAINING_UNAUTHORIZED, pending: PENDING_ANY },
     [],
-    [
-      { name: "names", value: SYSTEM_DATABASES.join(",") },
-      { name: "oids", value: oids },
-    ],
+    [],
     options,
   );
   if (exposed.length === 0) return;
@@ -356,7 +353,7 @@ async function terminateSessions(
     // 読み直しの間に載った接続にも送る（取り消しの後に照らす接続は、CONNECT を持つ役割だけが繋げる）
     await sql.execute(stmts.signal, params.length > 0 ? params : undefined, ADMIN);
     // 期限を過ぎていても、読み直しを 1 回打ってから決める
-    const [row] = await sql.execute(stmts.pending, pendingParams, ADMIN);
+    const [row] = await sql.execute(stmts.pending, pendingParams.length > 0 ? pendingParams : undefined, ADMIN);
     const pending = typeof row?.pending === "number" ? row.pending : Number.POSITIVE_INFINITY;
     const { remaining } = await readCount(sql, stmts.remaining, params.length > 0 ? params : undefined, ADMIN);
     if (pending === 0 && remaining === 0) return;
