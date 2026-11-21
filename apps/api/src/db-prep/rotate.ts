@@ -1,4 +1,5 @@
 import { PROGRESS_DB_IDENT_SHAPE } from "@nd-factory/contracts/db-prep";
+import { defaultNow, defaultSleep } from "./clock.ts";
 import { CREATE_SCHEMA, REVOKE_SCHEMA, SCHEMA_LOCK, SCHEMA_PRESENT, tablePresent, tablePresentFresh } from "./nd-prep-schema.ts";
 import type { ProjectIdent } from "./provision.ts";
 import { passwordCommandsRestriction, prepareRolePassword } from "./role-password.ts";
@@ -190,8 +191,8 @@ export async function terminateRoleConnections(
   const deadlineMs = options.deadlineMs ?? 15_000;
   const pollMs = options.pollMs ?? 500;
   const startingWaitCapMs = options.startingWaitCapMs ?? 120_000;
-  const now = options.now ?? (() => performance.now());
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = options.now ?? defaultNow;
+  const sleep = options.sleep ?? defaultSleep;
   const roleParam = [{ name: "role_name", value: role }];
   return inTransaction(sql, ADMIN_DATABASE, async (opts): Promise<TerminateResult> => {
     await sql.execute(ROTATE_LOCK, roleParam, opts);

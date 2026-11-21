@@ -1,5 +1,6 @@
 import { PROGRESS_DB_IDENT_SHAPE } from "@nd-factory/contracts/db-prep";
 import { escapeIdentifier } from "pg";
+import { defaultNow, defaultSleep } from "./clock.ts";
 import { prepareRolePassword } from "./role-password.ts";
 import { ADMIN_DATABASE, inTransaction, readFlag, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
 
@@ -320,8 +321,8 @@ async function terminateSessions(
 ): Promise<void> {
   const deadlineMs = options.deadlineMs ?? 15_000;
   const pollMs = options.pollMs ?? 500;
-  const now = options.now ?? (() => performance.now());
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = options.now ?? defaultNow;
+  const sleep = options.sleep ?? defaultSleep;
   const deadline = now() + deadlineMs;
   for (;;) {
     // 読み直しの間に載った接続にも送る（取り消しの後に照らす接続は、CONNECT を持つ役割だけが繋げる）

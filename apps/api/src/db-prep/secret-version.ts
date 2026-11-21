@@ -4,6 +4,7 @@ import {
   type SecretsManagerClient,
   UpdateSecretVersionStageCommand,
 } from "@aws-sdk/client-secrets-manager";
+import { defaultNow, defaultSleep } from "./clock.ts";
 
 // ランナーへ渡す URL を読む版に付くラベル。関数は SQL を終えた版へだけ移す（docs/design/data.md のパスワードの版の 4）
 export const CURRENT_STAGE = "AWSCURRENT";
@@ -65,8 +66,8 @@ export async function promoteVersion(
   versionId: string,
   options: PromoteOptions = {},
 ): Promise<void> {
-  const now = options.now ?? (() => performance.now());
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = options.now ?? defaultNow;
+  const sleep = options.sleep ?? defaultSleep;
   const abortAfter = options.abortAfter ?? ((ms: number) => AbortSignal.timeout(ms));
   const deadline = now() + (options.deadlineMs ?? 20_000);
   const budget: Budget = () => {
