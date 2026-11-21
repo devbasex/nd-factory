@@ -37,8 +37,6 @@ const ALLOWED_FILES: Record<string, string> = {
   "packages/core/src/ids.ts": "export const id = () => \"id\";\n",
   "packages/core/src/redact.ts": "export const redact = (v: string) => v;\n",
   "packages/core/src/log.ts": "export const log = () => undefined;\n",
-  "packages/core/src/web-http.ts": "export const createWebHttp = () => () => undefined;\nexport type WebHttp = () => void;\n",
-  "packages/core/src/outbound.ts": "export const callHttp = () => undefined;\nexport type OutboundRequest = { url: string };\n",
   "packages/core/src/store.ts": 'import { schema } from "@nd-factory/contracts/schema";\nexport const store = schema;\nexport type Store = typeof schema;\n',
   "packages/core/src/usage-limit.ts": 'import { plans } from "@nd-factory/contracts/plans";\nimport type { Plan } from "../../contracts/src/plans.ts";\nexport const limit: unknown = plans;\nexport type P = Plan;\n',
   "apps/api/src/handler.ts": 'import { store } from "@nd-factory/core/store";\nexport const handler = store;\nexport type Handler = typeof store;\n',
@@ -47,18 +45,10 @@ const ALLOWED_FILES: Record<string, string> = {
     'import { id } from "../../../packages/core/src/ids.ts";',
     'import { redact } from "@nd-factory/core/redact";',
     'import { log } from "@nd-factory/core/log";',
-    'import { createWebHttp } from "@nd-factory/core/web-http";',
     'import { schema } from "@nd-factory/contracts/schema";',
     'import { useState } from "react";',
     'import { createRoot } from "react-dom";',
-    'import { getSelf } from "./generated/users.ts";',
-    "export const app = [now, id, redact, log, createWebHttp, schema, useState, createRoot, getSelf];",
-    "",
-  ].join("\n"),
-  // 生成した呼び出し（#2 の K2-2）は画面の通信部品の型を受け、画面の起点が作った部品で送る
-  "apps/web/src/generated/users.ts": [
-    'import type { WebHttp } from "@nd-factory/core/web-http";',
-    "export const getSelf = (http: WebHttp) => http();",
+    "export const app = [now, id, redact, log, schema, useState, createRoot];",
     "",
   ].join("\n"),
   "apps/web/vite.config.ts": 'import react from "@vitejs/plugin-react";\nexport default react;\n',
@@ -95,11 +85,6 @@ const VIOLATIONS: Violation[] = [
     { file: "apps/web/src/bad-store-name.ts", code: 'import { store } from "@nd-factory/core/store";\nexport const s = store;\n', note: "名前の import" },
     { file: "apps/web/src/bad-store-relative.ts", code: 'import { store } from "../../../packages/core/src/store.ts";\nexport const s = store;\n', note: "相対のパスの import" },
     { file: "apps/web/src/bad-store-type.ts", code: 'import type { Store } from "@nd-factory/core/store";\nexport type S = Store;\n', note: "型だけの import" },
-    {
-      file: "apps/web/src/generated/bad-outbound.ts",
-      code: 'import { callHttp } from "@nd-factory/core/outbound";\nexport const c = callHttp;\n',
-      note: "生成した呼び出しからサーバーの外部の呼び出しの部品",
-    },
   ].map((v) => ({ ...v, rule: "web-uses-browser-core-only" })),
   ...[
     { file: "infra/lib/bad-api-name.ts", code: 'import { handler } from "@nd-factory/api/handler";\nexport const h = handler;\n', note: "名前の import" },
@@ -205,7 +190,7 @@ describe("受け入れ条件 1・4・7: .dependency-cruiser.cjs の依存の向�
     expect(options.doNotFollow).toEqual({ path: "node_modules" });
   });
 
-  it("許された依存（形の正本から zod・core から形の正本・画面から clock 等・画面の通信部品と react・判定のモジュールから料金プランの値）には当たらない", () => {
+  it("許された依存（形の正本から zod・core から形の正本・画面から clock 等と react・判定のモジュールから料金プランの値）には当たらない", () => {
     for (const path of Object.keys(ALLOWED_FILES)) {
       expect(hits.get(path) ?? [], path).toEqual([]);
     }
