@@ -93,7 +93,7 @@ package-lock.json
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `INFRA_DEFAULTS` | 定数 | `packages/contracts/src/settings.ts` | 上の 5 つの既定 |
-| `DB_PREP_TIMING` | 定数 | `packages/contracts/src/db-prep.ts` | `{ maxEventAgeSeconds: 60, functionTimeoutSeconds: 300, dataApiCallSeconds: 45, dataApiTxIdleSeconds: 180, prepDeadlineSeconds: 900 }`。`DbPrepFunction` が最初の 2 つを、#6 の見回りと API が `prepDeadlineSeconds` を読む。後の 2 つは Data API が決める値（全体の設計の LIB90）で、関数は変えない |
+| `DB_PREP_TIMING` | 定数 | `packages/contracts/src/db-prep.ts` | `{ maxEventAgeSeconds: 60, functionTimeoutSeconds: 300, dataApiCallSeconds: 45, dataApiTxIdleSeconds: 180, prepDeadlineSeconds: 900 }`。`DbPrepFunction` が最初の 2 つを、#6 の見回りと API が `prepDeadlineSeconds` を読む。後の 2 つは Data API が決める値（全体の設計の LIB91）で、関数は変えない |
 | `DB_PREP_FAILURE_REASONS` | 定数 | `packages/contracts/src/db-prep.ts` | `data_api_unavailable`・`guard_conflict`・`connections_remain`・`sql_failed` |
 
 ### 単体テストの観点
@@ -298,21 +298,21 @@ package-lock.json
 - `createDbPrepHandler`
   - 事前条件: 環境変数でクラスタの ARN・管理の役割の秘密の器の ARN・秘密の器の頭が渡っている（`handler` が読む）
   - 副作用: Data API への SQL・秘密の器の結んだ版の読み取りと、その版への `AWSCURRENT` の移し・終わりの記録の口の呼び出し。ほかの AWS の API とファイルには触れない
-- `handler` は `RDSDataClient` を `requestHandler` の `requestTimeout` 60,000 ミリ秒で作る（Data API の 45 秒より長くし、SDK が先に時間切れを返して、Data API が終えた文を打ち直さないようにする。全体の設計の LIB90）
+- `handler` は `RDSDataClient` を `requestHandler` の `requestTimeout` 60,000 ミリ秒で作る（Data API の 45 秒より長くし、SDK が先に時間切れを返して、Data API が終えた文を打ち直さないようにする。全体の設計の LIB91）
 - `createDataApiExecutor` の繰り返し
   - `p-retry` に `{ retries: attempts - 1, factor: 1, minTimeout: delayMs, maxTimeout: delayMs, randomize: false, maxRetryTime: deadlineMs }`（既定で `attempts` 12・`retries: 11`・`delayMs` 5,000・`deadlineMs` 60,000）を渡す。期限は呼び出しごとの最初の試行の開始から測り、`now`（既定 `performance.now`。`p-retry` が `maxRetryTime` を測るのと同じ時計）で測る
   - `p-retry` の `maxRetryTime` は待ちを残り時間に切り詰めるだけで、待った直後に期限を照らさずに次の試行を呼ぶ（設計文書の LIB8）。そのため、試行の関数の始めで期限を照らし、残りが 0 以下なら打たずに `AbortError` を投げる
   - `RESUME_WAIT_ERRORS` に無い例外は試行の中で `AbortError` に包み、繰り返さない（`shouldRetry` は使わない）。トランザクションの中の文（`transactionId` を持つ `execute`）と `commit`・`rollback` は繰り返さずに投げ、呼ぶ側が `rollback` して失敗にする。`begin` が通った時点で書き手は起きている
-- 識別子は `pg` の `escapeIdentifier` で組む。`CREATE ROLE … PASSWORD`・`ALTER ROLE … PASSWORD` は引数の束縛を受けないため、パスワードは SQL の文の中の文字列になる。その文が失敗すると PostgreSQL は既定（`log_min_error_statement` が `ERROR`）で文をサーバーのログに書き、`log_statement` を `ddl` 以上にすれば成功した文も書く（設計文書の LIB24）。そのため平文を文に載せず、`scramVerifier` の検証子を `escapeLiteral` で文字列にして渡す。PostgreSQL は SCRAM の形の文字列をそのまま保存し（LIB23）、Data API も Aurora PostgreSQL 14 以上では `scram-sha-256` だけを受ける（全体の設計の LIB90）。ログに残りうるのは検証子だけで、検証子から接続に要るパスワードは求められない（32 バイトの乱数のパスワードの総当たりは成り立たない）。名前と番号を照らす値は `SqlExecutor` の引数で渡す
+- 識別子は `pg` の `escapeIdentifier` で組む。`CREATE ROLE … PASSWORD`・`ALTER ROLE … PASSWORD` は引数の束縛を受けないため、パスワードは SQL の文の中の文字列になる。その文が失敗すると PostgreSQL は既定（`log_min_error_statement` が `ERROR`）で文をサーバーのログに書き、`log_statement` を `ddl` 以上にすれば成功した文も書く（設計文書の LIB24）。そのため平文を文に載せず、`scramVerifier` の検証子を `escapeLiteral` で文字列にして渡す。PostgreSQL は SCRAM の形の文字列をそのまま保存し（LIB23）、Data API も Aurora PostgreSQL 14 以上では `scram-sha-256` だけを受ける（全体の設計の LIB91）。ログに残りうるのは検証子だけで、検証子から接続に要るパスワードは求められない（32 バイトの乱数のパスワードの総当たりは成り立たない）。名前と番号を照らす値は `SqlExecutor` の引数で渡す
 - `PROGRESS_DB_IDENT_SHAPE` に合わない名前を口が返したら、SQL を打たずに投げる
 - 2 つの `SqlExecutor` の違いと、同じ手順を照らす前提の守り方（CI が打つのは `createPgExecutor` だけで、Data API の実装は SDK のクライアントを差し替えた単体テストと #44 の実測で確かめる）
 
 | 違い | Data API の実装 | `pg` の実装 | 守り方 |
 | --- | --- | --- | --- |
-| 文の長さと応答の大きさ | 応答は 1 MiB まで（LIB90）。文の長さの上限は確かめていない | 上限は実質無い | 手順の文はどれも検証子を含めて 1 KiB 未満で、返す行は数行に限る（一覧を読む文は `count(*)` か `LIMIT` を付ける）。作り物の `SqlExecutor` のテストで、`provisionProject`・`rotateRole`・`terminateRoleConnections`・`claimPrepRun`・`claimBinding` が渡す文がどれも 4 KiB 未満であることを照らす。上限は #44 で読む |
+| 文の長さと応答の大きさ | 応答は 1 MiB まで（LIB91）。文の長さの上限は確かめていない | 上限は実質無い | 手順の文はどれも検証子を含めて 1 KiB 未満で、返す行は数行に限る（一覧を読む文は `count(*)` か `LIMIT` を付ける）。作り物の `SqlExecutor` のテストで、`provisionProject`・`rotateRole`・`terminateRoleConnections`・`claimPrepRun`・`claimBinding` が渡す文がどれも 4 KiB 未満であることを照らす。上限は #44 で読む |
 | トランザクションの中の再開の待ち | `transactionId` を持つ文は繰り返さない（上の箇条） | 再開が無い | `begin` だけを繰り返し、通った後は書き手が起きている前提で打つ。中の文が `DatabaseResumingException` を返したら `rollback` して失敗にする（`createDataApiExecutor` の単体テスト） |
 | 値の型 | `formatRecordsAs: "JSON"` の JSON の型（整数は数、文字列は文字列、真偽は真偽、`bigint` は文字列のことがある） | `pg` の型の変換（`int4` は数、`int8`・`numeric` は文字列、時刻は `Date`） | 読む列はどれも SQL の側で `::int`・`::text`・`::boolean` に型を決め、時刻は読まずに SQL の中で比べる。`Row` を `Record<string, string \| number \| boolean \| null>` にし、両方の実装が同じ値を返すことを、同じ行の作り物の応答（Data API）と PostgreSQL のサービスコンテナ（`pg`）で照らす |
-| 接続と統計の写し | 接続の池を使い回し、トランザクションの間は 1 つの接続に結ぶ（LIB90） | トランザクションごとに専用の接続 | `pg_stat_clear_snapshot()` と `pg_terminate_backend` は、`terminateRoleConnections` の 1 つのトランザクションの中だけで打つ。切る相手はプロジェクトの役割の接続だけで、Data API の池の接続（管理の役割）に当たらない。Data API の上で同じに動くことは #44 で読む |
+| 接続と統計の写し | 接続の池を使い回し、トランザクションの間は 1 つの接続に結ぶ（LIB91） | トランザクションごとに専用の接続 | `pg_stat_clear_snapshot()` と `pg_terminate_backend` は、`terminateRoleConnections` の 1 つのトランザクションの中だけで打つ。切る相手はプロジェクトの役割の接続だけで、Data API の池の接続（管理の役割）に当たらない。Data API の上で同じに動くことは #44 で読む |
 
 - Data API が接続を残して一時停止を妨げると #44 で分かったとき（決定 83 の「接続を残さない」が外れたとき）: 用意の後に一時停止へ入るまでの時間を #44 で測り、1 時間を超えて妨げるなら、2 つ目のチームのプロジェクトでホステッドのレーンを動かす前に設計へ戻す。戻す先の候補は、同じ手順を `pg` の実装で打つ ECS のタスク（設計文書の決定 15 の採らなかった案）である。手順は `SqlExecutor` の裏に置いたため、起点と実装を替えるだけで SQL の手順とそのテストはそのまま使える
 
@@ -323,7 +323,7 @@ package-lock.json
 | `createDbPrepHandler` | 呼び出しが `dbPrepInvocation` に合わない | 口を呼ばずに終える。ログに形の誤りだけを出す |
 | `createDbPrepHandler` | `isCurrent` が偽 | SQL を打たず、`record` も呼ばずに終える（全体の設計の決定 96） |
 | `createDbPrepHandler` | `claimPrepRun` が投げる（Data API の再開の待ちが尽きた `DataApiUnavailableError` と、確定の応答が届かないときを含む） | 受け取りを確かめられないため、`failed` を含めて `record` を呼ばずに投げる（関数の誤り）。同じ用意の ID のもう一方の配信が受け取っていればそれが続け、どちらも受け取っていなければ見回りが期限の後に扱う。下の `DataApiUnavailableError` の行は、受け取りの後の段だけに当たる |
-| `createDbPrepHandler` | `claimPrepRun` が `duplicate`（同じ用意の ID の 2 つ目の配信。LIB91） | 用意と差し替えの SQL を打たず、`readTarget`・`promote`・`record` も呼ばずに終える。ログに `duplicate_delivery` を出す。1 つ目の配信だけが結果を確定するため、2 つ目が並行の DDL の衝突を `failed` に記して `無い` へ戻すことは起きない |
+| `createDbPrepHandler` | `claimPrepRun` が `duplicate`（同じ用意の ID の 2 つ目の配信。LIB92） | 用意と差し替えの SQL を打たず、`readTarget`・`promote`・`record` も呼ばずに終える。ログに `duplicate_delivery` を出す。1 つ目の配信だけが結果を確定するため、2 つ目が並行の DDL の衝突を `failed` に記して `無い` へ戻すことは起きない |
 | `createDbPrepHandler` | `isCurrent`・`readTarget`・`readPassword`・`promote`・`record` のどれかが投げる | 終わりを記さずに投げる（関数の誤り。自動の再試行は 0 回で、見回りが期限の後に扱う）。`promote` が投げたら `record` を呼ばない |
 | `createDbPrepHandler` | `applied`、または `rotate` で記した番号 = n の `rotation_superseded` | `promote` が版を確かめた後にだけ `record` を呼ぶ。`failed` と、記した番号 > n の `rotation_superseded` では `promote` を呼ばない |
 | `createDbPrepHandler` | `record` が `mismatch` | 書かれずに終える。ログに出す |
@@ -356,7 +356,7 @@ package-lock.json
 | --- | --- | --- | --- |
 | 同じ役割の 2 つの差し替えの呼び出し | 役割のパスワードと `nd_prep.rotation_seq` | `pg_advisory_xact_lock`（STD83） | 番号の比べで古い方は書かない（I17） |
 | 同じ番号 n の呼び直しと、時間切れの守りが外れて遅れた前の呼び出し（順序が逆になる） | 役割の接続 | 切るのは境の時刻 `old_conn_cutoff` より前に始まった接続だけ。境の時刻は、パスワードを書いたトランザクションの確定の後に、最初に切りの段へ来た呼び出しが排他の鎖の下で記し、後から来た呼び出しは記された値を使う | 終わりを記すのは切りの段の後だけで、API は終わりの記録を受けてから保留を下ろす（I20）。そのため新しいパスワードの接続はどれも境の時刻より後に始まり、遅れた呼び出しの切りに当たらない。境の時刻より前に始まった接続は、確定の前に古いパスワードで認証したものだけである |
-| 同じ用意の ID の重複の配信（非同期の呼び出しは、再試行が 0 回でも同じ呼び出しを 2 回以上届けうる。LIB91） | データベースと役割・終わりの記録 | `claimPrepRun` が `nd_prep.prep_runs` の主キーで 1 つ目だけを `first` にする。用意と差し替えの SQL・版の移し・終わりの記録は `first` の配信だけが打つ | 1 つ目が途中で落ちても同じ用意の ID は打ち直さない。やり直しは新しい用意の ID で起きる（作るなら次の開始、差し替えなら見回りの呼び直し。I18・I22） |
+| 同じ用意の ID の重複の配信（非同期の呼び出しは、再試行が 0 回でも同じ呼び出しを 2 回以上届けうる。LIB92） | データベースと役割・終わりの記録 | `claimPrepRun` が `nd_prep.prep_runs` の主キーで 1 つ目だけを `first` にする。用意と差し替えの SQL・版の移し・終わりの記録は `first` の配信だけが打つ | 1 つ目が途中で落ちても同じ用意の ID は打ち直さない。やり直しは新しい用意の ID で起きる（作るなら次の開始、差し替えなら見回りの呼び直し。I18・I22） |
 | 同じプロジェクトの作成の打ち直し | データベースと役割 | API の用意の ID（I18）と、関数が SQL の前に用意の ID を読み直すこと。手順は何度打っても同じ結果 | 次の開始で続く（`claimBinding` は `retry`） |
 | 2 つのプロジェクトの作成 | `nd_prep.bindings` | `pg_advisory_xact_lock(hashtext('nd-prep:bindings'))` と表の一意の制約 | 後に来た方が同じ名前を渡せば `conflict` |
 
