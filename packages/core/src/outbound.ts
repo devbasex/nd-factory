@@ -309,6 +309,7 @@ export function awsClientConfigOf(policyName: AwsPolicyName): AwsClientConfig {
 const clients = new WeakMap<(config: AwsClientConfig) => unknown, Map<AwsPolicyName, unknown>>();
 
 // 同じ構築子と方針の名前の 2 回目は同じクライアントを返す。構築子は呼ぶたびに作り直さず、モジュールの最上位に置いて渡す
+// 期限は本文の読み終わりまで掛かるため、流れの本文を返すクライアント（S3 の GetObject など）には使わない（outbound-socket.test.ts が期限で流れを切る挙動を固める）
 export function awsClient<C>(make: (config: AwsClientConfig) => C, policyName: AwsPolicyName): C {
   let byPolicy = clients.get(make);
   if (byPolicy === undefined) {

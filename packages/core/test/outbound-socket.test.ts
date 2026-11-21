@@ -153,3 +153,25 @@ describe("DeadlineHttpHandler の呼び手のシグナル", () => {
     handler.destroy();
   }, 10_000);
 });
+
+describe("DeadlineHttpHandler の流れの本文", () => {
+  // 期限は本文の読み終わりまで掛かる。流れの本文を返す呼び出し（S3 の GetObject など）を包むと、期限で本文が切れる。
+  // この挙動を固め、流れの本文を返すクライアントへ awsClient を使う変更がここで気づかれるようにする
+  it("期限を過ぎて流れ続ける本文は、期限で TimeoutError として切る（読み終えずに返す呼び出しには使えない）", async () => {
+    let tick: ReturnType<typeof setInterval> | undefined;
+    const port = await listen((_req, res) => {
+      res.writeHead(200, { "content-type": "application/octet-stream" });
+      tick = setInterval(() => res.write("x"), 20);
+      res.once("close", () => clearInterval(tick));
+    });
+    const handler = new DeadlineHttpHandler(200);
+    const started = Date.now();
+    const { response } = await handler.handle(requestTo(port));
+    const error = await readAll(response.body as Readable).catch((e: unknown) => e);
+    clearInterval(tick);
+    expect(error).toMatchObject({ name: "TimeoutError" });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(190);
+    expect(Date.now() - started).toBeLessThan(200 + 1_000);
+    handler.destroy();
+  }, 10_000);
+});
