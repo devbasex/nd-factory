@@ -1,15 +1,18 @@
 import { z } from "zod";
 import { idOf } from "../ids.ts";
 import { languageTag, timeZone, utcDateTime } from "../values.ts";
-import { overwriteRow, type RowKey, sha256Hex, versionlessRow } from "./common.ts";
+import { expireAt, overwriteRow, type RowKey, sha256Hex, uuid, versionlessRow } from "./common.ts";
 
-// db-users の行（利用者・ログインの組・IdP の主体の一意の行・Cognito の主体の対応の行・委任）
+// db-users の行（利用者・ログインの組・IdP の主体の一意の行・Cognito の主体の対応の行・ログインをつなぐ流れ・委任）
 
 export const idp = z.enum(["google", "github"]);
 
-// 利用者（USER#<利用者> / USER）。上書き
+// 利用者（USER#<利用者> / USER）。上書き。
+// login_count は結んだログインの数。ログインを結ぶ・外すトランザクションが、この行の版を条件に同じトランザクションで足し引きし、
+// 外すときは 2 以上を条件にする（同じ時に別々のログインを外す 2 つの要求の片方を断ち、最後のログインを外させない）
 export const userRow = overwriteRow(1, {
   user_id: idOf("usr"),
+  login_count: z.int().min(1),
   display_name: z.string().max(32),
   language: languageTag.optional(),
   time_zone: timeZone.optional(),
@@ -42,20 +45,46 @@ export const loginSubjectRow = versionlessRow(1, {
 export type LoginSubjectRow = z.infer<typeof loginSubjectRow>;
 export const loginSubjectKey = (row: LoginSubjectRow): RowKey => ({ pk: `LOGIN#${row.idp}#${row.subject}`, sk: "LOGIN" });
 
-// Cognito の主体の対応の行（COGNITO#<Cognito の sub> / COGNITO）。作ると消すだけ。
+// Cognito の主体の対応の行（COGNITO#<Cognito の sub> / COGNITO）。上書き（外しても消さず、失効の境を残す）。
 // Cognito の access token は IdP の主体でなく Cognito の利用者の sub を持つため、認証（userOfSubject）はこの行を強い整合で読んで利用者を引く。
 // Cognito は IdP のアカウントごとに別の利用者（別の sub）を作るため、ログインの組と 1 対 1 に当たる。
-// ログインの組と IdP の主体の一意の行と同じトランザクションで、無いときだけ書き（putIfAbsent）、外すときは 3 行を同じトランザクションで消す。
-// bound_auth_time は結んだときに使った token の auth_time。認証はこれより前にサインインした token を断つ（外して結び直す前のセッションを新しい利用者へ届かせない）
-export const cognitoSubjectRow = versionlessRow(1, {
+// state は bound（結んでいる。user_id と bound_auth_time を持つ）・signing_out（外して、その Cognito の利用者の
+// AdminUserGlobalSignOut の済むのを待つ間。結び直せない）・unlinked（外して失効を済ませた。revoked_before を持つ）。
+// bound_auth_time は結んだときに使った token の auth_time。認証はこれより前にサインインした token を断つ。
+// revoked_before は失効を済ませた時刻。これ以前にサインインした token では結び直せない（外す前のセッションと、失効の済む前のセッション）。
+// binding_epoch は外した回数。sessions.create の冪等の鍵に入れ、外す前の結果を外した後に返さない。
+// cognito_username は結ぶのに使った token の username で、外した後の AdminUserGlobalSignOut に渡す
+export const COGNITO_SUBJECT_STATES = ["bound", "signing_out", "unlinked"] as const;
+export const cognitoSubjectRow = overwriteRow(1, {
   cognito_sub: z.string().min(1),
-  user_id: idOf("usr"),
+  cognito_username: z.string().min(1),
   idp,
   subject: z.string().min(1),
-  bound_auth_time: utcDateTime,
+  state: z.enum(COGNITO_SUBJECT_STATES),
+  binding_epoch: z.int().min(0),
+  user_id: idOf("usr").optional(),
+  bound_auth_time: utcDateTime.optional(),
+  revoked_before: utcDateTime.optional(),
 });
 export type CognitoSubjectRow = z.infer<typeof cognitoSubjectRow>;
 export const cognitoSubjectKey = (row: CognitoSubjectRow): RowKey => ({ pk: `COGNITO#${row.cognito_sub}`, sk: "COGNITO" });
+
+// ログインをつなぐ流れ（USER#<利用者> / LINK#<流れの ID>）。作ると消すだけ。
+// login_links.create が今の利用者とそのセッション（要求の token の Cognito の sub）に結んで作り、認可の要求の state に link_id を、
+// PKCE の code_challenge に code_verifier の S256 を載せる。code_verifier はサーバーだけが持ち、画面へ返さない（ログに出さない）。
+// logins.create が認可コードを、この行の code_verifier で交換し、ログインを結ぶのと同じトランザクションで消す（1 回だけ使う）。
+// 期限（expires_at）を過ぎた行は使えず、TTL（expire_at）で消える
+export const loginLinkRow = versionlessRow(1, {
+  link_id: uuid,
+  user_id: idOf("usr"),
+  session_sub: z.string().min(1),
+  idp,
+  code_verifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/),
+  expires_at: utcDateTime,
+  expire_at: expireAt,
+});
+export type LoginLinkRow = z.infer<typeof loginLinkRow>;
+export const loginLinkKey = (row: LoginLinkRow): RowKey => ({ pk: `USER#${row.user_id}`, sk: `LINK#${row.link_id}` });
 
 // 委任（USER#<利用者> / DELEGATION#<委任>）。上書き。状態は expires_at・revoked_at から導き、列に持たない
 export const delegationRow = overwriteRow(1, {

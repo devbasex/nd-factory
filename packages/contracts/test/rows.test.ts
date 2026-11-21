@@ -34,8 +34,8 @@ const DETAIL_ROWS = [
   "idempotency",
 ];
 const OVERALL_ROWS = ["login_subject", "project", "assignment", "lane", "approval", "audit"];
-// 認証（Cognito の sub から利用者を引く読み手）のために足した行。19 の行に数えない
-const AUTH_ROWS = ["cognito_subject"];
+// 認証（Cognito の sub から利用者を引く読み手）とログインをつなぐ流れのために足した行。19 の行に数えない
+const AUTH_ROWS = ["cognito_subject", "login_link"];
 
 const ajv = new Ajv2020({ strict: true, validateFormats: false });
 
@@ -195,7 +195,7 @@ describe("TABLES", () => {
       expect(spec.sortKey).toBe(spec.purpose === "idempotency" ? null : "sk");
     }
     const ttl = Object.values(TABLES).filter((t) => t.ttlAttribute === "expire_at").map((t) => t.purpose);
-    expect(ttl.sort()).toEqual(["audit", "idempotency", "projects"]);
+    expect(ttl.sort()).toEqual(["audit", "idempotency", "projects", "users"]);
   });
 
   it("3 つの索引の鍵と写す列が詳細設計と一致する", () => {
@@ -223,7 +223,7 @@ describe("TABLES", () => {
 
   it("TTL の列を持つ表の、TTL の列を持つ行が詳細設計と一致する", () => {
     const holders = Object.values(TABLES).flatMap((t) => t.rows.filter((r) => "expire_at" in (ROW_CASES[r.name]?.schema as z.ZodObject).shape).map((r) => r.name));
-    expect(holders.sort()).toEqual(["audit", "github_token", "idempotency"]);
+    expect(holders.sort()).toEqual(["audit", "github_token", "idempotency", "login_link"]);
   });
 
   const base = Object.values(TABLES);

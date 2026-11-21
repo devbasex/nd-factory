@@ -82,10 +82,13 @@ function table(purpose: TablePurpose, opts: { sortKey?: boolean; ttl?: boolean; 
 
 export const TABLES = defineTables([
   table("users", {
+    // ログインをつなぐ流れの行だけが expire_at を持つ
+    ttl: true,
     rows: [
       { name: "user", skPattern: /^USER$/, writes: "overwrite" },
       { name: "login_subject", skPattern: /^LOGIN$/, writes: "create_delete" },
-      { name: "cognito_subject", skPattern: /^COGNITO$/, writes: "create_delete" },
+      { name: "cognito_subject", skPattern: /^COGNITO$/, writes: "overwrite" },
+      { name: "login_link", skPattern: /^LINK#[0-9a-f-]{36}$/, writes: "create_delete" },
       { name: "login", skPattern: new RegExp(`^LOGIN#${ID}#.+$`), writes: "create_delete" },
       { name: "delegation", skPattern: new RegExp(`^DELEGATION#${ID}$`), writes: "overwrite" },
     ],

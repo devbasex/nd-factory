@@ -28,17 +28,22 @@ export { createCognitoCheck, DB_PREP_AUDIENCE, RUNNER_AUDIENCE, type CognitoChec
 // 認可の判定（authorize）と操作の記録（audit）が主体を読む
 
 // 検証した Cognito の主体と、それに当たる IdP の主体。IdP の主体は要求の本文から採らず、検証した token の username で
-// 利用者プールを引いてサーバーの側で得る（AuthReaders.cognitoIdentity）。authTime は IdP でサインインした時刻（エポックの秒）
+// 利用者プールを引いてサーバーの側で得る（AuthReaders.cognitoIdentity）。authTime は IdP でサインインした時刻（エポックの秒）。
+// bindingEpoch と rowVersion は読んだ Cognito の主体の対応の行のもの（行が無ければ 0 と null）。結ぶハンドラーは、
+// rowVersion が null なら対応の行を無いときだけ書き（putIfAbsent）、そうでなければその版と「state が unlinked で revoked_before が
+// token の auth_time より前」を条件に書き換える（認証の読みの後に外し直された・失効が済んでいない行へ結ばない）
 export type CognitoLogin = {
   readonly cognitoSub: string;
   readonly idp: "google" | "github";
   readonly subject: string;
   readonly authTime: number;
+  readonly bindingEpoch: number;
+  readonly rowVersion: number | null;
 };
 
 export type Principal =
-  // cognitoSub は sessions.create の冪等の鍵を結ぶ前後で同じにするために持つ（idempotencyPrincipalKey）
-  | { readonly kind: "human"; readonly userId: Id<"usr">; readonly cognitoSub: string }
+  // cognitoSub と bindingEpoch は sessions.create の冪等の鍵を結ぶ前後で同じにし、外した後に変えるために持つ（idempotencyPrincipalKey）
+  | { readonly kind: "human"; readonly userId: Id<"usr">; readonly cognitoSub: string; readonly bindingEpoch: number }
   // Cognito の token は正しいが、まだ利用者へ結んでいない主体（初めてのサインイン）。sessions.create だけに渡し、そのハンドラーが
   // login の値（検証した主体とサーバーの側で得た IdP の主体）で利用者・ログインの組・IdP の主体の一意の行・Cognito の主体の対応の行を作る
   | { readonly kind: "newcomer"; readonly login: CognitoLogin }
@@ -105,14 +110,20 @@ export type DbPrepRecord = { readonly prepId: string; readonly inProgress: boole
 // 条件に外れたら、authenticate の外れと同じ 401 unauthorized を返し、値を返さない
 
 // 行の読み手（ポート）。どれも表の本体を強い整合で読む。中身は行の持ち主の子が書く（core から apps へ依存しない）
-// Cognito の主体の対応の行の読んだ値。boundAuthTime は結んだときに使った token の auth_time（UTC の ISO 8601）で、
-// これより前にサインインした token（結び直す前のセッション）を断つ
-export type CognitoBinding = { readonly userId: Id<"usr">; readonly boundAuthTime: string };
+// Cognito の主体の対応の行の読んだ値（docs/design/data.md の「Cognito の主体の対応の行」）。時刻は UTC の ISO 8601。
+// - bound: 結んでいる。boundAuthTime（結んだときに使った token の auth_time）より前にサインインした token を断つ
+// - signing_out: 外して、その Cognito の利用者の AdminUserGlobalSignOut の済むのを待つ間。どの token も通さず、結び直させない
+// - unlinked: 外して失効を済ませた。revokedBefore（失効を済ませた時刻）以前にサインインした token では結び直させない
+// epoch は外した回数（binding_epoch）、version は行の版
+export type CognitoBinding =
+  | { readonly state: "bound"; readonly userId: Id<"usr">; readonly boundAuthTime: string; readonly epoch: number; readonly version: number }
+  | { readonly state: "signing_out"; readonly epoch: number; readonly version: number }
+  | { readonly state: "unlinked"; readonly revokedBefore: string; readonly epoch: number; readonly version: number };
 
 export type AuthReaders = {
   // Cognito の access token の sub から利用者を引く。読むのは db-users の Cognito の主体の対応の行
-  // （COGNITO#<sub> / COGNITO の user_id と bound_auth_time。docs/design/data.md の「Cognito の主体の対応の行」）で、LOGIN#<IdP>#<主体> の行は読まない
-  // （sub は Cognito の利用者の ID で、IdP の主体ではない）。行が無ければ null
+  // （COGNITO#<sub> / COGNITO。docs/design/data.md の「Cognito の主体の対応の行」）で、LOGIN#<IdP>#<主体> の行は読まない
+  // （sub は Cognito の利用者の ID で、IdP の主体ではない）。行が無ければ null（一度も結んでいない）
   userOfSubject(cognitoSub: string): Promise<CognitoBinding | null>;
   // 検証した token の username で利用者プールの利用者を読み（AdminGetUser）、属性 sub と identities（IdP の名前と IdP の利用者の ID）を返す。
   // IdP の名前は設定で google か github に当てる。利用者が無い・identities が 1 件でない・当たる IdP が無ければ null
@@ -144,6 +155,9 @@ export const SESSIONS_CREATE = "sessions.create";
 // 結ぶ要求をその場のサインインの流れに限り、前に漏れた token や外す前のセッションの token で結べないようにする
 export const LOGIN_BIND_FRESH_MS = 300_000;
 
+// ログインをつなぐ流れ（login_links.create が作る行）の期限。認可の画面での操作と戻りの間だけ使える
+export const LOGIN_LINK_TTL_MS = 600_000;
+
 // 引き換えの token を受ける経路。ほかの経路は用途ごとの token（レーン・終わりの報告）だけを受ける
 const RUNNER_EXCHANGE = "runner.exchanges.create";
 const DB_PREP_EXCHANGE = "db_prep.exchanges.create";
@@ -158,12 +172,23 @@ function isExpired(iso: string, nowMs: number): boolean {
   return !Number.isFinite(at) || at <= nowMs;
 }
 
-// 結ぶための新しさの照らしと、IdP の主体のサーバーの側での取得（検証した username で利用者プールを引き、sub が token と同じこと）
-async function loginOf(claims: CognitoClaims, deps: AuthDeps): Promise<CheckResult<CognitoLogin>> {
-  if (claims.authTime * 1000 < deps.clock.epochMs() - LOGIN_BIND_FRESH_MS) return unauthorized("expired");
+// 結ぶための照らし: 新しいサインインであること、対応の行が結び直せる状態であること（失効の済むのを待つ間でなく、外したなら
+// 失効を済ませた後のサインイン）、IdP の主体のサーバーの側での取得（検証した username で利用者プールを引き、sub が token と同じこと）。
+// 結んでいる行はここへ来ない（呼び手が先に分ける）
+async function loginOf(claims: CognitoClaims, binding: CognitoBinding | null, deps: AuthDeps): Promise<CheckResult<CognitoLogin>> {
+  const authMs = claims.authTime * 1000;
+  if (authMs < deps.clock.epochMs() - LOGIN_BIND_FRESH_MS) return unauthorized("expired");
+  if (binding !== null && binding.state !== "unlinked") return unauthorized("revoked");
+  if (binding !== null) {
+    const revokedBefore = Date.parse(binding.revokedBefore);
+    if (!Number.isFinite(revokedBefore) || authMs <= revokedBefore) return unauthorized("revoked");
+  }
   const identity = await deps.readers.cognitoIdentity(claims.username);
   if (identity === null || identity.cognitoSub !== claims.sub) return unauthorized("unknown_principal");
-  return { ok: true, value: { cognitoSub: claims.sub, idp: identity.idp, subject: identity.subject, authTime: claims.authTime } };
+  return {
+    ok: true,
+    value: { cognitoSub: claims.sub, idp: identity.idp, subject: identity.subject, authTime: claims.authTime, bindingEpoch: binding?.epoch ?? 0, rowVersion: binding?.version ?? null },
+  };
 }
 
 async function human(token: string, operation: string, deps: AuthDeps): Promise<Outcome> {
@@ -172,28 +197,33 @@ async function human(token: string, operation: string, deps: AuthDeps): Promise<
   if (!checked.ok) return checked;
   const cognitoSub = checked.value.sub;
   const binding = await deps.readers.userOfSubject(cognitoSub);
-  if (binding !== null) {
+  if (binding !== null && binding.state === "bound") {
     // 結んだときの token より前にサインインした token は、外して結び直す前のセッションのものとして断つ
     const bound = Date.parse(binding.boundAuthTime);
     if (!Number.isFinite(bound) || checked.value.authTime * 1000 < bound) return unauthorized("unknown_principal");
-    return ok({ kind: "human", userId: binding.userId, cognitoSub });
+    return ok({ kind: "human", userId: binding.userId, cognitoSub, bindingEpoch: binding.epoch });
   }
-  // 結んでいない主体は sessions.create へだけ渡す（ほかの操作は利用者を持たないため断る）
+  // 結んでいない主体（一度も結んでいないか、外した主体）は sessions.create へだけ渡す（ほかの操作は利用者を持たないため断る）
   if (operation !== SESSIONS_CREATE) return unauthorized("unknown_principal");
-  const login = await loginOf(checked.value, deps);
+  const login = await loginOf(checked.value, binding, deps);
   return login.ok ? ok({ kind: "newcomer", login: login.value }) : login;
 }
 
-// logins.create のハンドラーが、要素の login_token（つなぐログインで今サインインした Cognito の access token）を照らす。
-// 要求の Authorization（今の利用者）とは別に、人の token と同じ検証・新しさの照らし・サーバーの側での IdP の主体の取得を通し、
-// まだ結んでいない主体だけを返す。外れたら要素の 401 unauthorized（理由は分けない）、依存先に届かなければ unavailable
-export async function verifyLoginToLink(loginToken: string, deps: AuthDeps): Promise<{ readonly ok: true; readonly login: CognitoLogin } | { readonly ok: false; readonly reason: "unauthorized" | "unavailable" }> {
+export type LinkVerdict = { readonly ok: true; readonly login: CognitoLogin } | { readonly ok: false; readonly reason: "unauthorized" | "already_linked" | "unavailable" };
+
+// logins.create のハンドラーが、つなぐログインの access token を照らす。token は要求の本文から受けず、ハンドラーが
+// ログインをつなぐ流れの行（今の利用者とセッションに結んだ行）の code_verifier で認可コードを Cognito のトークンの端点と交換して得たものだけを渡す。
+// 人の token と同じ検証・新しさの照らし・結び直せる状態の照らし・サーバーの側での IdP の主体の取得を通し、まだ結んでいない主体だけを返す。
+// 既に結んだ主体は already_linked（画面が IdP で別のアカウントを選び直すよう促す。要素の 409）、ほかの外れは unauthorized（要素の 401）、
+// 依存先に届かなければ unavailable
+export async function verifyLoginToLink(loginToken: string, deps: AuthDeps): Promise<LinkVerdict> {
   try {
     if (deps.cognito === null || !isJwtShape(loginToken)) return { ok: false, reason: "unauthorized" };
     const checked = await deps.cognito(loginToken, deps.clock.epochMs());
     if (!checked.ok) return { ok: false, reason: checked.reason };
-    if ((await deps.readers.userOfSubject(checked.value.sub)) !== null) return { ok: false, reason: "unauthorized" };
-    const login = await loginOf(checked.value, deps);
+    const binding = await deps.readers.userOfSubject(checked.value.sub);
+    if (binding !== null && binding.state === "bound") return { ok: false, reason: "already_linked" };
+    const login = await loginOf(checked.value, binding, deps);
     return login.ok ? { ok: true, login: login.value } : { ok: false, reason: login.reason };
   } catch {
     return { ok: false, reason: "unavailable" };
@@ -201,13 +231,14 @@ export async function verifyLoginToLink(loginToken: string, deps: AuthDeps): Pro
 }
 
 // 冪等の鍵の主体の部分（docs/design/api.md の「冪等の鍵」）。人と委任は主体の利用者。
-// sessions.create だけは、対応の行を作る前（newcomer）と後（human）で同じ鍵になるよう、検証した Cognito の sub で区切る
+// sessions.create だけは、対応の行を作る前（newcomer）と後（human）で同じ鍵になるよう、検証した Cognito の sub と
+// 対応の行の binding_epoch（外した回数）で区切る。外すと epoch が上がるため、外す前の結果を外した後（別の利用者へ結び直した後も）に返さない
 export function idempotencyPrincipalKey(principal: Principal, operation: string): string {
   switch (principal.kind) {
     case "human":
-      return operation === SESSIONS_CREATE ? `COGNITO#${principal.cognitoSub}` : principal.userId;
+      return operation === SESSIONS_CREATE ? `COGNITO#${principal.cognitoSub}#${principal.bindingEpoch}` : principal.userId;
     case "newcomer":
-      return `COGNITO#${principal.login.cognitoSub}`;
+      return `COGNITO#${principal.login.cognitoSub}#${principal.login.bindingEpoch}`;
     case "delegation":
       return principal.userId;
     case "runner":

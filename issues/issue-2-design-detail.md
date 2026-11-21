@@ -543,7 +543,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | --- | --- |
 | 列の名前 | 英小文字と `_`。ID の列は `<種類>_id`、日時は `<出来事>_at`、真偽は形容の語（`is_` を付けない） |
 | 状態の識別子 | 全体の設計の日本語の状態の名前と次の対応で持つ。スプリント: `running`（動いている）・`finished`（終わった）・`stopped`（止まった）・`canceled`（取り消した）。承認の依頼と問い: `waiting`・`answered`・`canceled`。答えの送達: `pending`（未渡し）・`delivering`（渡し中）・`delivered`（届いた）・`failed`（失敗）。区間の結果: `done`（完了）・`needs_decision`（判断が要る）・`failed`（できなかった）。手元のマシン: `pending`（登録待ち）・`online`・`offline`。席の役割: `owner`・`member`。IdP: `google`・`github`。通知先の種類: `web_push`・`slack`。量の種類: `compute`・`inference`・`byok_inference`・`machine_time`。知らせの種類: `approval`・`question`・`sprint_finished`・`sprint_stopped`・`cap_reached` |
-| TTL の列 | `expire_at`（UNIX の秒の整数。DynamoDB の TTL の属性）。持つのは冪等の鍵（作成から 24 時間）・渡した GitHub の token の記録（token の期限）・操作の記録（`AUDIT_RETENTION_DAYS` 日。設定のファイルの値） |
+| TTL の列 | `expire_at`（UNIX の秒の整数。DynamoDB の TTL の属性）。持つのは冪等の鍵（作成から 24 時間）・渡した GitHub の token の記録（token の期限）・操作の記録（`AUDIT_RETENTION_DAYS` 日。設定のファイルの値）・ログインをつなぐ流れ（作成から `LOGIN_LINK_TTL_MS`） |
 | 冪等の鍵の表の `sk` | 持たない（区切りの鍵だけの表）。共通の列の `sk` の例外として表の仕様に書く |
 | 答えの ID | 答えの要素の `idempotency_key`（UUID）をそのまま答えの ID にする。答えの ID の頭は ID の頭の集まりに無く、全体の設計が「答えの ID を冪等の鍵として」と書くため、頭を足さない |
 | 区間の ID | `<レーンの ID>#SEG#<連番>`。連番はレーンの中で 1 から上げる。費用の記録の冪等の鍵と `COST#` の `<ID>` に使う |
@@ -555,10 +555,11 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 
 | 行（表 / 並びの鍵） | 列（型、空を許すものに `?`） | 上書きか追記か |
 | --- | --- | --- |
-| 利用者（`db-users` / `USER`） | `user_id`・`display_name`（0〜32 字）・`language?`（`languageTag`）・`time_zone?`（`timeZone`）・`created_at` | 上書き |
+| 利用者（`db-users` / `USER`） | `user_id`・`login_count`（結んだログインの数、1 以上。結ぶ・外すトランザクションがこの行の版を条件に足し引きし、外すときは 2 以上を条件にする）・`display_name`（0〜32 字）・`language?`（`languageTag`）・`time_zone?`（`timeZone`）・`created_at` | 上書き |
 | ログインの組（`db-users` / `LOGIN#<IdP>#<主体>`） | `user_id`・`idp`・`subject`・`cognito_sub`（外すときに Cognito の主体の対応の行の鍵を組む）・`linked_at` | 作ると消すだけ（`version` を持たない） |
 | IdP の主体の一意の行（全体の設計が列を決めた行で、19 の行に数えない） | 全体の設計の `user_id` に、鍵を組む `idp`・`subject` と、Cognito の主体の対応の行の鍵を組む `cognito_sub` を足す | 作ると消すだけ |
-| Cognito の主体の対応の行（`db-users` / `COGNITO`。認証が Cognito の `sub` から利用者を引くために足した行で、19 の行に数えない） | `cognito_sub`・`user_id`・`idp`・`subject`・`bound_auth_time`（結ぶのに使った token の `auth_time`。これより前にサインインした token を断つ） | 作ると消すだけ（ログインの組・IdP の主体の一意の行と同じトランザクションで作り、消す。[Cognito の主体の対応の行](../docs/design/data.md#cognito-の主体の対応の行)） |
+| Cognito の主体の対応の行（`db-users` / `COGNITO`。認証が Cognito の `sub` から利用者を引くために足した行で、19 の行に数えない） | `cognito_sub`・`cognito_username`（結ぶのに使った token の `username`。外した後の `AdminUserGlobalSignOut` に渡す）・`idp`・`subject`・`state`（`bound`・`signing_out`・`unlinked`）・`binding_epoch`（外した回数。`sessions.create` の冪等の鍵に入れる）・`user_id?`・`bound_auth_time?`（`bound` の間。結ぶのに使った token の `auth_time`。これより前にサインインした token を断つ）・`revoked_before?`（`unlinked` の間。失効を済ませた時刻。これ以前にサインインした token では結び直せない） | 上書き（外しても消さず、失効の境を残す。[Cognito の主体の対応の行](../docs/design/data.md#cognito-の主体の対応の行)） |
+| ログインをつなぐ流れ（`db-users` / `LINK#<流れの ID>`。`logins.create` を今の利用者とセッションに結ぶために足した行で、19 の行に数えない） | `link_id`（UUID。認可の要求の `state`）・`user_id`・`session_sub`（流れを始めた要求の Cognito の `sub`）・`idp`・`code_verifier`（PKCE。サーバーだけが持つ）・`expires_at`・`expire_at`（TTL） | 作ると消すだけ（`login_links.create` が作り、`logins.create` がログインを結ぶのと同じトランザクションで消す） |
 | 委任（`db-users` / `DELEGATION#<委任>`） | `delegation_id`・`user_id`・`client_name`（1〜64 字）・`scope_project_ids`（`prj` の ID の配列、1 以上）・`scope_kind`（`read`・`run`・`manage`）・`secret_sha256`（64 桁）・`expires_at`・`created_at`・`last_used_at?`・`revoked_at?` | 上書き（状態は `expires_at`・`revoked_at` から導き、列に持たない） |
 | チーム（`db-teams` / `TEAM`） | `team_id`・`name`（1〜100 字）・`plan`（料金プランの行の名前）・`currency`（`currencyCode`）・`monthly_cap?`（`money`）・`default_place`（`hosted`・`machine`）・`default_inference`（`managed`・`byok`）・`created_at` | 上書き |
 | 席（`db-teams` / `SEAT#<利用者>`） | `team_id`・`user_id`・`role`・`added_at` | 上書き |
