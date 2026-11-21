@@ -1,4 +1,5 @@
 import { PROGRESS_DB_IDENT_SHAPE } from "@nd-factory/contracts/db-prep";
+import { CREATE_SCHEMA, REVOKE_SCHEMA, SCHEMA_LOCK, SCHEMA_PRESENT, tablePresent, tablePresentFresh } from "./nd-prep-schema.ts";
 import type { ProjectIdent } from "./provision.ts";
 import { passwordCommandsRestriction, prepareRolePassword } from "./role-password.ts";
 import { ADMIN_DATABASE, type SqlExecutor, type SqlParam } from "./sql-executor.ts";
@@ -43,14 +44,8 @@ function assertSeq(seq: number): void {
 const ROTATE_LOCK = "SELECT 1::int AS locked FROM pg_advisory_xact_lock(hashtext('nd-rotate:' || CAST(:role_name AS text)))";
 // 表の有無は 2 回見る（prep-run.ts と同じ）: 鎖なしで見て、無ければスキーマの鎖を取ってからカタログをその文の写しで読み直す。
 // 取る順は差し替えの鎖 → スキーマの鎖で、スキーマの鎖を持って差し替えの鎖を待つ処理は無いため、互いに待ち合わない
-const SCHEMA_LOCK = "SELECT 1::int AS locked FROM pg_advisory_xact_lock(hashtext('nd-prep:schema'))";
-const TABLE_PRESENT = "SELECT to_regclass('nd_prep.rotation_seq') IS NOT NULL AS present";
-const TABLE_PRESENT_FRESH =
-  "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace" +
-  " WHERE n.nspname = 'nd_prep' AND c.relname = 'rotation_seq') AS present";
-const SCHEMA_PRESENT = "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'nd_prep') AS present";
-const CREATE_SCHEMA = "CREATE SCHEMA nd_prep";
-const REVOKE_SCHEMA = "REVOKE ALL ON SCHEMA nd_prep FROM PUBLIC";
+const TABLE_PRESENT = tablePresent("rotation_seq");
+const TABLE_PRESENT_FRESH = tablePresentFresh("rotation_seq");
 // 役割ごとに 1 行で、消さない。old_conn_cutoff は古い接続を切る境で、パスワードを書くたびに空へ戻す
 const CREATE_TABLE =
   "CREATE TABLE nd_prep.rotation_seq (role_name text PRIMARY KEY, seq integer NOT NULL," +
