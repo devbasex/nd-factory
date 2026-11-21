@@ -250,9 +250,9 @@ nd-factory/
 | `authorize` | 対象の ID の種類の頭が操作と合わない | 404 `not_found`（`parseId` が `null`） |
 | `claimIdempotency` | 行が無い | 借りの行（持ち主の要求の ID・`fingerprint`・借りの期限）を条件つきで書き、`fresh` |
 | `claimIdempotency` | 済みの行で `fingerprint` が同じ | `replay`（控えた要素の結果） |
-| `claimIdempotency` | 行があり `fingerprint` が違う | `reused` |
-| `claimIdempotency` | 借りの行で期限の前 | `in_progress` |
-| `claimIdempotency` | 借りの行で期限を過ぎた | 持ち主を自分へ替える条件つきの更新に勝てば `fresh`、負ければ `in_progress` |
+| `claimIdempotency` | 済みの行か期限の前の借りの行で `fingerprint` が違う | `reused` |
+| `claimIdempotency` | 借りの行で期限の前・`fingerprint` が同じ | `in_progress` |
+| `claimIdempotency` | 借りの行で期限を過ぎた（`fingerprint` によらない） | 持ち主を自分へ替える条件つきの更新に勝てば `fresh`、負ければ `in_progress`。確定しなかった借りは結果を持たず、前の持ち主の済みの行は持ち主の条件で外れるため、中身を直した送り直しも受ける（全部か無かで確定せず手放せなかった鍵を含む） |
 | `judgeUsage` | 時点が「始める」 | 実行の場所と推論の手段がプランに無ければ `place_not_allowed`・`inference_not_allowed`。上限額があり使った額が上限額以上なら `monthly_cap_reached`（待っても解けない） |
 | `judgeUsage` | 時点が「割り当てる」 | 同時に動くレーンの数がプランの数以上なら `concurrency_full`（待てば解ける）。上限なしの行は照らさない |
 | `judgeUsage` | 時点が「区間の境」 | 使った額が上限額以上なら `monthly_cap_reached`（待てば解ける: 上限額を変えるか月が替わる） |

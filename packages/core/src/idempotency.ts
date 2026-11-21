@@ -98,9 +98,11 @@ export async function claimIdempotency(db: Db, claim: IdempotencyClaimInput, clo
     const taken = await writeAtomically(db, [takeOver(claim, row, clock)], log);
     return decided(taken.ok ? { kind: "fresh" } : { kind: "in_progress" });
   }
-  if (row["fingerprint"] !== claim.fingerprint) return decided({ kind: "reused" });
-  if (row["state"] === "settled") return decided({ kind: "replay", result: (row["result"] ?? { ok: false }) as ItemResult });
-  if (!isPast(row["lease_until"], clock)) return decided({ kind: "in_progress" });
+  const sameItem = row["fingerprint"] === claim.fingerprint;
+  if (row["state"] === "settled") return decided(sameItem ? { kind: "replay", result: (row["result"] ?? { ok: false }) as ItemResult } : { kind: "reused" });
+  if (!isPast(row["lease_until"], clock)) return decided(sameItem ? { kind: "in_progress" } : { kind: "reused" });
+  // 期限を過ぎた借りの行は、中身によらず取り直す。済みの結果を持たず、前の持ち主の済みの行は持ち主の条件で外れるため、もう確定しない
+  // （全部か無かで確定せず、後始末の時間が足りずに手放せなかった鍵を、直した要素で送り直せるようにする）
 
   const taken = await writeAtomically(db, [takeOver(claim, row, clock)], log);
   return decided(taken.ok ? { kind: "fresh" } : { kind: "in_progress" });

@@ -711,7 +711,7 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     expect(table.rows("idempotency")[0]).toMatchObject({ state: "settled", result: { ok: true, item: { title: "stored" } } });
   });
 
-  it("同じ連番の並行の再送で付随する書き込みの版も外れたら、版の違いでなく既にある行の結果を返す", async () => {
+  it("同じ連番の並行の再送で省ける件と挙げた付随する書き込みの版も外れたら、版の違いでなく既にある行の結果を返す", async () => {
     const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
     const event: Handler = async (item) => {
       const note = item as { project_id: string; title: string };
@@ -721,7 +721,7 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
           putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: note.title }, onConflict: "return_existing" }),
           updateIfVersion({ table: "sprints", key: NOTE_KEY(P_A), version: 1, set: { title: note.title }, onConflict: "version_mismatch" }),
         ],
-        conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }) }],
+        conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }), skippable: [1] }],
       };
     };
     const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
@@ -731,6 +731,55 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
     expect(itemsOf(result)).toEqual([{ ok: true, item: { title: "stored" } }]);
     expect(table.row("sprints", NOTE_KEY(P_A))).toMatchObject({ title: "stored", version: 2 });
+  });
+
+  it("同じ連番の再送でも、省ける件と挙げない書き込み（レーンの世代の条件など）が外れたら既にある行の結果を返さない", async () => {
+    const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
+    const event: Handler = async (item) => {
+      const note = item as { project_id: string; title: string };
+      return {
+        result: { ok: true, item: { title: note.title } },
+        writes: [
+          putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: note.title }, onConflict: "return_existing" }),
+          updateIfVersion({ table: "sprints", key: NOTE_KEY(P_A), version: 1, set: { title: note.title }, onConflict: "state_mismatch" }),
+        ],
+        conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }) }],
+      };
+    };
+    const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
+    // 認証の後に世代が替わった
+    table.seed("sprints", { ...eventKey, schema_version: 1, version: 1, title: "stored" });
+    table.seed("sprints", { ...NOTE_KEY(P_A), schema_version: 1, version: 2, title: "next" });
+    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
+    expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "state_mismatch" }]);
+    expect(table.row("sprints", NOTE_KEY(P_A))).toMatchObject({ title: "next", version: 2 });
+  });
+
+  it("既にある行の結果を確定するトランザクションでも、省けない件の条件を書かずに照らし、省ける件は入れない", async () => {
+    const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
+    const laneKey = { pk: `PROJECT#${P_A}`, sk: "LANE#1" };
+    const event: Handler = async (item) => {
+      const note = item as { project_id: string; title: string };
+      return {
+        result: { ok: true, item: { title: note.title } },
+        writes: [
+          putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: note.title }, onConflict: "return_existing" }),
+          updateIfVersion({ table: "sprints", key: NOTE_KEY(P_A), version: 1, set: { title: note.title }, onConflict: "version_mismatch" }),
+          updateIfVersion({ table: "sprints", key: laneKey, version: 1, set: { title: note.title }, onConflict: "state_mismatch" }),
+        ],
+        conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }), skippable: [1] }],
+      };
+    };
+    const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.create": event } });
+    table.seed("sprints", { ...eventKey, schema_version: 1, version: 1, title: "stored" });
+    table.seed("sprints", { ...NOTE_KEY(P_A), schema_version: 1, version: 2, title: "stored" });
+    table.seed("sprints", { ...laneKey, schema_version: 1, version: 1, title: "lane" });
+    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "again", idempotency_key: IDEM_1 }]), deps);
+    expect(itemsOf(result)).toEqual([{ ok: true, item: { title: "stored" } }]);
+    const last = table.transactions.filter((t) => t.some((i) => i.table === "idempotency")).at(-1) ?? [];
+    const sprints = last.filter((i) => i.table === "sprints");
+    expect(sprints.map((i) => [i.op, i.key.sk])).toEqual([["check", "LANE#1"]]);
+    expect(table.row("sprints", laneKey)).toMatchObject({ title: "lane", version: 1 });
   });
 
   it("同じ連番の再送でも、要求元の照らしが外れたら既にある行の結果より先に 409 state_mismatch", async () => {

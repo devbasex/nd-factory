@@ -177,14 +177,15 @@ type Handled = {
   readonly createdUserId: Id<"usr"> | null;
 };
 
-type Part = { readonly element: number; readonly writes: readonly TransactItem[]; readonly audit: TransactItem; readonly settle: TransactItem | null };
+// writes は要素のハンドラーが並べた件と同じ番号で、null は確定に入れない件（既にある行の結果で省く件）
+type Part = { readonly element: number; readonly writes: readonly (TransactItem | null)[]; readonly audit: TransactItem; readonly settle: TransactItem | null };
 
 // guarded は要求元の照らしの持ち手
 type Owner = { readonly element: number | null; readonly role: "write" | "audit" | "settle" | "guard"; readonly writeIndex: number; readonly guarded: boolean; readonly onConflict: ConflictRule };
 
 const sameRow = (a: TransactItem, b: TransactItem): boolean => a.table === b.table && a.key.pk === b.key.pk && a.key.sk === b.key.sk;
 
-function partOf(req: Request, principal: Principal, op: OperationDef, element: number, h: Handled, result: ItemResult, writes: readonly TransactItem[]): Part {
+function partOf(req: Request, principal: Principal, op: OperationDef, element: number, h: Handled, result: ItemResult, writes: readonly (TransactItem | null)[]): Part {
   const entry = entryOf(req, actorOf(req, principal, h.createdUserId), { targetIds: record(h.item), projectId: h.authz.projectId, result: itemAuditResult(result), itemIndex: element });
   return { element, writes, audit: auditItem(entry, op, req.deps.clock), settle: h.claim === null ? null : settleIdempotency(h.claim, result, op, req.deps.clock) };
 }
@@ -208,7 +209,9 @@ function compose(parts: readonly Part[], guards: readonly TransactItem[]): { ite
     slots[at]?.push({ ...owner, onConflict: item.onConflict });
   };
   for (const part of parts) {
-    part.writes.forEach((write, writeIndex) => add(write, { element: part.element, role: "write", writeIndex, guarded: false, onConflict: write.onConflict }));
+    part.writes.forEach((write, writeIndex) => {
+      if (write !== null) add(write, { element: part.element, role: "write", writeIndex, guarded: false, onConflict: write.onConflict });
+    });
     add(part.audit, { element: part.element, role: "audit", writeIndex: -1, guarded: false, onConflict: part.audit.onConflict });
     if (part.settle !== null) add(part.settle, { element: part.element, role: "settle", writeIndex: -1, guarded: false, onConflict: part.settle.onConflict });
   }
@@ -236,22 +239,29 @@ type Verdict = { readonly kind: "result"; readonly result: ItemResult } | { read
 // 1 つの要素の外れた件を結果へ訳す。要求元の照らし（同じ行へまとめた件を含む）を先に当て、残りはハンドラーが並べた件の順の最初の理由
 // （ハンドラーが conflicts に操作の契約の失敗の結果を置いた件はその結果、ほかは onConflict の version_mismatch・state_mismatch）。
 // 記録の行が外れたら 503 audit_unavailable、済みの行だけが外れたら（借りを失った）409 in_progress。
-// 既にある行から結果を組める return_existing の件が外れたら、付随する書き込みの外れによらず、その件の既にある行から結果を組む（existing）。
-// 同じレーンの同じ連番の並行の再送では、先に確定した要求が付随する行（レーンの版など）も進めるため、付随する件も外れる。
-// 既にある行の結果では付随する書き込みを確定しないため、その外れは結果を決めない。再送そのものを拒む条件（要求元の照らし・記録の行・
-// 冪等の鍵の済みの行）は上で先に当て、既にある行の結果を確定するトランザクションでも同じ件を照らし直す
+// 既にある行から結果を組める return_existing の件が外れ、ほかに外れた書き込みがその件の省ける件（skippable）だけなら、その件の既にある行から結果を組む（existing）。
+// 同じレーンの同じ連番の並行の再送では、先に確定した要求が付随する行（レーンの版など）も進めるため、ハンドラーはその件を省ける件に挙げる。
+// 挙げない件（レーンの世代・終了の状態など再送にも要る条件）が外れたら、既にある行の結果を返さず、その件で結果を決める。
+// 再送そのものを拒む条件（要求元の照らし・記録の行・冪等の鍵の済みの行）は上で先に当て、既にある行の結果を確定するトランザクションでも、
+// これらと省けない件の条件を照らし直す（replayWrites）
 function verdictOf(req: Request, failed: readonly Owner[], conflicts: readonly (WriteConflict | undefined)[]): Verdict {
   const result = (r: ItemResult): Verdict => ({ kind: "result", result: r });
   if (failed.some((f) => f.guarded)) return result(failure(409, "state_mismatch"));
   if (failed.some((f) => f.role === "audit")) throw halt(503, "audit_unavailable");
   const own = failed.filter((f) => f.role === "write").sort((a, b) => a.writeIndex - b.writeIndex);
   if (own.length === 0) return result(failure(409, "in_progress"));
-  const replayable = own.find((f) => {
+  const skippableOf = (f: Owner): ReadonlySet<number> | null => {
     const conflict = conflicts[f.writeIndex];
-    return f.onConflict === "return_existing" && conflict !== undefined && "existing" in conflict;
+    return f.onConflict === "return_existing" && conflict !== undefined && "existing" in conflict ? new Set(conflict.skippable ?? []) : null;
+  };
+  const replayable = own.find((f) => {
+    const skippable = skippableOf(f);
+    return skippable !== null && own.every((g) => g.writeIndex === f.writeIndex || skippable.has(g.writeIndex));
   });
   if (replayable !== undefined) return { kind: "existing", writeIndex: replayable.writeIndex };
-  const decisive = own.find((f) => f.onConflict !== "return_existing");
+  // 省けない件が外れた。既にある行を返す件に省ける件と挙げられた件は、結果を決めない
+  const skipped = new Set(own.flatMap((f) => [...(skippableOf(f) ?? [])]));
+  const decisive = own.find((f) => f.onConflict !== "return_existing" && !skipped.has(f.writeIndex)) ?? own.find((f) => f.onConflict !== "return_existing");
   if (decisive === undefined) {
     req.log.error("既にある行から結果を組む手立ての無い return_existing の件が外れた", {});
     throw halt(503, "unavailable");
@@ -308,10 +318,17 @@ function checkOutput(c: Ctx, output: HandlerOutput | undefined): HandlerOutput &
     c.req.log.error("読む操作のハンドラーが書き込みを返した", {});
     throw halt(503, "unavailable");
   }
-  const checked = (conflicts as unknown[]).map((conflict): WriteConflict | undefined => {
+  const checked = (conflicts as unknown[]).map((conflict, index): WriteConflict | undefined => {
     if (conflict === undefined) return undefined;
     const r = record(conflict);
-    if (typeof r["existing"] === "function") return { existing: r["existing"] as (row: StoredRow | null) => ItemResult };
+    if (typeof r["existing"] === "function") {
+      const skippable: unknown = r["skippable"] ?? [];
+      const valid =
+        Array.isArray(skippable) && skippable.every((n) => Number.isInteger(n) && n >= 0 && n < output.writes.length && n !== index) && output.writes[index]?.onConflict === "return_existing";
+      if (valid) return { existing: r["existing"] as (row: StoredRow | null) => ItemResult, skippable: skippable as number[] };
+      c.req.log.error("ハンドラーの既にある行の結果の組み方が書き込みと合わない", {});
+      throw halt(503, "unavailable");
+    }
     if ("result" in r) {
       const result = resultOf(c, r["result"]);
       if (!result.ok) return { result };
@@ -405,6 +422,14 @@ async function existingResult(c: Ctx, h: Handled, writeIndex: number): Promise<I
   return resultOf(c, value);
 }
 
+// 既にある行の結果を確定するときの件。既にある行を返す件とその省ける件は入れず、ほかの件は書かずに同じ行と条件を照らす（check）。
+// 件の番号はハンドラーが並べた番号のまま（外れたときの結果を conflicts から引くため）
+function replayWrites(h: Handled, writeIndex: number): (TransactItem | null)[] {
+  const conflict = h.conflicts[writeIndex];
+  const skippable = new Set(conflict !== undefined && "existing" in conflict ? (conflict.skippable ?? []) : []);
+  return h.writes.map((write, i) => (i === writeIndex || skippable.has(i) ? null : { table: write.table, op: "check", key: write.key, condition: write.condition, onConflict: write.onConflict }));
+}
+
 // 要素ごとの確定。状態を書かず冪等の鍵も押さえていない要素は、要約の行だけに残す
 async function settleElement(c: Ctx, index: number, h: Handled): Promise<ItemResult> {
   const { req, principal, op } = c;
@@ -420,14 +445,14 @@ async function settleElement(c: Ctx, index: number, h: Handled): Promise<ItemRes
   const verdict = verdictOf(req, failedOf(outcome, slots), h.conflicts);
   if (verdict.kind === "result") return verdict.result;
 
-  // 既にある行（同じレーンの同じ連番の事象など）: その行に当たる結果を返す。付随する状態の書き込みは確定せず、
-  // 要素の記録の行と冪等の鍵の済みの行（と要求元の照らし）だけを確定する
+  // 既にある行（同じレーンの同じ連番の事象など）: その行に当たる結果を返す。状態の書き込みは確定せず、要素の記録の行と冪等の鍵の済みの行
+  // （と要求元の照らし・省けない件の条件の照らし）だけを確定する
   const result = await existingResult(c, h, verdict.writeIndex);
   const replay: Handled = { ...h, createdUserId: null };
-  const again = compose([partOf(req, principal, op, index, replay, result, [])], guards);
+  const again = compose([partOf(req, principal, op, index, replay, result, replayWrites(h, verdict.writeIndex))], guards);
   const second = await commit(req, again.items);
   if (second.ok) return result;
-  const last = verdictOf(req, failedOf(second, again.slots), []);
+  const last = verdictOf(req, failedOf(second, again.slots), h.conflicts);
   if (last.kind === "result") return last.result;
   throw halt(503, "unavailable");
 }

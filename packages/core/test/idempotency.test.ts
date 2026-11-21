@@ -67,6 +67,26 @@ describe("claimIdempotency", () => {
     expect(results.map((r) => r.kind).sort()).toEqual(["fresh", "in_progress"]);
   });
 
+  it("期限を過ぎた借りの行は中身が違っても fresh で取り直し、前の持ち主はもう確定しない", async () => {
+    const table = fakeTable();
+    const { clock, set } = clockAt(T0);
+    await claimIdempotency(table.db, claim(), clock);
+    set(T0 + IDEMPOTENCY_LEASE_MS);
+    const fixed = claim({ requestId: "req-2", fingerprint: "b".repeat(64) });
+    expect(await claimIdempotency(table.db, fixed, clock)).toEqual({ kind: "fresh" });
+    expect(table.row("idempotency", idempotencyKeyOf(claim()))).toMatchObject({ state: "leased", owner_request_id: "req-2", fingerprint: "b".repeat(64) });
+    expect((await writeAtomically(table.db, [settleIdempotency(claim(), { ok: true }, NO_ONCE_ONLY, clock)])).ok).toBe(false);
+  });
+
+  it("済みの行で中身が違えば、借りの期限を過ぎても reused", async () => {
+    const table = fakeTable();
+    const { clock, set } = clockAt(T0);
+    await claimIdempotency(table.db, claim(), clock);
+    await writeAtomically(table.db, [settleIdempotency(claim(), { ok: true }, NO_ONCE_ONLY, clock)]);
+    set(T0 + IDEMPOTENCY_LEASE_MS);
+    expect(await claimIdempotency(table.db, claim({ requestId: "req-2", fingerprint: "b".repeat(64) }), clock)).toEqual({ kind: "reused" });
+  });
+
   it("済みの行で中身が同じなら replay で前の要素の結果を返す", async () => {
     const table = fakeTable();
     const { clock } = clockAt(T0);

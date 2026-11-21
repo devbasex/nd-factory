@@ -62,8 +62,11 @@ export type HandlerContext = {
 };
 
 // 書き込みの件が外れたときの要素の結果。result は操作の契約にある失敗の結果（logins.delete の最後のログイン・logins.create の already_linked など）。
-// existing は onConflict が return_existing の件で、既にある行（強い整合で読んだ行。読んだ時に無ければ null）から今回の結果を組む
-export type WriteConflict = { readonly result: ItemResult } | { readonly existing: (row: StoredRow | null) => ItemResult };
+// existing は onConflict が return_existing の件で、既にある行（強い整合で読んだ行。読んだ時に無ければ null）から今回の結果を組む。
+// skippable は、既にある行の結果を返すときに省ける付随する書き込みの番号（先に確定した同じ再送が進めた行の版など）。省けるのはここに挙げた件だけで、
+// 挙げない件（レーンの世代・終了の状態の条件など、再送にも要る条件）は、外れれば既にある行の結果を返さず、既にある行の結果を確定するトランザクションでも
+// 同じ行と条件を書かずに照らす
+export type WriteConflict = { readonly result: ItemResult } | { readonly existing: (row: StoredRow | null) => ItemResult; readonly skippable?: readonly number[] };
 
 // ハンドラーは状態を自分で書かない。要素の結果と組んだ書き込み（putIfAbsent・updateIfVersion・usageAddItem の戻り値）を返す。
 // 要求元の照らし（人の書き込み）は dispatch が足すため、ハンドラーは要求元の行を照らさない。
