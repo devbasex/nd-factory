@@ -57,7 +57,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `infra/bin/app.ts` | 変更 | 合成の入力のダイジェストを読んで `AppStack` へ渡す | `images.ts` | モジュール | 最上位の処理（変更） |
 | `infra/setup/images.ts` | 新設 | 使用中の版を押し出さないかを照らし、イメージを作って push し、一覧を書く。反映の前に引くイメージが残す 10 版にあるかを確かめる | `images.ts`・AWS SDK（ECR・ECS） | モジュール | `buildAndPushImages`・`checkPushKeepsInUse`・`checkImagesKept` |
 | `infra/setup/images-cli.ts` | 新設 | パイプラインの準備のアクションから `buildAndPushImages` を打つ入口 | `setup/images.ts` | モジュール | `main` |
-| `packages/contracts/data/exit-codes.json` | 変更 | 6 `BUILD` の意味にイメージの作成と push を足し、9 `IMAGES` を足す。0 と 6 の「AWS へ書いたか」を自前の ECR への push に合わせる（`setup.md` の表は生成） | — | — | — |
+| `packages/contracts/data/exit-codes.json` | 変更 | 6 `BUILD` の意味にイメージの作成と push を、4 `PROFILE` の意味にイメージの照らしの権限を足し、9 `IMAGES` を足す。0・5・6 の「AWS へ書いたか」を自前の ECR への push に合わせる（`setup.md` の表は生成） | — | — | — |
 | `infra/setup/aws-reader.ts` | 変更 | コスト配分タグ・組織・AZ を読む | AWS SDK（Cost Explorer・Organizations・EC2） | モジュール | `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount`（新設） |
 | `infra/setup/nd-setup.ts` | 変更 | `diff` の合成の前にイメージを push し、`deploy` の前に引くイメージが残す 10 版にあるかを確かめる。`diff` の最後に一覧を出す | 上の 2 つ | モジュール | `runDiff`・`synthesize`・`runDeploy`・`defaultDeps`（変更） |
 | `infra/test/support.ts` | 変更 | スタックの決まりの検査 | — | モジュール | `stackRuleViolations`（新設）・`hourlyCostResources`（変更） |
@@ -233,7 +233,8 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `buildAndPushImages` | Docker が無い・作れない | 端末に Docker が無い・Dockerfile の誤り | `docker` の終了コード | 合成せずに止める | 「Docker が要る」か docker の出力、`EXIT.BUILD` | 何も合成していない。再実行できる |
-| `buildAndPushImages` | push できない | 権限・網 | `docker push` の終了コード | 合成せずに止める | docker の出力、`EXIT.BUILD` | push の済んだ版が残る（どのタスクの定義からも引かれない）。再実行できる |
+| `buildAndPushImages` | push できない | 権限・網 | `docker push` の終了コード、push の後のダイジェストの読み取り（`DescribeImages`）の SDK の例外 | 合成せずに止める | docker の出力か例外の名前と文、`EXIT.BUILD` | push の済んだ版が残る（どのタスクの定義からも引かれない）。再実行できる |
+| `buildAndPushImages`・`checkPushKeepsInUse`・`checkImagesKept` | push の前・反映の前の読み取りを許されない・読めない | profile に `ecr:DescribeRepositories`・`ecr:DescribeImages`・`ecr:GetAuthorizationToken`・`ecs:DescribeTaskDefinition` の許しが無い・網 | `DescribeRepositories`・`DescribeImages`・`DescribeTaskDefinition`・`GetAuthorizationToken` の SDK の例外（`AccessDeniedException` を含む。`DescribeTaskDefinition` の族が無い `ClientException` と `DescribeRepositories` の `RepositoryNotFoundException` は除き、それぞれ「族が無い」「リポジトリが無い」として続ける） | 押し出しの判定と分け、9 にしない。どのイメージも作らず push せず、反映しない | 「<操作> を読めない: <例外の名前>: <文>。profile に <操作> を許して打ち直す（`docs/operations/setup.md` の前提）」、`EXIT.PROFILE` | 何も書いていない（読み取りはすべて最初の build と push の前、`deploy` では反映の前に打つ）。権限を足して再実行できる |
 | `checkPushKeepsInUse` | 使用中の版を押し出す | 反映しない `diff` や準備が 9 回続いた | 使用中の版より後の版の数 | どのイメージも作らず push しない | キー・使用中のダイジェスト・後の版の数と「反映を待つ版を反映するか、反映しない版を `aws ecr batch-delete-image` で消してから打ち直す」、`EXIT.IMAGES` | 何も書いていない |
 | `checkImagesKept` | 引くイメージが無いか、残す 10 版から外れた | 残す数を超えて古い版へ戻す・承認の後に別の push で押し出された | `DescribeImages` の結果の並び | 反映しない | 外れたダイジェストと「その版のコミットで `diff` から作り直し、新しい差分を承認する」、`EXIT.IMAGES` | 何も書いていない |
 
@@ -244,10 +245,10 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `ImageRepository` | 合成の出力に、タグ書き換え不可のリポジトリと、`imageCountMoreThan` が 10 の規則 1 つがある | — | 規則が日数になる・数が変わると落ちる |
 | `AppStack`（ダイジェストあり） | DB の用意のタスクの定義のイメージが `<リポジトリ>@sha256:…` | ダイジェストなしでタスクの定義を作らない | ダイジェストを変えると要約値が変わる（合成の結果の要約値の比べ） |
 | `buildAndPushImages` | リポジトリがあれば作って push し、一覧を書く | リポジトリが 1 つも無ければ何もしない。`IMAGE_SPECS` が `db-prep` と `runner` で `db-prep` のリポジトリだけがあると、`db-prep` だけを push して一覧に載せ、`noRepository` が `runner` になる | Docker の失敗・push の失敗で投げ、一覧を書かない。login の値が出力に出ない。`checkPushKeepsInUse` が `ok: false` のキーが 1 つでもあれば、どのキーも build も push も呼ばない |
-| `checkPushKeepsInUse` | 使用中の版より後の版が 8 で `ok: true` | 後の版が 9 で `ok: false`。族が無い・使用中の版がリポジトリに無いと `ok: true` | — |
+| `checkPushKeepsInUse` | 使用中の版より後の版が 8 で `ok: true` | 後の版が 9 で `ok: false`。族が無い・使用中の版がリポジトリに無いと `ok: true` | `DescribeTaskDefinition` か `DescribeImages` が `AccessDeniedException` を投げると、`buildAndPushImages` が build も push も呼ばずに 4 で終わり（9 にならない）、出力に足りない操作の名前が出る |
 | `AppStack`（一部のキーだけのダイジェスト） | 一覧が `db-prep` だけのとき、DB の用意のタスクの定義を作る | 前の版（`db-prep` だけ）の合成の出力と比べ、`runner` のリポジトリを足しても DB の用意のタスクの定義が消える差分にならない | — |
 | `synthesize` | `--stack app` と既定で `buildAndPushImages` を呼ぶ | `--stack pipeline` だけで呼ばず、置き場に一覧が無い | — |
-| `checkImagesKept`・`runDeploy` | すべて新しい 10 版にあれば反映する | 新しい順の 10 番目で反映し、11 番目で反映しない。置き場に一覧が無ければ確かめずに反映する | 1 つでも無いか外れていれば反映を呼ばず 9 で終わる |
+| `checkImagesKept`・`runDeploy` | すべて新しい 10 版にあれば反映する | 新しい順の 10 番目で反映し、11 番目で反映しない。置き場に一覧が無ければ確かめずに反映する | 1 つでも無いか外れていれば反映を呼ばず 9 で終わる。`DescribeImages` が `AccessDeniedException` を投げると反映を呼ばず 4 で終わる |
 
 ## 設置のコマンド
 
@@ -291,10 +292,14 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | 終了コード | 名前 | 意味 | AWS へ書いたか |
 | --- | --- | --- | --- |
 | 0 | `OK`（直す） | `diff` は差分を示して止まった。`deploy` は反映した | `diff` は `app` を選び ECR があるときだけ、自前の ECR へ push した。`deploy` は CloudFormation へ反映した |
+| 4 | `PROFILE`（直す） | profile が無い・資格情報を得られない・リージョンが無い。イメージの照らしに要る読み取り（下の「イメージ」の異常系の表）を profile が許さない | 書いていない |
+| 5 | `BOOTSTRAP`（直す） | bootstrap が無いか版が足りない（求める版と今の版を示す）。bootstrap の版を読めない | `diff` で `app` を選び ECR があるときは、合成の前に push した版が自前の ECR に残る（どのタスクの定義からも引かれない）。`deploy` は書いていない |
 | 6 | `BUILD`（直す） | 画面のビルド・イメージの作成と push・合成・差分の作成が失敗した | `diff` で push の後に止まれば、push した版が自前の ECR に残る（どのタスクの定義からも引かれない）。ほかは書いていない |
-| 9 | `IMAGES`（足す） | `diff` で、push すると使用中の版が残す 10 版から押し出される。`deploy` で、引くイメージが自前の ECR に無いか、残す 10 版から外れている | 書いていない |
+| 9 | `IMAGES`（足す） | `diff` で、push すると使用中の版が残す 10 版から押し出される。`deploy` で、引くイメージが自前の ECR に無いか、残す 10 版から外れている | 書いていない（`diff` は push の前に止まる） |
 
-`setup.md` の「終了コード」の節の地の文「0 と 8 のほかは、AWS へ何も書いていない。そのため 2〜7 で止まったときは、…」を、次に直す。「0・6・8 のほかは、AWS へ何も書いていない。0 の `diff` と 6 は自前の ECR へ push していることがあるが、反映しなければどのタスクの定義からも引かれない。そのため 2〜7 と 9 で止まったときは、表の意味の原因を直して打ち直せばよい。9 で止まったときは、`diff` なら反映を待つ版を反映するか反映しない版を消してから、`deploy` ならその版のコミットで `diff` から作り直し、新しい差分を読んでから `deploy` を打つ」（7・8 の文はそのまま）。`diff` の確かめの順の「どの段で止まっても AWS へは書かない」も、「イメージの段より後で止まったときは push した版が残ることがある」に直し、段の並びにイメージの段（6・9）を足す。
+`diff` の確かめの順は、引数（2）・設定のファイル（3）・profile（4）・画面のビルド・イメージの照らし（4・9。何も push しない）・イメージの作成と push（6）・合成（6）・bootstrap の版（5）・差分の作成（6）になる。push より後の段は 6 の残りと 5 と 6 の差分の作成で、ここで止まると push した版が残る。`setup.md` の「diff」の節の段の並びをこの順に直し、「どの段で止まっても AWS へは書かない」を「イメージの作成と push より後の段（合成・bootstrap の版・差分の作成）で止まったときは、push した版が自前の ECR に残ることがある。ほかの段では AWS へ書かない」に直す。
+
+`setup.md` の「終了コード」の節の地の文「0 と 8 のほかは、AWS へ何も書いていない。そのため 2〜7 で止まったときは、…」を、次に直す。「0・5・6・8 のほかは、AWS へ何も書いていない。0 の `diff` と、`diff` の 5 と 6 は自前の ECR へ push していることがあるが、反映しなければどのタスクの定義からも引かれない。そのため 2〜7 と 9 で止まったときは、表の意味の原因を直して打ち直せばよい。9 で止まったときは、`diff` なら反映を待つ版を反映するか反映しない版を消してから、`deploy` ならその版のコミットで `diff` から作り直し、新しい差分を読んでから `deploy` を打つ」（7・8 の文はそのまま）。打ち直した `diff` はまた push するため、5 で止まったまま打ち直しを重ねると反映しない版が溜まり、9 に近づく。bootstrap を上げてから打ち直す。
 
 ### 初めての設置の手順
 
@@ -334,7 +339,7 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 | `PipelineStack`・`prepareBuildSpec` | 合成の出力の準備の役割が上の操作だけを持ち、準備の CodeBuild が特権 | 準備の手順が `images-cli.ts` の有無で分かれる | 反映の役割に `ecr:DescribeImages` のほかの ECR の権限が増えると落ちる |
 | `deployBuildSpec`（手順を bash で打つテスト。`aws` を作り物に差し替える） | 一覧のダイジェストが新しい 10 版にあれば `cdk deploy` に進む | 一覧が無ければ確かめずに進む | 承認の後にダイジェストが ECR から消えた（作り物の `aws` が返す並びに無い）・11 番目に下がったとき、`cdk deploy` を打たずに 1 で終わる |
 
-`docs/operations/setup.md` の前提の表に Docker（`diff` を打つ端末）を足し、手順に「パイプラインで初めてイメージを引く版は、パイプラインのスタックを先に反映する」と、上の「初めての設置の手順」を足す。あわせて、先の反映の前に保存するもの・戻しを始める条件・前の版へ戻す 4 つの段・マージの後に準備を再び走らせる段（設計文書の決定 11）を、運用する環境の節に手順として写す。
+`docs/operations/setup.md` の前提の表に Docker（`diff` を打つ端末）と、AWS の profile の行へイメージの照らしと push に要る許し（`ecr:DescribeRepositories`・`ecr:DescribeImages`・`ecr:GetAuthorizationToken`・`ecr:BatchCheckLayerAvailability`・`ecr:InitiateLayerUpload`・`ecr:UploadLayerPart`・`ecr:CompleteLayerUpload`・`ecr:PutImage`・`ecs:DescribeTaskDefinition`。`deploy` は `ecr:DescribeImages` を使う。許しが無ければ `diff` と `deploy` は何も書かずに終了コード 4 で止まる）を足し、手順に「パイプラインで初めてイメージを引く版は、パイプラインのスタックを先に反映する」と、上の「初めての設置の手順」を足す。あわせて、先の反映の前に保存するもの・戻しを始める条件・前の版へ戻す 4 つの段・マージの後に準備を再び走らせる段（設計文書の決定 11）を、運用する環境の節に手順として写す。
 
 ## DB の用意のタスク
 
