@@ -23,8 +23,8 @@
 
 ### Task 1: CI の定義のテストをすべてのワークフローを YAML で読む形にする
 
-- **対象ファイル:** `tools/test/ci-definition.test.ts`・`tools/test/ref-check.test.ts`・`tools/package.json`（`yaml`）・`package.json`・`package-lock.json`・`vitest.config.ts`
-- **変更内容:** 詳細設計書の「zizmor の設定と CI の定義のテスト」の関数の表（`loadWorkflows`・`jobNames`・`triggersPullRequest`・`permissionBlocks`）と照らすこと。`ref-check.test.ts` にワークフローの版の比べのテストを足す。`vitest.config.ts` で `*.integration.test.ts` を単体のテストから外し、スクリプト `test:integration` を足す（後のタスクの結合のテストの置き場）
+- **対象ファイル:** `tools/test/ci-definition.test.ts`・`tools/test/ref-check.test.ts`・`tools/package.json`（`yaml`）・`package.json`・`package-lock.json`・`vitest.config.ts`・`vitest.integration.config.ts`（新設。結合のテストを既定の実行から外す vitest の標準の書き方が設定のファイルを分けることのため）
+- **変更内容:** 詳細設計書の「zizmor の設定と CI の定義のテスト」の関数の表（`loadWorkflows`・`jobNames`・`triggersPullRequest`・`permissionBlocks`）と照らすこと。`ref-check.test.ts` にワークフローの版の比べのテストを足す。`vitest.config.ts` で `*.integration.test.ts` を単体のテストから外し、`vitest.integration.config.ts` を打つスクリプト `test:integration` を足す（後のタスクの結合のテストの置き場）
 - **満たす受け入れ条件:** 8・10
 - **進め方:** 失敗するテスト（2 つ目のワークフローにだけ資格情報の語・`id-token: write` を足した作り物）→ 実装 → 整理
 
