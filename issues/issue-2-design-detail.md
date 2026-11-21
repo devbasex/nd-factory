@@ -556,9 +556,9 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | 行（表 / 並びの鍵） | 列（型、空を許すものに `?`） | 上書きか追記か |
 | --- | --- | --- |
 | 利用者（`db-users` / `USER`） | `user_id`・`display_name`（0〜32 字）・`language?`（`languageTag`）・`time_zone?`（`timeZone`）・`created_at` | 上書き |
-| ログインの組（`db-users` / `LOGIN#<IdP>#<主体>`） | `user_id`・`idp`・`subject`・`linked_at` | 作ると消すだけ（`version` を持たない） |
-| IdP の主体の一意の行（全体の設計が列を決めた行で、19 の行に数えない） | 全体の設計のまま（`user_id`） | 作ると消すだけ |
-| Cognito の主体の対応の行（`db-users` / `COGNITO`。認証が Cognito の `sub` から利用者を引くために足した行で、19 の行に数えない） | `cognito_sub`・`user_id`・`idp`・`subject` | 作ると消すだけ（ログインの組・IdP の主体の一意の行と同じトランザクションで作り、消す。[Cognito の主体の対応の行](../docs/design/data.md#cognito-の主体の対応の行)） |
+| ログインの組（`db-users` / `LOGIN#<IdP>#<主体>`） | `user_id`・`idp`・`subject`・`cognito_sub`（外すときに Cognito の主体の対応の行の鍵を組む）・`linked_at` | 作ると消すだけ（`version` を持たない） |
+| IdP の主体の一意の行（全体の設計が列を決めた行で、19 の行に数えない） | 全体の設計の `user_id` に、鍵を組む `idp`・`subject` と、Cognito の主体の対応の行の鍵を組む `cognito_sub` を足す | 作ると消すだけ |
+| Cognito の主体の対応の行（`db-users` / `COGNITO`。認証が Cognito の `sub` から利用者を引くために足した行で、19 の行に数えない） | `cognito_sub`・`user_id`・`idp`・`subject`・`bound_auth_time`（結ぶのに使った token の `auth_time`。これより前にサインインした token を断つ） | 作ると消すだけ（ログインの組・IdP の主体の一意の行と同じトランザクションで作り、消す。[Cognito の主体の対応の行](../docs/design/data.md#cognito-の主体の対応の行)） |
 | 委任（`db-users` / `DELEGATION#<委任>`） | `delegation_id`・`user_id`・`client_name`（1〜64 字）・`scope_project_ids`（`prj` の ID の配列、1 以上）・`scope_kind`（`read`・`run`・`manage`）・`secret_sha256`（64 桁）・`expires_at`・`created_at`・`last_used_at?`・`revoked_at?` | 上書き（状態は `expires_at`・`revoked_at` から導き、列に持たない） |
 | チーム（`db-teams` / `TEAM`） | `team_id`・`name`（1〜100 字）・`plan`（料金プランの行の名前）・`currency`（`currencyCode`）・`monthly_cap?`（`money`）・`default_place`（`hosted`・`machine`）・`default_inference`（`managed`・`byok`）・`created_at` | 上書き |
 | 席（`db-teams` / `SEAT#<利用者>`） | `team_id`・`user_id`・`role`・`added_at` | 上書き |

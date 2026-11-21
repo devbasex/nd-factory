@@ -18,22 +18,26 @@ export const userRow = overwriteRow(1, {
 export type UserRow = z.infer<typeof userRow>;
 export const userKey = (row: UserRow): RowKey => ({ pk: `USER#${row.user_id}`, sk: "USER" });
 
-// ログインの組（USER#<利用者> / LOGIN#<IdP>#<主体>）。作ると消すだけ
+// ログインの組（USER#<利用者> / LOGIN#<IdP>#<主体>）。作ると消すだけ。
+// cognito_sub はこのログインでサインインした Cognito の利用者の sub。外すとき（logins.delete）に Cognito の主体の対応の行の鍵を組む
 export const loginRow = versionlessRow(1, {
   user_id: idOf("usr"),
   idp,
   subject: z.string().min(1),
+  cognito_sub: z.string().min(1),
   linked_at: utcDateTime,
 });
 export type LoginRow = z.infer<typeof loginRow>;
 export const loginKey = (row: LoginRow): RowKey => ({ pk: `USER#${row.user_id}`, sk: `LOGIN#${row.idp}#${row.subject}` });
 
 // IdP の主体の一意の行（LOGIN#<IdP>#<主体> / LOGIN、I16）。作ると消すだけ。
-// 全体の設計の列は user_id だけで、鍵を列から組むために idp と subject を持つ（全体の設計からの読み替え）
+// 全体の設計の列は user_id だけで、鍵を列から組むために idp と subject を持つ（全体の設計からの読み替え）。
+// cognito_sub はログインの組と同じ値（IdP の主体からも Cognito の主体の対応の行の鍵を組める）
 export const loginSubjectRow = versionlessRow(1, {
   user_id: idOf("usr"),
   idp,
   subject: z.string().min(1),
+  cognito_sub: z.string().min(1),
 });
 export type LoginSubjectRow = z.infer<typeof loginSubjectRow>;
 export const loginSubjectKey = (row: LoginSubjectRow): RowKey => ({ pk: `LOGIN#${row.idp}#${row.subject}`, sk: "LOGIN" });
@@ -41,12 +45,14 @@ export const loginSubjectKey = (row: LoginSubjectRow): RowKey => ({ pk: `LOGIN#$
 // Cognito の主体の対応の行（COGNITO#<Cognito の sub> / COGNITO）。作ると消すだけ。
 // Cognito の access token は IdP の主体でなく Cognito の利用者の sub を持つため、認証（userOfSubject）はこの行を強い整合で読んで利用者を引く。
 // Cognito は IdP のアカウントごとに別の利用者（別の sub）を作るため、ログインの組と 1 対 1 に当たる。
-// ログインの組と IdP の主体の一意の行と同じトランザクションで、無いときだけ書き（putIfAbsent）、外すときは 3 行を同じトランザクションで消す
+// ログインの組と IdP の主体の一意の行と同じトランザクションで、無いときだけ書き（putIfAbsent）、外すときは 3 行を同じトランザクションで消す。
+// bound_auth_time は結んだときに使った token の auth_time。認証はこれより前にサインインした token を断つ（外して結び直す前のセッションを新しい利用者へ届かせない）
 export const cognitoSubjectRow = versionlessRow(1, {
   cognito_sub: z.string().min(1),
   user_id: idOf("usr"),
   idp,
   subject: z.string().min(1),
+  bound_auth_time: utcDateTime,
 });
 export type CognitoSubjectRow = z.infer<typeof cognitoSubjectRow>;
 export const cognitoSubjectKey = (row: CognitoSubjectRow): RowKey => ({ pk: `COGNITO#${row.cognito_sub}`, sk: "COGNITO" });

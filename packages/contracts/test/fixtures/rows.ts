@@ -36,9 +36,9 @@ export type RowCase = {
 
 export const ROW_CASES: Readonly<Record<string, RowCase>> = {
   user: { schema: userRow, keyOf: userKey, overwrite: true, sample: { schema_version: 1, version: 1, user_id: USR, display_name: "acme の人", created_at: AT } },
-  login: { schema: loginRow, keyOf: loginKey, overwrite: false, sample: { schema_version: 1, user_id: USR, idp: "google", subject: "1234567890", linked_at: AT } },
-  login_subject: { schema: loginSubjectRow, keyOf: loginSubjectKey, overwrite: false, sample: { schema_version: 1, user_id: USR, idp: "github", subject: "42" } },
-  cognito_subject: { schema: cognitoSubjectRow, keyOf: cognitoSubjectKey, overwrite: false, sample: { schema_version: 1, cognito_sub: UUID, user_id: USR, idp: "github", subject: "42" } },
+  login: { schema: loginRow, keyOf: loginKey, overwrite: false, sample: { schema_version: 1, user_id: USR, idp: "google", subject: "1234567890", cognito_sub: UUID, linked_at: AT } },
+  login_subject: { schema: loginSubjectRow, keyOf: loginSubjectKey, overwrite: false, sample: { schema_version: 1, user_id: USR, idp: "github", subject: "42", cognito_sub: UUID } },
+  cognito_subject: { schema: cognitoSubjectRow, keyOf: cognitoSubjectKey, overwrite: false, sample: { schema_version: 1, cognito_sub: UUID, user_id: USR, idp: "github", subject: "42", bound_auth_time: AT } },
   delegation: {
     schema: delegationRow,
     keyOf: delegationKey,

@@ -118,7 +118,7 @@ erDiagram
 
 | 表 | 区切りの鍵 / 並びの鍵 | 持つ列 | 書き方 |
 | --- | --- | --- | --- |
-| `db-users` | `LOGIN#<IdP>#<主体>` / `LOGIN` | `user_id`・`schema_version` | ログインの組の行（`USER#<利用者>` / `LOGIN#<IdP>#<主体>`）と同じトランザクションで、無いときだけ書く（`putIfAbsent`）。既にあれば 409。外すときは 2 行を同じトランザクションで消す |
+| `db-users` | `LOGIN#<IdP>#<主体>` / `LOGIN` | `user_id`・`cognito_sub`・`schema_version` | ログインの組の行（`USER#<利用者>` / `LOGIN#<IdP>#<主体>`）と同じトランザクションで、無いときだけ書く（`putIfAbsent`）。既にあれば 409。外すときは下の Cognito の主体の対応の行と合わせて 3 行を同じトランザクションで消す |
 
 サインインは IdP の主体からこの行を強い整合で読み、利用者を引く（決定 99）。
 
@@ -128,9 +128,19 @@ erDiagram
 
 | 表 | 区切りの鍵 / 並びの鍵 | 持つ列 | 書き方 |
 | --- | --- | --- | --- |
-| `db-users` | `COGNITO#<Cognito の sub>` / `COGNITO` | `cognito_sub`・`user_id`・`idp`・`subject`・`schema_version` | ログインの組の行と IdP の主体の一意の行を作るのと同じトランザクションで、無いときだけ書く（`putIfAbsent`。初めてのサインインの `sessions.create` と、ログインをつなぐ `logins.create`）。既にあれば 409。ログインを外す `logins.delete` は、3 行を同じトランザクションで消す |
+| `db-users` | `COGNITO#<Cognito の sub>` / `COGNITO` | `cognito_sub`・`user_id`・`idp`・`subject`・`bound_auth_time`・`schema_version` | ログインの組の行と IdP の主体の一意の行を作るのと同じトランザクションで、無いときだけ書く（`putIfAbsent`。初めてのサインインの `sessions.create` と、ログインをつなぐ `logins.create`）。既にあれば 409。ログインを外す `logins.delete` は、3 行を同じトランザクションで消す |
 
-認証（`authenticate` の読み手 `userOfSubject`）は、検証した access token の `sub` で `COGNITO#<sub>` / `COGNITO` を強い整合で読み、`user_id` を利用者にする。行が無い主体は、利用者を作る `sessions.create` にだけ「まだ結んでいない人」として渡り、ほかの操作では 401 になる。
+3 行の値と鍵の引き元は次のとおりである。どの値も要求の本文から採らない。
+
+| 場面 | Cognito の `sub` の引き元 | IdP と主体の引き元 | 3 行の書き方 |
+| --- | --- | --- | --- |
+| 初めてのサインイン（`sessions.create`） | 要求の access token の `sub`（認証が検証した値） | 認証が、検証した token の `username` で利用者プールを読み（`AdminGetUser`）、属性 `sub` が token と同じことと、属性 `identities` の IdP の名前と IdP の利用者の ID を得る。IdP の名前は設定で `google` か `github` に当てる | 主体 `newcomer` が持つ値で 3 行を作る。ログインの組と IdP の主体の一意の行にも `cognito_sub` を写す |
+| ログインをつなぐ（`logins.create`） | 要素の `login_token`（つなぐログインでその場でサインインした Cognito の access token）を、人の token と同じに検証した `sub`。要求の Authorization は今の利用者を決めるだけ | 初めてのサインインと同じに、`login_token` の `username` で利用者プールを読んで得る | 今の利用者と `login_token` の主体の 2 つを 1 つの要素で受け、3 行を作る。手順は [詳細設計の `verifyLoginToLink`](detail.md#関数の仕様) |
+| ログインを外す（`logins.delete`） | 外すログインの組の行（`USER#<利用者>` / `LOGIN#<IdP>#<主体>`）を強い整合で読んだ `cognito_sub`。要求の token の `sub` は使わない（別のログインのものであり得る） | 要素の `idp`・`subject` | 3 行を同じトランザクションで消す。各行の条件は「`user_id` が今の利用者、`cognito_sub` が読んだ値」で、外れたら 409。確定の後、その Cognito の利用者の refresh token を `AdminUserGlobalSignOut` で取り消す（同じトランザクションで書いた「行う予定」の行から行う） |
+
+結ぶ（初めてのサインインとログインをつなぐ）token は、IdP でサインインした時刻（`auth_time`）が 5 分の内のものだけを受ける。`bound_auth_time` には結ぶのに使った token の `auth_time` を書く。
+
+認証（`authenticate` の読み手 `userOfSubject`）は、検証した access token の `sub` で `COGNITO#<sub>` / `COGNITO` を強い整合で読み、`user_id` を利用者にする。token の `auth_time` が行の `bound_auth_time` より前なら 401 にする。外して結び直す前のセッションの token が、同じ `sub` で結び直した後の利用者へ届かないようにするためである（外した後に refresh token で取り直した token も `auth_time` を変えないため同じく断つ）。行が無い主体は、利用者を作る `sessions.create` にだけ「まだ結んでいない人」として渡り、ほかの操作では 401 になる。
 
 ### テーブル定義
 

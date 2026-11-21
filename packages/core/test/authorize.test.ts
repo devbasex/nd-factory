@@ -33,7 +33,7 @@ const P_MOVING = id("prj", 23); // チーム B からチーム A へ移す途中
 const LANE = id("lane", 30);
 const MACHINE = id("mch", 40);
 
-const human = (userId: `usr_${string}`): Principal => ({ kind: "human", userId });
+const human = (userId: `usr_${string}`): Principal => ({ kind: "human", userId, cognitoSub: `cognito-${userId}` });
 const delegation = (userId: `usr_${string}`, projectIds: `prj_${string}`[], operations: "read" | "run" | "manage" = "manage"): Principal => ({
   kind: "delegation",
   userId,
@@ -255,7 +255,7 @@ describe("authorize: ランナー・手元のマシン・DB の用意のタス�
 
   it("まだ結んでいない人は sessions.create だけを通り、見えるプロジェクトを持たない", async () => {
     const table = world();
-    const newcomer: Principal = { kind: "newcomer", cognitoSub: "cognito-sub-new" };
+    const newcomer: Principal = { kind: "newcomer", login: { cognitoSub: "cognito-sub-new", idp: "google", subject: "1234567890", authTime: 0 } };
     expect(await visibleProjectIds(newcomer, fakeScope(table))).toEqual([]);
     expect(items(await authorize(newcomer, sessionsCreate, [{}], fakeScope(table)))).toEqual([{ decision: "allow", projectId: null, role: null }]);
     expect(await authorize(newcomer, projectsGet, [{ project_id: P_A }], fakeScope(table))).toEqual({ reject: "scope_insufficient" });

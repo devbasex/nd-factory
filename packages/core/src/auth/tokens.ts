@@ -148,7 +148,11 @@ export function dbPrepClaimsOf(claims: SignedClaims): DbPrepTokenClaims | null {
 // responseTimeout だけを渡す（決定 17。全体の設計の決定 48）。控えは実行環境ごとに 1 つで、起点が 1 回だけ作る
 export type CognitoConfig = { readonly userPoolId: string; readonly clientId: string };
 
-export type CognitoCheck = (token: string, nowMs: number) => Promise<CheckResult<{ readonly sub: string }>>;
+// sub は Cognito の利用者の ID、username は Cognito の利用者の名前（IdP の主体を引く AdminGetUser に渡す）、
+// authTime は利用者が IdP でサインインした時刻（auth_time。refresh token で取り直しても変わらない）のエポックの秒
+export type CognitoClaims = { readonly sub: string; readonly username: string; readonly authTime: number };
+
+export type CognitoCheck = (token: string, nowMs: number) => Promise<CheckResult<CognitoClaims>>;
 
 export type CognitoCheckOptions = {
   // テストだけが差し替える（本番は SimpleFetcher のまま）
@@ -210,7 +214,12 @@ export function createCognitoCheck(config: CognitoConfig, options: CognitoCheckO
       const nbf: unknown = payload.nbf;
       if (nbf !== undefined && (typeof nbf !== "number" || !Number.isFinite(nbf))) return unauthorized("shape");
       if (typeof nbf === "number" && nbf * 1000 > nowMs) return unauthorized("expired");
-      return { ok: true, value: { sub } };
+      // 結び直す前の token を断つ照らし（authenticate）と、結ぶときの新しさの照らしに使うため、username と有限の数の auth_time を必須にする
+      const username: unknown = payload.username;
+      if (typeof username !== "string" || username.length === 0) return unauthorized("shape");
+      const authTime: unknown = payload.auth_time;
+      if (typeof authTime !== "number" || !Number.isFinite(authTime)) return unauthorized("shape");
+      return { ok: true, value: { sub, username, authTime } };
     } catch (error) {
       if (isUnavailable(error)) return { ok: false, reason: "unavailable", cause: causeOf(error) };
       return unauthorized(faultOf(error));
