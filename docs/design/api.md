@@ -84,8 +84,6 @@ API の操作は 1 つの画面に合わせず、エンティティ（スプリ�
 | どこに置くか | 新しいものを作る操作と、外へ働きかける操作（`sprints.create`・`sprints.cancel`・`approvals.answer`・`questions.answer`・`delegations.create`・`machines.create` など）の要素に `idempotency_key`（UUID の形）を必ず持たせる |
 | 何で見分けるか | 主体の利用者・操作の名前・鍵の 3 つの組 |
 | 2 回目 | 24 時間の間、同じ組の 2 回目は 1 回目の要素の結果を返し、状態を変えない。1 回だけ返す値（委任の token など）は 2 回目に `null` にする |
-| 1 回だけ返す値を持つ操作 | 操作の表の `onceFields` に、結果のうち 1 回だけ返す値の項目（`delegations.create` と `machines.create` の token）を挙げる。生成した呼び出しは、`onceFields` を持つ操作の要求を冪等の鍵があっても通信の障害の後に自動で送り直さない（1 回目が成功して応答だけを失うと、送り直しは token が `null` の結果を返し、呼び手は発行済みの token を二度と得られないため）。送り直すのは API が処理の前に断った 429 だけ |
-| 結果が分からない | `onceFields` を持つ操作が時間切れ・ネットワークの誤り・5xx で終わったら、画面は「発行できたか分かりません」と見せ、自動で進めない。人が「確かめる」を押すと、同じ要素を同じ鍵で 1 回送る。token が返れば 1 回目は届いていなかったので、それを見せる。token が `null` の結果なら発行は済んで token を失ったので、結果の ID を取り消しの操作（`delegations.revoke`・`machines.delete`）で取り消し、人が新しい鍵で発行し直す。409 `in_progress` なら待って確かめ直す。確かめは鍵の 24 時間のうちに行い、過ぎたら一覧（`delegations.list`・`machines.list`）で使っていない発行を取り消す |
 | 中身が違う | 同じ組で要素の中身が違えば 422 `idempotency_key_reused` |
 | 1 回目が途中 | 409 `in_progress`。呼び手は待って同じ要素を送り直す |
 
@@ -546,7 +544,6 @@ classDiagram
         +ownerOnly
         +allOrNothing
         +idempotencyKey
-        +onceFields
         +item: zod
         +result: zod
         +reasons
