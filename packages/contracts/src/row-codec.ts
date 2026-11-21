@@ -80,6 +80,44 @@ export function rowCodec<L, P>(spec: {
   };
 }
 
+function withSchemaVersion(body: unknown, version: number): unknown {
+  return typeof body === "object" && body !== null && !Array.isArray(body) ? { ...body, schema_version: version } : body;
+}
+
+function issuePaths(error: z.ZodError): string {
+  return error.issues.map((i) => i.path.join(".")).join(", ");
+}
+
+// 値が undefined の列は無い列と同じに見る（writeRow は undefined の列を書かない）
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((v, i) => sameValue(v, b[i]));
+  }
+  const entries = (o: object) => Object.entries(o).filter(([, v]) => v !== undefined);
+  const ea = entries(a);
+  const eb = new Map(entries(b));
+  return ea.length === eb.size && ea.every(([k, v]) => eb.has(k) && sameValue(v, eb.get(k)));
+}
+
+// 前の版で書くときは、下げた行を上げ直して元の行（latest の形）に戻ることを確かめ、戻らなければ投げる。
+// 次の版にだけ持てる値を前の版で書くと、その値が行から消える（rowUpdateOf の remove が次の版だけの列を消す）。
+// 書き手を前の版へ戻せる間は、次の版の値も前の版で表せる値だけを書く決まり（版を上げる子の手順）で、ここはその決まりが破られたときに書かずに止める
+function assertLosslessDowngrade<L>(codec: RowCodec<L>, previous: PreviousVersion<L>, row: L, downgraded: unknown): void {
+  const original = codec.latest.schema.safeParse(withSchemaVersion(row, codec.latest.version));
+  if (!original.success) throw new RowCodecError(`行が版 ${codec.latest.version} の形を通らない: ${issuePaths(original.error)}`);
+  let back: unknown;
+  try {
+    back = codec.latest.schema.safeParse(previous.upgrade(downgraded));
+  } catch {
+    back = null;
+  }
+  const restored = back as { success?: boolean; data?: unknown } | null;
+  if (restored?.success !== true || !sameValue(restored.data, original.data)) throw new RowCodecError(`版 ${previous.version} へ下げると版 ${codec.latest.version} の値が失われる`);
+}
+
 // latest の版はそのまま、previous の版は upgrade で latest の形へそろえて返し、ほかの版を拒む。writeVersion によらず同じ結果を返す。
 // upgrade が投げたときは、前の版の行を latest の形へそろえられなかったものとして shape_invalid を返す（読み手は投げない）
 export function readRow<L>(codec: RowCodec<L>, raw: unknown): ReadRowResult<L> {
@@ -112,8 +150,9 @@ export function writeRow<L>(codec: RowCodec<L>, row: L): Record<string, unknown>
   const toPrevious = previous !== null && codec.writeVersion === previous.version;
   const body = toPrevious ? previous.downgrade(row) : row;
   const schema = toPrevious ? previous.schema : codec.latest.schema;
-  const parsed = schema.safeParse(typeof body === "object" && body !== null ? { ...body, schema_version: codec.writeVersion } : body);
-  if (!parsed.success) throw new RowCodecError(`行が版 ${codec.writeVersion} の形を通らない: ${parsed.error.issues.map((i) => i.path.join(".")).join(", ")}`);
+  const parsed = schema.safeParse(withSchemaVersion(body, codec.writeVersion));
+  if (!parsed.success) throw new RowCodecError(`行が版 ${codec.writeVersion} の形を通らない: ${issuePaths(parsed.error)}`);
+  if (toPrevious) assertLosslessDowngrade(codec, previous, row, parsed.data);
   const columns = Object.entries(parsed.data as Record<string, unknown>).filter(([, value]) => value !== undefined);
   return { ...Object.fromEntries(columns), pk: key.pk, ...(key.sk === null ? {} : { sk: key.sk }) };
 }
@@ -121,8 +160,12 @@ export function writeRow<L>(codec: RowCodec<L>, row: L): Record<string, unknown>
 // 読んだ行（raw）を row へ書き換える更新の set と remove を作る。set は writeRow の戻り値から pk・sk・version を外したもの（schema_version を含む）。
 // remove は raw の列のうち writeRow の戻り値に無く、pk・sk・version でもない列（別の版で消した列と、undefined にした任意の列。索引の鍵なら書き込みで索引から外れる）。
 // 列の有無は自身の列だけで見る（constructor などの継承した名前を列と取り違えない）
+// 書き換え後の鍵（keyOf）が読んだ行の鍵と違えば投げる。鍵は書き込みの key に読んだ行のものを使うため、違う鍵の列から組んだ中身を古い鍵の行へ書かない
+// （たとえば席の user_id を変えると、旧利用者の SEAT#… に新利用者の user_id が載り、主キーと索引で引く所属が食い違う）
 export function rowUpdateOf<L>(codec: RowCodec<L>, raw: Readonly<Record<string, unknown>>, row: L): RowUpdate {
   const written = writeRow(codec, row);
+  const rawSk = Object.hasOwn(raw, "sk") ? raw["sk"] : undefined;
+  if (raw["pk"] !== written["pk"] || rawSk !== written["sk"]) throw new RowCodecError(`書き換え後の鍵が読んだ行の鍵と違う: ${String(raw["pk"])} / ${String(rawSk)} → ${String(written["pk"])} / ${String(written["sk"])}`);
   const set = Object.fromEntries(Object.entries(written).filter(([column]) => !NOT_UPDATED.has(column)));
   const remove = Object.keys(raw).filter((column) => !Object.hasOwn(written, column) && !NOT_UPDATED.has(column));
   return { set, remove };
