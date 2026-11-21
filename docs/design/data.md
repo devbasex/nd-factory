@@ -149,6 +149,8 @@ erDiagram
 
 結ぶ（初めてのサインインとログインをつなぐ）token は、IdP でサインインした時刻（`auth_time`）が 5 分の内のものだけを受ける。`bound_auth_time` には結ぶのに使った token の `auth_time` を、`cognito_username` には検証した token の `username` を書く。
 
+この対応の行と `login_count` は、IdP の主体の一意の行・ログインの組の行と同じトランザクションでだけ作る。そのため、この仕組みを入れるのは `db-users` に IdP の主体の一意の行とログインの組の行がまだ無い環境に限り、既にある行から対応の行と `login_count` を作り直す移しの手順を持たない。今ある環境で利用者を書くのは骨組みの `PUT /v1/users`（`accounts` の表の `USER#<Cognito の sub>` / `PROFILE` の行。`db-users` と別の表で、IdP の主体の一意の行を書かない）だけで、[形の版と移し方](#形の版と移し方) のとおり nd-factory の外や骨組みで書かれた行は取り込まない。対応の行の無い一意の行があると、その IdP のアカウントは `sessions.create` が一意の行の条件で 409 になり続けるため、`sessions.create` を出す反映（#4）は、反映の前に `db-users` を走査して IdP の主体の一意の行が 1 行も無いことを確かめ、あれば反映を止める。
+
 認証（`authenticate` の読み手 `userOfSubject`）は、検証した access token の `sub` で `COGNITO#<sub>` / `COGNITO` を強い整合で読む。`bound` で token の `auth_time` が `bound_auth_time` 以後なら `user_id` を利用者にし、前なら 401 にする。外して結び直す前のセッションの token が、同じ `sub` で結び直した後の利用者へ届かないようにするためである（refresh token で取り直した token も `auth_time` を変えないため同じく断つ）。行が無い主体と `unlinked` の主体は、`sessions.create` にだけ「まだ結んでいない人」として渡り（`unlinked` は `auth_time` が `revoked_before` より後のときだけ）、ほかの操作では 401 になる。結ぶトランザクションも上の条件で同じ境を照らし直す（認証の読みの後に外し直された行へ結ばない）。認証は同じ読みで、下の [セッションの取り消しの行](#セッションの取り消しの行)（`COGNITO#<sub>` / `REVOKED#<token の origin_jti>`）も強い整合で読み（2 行を並べて読む）、あれば `state` によらず 401 にする。ただし `sessions.delete` だけは取り消しの行があっても 401 にせず、ハンドラーが「取り消し済み」を返す（下の「`sessions.delete` の再送」）。
 
 「行う予定」の行（失効の予定の行）は次の形で置く。
