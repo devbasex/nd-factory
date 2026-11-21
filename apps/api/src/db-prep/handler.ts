@@ -11,11 +11,20 @@ import { type ProjectIdent, checkIsolationGuard, claimBinding, provisionProject 
 import { rotateRole, terminateRoleConnections } from "./rotate.ts";
 import { DataApiUnavailableError, type SqlExecutor } from "./sql-executor.ts";
 
-// 口がプロジェクトの行から返す、データベースと役割と秘密の器の名前と、今の用意が結んだ版の ID
-export type PrepTarget = { database: string; role: string; secret: string; secretVersion: string };
+// 口がプロジェクトの行の 1 回の強い整合の読みから返す、データベースと役割と秘密の器の名前と、結んだ版の ID と、
+// 同じ行の用意の ID と差し替えの番号（差し替えをまだしていない行は null）。版の ID を、読んだ時点の用意の ID と番号に結び付けて照らす
+export type PrepTarget = {
+  database: string;
+  role: string;
+  secret: string;
+  secretVersion: string;
+  prepId: string;
+  rotationSeq: number | null;
+};
 
 // 終わりの記録の口。実装は #6（プロジェクトのモジュールの操作）。isCurrent はプロジェクトの表をプロジェクトの ID の主キーで
-// 強い整合で読み（認可もそのプロジェクトに限る）、その行の用意の ID が渡した値と同じかを返す。record は用意の ID・
+// 強い整合で読み（認可もそのプロジェクトに限る）、その行の用意の ID が渡した値と同じかを返す。readTarget は同じ読み方で
+// 1 回読み、名前と版の ID を、同じ行の用意の ID と差し替えの番号と一緒に返す。record は用意の ID・
 // 差し替えの番号・版の ID が今の値と合うときだけ書く条件つきの書き込みで、合わなければ書かずに mismatch を返す
 export type PrepCompletionPort = {
   isCurrent(projectId: string, prepId: string): Promise<boolean>;
@@ -247,6 +256,12 @@ export function createDbPrepHandler(deps: PrepDeps): (event: unknown) => Promise
       stage = "read_target";
       const target = await completion.readTarget(inv.project_id);
       assertTarget(target);
+      // isCurrent の後に用意の ID か番号が替わり、行が次の用意の版を結んでいれば、その版を読まずに終える
+      // （古い呼び出しが新しい版を DB へ書く前に AWSCURRENT へ移さないように）
+      if (target.prepId !== inv.prep_id || (inv.kind === "rotate" && target.rotationSeq !== inv.rotation_seq)) {
+        logger.info({ ...base, result: "not_current" }, PREP_LOG_MESSAGES.notCurrent);
+        return;
+      }
       stage = "read_password";
       const password = await deps.readPassword(target.secret, target.secretVersion);
 

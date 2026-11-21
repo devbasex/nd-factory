@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { DatabaseResumingException } from "@aws-sdk/client-rds-data";
-import { DB_PREP_ENV, type DbPrepInvocation, type DbPrepOutcome } from "@nd-factory/contracts/db-prep";
+import { DB_PREP_ENV, type DbPrepInvocation, type DbPrepOutcome, dbPrepInvocation } from "@nd-factory/contracts/db-prep";
 import { describe, expect, it } from "vitest";
 import {
   DbPrepFunctionError,
@@ -26,7 +26,11 @@ const SECRET = "acme/test/progress-db/acme-secret-name";
 const VERSION = "0b9c3c1e-5f0a-4d6b-9a51-2f6c8e1d7a01";
 const PASSWORD = "acme-Password-0123456789abcdefghijklmnop";
 const URL_VALUE = `postgresql://${ROLE}:${PASSWORD}@acme-progress.example.com:5432/${DATABASE}`;
-const TARGET: PrepTarget = { database: DATABASE, role: ROLE, secret: SECRET, secretVersion: VERSION };
+// 行の名前と版。用意の ID と差し替えの番号は、作り物の口が呼び出しに合わせて足す
+type TargetNames = Omit<PrepTarget, "prepId" | "rotationSeq">;
+type TargetRow = Pick<PrepTarget, "prepId" | "rotationSeq">;
+const TARGET: TargetNames = { database: DATABASE, role: ROLE, secret: SECRET, secretVersion: VERSION };
+const rowOf = (inv: DbPrepInvocation): TargetRow => ({ prepId: inv.prep_id, rotationSeq: inv.kind === "rotate" ? inv.rotation_seq : null });
 // ログに部分の文字列として現れてはならない値
 const SECRETS = [PASSWORD, URL_VALUE, DATABASE, ROLE, SECRET];
 
@@ -95,7 +99,10 @@ class FakeWorld {
   events: string[] = [];
   records: Array<{ inv: DbPrepInvocation; outcome: DbPrepOutcome; secretVersion: string }> = [];
   current = true;
-  target: PrepTarget = { ...TARGET };
+  target: TargetNames = { ...TARGET };
+  // readTarget が返す行の用意の ID と番号。undefined なら、打った呼び出しの値（行が今の用意を結んでいる）
+  row: TargetRow | undefined = undefined;
+  invoked: TargetRow = { prepId: PREP_ID, rotationSeq: null };
   recordResult: "recorded" | "mismatch" = "recorded";
   // 作り物の秘密の器で AWSCURRENT の付く版
   currentVersion: string | undefined = undefined;
@@ -111,7 +118,7 @@ class FakeWorld {
       readTarget: async (projectId) => {
         this.events.push(`readTarget:${projectId}`);
         if (this.fail.readTarget) throw this.fail.readTarget;
-        return this.target;
+        return { ...this.target, ...(this.row ?? this.invoked) };
       },
       record: async (inv, outcome, secretVersion) => {
         this.events.push("record");
@@ -172,12 +179,17 @@ function setup(state: FakeState = {}, sql?: SqlExecutor) {
     now: clock.now,
     sleep: clock.sleep,
   };
+  const handler = createDbPrepHandler(deps);
   return {
     db,
     world,
     lines,
     clock,
-    handle: createDbPrepHandler(deps),
+    handle: (event: unknown): Promise<void> => {
+      const parsed = dbPrepInvocation.safeParse(event);
+      if (parsed.success) world.invoked = rowOf(parsed.data);
+      return handler(event);
+    },
     logs: (): LogLine[] => lines.map((l) => JSON.parse(l) as LogLine),
   };
 }
@@ -321,6 +333,29 @@ describe("createDbPrepHandler の口と秘密の器の失敗", () => {
       expect(t.world.events.some((x) => x.startsWith("readPassword"))).toBe(false);
       expect(t.world.events).not.toContain("record");
       expect(e.message).not.toContain("Acme-Db");
+    }
+  });
+
+  it("isCurrent の後に行の用意の ID か差し替えの番号が替わっていたら、パスワードを読まず、SQL・promote・record を呼ばずに終える", async () => {
+    const cases: Array<{ inv: DbPrepInvocation; row: TargetRow }> = [
+      // 遅れた番号 n の呼び出しが isCurrent を通った後に、別の呼び出しが n を終え、行が n+1 の用意と版を結んだ
+      { inv: rotate(3), row: { prepId: "prep_acme_0002", rotationSeq: 4 } },
+      // 用意の ID だけが替わった（見回りの呼び直し）
+      { inv: rotate(3), row: { prepId: "prep_acme_0002", rotationSeq: 3 } },
+      // 用意の ID が同じでも番号が合わない
+      { inv: rotate(3), row: { prepId: PREP_ID, rotationSeq: 4 } },
+      { inv: CREATE, row: { prepId: "prep_acme_0002", rotationSeq: null } },
+    ];
+    for (const { inv, row } of cases) {
+      const t = setup();
+      t.world.row = row;
+      t.world.target = { ...TARGET, secretVersion: "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f" };
+      await t.handle(inv);
+      expect(t.world.events).toEqual([`isCurrent:${PROJECT_ID}:${PREP_ID}`, `readTarget:${PROJECT_ID}`]);
+      expect(prepStatements(t.db)).toEqual([]);
+      expect(statements(t.db).some((x) => x.includes("rotation_seq"))).toBe(false);
+      expect(t.world.records).toEqual([]);
+      expect(t.logs().at(-1)).toMatchObject({ prep_id: PREP_ID, kind: inv.kind, result: "not_current" });
     }
   });
 
@@ -489,6 +524,7 @@ describe("createDbPrepHandler の差し替え", () => {
 
   it("promote は古い接続を切るトランザクションの中で、差し替えの鎖を持ったまま確定の前に打つ", async () => {
     const t = setup({ recorded: [{ recorded: 2, cutoff_recorded: false }, { recorded: 3, cutoff_recorded: false }] });
+    t.world.row = rowOf(rotate(3));
     let callsAtPromote = -1;
     const inner = t.world.promote;
     t.world.promote = async (secret, versionId) => {
@@ -667,11 +703,11 @@ describe("DB の用意の関数の起点", () => {
 // --- PostgreSQL のサービスコンテナ ---
 
 // 作り物の口。readTarget はテストのプロジェクトの名前を返し、record は呼ばれた順に残す
-function pgWorld(target: PrepTarget, password: string) {
+function pgWorld(target: TargetNames, password: string) {
   const records: DbPrepOutcome[] = [];
   const port: PrepCompletionPort = {
     isCurrent: async () => true,
-    readTarget: async () => target,
+    readTarget: async () => ({ ...target, ...rowOf(CREATE) }),
     record: async (_inv, outcome) => {
       records.push(outcome);
       return "recorded";
@@ -691,7 +727,7 @@ function counting(inner: SqlExecutor, seen: string[]): SqlExecutor {
   };
 }
 
-function newTarget(db: TestDatabase): PrepTarget {
+function newTarget(db: TestDatabase): TargetNames {
   const s = randomBytes(5).toString("hex");
   const target = { database: `acme_h_db_${s}`, role: `acme_h_role_${s}`, secret: "acme/test/progress-db/h", secretVersion: VERSION };
   db.dropDatabaseLater(target.database);
@@ -737,12 +773,12 @@ describePgDisposable("createDbPrepHandler（PostgreSQL）", () => {
         oldPromoting = resolve;
       });
       const records: Array<{ seq: number | undefined; outcome: DbPrepOutcome }> = [];
-      const handlerFor = (version: string, gated: boolean) =>
+      const handlerFor = (version: string, gated: boolean, inv: DbPrepInvocation) =>
         createDbPrepHandler({
           sql: db.executor(),
           completion: {
             isCurrent: async () => true,
-            readTarget: async () => ({ ...target, secretVersion: version }),
+            readTarget: async () => ({ ...target, secretVersion: version, ...rowOf(inv) }),
             record: async (inv, outcome) => {
               records.push({ seq: inv.kind === "rotate" ? inv.rotation_seq : undefined, outcome });
               return "recorded";
@@ -759,11 +795,11 @@ describePgDisposable("createDbPrepHandler（PostgreSQL）", () => {
           },
           logger: createPrepLogger({ write: () => undefined }),
           now: () => performance.now(),
-        });
-      await handlerFor("v0", false)(CREATE);
-      const older = handlerFor("v1", true)(rotate(1, "prep_acme_old"));
+        })(inv);
+      await handlerFor("v0", false, CREATE);
+      const older = handlerFor("v1", true, rotate(1, "prep_acme_old"));
       await oldReachedPromote;
-      const newer = handlerFor("v2", false)(rotate(2, "prep_acme_new"));
+      const newer = handlerFor("v2", false, rotate(2, "prep_acme_new"));
       // 新しい呼び出しは鎖を待つため、古い呼び出しが移し終えるまで進めない（進めば先に終わる）
       const newerFirst = await Promise.race([newer.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 1_000))]);
       release();
