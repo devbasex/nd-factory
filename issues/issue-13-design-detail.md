@@ -35,7 +35,7 @@ apps/db-prep/                   *
 ├── package.json・tsconfig.json・Dockerfile
 ├── src/main.ts・exchange.ts・provision.ts・rotate.ts
 └── test/exchange.test.ts・provision.test.ts・rotate.test.ts
-docs/operations/settings.md・setup.md
+docs/operations/settings.md・setup.md・pipeline-approval.md
 .github/workflows/ci.yml
 ```
 
@@ -51,15 +51,15 @@ docs/operations/settings.md・setup.md
 | `infra/lib/tasks.ts` | 新設 | ECS のクラスタ・実行の役割・DB の用意のタスクの定義 | aws-cdk-lib・`Network` | `TaskPlatform` | `constructor`・`RUNNER_TASK_SIZE`・`DB_PREP_TASK_SIZE` |
 | `infra/lib/cost-watch.ts` | 新設 | 運用の知らせのトピックと月の予算 | aws-cdk-lib | `CostWatch` | `constructor` |
 | `infra/lib/app-stack.ts` | 変更 | 4 つの部品を組み、AZ を `Fn::GetAZs` から返し、利用者の表に PITR を付ける | 上の 4 つ | `AppStack` | `availabilityZones`（新設の getter）・`constructor`（変更） |
-| `infra/lib/pipeline-stack.ts` | 変更 | 準備のアクションを特権にしてイメージを作らせ、自前の ECR への push を許す。反映のアクションに印のタグ付けを許す | `images.ts` | `PipelineStack` | `constructor`・`prepareBuildSpec`・`deployBuildSpec`（変更） |
+| `infra/lib/pipeline-stack.ts` | 変更 | 準備のアクションを特権にしてイメージを作らせ、自前の ECR への push と `images-cli.ts` の束ねを打たせる。反映のアクションに守りと印のタグ付けと、その照合に要る読み取りを許す | `images.ts` | `PipelineStack` | `constructor`・`prepareBuildSpec`・`deployBuildSpec`（変更） |
 | `infra/setup/missing-settings.ts` | 新設 | 足りない設定の一覧を集めて出す | `aws-reader` | モジュール | `MISSING_CHECKS`・`collectMissingSettings`・`printMissingSettings` |
 | `infra/lib/images.ts` | 新設 | イメージごとの自前の ECR とライフサイクルの規則、合成の入力のダイジェストの読み方 | aws-cdk-lib | `ImageRepository` | `constructor`・`IMAGE_SPECS`・`readImageDigests`・`lifecycleRules` |
 | `infra/bin/app.ts` | 変更 | 合成の入力のダイジェストを読んで `AppStack` へ渡す | `images.ts` | モジュール | 最上位の処理（変更） |
-| `infra/setup/images.ts` | 新設 | イメージを作って push し、一覧を書く。反映の前の在りかの確かめと、反映の後の印のタグ | `images.ts`・AWS SDK（ECR） | モジュール | `buildAndPushImages`・`checkImagesExist`・`tagDeployedImages` |
-| `infra/setup/images-cli.ts` | 新設 | パイプラインの準備と反映のアクションから上の 3 つを打つ入口 | `setup/images.ts` | モジュール | `main` |
-| `packages/contracts/data/exit-codes.json` | 変更 | 終了コード 9 `GC_BUSY` を足す（`setup.md` の表は生成） | — | — | — |
-| `infra/setup/aws-reader.ts` | 変更 | コスト配分タグ・組織・AZ・スタックの更新の状態を読む | AWS SDK（Cost Explorer・Organizations・EC2・CloudFormation） | モジュール | `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount`・`readStackActivity`（新設） |
-| `infra/setup/nd-setup.ts` | 変更 | `diff` の合成の前にイメージを push し、`deploy` の前後で在りかの確かめと印のタグを打つ。`diff` の最後に一覧を出す | 上の 2 つ | モジュール | `parseArgs`・`runDiff`・`synthesize`・`runDeploy`・`defaultDeps`（変更） |
+| `infra/setup/images.ts` | 新設 | イメージを作って push し、一覧を書く。反映の前の確かめと守りのタグ、反映済みの照合、反映の後の印のタグと守りの外し | `images.ts`・AWS SDK（ECR・CloudFormation） | モジュール | `buildAndPushImages`・`guardImages`・`readDeployedState`・`tagDeployedImages`・`releaseGuards` |
+| `infra/setup/images-cli.ts` | 新設 | パイプラインの準備と反映のアクションから上の関数を打つ入口。準備のアクションが 1 つのファイルに束ねて合成の結果へ入れる | `setup/images.ts` | モジュール | `main` |
+| `packages/contracts/data/exit-codes.json` | 変更 | 終了コード 9 `IMAGE_CHECK_FAILED`・10 `MARK_FAILED` を足し、0 と 6 の「AWS へ書いたか」を自前の ECR への push に合わせる（`setup.md` の表は生成。値は下の「設置のコマンド」の終了コードの表） | — | — | — |
+| `infra/setup/aws-reader.ts` | 変更 | コスト配分タグ・組織・AZ を読む | AWS SDK（Cost Explorer・Organizations・EC2） | モジュール | `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount`（新設） |
+| `infra/setup/nd-setup.ts` | 変更 | `diff` の合成の前にイメージを push し、`deploy` の前後で守りのタグ・反映済みの照合・印のタグを打つ。`diff` の最後に一覧を出す | 上の 2 つ | モジュール | `parseArgs`・`runDiff`・`synthesize`・`runDeploy`・`defaultDeps`（変更） |
 | `infra/test/support.ts` | 変更 | スタックの決まりの検査 | — | モジュール | `stackRuleViolations`（新設）・`hourlyCostResources`（変更） |
 | `apps/db-prep/src/main.ts` | 新設 | タスクの入口。引き換え → 用意か差し替え → 終わりの報告 | 下の 3 つ・contracts | モジュール | `main` |
 | `apps/db-prep/src/exchange.ts` | 新設 | タスクの ID を読み、API と話す | contracts | モジュール | `readTaskArn`・`exchange`・`complete` |
@@ -213,19 +213,49 @@ docs/operations/settings.md・setup.md
 | --- | --- | --- | --- | --- |
 | `IMAGE_SPECS` | `infra/lib/images.ts` | 新設 | `readonly { key: "db-prep"; dockerfile: string; context: string }[]` | 作るイメージの並び（今は DB の用意だけ）。#6 は `runner` の行を足す |
 | `ImageRepository` の `constructor` | 同上 | 新設 | `(scope, id, props: { name: string })` | ECR のリポジトリ（名前 `<prefix>-<environment>-<key>`・タグは書き換え不可・push の時の検査・`RemovalPolicy.RETAIN`）と `lifecycleRules()` の規則 |
-| `lifecycleRules` | 同上 | 新設 | `() => LifecycleRule[]` | 優先 1: `deployed-` の印の付いた版を 10 残す。優先 2: `build-` の版を push から 14 日で消す。優先 3: タグの無い版を 1 日で消す |
+| `lifecycleRules` | 同上 | 新設 | `() => LifecycleRule[]` | 優先 1: `keep-` の守りのタグの付いた版を 100 残す（上限の安全弁。守りは普段 3 版以下）。優先 2: `deployed-` の印の付いた版を 10 残す。優先 3: `build-` の版を push から 14 日で消す。優先 4: タグの無い版を 1 日で消す |
+| `nearExpiry` | 同上 | 新設 | `(image: ImageDetail, all: ImageDetail[], now: Date, marginDays: number) => boolean` | 規則で消える状態か、それに近いかを返す。`keep-` があれば偽。`deployed-` があれば、push のより新しい `deployed-` の版が 9 以上で真（優先 2 の 10 の 1 つ手前）。どちらも無ければ、push からの日数が `14 - marginDays` 以上で真 |
 | `readImageDigests` | 同上 | 新設 | `(env: NodeJS.ProcessEnv) => ImageDigests` | 環境の値 `ND_IMAGES` が指す一覧のファイル（`nd-setup-images.json`）を読み、キーごとのダイジェストを返す。無ければ空 |
-| `buildAndPushImages` | `infra/setup/images.ts` | 新設 | `(target: Target, s: Settings, out: string, deps: ImageDeps) => Promise<ImagesResult>` | リポジトリがあるかを読み、あれば `IMAGE_SPECS` ごとに `docker build --platform linux/amd64` → `build-<UTC の時刻>` のタグで push → ダイジェストを読み、`<out>/nd-setup-images.json` に書く。リポジトリが無ければ `{ status: "no_repository" }` を返して何も書かない |
-| `checkImagesExist` | 同上 | 新設 | `(target: Target, assembly: string, deps: ImageDeps) => Promise<{ missing: string[]; outsideKeep: string[] }>` | 合成の結果の一覧のダイジェストがリポジトリにあるかを `BatchGetImage` で読み、無いダイジェストを返す。あわせて `DescribeImages` で、そのダイジェストより push の新しい `deployed-` の印の付いた版が 10 以上あるもの（印を付けても規則で消える版）を返す |
-| `tagDeployedImages` | 同上 | 新設 | `(target: Target, assembly: string, at: Date, deps: ImageDeps) => Promise<void>` | 一覧のダイジェストの manifest を読み、`deployed-<UTC の時刻>` のタグで `PutImage` する |
-| `main` | `infra/setup/images-cli.ts` | 新設 | `(argv: string[], deps: ImageDeps) => Promise<number>` | `push --settings <file> --out <dir>`・`check --assembly <dir>`・`tag --assembly <dir>` の 3 つ。パイプラインの CodeBuild の資格情報（既定の解き方）で打つ |
+| `buildAndPushImages` | `infra/setup/images.ts` | 新設 | `(target: Target, s: Settings, out: string, deps: ImageDeps) => Promise<ImagesResult>` | リポジトリがあるかを読み、あれば `IMAGE_SPECS` ごとに `docker build --platform linux/amd64` → `build-<UTC の時刻>` のタグで push → ダイジェストを読む。そのダイジェストの版が前から ECR にあり（同じ中身の作り直し）、`nearExpiry(…, 7)` が真なら、その版を `BatchDeleteImage` で消してからもう一度 push し、push の時刻を新しくする（`keep-` の付いた版は `nearExpiry` が偽のため消さない）。一覧を `<out>/nd-setup-images.json` に書く。リポジトリが無ければ `{ status: "no_repository" }` を返して何も書かない |
+| `readDeployedState` | 同上 | 新設 | `(target: Target, assembly: string, stack: string, deps: ImageDeps) => Promise<{ matches: boolean; digests: string[] }>` | `DescribeStacks` でスタックの状態を、`GetTemplate`（`Original`）で反映済みのテンプレートを読む。`matches` は、状態が `CREATE_COMPLETE`・`UPDATE_COMPLETE`・`UPDATE_ROLLBACK_COMPLETE` のどれかで、反映済みのテンプレートが置き場のテンプレートと JSON として等しいときだけ真（その置き場が成功した反映で今使われている）。`digests` は反映済みのテンプレートが自前のリポジトリから引くダイジェスト |
+| `guardImages` | 同上 | 新設 | `(target: Target, assembly: string, at: Date, deps: ImageDeps) => Promise<GuardResult>` | 一覧のダイジェストがあるかを `BatchGetImage` で、`nearExpiry(…, 1)` を `DescribeImages` で読み、外れれば何も書かずに `unavailable` を返す。通れば各ダイジェストへ `keep-<UTC の時刻>` の守りのタグを `PutImage` で付け、`DescribeImages` で読み直して、まだあり守りのタグが付いたことを確かめる |
+| `tagDeployedImages` | 同上 | 新設 | `(target: Target, assembly: string, stack: string, at: Date, deps: ImageDeps) => Promise<"tagged" \| "not_deployed">` | 先に `readDeployedState` を打ち、`matches` が偽なら何も書かずに `not_deployed` を返す。真なら、一覧のダイジェストのうち `deployed-` がまだ無いものの manifest を読み、`deployed-<UTC の時刻>` のタグで `PutImage` する |
+| `releaseGuards` | 同上 | 新設 | `(target: Target, keep: string[], deps: ImageDeps) => Promise<void>` | 自前のリポジトリの `keep-` の付いた版のうち、ダイジェストが `keep` に無いものから、その `keep-` のタグだけを `BatchDeleteImage`（`imageTag` を指す）で外す。版は `build-` か `deployed-` のタグが残るため消えない |
+| `main` | `infra/setup/images-cli.ts` | 新設 | `(argv: string[], deps: ImageDeps) => Promise<number>` | `push --settings <file> --out <dir>`・`state --assembly <dir> --stack <名前>`・`guard --assembly <dir> --previous-out <file>`・`tag --assembly <dir> --stack <名前>`・`release --assembly <dir> --previous <file>` の 5 つ。パイプラインの CodeBuild の資格情報（既定の解き方）で打つ。`state` は `matches` が真なら 0、偽なら 1 で終わる。`guard` は反映の前に `readDeployedState` の `digests`（反映の前の現用の版 = 反映した後の戻し先）をファイルに書く |
 | `synthesize` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 画面のビルドの後、合成の前に `buildAndPushImages` を打ち、一覧のファイルを `ND_IMAGES` で合成へ渡す。一覧は合成の結果の置き場にあるため要約値に入る |
 | `parseArgs` | 同上 | 変更 | 戻り値の `DeployArgs` に `tagOnly: boolean` を足す | `deploy` の `--tag-only` を読む |
-| `runDeploy` | 同上 | 変更 | 変えない | 確認の値を照らした後・反映の前に `checkImagesExist` を打ち、無いダイジェストか規則で消えるダイジェストがあれば反映しない。反映が 0 で終わったら `tagDeployedImages` を打つ。`--tag-only` を付けると、反映を打たずに確認の値を照らして印だけを付ける（タグ付けの失敗の打ち直し） |
+| `runDeploy` | 同上 | 変更 | 変えない | 下の「反映の順」のとおり |
 
-- `SetupDeps` と `ImageDeps` に `docker: (args: string[]) => Promise<{ code: number; stdout: string }>`・`ecr`（`DescribeRepositories`・`GetAuthorizationToken`・`BatchGetImage`・`PutImage` の包み）を置く（テストは本物の Docker と AWS を呼ばない）
+- `SetupDeps` と `ImageDeps` に `docker: (args: string[]) => Promise<{ code: number; stdout: string }>`・`ecr`（`DescribeRepositories`・`GetAuthorizationToken`・`DescribeImages`・`BatchGetImage`・`PutImage`・`BatchDeleteImage` の包み）・`cfn`（`DescribeStacks`・`GetTemplate` の包み）を置く（テストは本物の Docker と AWS を呼ばない）
 - push の前の `docker login` は `GetAuthorizationToken` の値を標準入力で渡し、値をログ・出力に出さない
 - `AppStack` の props に `images: ImageDigests` を足し、`bin/app.ts` が `readImageDigests(process.env)` で渡す。CI の合成は `ND_IMAGES` を持たず、タスクの定義を作らない版になる。スタックのテストは作り物のダイジェスト（`sha256:` と 0 を 64 桁）を渡して、タスクの定義を持つ版を照らす
+- 一覧のファイルが置き場に無い（ECR がまだ無い版・この課題より前の版）ときは、`runDeploy` も反映のアクションもイメージの段をすべて飛ばし、今のとおり反映だけを打つ
+
+### 守る版
+
+ライフサイクルの規則は push の時刻で並べて数え、タグを足しても push の時刻は変わらない（LIB7。M3 で確かめる）。そのため、印の数と日数だけでは、古い版へ戻す反映や期限の近い版の反映で、反映の途中に版が消えうる。次の 3 つを `keep-` の守りのタグで優先 1 の規則に入れ、日数と印の数から外す。
+
+| 守る版 | 付ける時 | 外す時 |
+| --- | --- | --- |
+| 反映中の候補（置き場の一覧のダイジェスト） | `guardImages`。CloudFormation へ書く前 | 反映が失敗したまま次の反映が成功したとき（その `releaseGuards`） |
+| 現用（反映が成功した版） | 候補のときに付けたものが残る | 次の次の反映が成功したとき |
+| 戻し先（1 つ前の現用） | 前の反映で付けたものが残る | 次の反映が成功したとき |
+
+- `releaseGuards` の `keep` は、反映の後の `readDeployedState` の `digests`（現用）と、`guard` が反映の前に書いた `digests`（戻し先）の和である。`--tag-only` と反映のアクションの再試行は戻し先を知らないため `releaseGuards` を打たない（外し残しは次の成功で外れる）
+- 2 つ前より古い版は `deployed-` の印で 10 まで残る。外れた版へ戻すときは「異常系の処理」の作り直しの道筋による
+- `nearExpiry` の幅は、`guardImages` が 1 日（確かめてから守りのタグが付くまでの間と、規則に当たってから 24 時間のうちに消える遅れを覆う）、`buildAndPushImages` が 7 日（`diff` から承認までの間を覆う）である
+
+### 反映の順
+
+`runDeploy`（`--tag-only` なし）は次の順に打つ。反映のアクションも同じ順を `images-cli.ts` で打つ（下の「反映のパイプライン」）。
+
+1. 確認の値を照らす（違えば 7）
+2. `guardImages` を打つ。反映の前の現用のダイジェストを控える。`unavailable` か守りのタグの失敗なら 9 で止まり、CloudFormation へは書かない
+3. 反映する。失敗なら 8（候補の守りのタグは残り、次の成功で外れる）
+4. `tagDeployedImages` を打つ。`not_deployed` か失敗なら 10 で止まる。候補の守りのタグが残るため、現用の版は消えない
+5. `releaseGuards` を打つ。失敗は警告の 1 行だけで、終了コードは 0 のまま
+
+`--tag-only` は 1 と 4 だけを打つ。4 が `not_deployed` なら、その置き場は今のスタックに成功した反映で使われていないため 9 で止まり、何も書かない。
 
 ### 異常系の処理
 
@@ -233,18 +263,23 @@ docs/operations/settings.md・setup.md
 | --- | --- | --- | --- | --- | --- | --- |
 | `buildAndPushImages` | Docker が無い・作れない | 端末に Docker が無い・Dockerfile の誤り | `docker` の終了コード | 合成せずに止める | 「Docker が要る」か docker の出力、`EXIT.BUILD` | 何も合成していない。push した分は印が無く 14 日で消える。再実行できる |
 | `buildAndPushImages` | push できない | 権限・網 | `docker push` の終了コード | 合成せずに止める | docker の出力、`EXIT.BUILD` | 同上 |
-| `checkImagesExist` | 引くイメージが無い | 印の無い版が 14 日で消えた・10 を超えて古い版へ戻す | `BatchGetImage` の `failures` | 反映しない | 無いダイジェストと「前の版のコミットで `diff` から作り直す」、`EXIT.BUILD` | 何も書いていない |
-| `checkImagesExist` | 印を付けても規則で消える | 10 を超えて古い版へ戻す | `DescribeImages` の push の時刻と印 | 反映しない | 当たるダイジェストと「前の版のコミットで `diff` から作り直す」、`EXIT.BUILD` | 何も書いていない |
-| `tagDeployedImages` | タグを付けられない | 権限・網 | SDK の例外 | 止める | 「反映は済んだ。印のタグを付けられなかった。14 日のうちに打ち直す」と `deploy --tag-only` の打ち直しのコマンド、`EXIT.BUILD` | 反映は済んでいる。同じ置き場で `--tag-only` を打てば付く（同じダイジェストへの新しい時刻のタグ） |
+| `guardImages` | 引くイメージが無い・消える状態に近い | 印の無い版が日数で消えた・`deployed-` の 10 から外れた古い版へ戻す・承認までに期限が近づいた | `BatchGetImage` の `failures`・`DescribeImages` の push の時刻とタグ | 反映しない | 当たるダイジェストと「その版のコミットで `diff` から作り直す」、`EXIT.IMAGE_CHECK_FAILED`（9） | 何も書いていない。作り直しは下の行 |
+| `guardImages` | 守りのタグを付けられない | 権限・網 | SDK の例外・読み直し | 反映しない | SDK の誤りと「原因を直して同じ `deploy` を打ち直す」、9 | CloudFormation へは書いていない。付いた守りのタグは次の成功で外れる。同じ置き場で打ち直せる |
+| `buildAndPushImages`（作り直し） | 同じ中身を作り直すと同じダイジェストになり、push しても push の時刻が変わらない | 再現できるビルド | `DescribeImages` の push の時刻 | `nearExpiry(…, 7)` が真なら、その版を消して push し直す。守りのタグの付いた版（現用と戻し先）は消さない | 「同じ中身の版を push し直した」の 1 行 | 消えていた版は新しい push の時刻で戻る。新しい置き場で `deploy` を打つ |
+| `tagDeployedImages` | 印を付けられない | 権限・網 | SDK の例外 | 止める | 「反映は済んだ。印のタグを付けられなかった。守りのタグで現用の版は消えない」と `deploy --tag-only` の打ち直しのコマンド、`EXIT.MARK_FAILED`（10） | CloudFormation の反映は済んでいる。同じ置き場で `--tag-only` を打てば、反映済みの照合の後に付く |
+| `tagDeployedImages` | 反映済みと照合できない | 反映の後にスタックの状態を読めない・別の反映が先に入った | `readDeployedState` | 印を付けない | 「反映は済んだが、この置き場が今のスタックと合わない」、10 | 同上。`--tag-only` も照合が合わなければ 9 で止まり、印を付けない |
+| `releaseGuards` | 守りのタグを外せない | 権限・網 | SDK の例外 | 続ける | 警告の 1 行。終了コードは 0 | 次の成功した反映で外れる。守りの多い間は保管の費用が少し増えるだけ |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `ImageRepository`・`lifecycleRules` | 合成の出力に、タグ書き換え不可のリポジトリと 3 つの規則（優先 1 が `deployed-` の 10）がある | — | 優先の入れ替え・`deployed-` の規則が数でなく日数で落ちる |
+| `ImageRepository`・`lifecycleRules` | 合成の出力に、タグ書き換え不可のリポジトリと 4 つの規則（優先 1 が `keep-`、優先 2 が `deployed-` の 10）がある | — | 優先の入れ替え・`deployed-` の規則が数でなく日数で落ちる |
+| `nearExpiry` | `keep-` の付いた版は 30 日でも偽 | `build-` だけの版は幅 1 で 13 日の 1 秒前が偽・13 日で真。`deployed-` の版はより新しい印が 8 で偽・9 で真 | — |
 | `AppStack`（ダイジェストあり） | DB の用意のタスクの定義のイメージが `<リポジトリ>@sha256:…` | ダイジェストなしでタスクの定義を作らない | ダイジェストを変えると要約値が変わる（合成の結果の要約値の比べ） |
-| `buildAndPushImages` | リポジトリがあれば作って push し、一覧を書く | リポジトリが無ければ何もしない | Docker の失敗・push の失敗で投げ、一覧を書かない。login の値が出力に出ない |
-| `checkImagesExist`・`runDeploy` | すべてあれば反映して印を付ける | 新しい印の付いた版が 9 なら通り、10 なら止まる | 1 つでも無ければ反映を呼ばない。反映の失敗で印を付けない。`--tag-only` は反映を呼ばない |
+| `buildAndPushImages` | リポジトリがあれば作って push し、一覧を書く | リポジトリが無ければ何もしない。同じダイジェストの版が 6 日前の push なら消さず、7 日前なら消して push し直す。`keep-` の付いた同じダイジェストは古くても消さない | Docker の失敗・push の失敗で投げ、一覧を書かない。login の値が出力に出ない |
+| `readDeployedState` | 状態が `UPDATE_COMPLETE` でテンプレートが等しければ真 | `UPDATE_ROLLBACK_COMPLETE` で等しければ真 | テンプレートが違う（未反映・置き換わった）・`UPDATE_IN_PROGRESS`・`UPDATE_ROLLBACK_FAILED` で偽 |
+| `runDeploy`（反映の順） | すべてあれば守りのタグ → 反映 → 照合 → 印 → 外しの順に呼ぶ | 期限の直前（`build-` だけで 13 日）の版で反映を呼ばずに 9。12 日 23 時間の版は守りのタグを付けてから反映し、反映の後に時計を 15 日へ進めても `nearExpiry` が偽 | 1 つでも無ければ反映を呼ばない。守りのタグの失敗で反映を呼ばない。反映の失敗で印を付けない。印のタグの失敗で 10 になり、守りのタグが外れない。外しの失敗で 0 のまま。`--tag-only` は反映を呼ばず、照合が偽なら 9 で何も書かない |
 
 ## 設置のコマンド
 
@@ -263,7 +298,7 @@ docs/operations/settings.md・setup.md
 | `runDiff` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 確認の値を出した後に `collectMissingSettings` と `printMissingSettings` を打つ。終了コードは変えない |
 
 - `SetupDeps` に `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount` を足す（テストは本物の AWS を呼ばない）
-- `MISSING_CHECKS` の 5 種類: Google のクライアントの ID が無い・`budget.scope` が `tags` でタグ `app-prefix`・`app-env` が `Active` でない（下のタグの行と、読めないときの行。`account` なら照らさない）・`ops.notify_emails` が空・`buildAndPushImages` が `no_repository` を返した（「ECR がまだ無いため、イメージを持たない版を合成した。この差分を反映した後に、もう一度 `diff` を打つ」）・`readGetAzsCount` が 2 未満（「`Fn::GetAZs` が返す AZ が <数> つで、反映が網を作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --availability-zone <AZ>`）か、既定のサブネットをすべて消す」。読めなければ「確かめられない（`ec2:DescribeSubnets`・`ec2:DescribeAvailabilityZones` を許した profile で読む）」）
+- `MISSING_CHECKS` の 5 種類: Google のクライアントの ID が無い・`budget.scope` が `tags` でタグ `app-prefix`・`app-env` が `Active` でない（下のタグの行と、読めないときの行。`account` なら照らさない）・`ops.notify_emails` が空・`buildAndPushImages` が `no_repository` を返した（「ECR がまだ無いため、イメージを持たない版を合成した。この差分を反映した後に、新しい置き場でもう一度 `diff` を打ち、出た確認の値で `deploy` を打つ」。順は下の「初めての設置の手順」）・`readGetAzsCount` が 2 未満（「`Fn::GetAZs` が返す AZ が <数> つで、反映が網を作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --availability-zone <AZ>`）か、既定のサブネットをすべて消す」。読めなければ「確かめられない（`ec2:DescribeSubnets`・`ec2:DescribeAvailabilityZones` を許した profile で読む）」）
 - 読めないときの行の文（設計文書の決定 12）: 「コスト配分タグ `app-prefix`・`app-env` が有効かを確かめられない。有効でなければ予算は 0 を数え続け、予算の知らせは鳴らない。次の操作: <操作>」。読めない原因は SDK の例外だけでは権限の不足と組織の制限を分けられないため、`readOrganizationManager` で分ける。<操作> は、`member: false` なら「`ce:ListCostAllocationTags` を許した profile で `diff` を打ち直す」、`member: true` なら「組織の管理のアカウント <ID> にタグの有効化を確かめて頼む（メンバーのアカウントでは権限を足しても有効にできない）。頼めなければ設定のファイルの `budget.scope` を `account` にする」、`unknown` なら両方を「組織に入っていなければ …。組織のメンバーなら …」の 2 つに分けて示す（管理のアカウントの ID は「組織の管理のアカウント」とだけ示す）
 - タグの行の文（設計文書の決定 6）: 「コスト配分タグ <有効でないタグ> が有効でない。有効になるまで予算は 0 を数え続け、予算の知らせは鳴らない。有効にする先: <先>。有効にできなければ設定のファイルの `budget.scope` を `account` にする（アカウントの全体を数える）」。<先> は `readOrganizationManager` が `member: false` なら「このアカウント（請求の画面のコスト配分タグ）」、`member: true` なら「組織の管理のアカウント <ID>（メンバーのアカウントでは有効にできない）」、`unknown` なら「組織に入っていなければこのアカウント、組織のメンバーなら組織の管理のアカウント」
 
@@ -281,19 +316,101 @@ docs/operations/settings.md・setup.md
 | `readGetAzsCount` | 既定のサブネットが 3 つの AZ にあれば 3 | 既定のサブネットが 1 つの AZ にだけあれば、使える AZ が 3 つでも 1。既定のサブネットが無ければ使える AZ の数 | — |
 | `runDiff` | 出力の最後に一覧の欄 | — | 足りない設定があっても終了コード 0 |
 
+### 終了コード
+
+正本は `packages/contracts/data/exit-codes.json` で、`setup.md` の表はそこから作る。足す行と直す行は次のとおりで、ほかの行（2〜5・7・8）は変えない。
+
+| 終了コード | 名前 | 意味 | AWS へ書いたか |
+| --- | --- | --- | --- |
+| 0 | `OK`（直す） | `diff` は差分を示して止まった。`deploy` は反映した | `diff` は自前の ECR へ push した（ECR があるとき）。`deploy` は反映し、イメージに守りと印のタグを付けた |
+| 6 | `BUILD`（直す） | 画面のビルド・イメージの作成と push・合成・差分の作成が失敗した | push の後に止まれば、push した版が自前の ECR に残る（印が無く 14 日で消える）。ほかは書いていない |
+| 9 | `IMAGE_CHECK_FAILED`（足す） | 反映の前に、引くイメージが無い・消える状態に近い・守りのタグを付けられない。`--tag-only` では、置き場が今のスタックに成功した反映で使われていない | CloudFormation へは書いていない。守りのタグだけが残りうる（次の成功した反映で外れる） |
+| 10 | `MARK_FAILED`（足す） | 反映は済んだが、反映済みの照合か印のタグが失敗した | 反映した。守りのタグで現用の版は消えない。同じ置き場で `deploy --tag-only` を打ち直す |
+
+`setup.md` の「終了コード」の節の地の文「0 と 8 のほかは、AWS へ何も書いていない」を、次の 3 つに直す。(1) 2〜5・7・9 は CloudFormation へ何も書いていない（9 はイメージの守りのタグだけが残りうる）ため、原因を直して同じコマンドを打ち直す。(2) 0 の `diff` と 6 は自前の ECR へ push していることがあるが、反映しなければどのタスクの定義からも引かれない。(3) 10 は反映が済んだ状態で、反映を打ち直さずに同じ置き場で `npm run nd-setup -- deploy --profile <profile> --assembly <置き場> --confirm <確認の値> --tag-only` を打つ。`deploy` の節の「どこかで欠ければ、AWS へ書かずに止まる」も、守りのタグと反映の後の印の段を足して直す。
+
+### 初めての設置の手順
+
+ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回目の反映が DB の用意のタスクの定義を足す。`setup.md` の「使い方の場面」の「自分で設置する人」の段 2・3（`diff` と `deploy`）を、次の 4 つの段に置き換えてこのまま写す。どの段も同じ profile と設定のファイルで打つ。
+
+1. `npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> --out <置き場 1>` を打つ。次を読む
+   - 足りない設定の一覧に「ECR がまだ無いため、イメージを持たない版を合成した」の行がある
+   - 差分が自前の ECR のリポジトリ（`AWS::ECR::Repository`。今は DB の用意の 1 つ）を足す
+   - 差分に DB の用意のタスクの定義（`AWS::ECS::TaskDefinition`）が無い
+   - 出力の確認の値（確認の値 1）を控える
+2. `npm run nd-setup -- deploy --profile <profile> --assembly <置き場 1> --confirm <確認の値 1>` を打ち、0 で終わることを読む。置き場 1 にイメージの一覧が無いため、イメージの段は飛ぶ
+3. 同じ対象へ、新しい置き場で `npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> --out <置き場 2>` を打つ。次を読む
+   - 出力に DB の用意のイメージを push した行と、そのダイジェスト（`sha256:…`）がある
+   - 差分が DB の用意のタスクの定義を足し、そのイメージが `<リポジトリ>@sha256:…` で、ダイジェストが上の push の行と同じ
+   - 差分にリポジトリの作り直しや、ほかの資源の消しが無い
+   - 足りない設定の一覧から ECR の行が消えた
+   - 出力の確認の値（確認の値 2）を控える。確認の値 1 とは違う
+4. `npm run nd-setup -- deploy --profile <profile> --assembly <置き場 2> --confirm <確認の値 2>` を打ち、0 で終わることと、守りのタグ（`keep-`）と印のタグ（`deployed-`）を付けた行を読む。10 で終わったら、上の「終了コード」の `--tag-only` を打つ
+
+確認の値 1 を 4 に使うと 7 で止まる（置き場が違う）。2 と 3 の間に日が空いても順は変わらない。
+
 ## 反映のパイプライン
 
-満たす決定: 決定 11
+満たす決定: 決定 2・11
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `PipelineStack` の `constructor` | `infra/lib/pipeline-stack.ts` | 変更 | 変えない | 準備のアクションの CodeBuild を `privileged: true` にし、その役割に `ecr:GetAuthorizationToken` と、自前のリポジトリ（`<prefix>-<environment>-` の頭の名前）への push と読みを許す。反映のアクションの役割に、同じリポジトリの `BatchGetImage`・`PutImage` を許す。引き受ける bootstrap の役割は今の `deploy`・`file-publishing` のままで、`image-publishing` は足さない |
-| `prepareBuildSpec` | 同上 | 変更 | 変えない | 合成の前に `node infra/setup/images-cli.ts push --settings <設定> --out cdk.out` を打ち、`ND_IMAGES` を付けて合成する |
-| `deployBuildSpec` | 同上 | 変更 | 変えない | 要約値を照らした後・反映の前に `images-cli.ts check --assembly cdk.out` を、反映の後に `images-cli.ts tag --assembly cdk.out` を打つ |
+| `PipelineStack` の `constructor` | `infra/lib/pipeline-stack.ts` | 変更 | 変えない | 準備のアクションの CodeBuild を `privileged: true` にする。役割は下の権限の表のとおり。引き受ける bootstrap の役割は今の `deploy`・`file-publishing` のまま |
+| `prepareBuildSpec` | 同上 | 変更 | 変えない | 下の「準備のアクションの手順」 |
+| `deployBuildSpec` | 同上 | 変更 | 変えない | 下の「反映のアクションの手順」 |
 
-`docs/operations/setup.md` の前提の表に Docker（`diff` を打つ端末）を足し、手順に「パイプラインで初めてイメージを引く版は、パイプラインのスタックを先に反映する」と「初めての設置は、ECR を作る反映の後にもう一度 `diff` と `deploy` を打つ」を足す。あわせて、先の反映の前に保存するもの・戻しを始める条件・前の版へ戻す 4 つの段（設計文書の決定 11）を、運用する環境の節に手順として写す。
+### 権限
+
+自前のリポジトリは `<prefix>-<environment>-` の頭の名前に絞り、スタックは `app` のスタックに絞る。`ecr:GetAuthorizationToken` だけは資源を絞れない。
+
+| 役割 | 許す操作 | 使う関数 |
+| --- | --- | --- |
+| 準備のアクション | `ecr:GetAuthorizationToken`・`ecr:DescribeRepositories`・`ecr:BatchCheckLayerAvailability`・`ecr:InitiateLayerUpload`・`ecr:UploadLayerPart`・`ecr:CompleteLayerUpload`・`ecr:PutImage`・`ecr:BatchGetImage`・`ecr:DescribeImages`・`ecr:BatchDeleteImage` | `buildAndPushImages`（消すのは同じ中身の push し直しのときだけ） |
+| 反映のアクション | `ecr:BatchGetImage`・`ecr:DescribeImages`・`ecr:PutImage`・`ecr:BatchDeleteImage`・`cloudformation:DescribeStacks`・`cloudformation:GetTemplate` | `guardImages`・`readDeployedState`・`tagDeployedImages`・`releaseGuards`（消すのは `keep-` のタグだけ。IAM ではタグだけに絞れないため、関数が `imageTag` だけを渡す） |
+
+### 配る方法
+
+反映のアクションの入力は準備のアクションの出力（`Assembly`）だけで、`Source` も `node_modules` も持たない。そのため、準備のアクションが `images-cli.ts` とその依存（AWS SDK の ECR と CloudFormation の部品）を、`infra` の esbuild で 1 つのファイル `cdk.out/nd-tools/images-cli.mjs`（反映のアクションの Node 22 で動く ESM）に束ね、合成の結果の置き場へ入れる。置き場の中にあるため要約値に入り、承認した確認の値の中の道具だけが反映のアクションで動く。反映のアクションの入力と出力（`cdk.out/**/*`・`approval/**/*`）は変えない。設置のコマンドは手元の `infra/setup/images.ts` を直に使い、束ねたファイルを使わない。
+
+### 準備のアクションの手順
+
+1. 今の手順のとおり、設定を書き出し、`npm ci` と画面のビルドを打つ
+2. `infra/setup/images-cli.ts` があれば `node infra/setup/images-cli.ts push --settings <設定> --out .nd-images` を打つ。ECR がまだ無ければ「ECR がまだ無いため、イメージを持たない版を合成した。この反映の後に準備を再び走らせる（決定 11）」を記録へ出し、一覧を書かずに続ける
+3. `.nd-images/nd-setup-images.json` があれば `ND_IMAGES` にそのパスを付けて合成し、無ければ今のとおり合成する。合成の後、一覧を `cdk.out/nd-setup-images.json` へ写す
+4. `infra/setup/images-cli.ts` があれば、束ねたファイルを `cdk.out/nd-tools/images-cli.mjs` に書く
+5. 今の手順のとおり、差分と要約値を作る（一覧と束ねたファイルを含む）
+
+### 反映のアクションの手順
+
+1. 今の手順のとおり、要約値を数え直して承認した値と比べる
+2. `cdk.out/nd-setup-images.json` が無ければ、今の手順のとおり反映して終わる
+3. 一覧があるのに `cdk.out/nd-tools/images-cli.mjs` が無ければ、反映せずに 1 で終わる
+4. `node cdk.out/nd-tools/images-cli.mjs state --assembly cdk.out --stack <app>` が 0（この置き場は反映済み）なら 5 と 6 を飛ばす。同じ実行の反映のアクションの再試行（CodePipeline の「失敗したアクションの再試行」）が、反映を打ち直さずに印だけを付け直す入口になる。承認は同じ実行のため要らない
+5. `images-cli.mjs guard --assembly cdk.out --previous-out previous.json` を打つ。0 でなければ反映せずに止まる
+6. `cdk deploy` を今のとおり打つ
+7. `images-cli.mjs tag --assembly cdk.out --stack <app>` を打つ。0 でなければ「反映は済んだ。印のタグを付けられなかった。この反映のアクションを再試行する」を記録へ出して 1 で終わる（パイプラインの失敗の知らせが鳴る）
+8. 5 を打ったときだけ `images-cli.mjs release --assembly cdk.out --previous previous.json` を打つ。失敗は警告だけで、アクションは成功で終わる
+
+### 移行の間の動き
+
+パイプラインのスタックを先に反映してから main へマージするまで（決定 11）、`Source` は `images-cli.ts` を持たない前の版である。
+
+| `Source` | 準備のアクション | 反映のアクション |
+| --- | --- | --- |
+| 前の版（`images-cli.ts` が無い） | 2 と 4 を飛ばし、今のとおり合成する。一覧も束ねたファイルも無い | 一覧が無いため、今のとおり反映する |
+| この課題の版で ECR がまだ無い（マージの後の最初の実行） | 2 が ECR の無いことを記録へ出し、一覧を書かない。束ねたファイルは書く | 一覧が無いため、今のとおり反映する（ECR を作る）。その後に準備を再び走らせる（決定 11） |
+| この課題の版で ECR がある | push し、一覧と束ねたファイルを置き場へ入れる | 4〜8 を打つ |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `PipelineStack`・`prepareBuildSpec`・`deployBuildSpec` | 合成の出力の準備の役割と反映の役割が、上の権限の表の操作だけを持つ。準備の CodeBuild が特権 | 準備の手順の 2 と 4 が `images-cli.ts` の有無で分かれ、反映の手順の 2 が一覧の有無で分かれる | 反映の役割に `DescribeImages` か `GetTemplate` が無いと落ちる。反映の手順が `state` の 0 で `cdk deploy` を飛ばさないと落ちる |
+| `images-cli.ts`（束ねたファイル） | esbuild で束ねたファイルを `node_modules` の無い一時のディレクトリで打ち、`--help` が 0 | — | 束ねたファイルが外の import を残すと落ちる |
+
+`docs/operations/setup.md` の前提の表に Docker（`diff` を打つ端末）を足し、手順に「パイプラインで初めてイメージを引く版は、パイプラインのスタックを先に反映する」と、上の「初めての設置の手順」を足す。あわせて、先の反映の前に保存するもの・戻しを始める条件・前の版へ戻す 4 つの段・マージの後に準備を再び走らせる段（設計文書の決定 11）を、運用する環境の節に手順として写す。`pipeline-approval.md` には、反映のアクションが印のタグで失敗したときは承認をやり直さずに反映のアクションを再試行することを足す。
 
 ## DB の用意のタスク
 
@@ -388,6 +505,6 @@ CI の `check` のジョブに `postgres:16`（要約値で固定）のサービ
 | --- | --- | --- | --- |
 | M1 | 接続の無い間の一時停止 | 反映の後 3 日、CloudWatch の `ServerlessDatabaseCapacity` を 5 分の粒度で読み、0 でない時間の合計と起きた回数を数える | 0 でない時間が保守の起き上がり（1 回 20 分程度）だけ |
 | M2 | 単価 | EventBridge Scheduler・DynamoDB の PITR とストリームの単価の頁を、設置したリージョンで読む | 見込みの額への効きを全体の設計の見込みに書く |
-| M3 | ECR のライフサイクルの規則 | 反映の後に、DB の用意のリポジトリで `deployed-` の印が付いたことを読み、ライフサイクルの規則の試し（`StartLifecyclePolicyPreview`）を打って、消える予定の版を読む。戻しの予行（M4）の後にもう一度試しを打つ。あわせて、同じダイジェストへタグを足した前後で、イメージの push の時刻（`imagePushedAt`）が変わらないことを読む | 使用中の版と M4 の戻し先の版が消える予定に入らない。印の無い版だけが日数で消える予定に入る |
+| M3 | ECR のライフサイクルの規則 | 反映の後に、DB の用意のリポジトリで `deployed-` の印が付いたことを読み、ライフサイクルの規則の試し（`StartLifecyclePolicyPreview`）を打って、消える予定の版を読む。戻しの予行（M4）の後にもう一度試しを打つ。あわせて次を読む。(a) 同じダイジェストへタグを足した前後で、イメージの push の時刻（`imagePushedAt`）が変わらない。(b) 使っていない作り物の版を `BatchDeleteImage` で消して同じ中身を push し直すと、push の時刻が新しくなる。(c) タグの書き換え不可のリポジトリで、`imageTag` を指した `BatchDeleteImage` が `keep-` のタグだけを外し、版と `build-` のタグが残る | 使用中の版・M4 の戻し先の版・守りのタグの付いた版が消える予定に入らない。印も守りも無い版だけが日数で消える予定に入る。(a)〜(c) が書いたとおり。(b) か (c) が外れれば、作り直しの道筋と守りの外し方を #13 の中で直してから閉じる |
 | M4 | 戻しの予行 | 決定 10 の手順。戻す前に、Aurora のクラスタの識別子とリソースの ID（`DescribeDBClusters` の `DbClusterResourceId`）・利用者の表の項目の数と作り物の目印の項目 1 件を控える。前の合成の結果を `deploy` し、同じ値を読み直し、確認の値の照らしを読む | クラスタの識別子とリソースの ID が前後で同じ・利用者の表の項目の数と目印の項目が残る・確認の値の違う `deploy` が止まる。プロジェクトのデータベースの残りは確かめない（#44 が受ける） |
 | M5 | 予算と運用の知らせ | 予算を 1 ドルにした設定で `diff`・`deploy` し、知らせのメールが届くことを読んだ後に戻す | 宛先に届く |
