@@ -118,6 +118,22 @@ describe("createLogger", () => {
     expect(out.records()[0]).toMatchObject({ operation: "call" });
   });
 
+  it("伏せる鍵の上書きは元の鍵で決め、残った鍵の重なりには番号を付ける", () => {
+    const out = capture();
+    const log = createLogger(context, out.sink);
+    const same = SECRET_SAMPLES["github_personal_token"] ?? "";
+    const other = SECRET_SAMPLES["github_app_token"] ?? "";
+    log.child({ [same]: "child" }).info("同じ鍵", { [same]: "call" });
+    log.child({ [same]: "first" }).child({ [other]: "second" }).info("別の鍵");
+    log.child({ [same]: "child" }).info("別の鍵を呼び出しで", { [other]: "call" });
+    expect(leakedSecrets(out.lines.join("\n"))).toEqual([]);
+    const [first, second, third] = out.records();
+    expect(first).toMatchObject({ "[redacted]": "call" });
+    expect(first).not.toHaveProperty("[redacted]#2");
+    expect(second).toMatchObject({ "[redacted]": "first", "[redacted]#2": "second" });
+    expect(third).toMatchObject({ "[redacted]": "child", "[redacted]#2": "call" });
+  });
+
   it("child の項目を読めなくても、親のロガーで続ける", () => {
     const out = capture();
     const fields = Object.defineProperty({}, "bad", {

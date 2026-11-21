@@ -67,6 +67,20 @@ describe("createLogger（ブラウザー版の pino）", () => {
     expect(second).toMatchObject({ request_id: "req-1", "field.request_id": "fr", "field.request_id#2": "r" });
   });
 
+  it("伏せる鍵の上書きは元の鍵で決め、残った鍵の重なりには番号を付ける", () => {
+    const out = capture();
+    const log = createLogger(context, out.sink);
+    const same = SECRET_SAMPLES["github_personal_token"] ?? "";
+    const other = SECRET_SAMPLES["github_app_token"] ?? "";
+    log.child({ [same]: "child" }).info("同じ鍵", { [same]: "call" });
+    log.child({ [same]: "first" }).child({ [other]: "second" }).info("別の鍵");
+    expect(leakedSecrets(out.lines.join("\n"))).toEqual([]);
+    const [first, second] = out.records();
+    expect(first).toMatchObject({ "[redacted]": "call" });
+    expect(first).not.toHaveProperty("[redacted]#2");
+    expect(second).toMatchObject({ "[redacted]": "first", "[redacted]#2": "second" });
+  });
+
   it("sink を省くと、レベルに合う console の口へ物でなく JSON の 1 行を渡す", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

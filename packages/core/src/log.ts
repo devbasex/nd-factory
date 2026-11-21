@@ -74,16 +74,28 @@ function reserved(layers: readonly LogFields[]): LogFields {
   return out;
 }
 
+// child の項目の写し。値は伏せるが鍵は元の名前のまま持つ。上書きは元の鍵で決め（伏せた鍵では、同じ鍵が別の名前になり、
+// 別の鍵が同じ "[redacted]" に重なる）、残った鍵を伏せて重なりに番号を付けるのは行を書く時の formatters.log が 1 度だけ行う
+function snapshot(fields: LogFields): LogFields {
+  const out: LogFields = {};
+  for (const [key, value] of Object.entries(fields)) {
+    // 鍵の名前で伏せる値（token など）も伏せるよう、鍵と値の組で redact に通し、値だけを取る
+    const [safe] = Object.values(loggable({ [key]: value }));
+    Object.defineProperty(out, key, { value: safe, enumerable: true, writable: true, configurable: true });
+  }
+  return out;
+}
+
 function wrap(base: PinoLogger, bound: readonly LogFields[]): Logger {
   const line = (fields: LogFields | undefined): LogFields => reserved([...bound, fields ?? {}]);
   return {
     info: (msg, fields) => quietly(() => base.info(line(fields), msg)),
     warn: (msg, fields) => quietly(() => base.warn(line(fields), msg)),
     error: (msg, fields) => quietly(() => base.error(line(fields), msg)),
-    // 子の項目はこの時に伏せた写しを取って持つ。扱えない（読むと投げる getter など）ときは、親のロガーのまま続ける
+    // 子の項目はこの時に値を伏せた写しを取って持つ。扱えない（読むと投げる getter など）ときは、親のロガーのまま続ける
     child: (fields) => {
       try {
-        return wrap(base, [...bound, loggable(fields)]);
+        return wrap(base, [...bound, snapshot(fields)]);
       } catch {
         return wrap(base, bound);
       }
