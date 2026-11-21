@@ -443,16 +443,16 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 ## 言語と書き方の決まり
 
-子の課題が詳細設計で引く、言語と画面の組み方と TypeScript の書き方の細則の正本である（決定 140）。縛るのは根の `tsconfig.json`・`eslint.config.js`・`apps/web/package.json`・`apps/web/vite.config.ts` である。画面の組み方の行（React と TSX）を除き、値は今のリポジトリの設定と同じである。React と TSX の規約は #12 で入れ、その PR が `apps/web/package.json` の依存（LIB87・LIB90）、根の `tsconfig.json` の `jsx`、`apps/web/vite.config.ts` の React のプラグイン、画面の外から React と `.tsx` を import すると落とす ESLint の規則を整える。それまでの画面は今の骨組み（素の TypeScript）のままである。`AGENTS.md` は手順（`npm run generate`・`npm run check`）だけを持ち、細則はこの節を指す。
+子の課題が詳細設計で引く、言語と画面の組み方と TypeScript の書き方の細則の正本である（決定 140）。縛るのは共通の `tsconfig.base.json`（各置き場の `tsconfig.json` が `extends` で引く）・`apps/web/tsconfig.json`・`eslint.config.js`・`apps/web/package.json`・`apps/web/vite.config.ts` である。画面の組み方の行（React と TSX）を除き、値は今のリポジトリの設定と同じである。React と TSX の規約は #12 で入れ、その PR が `apps/web/package.json` の依存（LIB87・LIB90）、`apps/web/tsconfig.json` の `jsx` と `include` の `.tsx`、`apps/web/vite.config.ts` の React のプラグイン、画面の外から React と `.tsx` を import すると落とす ESLint の規則を整える。それまでの画面は今の骨組み（素の TypeScript）のままである。`AGENTS.md` は手順（`npm run generate`・`npm run check`）だけを持ち、細則はこの節を指す。
 
 | 項目 | 決まり | 縛るもの |
 | --- | --- | --- |
-| 言語 | コードは TypeScript だけで書く。画面の外（API・インフラ・設置のコマンド・検査）は Node 24 の型の剥がし（STD84）で直に打ち、出力のための変換の段を持たない（Lambda の束ねは esbuild）。画面は TSX で書き、Vite と vitest が変換する | 根の `tsconfig.json`（`noEmit`） |
+| 言語 | コードは TypeScript だけで書く。画面の外（API・インフラ・設置のコマンド・検査）は Node 24 の型の剥がし（STD84）で直に打ち、出力のための変換の段を持たない（Lambda の束ねは esbuild）。画面は TSX で書き、Vite と vitest が変換する | `tsconfig.base.json`（`noEmit`） |
 | 使う構文 | 型の注釈を消すだけで JavaScript に戻る構文だけを使う。enum・引数のプロパティ・namespace を使わない。閉じた語の集まりは zod の列挙で持つ（[定数とデータの置き場の基準](#定数とデータの置き場の基準)） | `erasableSyntaxOnly`（型検査が落とす） |
-| 型の厳しさ | `strict` と `noUncheckedIndexedAccess` を外さない | 根の `tsconfig.json` |
+| 型の厳しさ | `strict` と `noUncheckedIndexedAccess` を外さない | `tsconfig.base.json` |
 | import | 型だけの import は `import type` で書く。相対の import は実ファイルの拡張子（`.ts` か `.tsx`）まで書く。画面や単体テストから部品を import するときは `.tsx` を書く | `verbatimModuleSyntax`・`allowImportingTsExtensions`、ESLint の `consistent-type-imports` |
 | 使わない名前 | 使わない引数と変数は `_` で始める | ESLint の `no-unused-vars` |
-| 画面の組み方 | #12 から、部品は React 19（LIB87）の関数の部品として TSX で書く。束ねと開発のサーバーは Vite（LIB86）と React の Vite のプラグイン（LIB90）。部品の単体テストは vitest で書く。画面の外のコードは TSX と React を import しない | `apps/web/package.json` の依存・根の `tsconfig.json` の `jsx`・`eslint.config.js` の置き場ごとの規則 |
+| 画面の組み方 | #12 から、部品は React 19（LIB87）の関数の部品として TSX で書く。束ねと開発のサーバーは Vite（LIB86）と React の Vite のプラグイン（LIB90）。部品の単体テストは vitest で書く。画面の外のコードは TSX と React を import しない | `apps/web/package.json` の依存・`apps/web/tsconfig.json` の `jsx`・`eslint.config.js` の置き場ごとの規則 |
 | テスト | 振る舞いを足すときは先に落ちるテストを書く。単体は vitest、画面は Playwright の e2e | `npm run check`・`npm run e2e`（[基本の検査](#基本の検査)） |
 | NDF の版 | NDF の版の数字を読んで大小を比べない | 参照の検査 |
 
