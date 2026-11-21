@@ -358,7 +358,7 @@ flowchart TD
 | 再試行の部品のそろえ方 | 全体の設計の横断の部品の `withRetry`（[決定 91](../docs/design/platform.md#決定の記録)）とのそろえ方は #56 が受ける | — |
 | DB の用意の関数のログ | `pino`（LIB10）。1 行の JSON を標準出力へ出し、出す項目を決まった形で組んで値をメッセージに埋め込まず、`redact` で伏せるキーを外す（`redact` はキーのパスだけを伏せ、文字列の中は伏せない） | AWS Lambda Powertools の Logger（LIB11。Lambda の文脈の項目を足せるが、出す項目を決まった形で組む決まりと `redact` の 2 つ目の守りは `pino` で足りる）・自前の `JSON.stringify`（Value 15。横断の部品とのそろえ方は #56） |
 | 資格情報の差し替え | 今の設計のまま、DB の用意の関数が差し替える（全体の設計の決定 95） | Secrets Manager の公式のローテーションの Lambda（LIB12。Lambda を VPC に入れ、Secrets Manager の端点へ NAT か Interface 型のエンドポイントで出る必要があり、時間で費用が掛かる。予定による差し替えで、割り当ての移しを引き金に番号を照らす I17 の形を持たない） |
-| 管理の役割のパスワード | 今の設計のまま、CDK が生成して自前の秘密の器 `<prefix>/<environment>/progress-db-admin` に置く | Aurora が管理するマスターユーザーのパスワード（LIB13。秘密の器の名前を選べず `rds!cluster-…` になり、API の関数が読める器を `<prefix>/<environment>/` の頭に絞る全体の設計の決定 90 と合わない。7 日ごとの差し替えでクラスタが起きる） |
+| 管理の役割のパスワード | 今の設計のまま、CDK が生成して自前の秘密の器 `<prefix>/<environment>/progress-db-admin` に置く | Aurora が管理するマスターユーザーのパスワード（LIB13。秘密の器の名前を選べず `rds!cluster-…` になり、器の名前を `<prefix>/<environment>/<用途>` にそろえ、読み手を関数ごとに器の名前で許す全体の設計の決定 90 と合わない。7 日ごとの差し替えでクラスタが起きる） |
 | DB の用意そのもの | RDS Data API を使う Lambda（LIB14）に乗り換えた（決定 15） | ECS のタスクで動かす形（決定 15 の採らなかった案） |
 | イメージを作って ECR へ push する | #6 が作る（「#6 へ渡すこと」）。部品は Docker の CLI と AWS SDK の ECR のクライアント | CDK の `DockerImageAsset`（決定 1）・`cdk-ecr-deployment`（LIB15。アセットを写すため bootstrap のリポジトリに古い版が残る）・`cdk-docker-image-deployment`（LIB16。版が 0.0 のままで、中継の ECR にアセットの仕組みで置き、ダイジェストで引く形を持たない） |
 | ダイジェストを合成へ渡す | #6 が作る。CDK の context（`nd:images`。スタックは `node.tryGetContext` で読む） | 自前の環境の値（CDK に値を渡す標準の仕組みがあり、要らない） |
