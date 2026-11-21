@@ -313,13 +313,18 @@ nd-factory/
 | `pinChanged` | `tools/checks/src/ndf-contract-check.ts` | 新設 | `(root: string, base: string, head: string) => Promise<boolean>` | `git merge-base <base> <head>` で分岐点を求め、分岐点と head のコミットの `ndf-pin.json` の中身を `git show` で比べる。作業の木は読まない |
 | `fetchContract` | 同上 | 新設 | `(rev: ContractRev, workDir: string) => Promise<ContractFiles>` | NDF のリポジトリから 1 つのコミットを深さ 1 で取り、契約のファイルを読む。先端は `git ls-remote --symref` の `HEAD` で既定の枝を引く |
 | `compareContract` | 同上 | 新設 | `(files: ContractFiles, use: NdfContractUse \| null) => ContractFinding[]` | 下の 6 つを照らし、食い違いを返す |
-| `renderSummary` | 同上 | 新設 | `(fixed: ContractFinding[], tip: ContractFinding[] \| null, skipped: string[]) => string` | 要約の Markdown（固定の点と先端の食い違いの表）を作る |
+| `renderSummary` | 同上 | 新設 | `(fixed: ContractFinding[], tip: ContractFinding[] \| null, skipped: string[]) => string` | 要約の Markdown（照らした先ごとの `checked:` か `skip:` の行と、固定の点と先端の食い違いの表）を作る |
 | `mainNdfContractCheck` | 同上 | 新設 | `(argv: string[], env: NodeJS.ProcessEnv) => Promise<number>` | 起動の判定・取得・照らし・要約・終了コードをつなぐ |
 
 - `mainNdfContractCheck`
   - 引数: `[--root <作業の木>] [--base <基点のコミット>] [--head <head のコミット>] [--summary <要約のファイル>]`。スクリプト `npm run ndf-contract`
   - 事前条件: `--base` と `--head` は Pull Request のときだけ、両方そろえて渡す（片方だけなら終了コード 2）
-  - 事後条件: `--base` があり `pinChanged` が偽なら、取得も照らしもせずに `skip:` の 1 行を出して 0 で終わる。それ以外は、作業の木（`--root`）の `ndf-pin.json` と形の正本で、固定の点と先端の両方を照らす
+  - 事後条件: `--base` があり `pinChanged` が偽なら、取得も照らしもせずに `skip: pin-unchanged` の 1 行を出して 0 で終わる。それ以外は、作業の木（`--root`）の `ndf-pin.json` と形の正本で、固定の点と先端の両方を照らす
+  - 出力の行（標準出力と要約の両方に出す。どの行が出たかで、照らしたかどうかと理由を見分ける）:
+    - `skip: pin-unchanged` — Pull Request で固定の点を変えていないので照らさなかった
+    - `skip: no-contract-use <固定の点のコミット>` — NDF の契約の使い方の書き出しが無いので 1〜6 を照らさなかった（契約のファイルを読めることだけを確かめた）
+    - `checked: fixed <固定の点のコミット> 1-6` — 固定の点に対して照らすこと 1〜6 をすべて実行した。食い違いの有無に関わらず、1〜6 を実行したときだけ出す
+    - `checked: tip <先端のコミット> 1-6` — 先端に対して同じく実行した（先端を取れなければ出さず、要約に先端を照らさなかったと出す）
 
 使うコミット:
 
@@ -360,7 +365,7 @@ nd-factory/
 | `pinChanged` | 基点か head のコミットを読めない・分岐点が無い | ワークフローが履歴を取っていない | `git merge-base`・`git show` の失敗 | 止める | 終了コード 2 | ワークフローを直して打ち直す |
 | `fetchContract`（固定の点） | 取れない・契約のファイルが無い・JSON でない | ネットワーク・固定の点の誤り・置き場の移動 | 取得と読み込み | 止める | 標準エラーに理由、終了コード 2 | 打ち直せる。置き場の移動なら固定の点を変える Pull Request で直す |
 | `fetchContract`（先端） | 同上 | 同上 | 同上 | 既定値で続ける（先端を照らさなかったと要約に出す） | 要約の行、固定の点の結果で終わる | 次の毎日の実行で照らす |
-| `compareContract` | NDF の契約の使い方の書き出しが無い | #2 がまだ置いていない | 動的な import | 既定値で続ける（1〜6 を照らさず、契約のファイルが読めることだけを確かめる） | `skip:` の 1 行と要約の行 | — |
+| `compareContract` | NDF の契約の使い方の書き出しが無い | #2 がまだ置いていない | 動的な import | 既定値で続ける（1〜6 を照らさず、契約のファイルが読めることだけを確かめる） | `skip: no-contract-use <固定の点のコミット>` の 1 行と要約の行。`checked:` の行を出さない | — |
 | `mainNdfContractCheck` | 固定の点で食い違う | 固定の点を変えた・nd-factory の側を変えた | 照らした後 | 呼び出し元へ返す | 要約の表と食い違いの行、終了コード 1 | 直すか固定の点を戻す |
 | `mainNdfContractCheck` | 先端だけで食い違う | 上流の未配布の変更 | 照らした後 | 既定値で続ける | 要約の表に見本の id と契約のファイルのパス、終了コード 0 | 次の固定の点を変える Pull Request で扱う |
 
@@ -370,7 +375,7 @@ nd-factory/
 | --- | --- | --- | --- |
 | `pinChanged` | 分岐点と head が同じ中身で偽、違えば真 | 空白だけの違いも真（中身の比べ）。分岐の後に基点の枝だけで `ndf-pin.json` を変えたリポジトリで偽。作業の木だけを変えても結果が変わらない | 基点か head を読めないと例外 |
 | `compareContract` | 作り物の契約と使い方で 0 件 | 使い方が `null` で照らさない。`ask-journal` に `fields` を足した契約で知らせが出て、食い違いにならない | 1〜6 のそれぞれ 1 つを壊した契約で、その番号の食い違いが出る |
-| `mainNdfContractCheck` | 固定の点だけの食い違いで 1、先端だけで 0 と要約の行 | `--base` と `--head` の分岐点が同じ中身で `skip:` と 0 | 固定の点の取得の失敗で 2。`--base` だけを渡すと 2 |
+| `mainNdfContractCheck` | 固定の点だけの食い違いで 1、先端だけで 0 と要約の行。どちらも `checked: fixed <固定の点> 1-6` の行が出る | `--base` と `--head` の分岐点が同じ中身で `skip: pin-unchanged` と 0、`checked:` の行が出ない。使い方の書き出しが無いと `skip: no-contract-use` と 0、`checked:` の行が出ない | 固定の点の取得の失敗で 2。`--base` だけを渡すと 2 |
 
 `fetchContract` はテストでネットワークを使わず、テストの中で作った git のリポジトリを NDF のリポジトリの代わりに渡す（URL を引数で差し替える）。
 
