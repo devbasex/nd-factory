@@ -3,7 +3,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fake, seed, setFaker } from "zod-schema-faker/v4";
-import { buildDummy, buildOperationSchemas, examplesOf } from "../scripts/artifacts.ts";
+import { buildDummy, buildOpenApi, buildOperationSchemas, examplesOf } from "../scripts/artifacts.ts";
 import { UUID_V7_PATTERN } from "../src/ids.ts";
 import { defineOperation, isPending, MAX_ITEMS, okItem, type OperationDef, resultSchemaOf } from "../src/operation.ts";
 import { OPERATIONS } from "../src/operations/index.ts";
@@ -16,7 +16,7 @@ const ITEM_SAMPLES = 3;
 const PREFIXED_ID = new RegExp(`^[a-z]+_${UUID_V7_PATTERN}$`);
 
 type Case = { label: string; value: unknown };
-type Comparison = { items: number; successes: number; failures: number; mismatches: string[] };
+type Comparison = { items: number; openApiItems: number; successes: number; failures: number; mismatches: string[] };
 
 function sampleItems(op: OperationDef & { item: z.ZodType }): unknown[] {
   setFaker(faker);
@@ -50,7 +50,11 @@ function brokenCopies(value: unknown, path = "$"): Case[] {
 function compare(ops: readonly OperationDef[]): Comparison {
   const ajv = new Ajv2020({ strict: true, validateFormats: false });
   ajv.addSchema(buildOperationSchemas(ops), "ops");
-  const result: Comparison = { items: 0, successes: 0, failures: 0, mismatches: [] };
+  // openapi.json の components.schemas の要素の形。受け口 user の操作だけが載る。
+  // 要素の中の $ref は文書の根からの "#/components/schemas/…" のため、components を持つ文書として足す
+  const openApi = new Ajv2020({ strict: false, validateFormats: false });
+  openApi.addSchema({ components: buildOpenApi(ops).components ?? {} }, "openapi");
+  const result: Comparison = { items: 0, openApiItems: 0, successes: 0, failures: 0, mismatches: [] };
   const check = (name: string, zod: z.ZodType, ajvSchema: object | string, cases: Case[]): number => {
     const validate = typeof ajvSchema === "string" ? ajv.getSchema(ajvSchema) : ajv.compile(ajvSchema);
     if (validate === undefined) throw new Error(`JSON Schema が無い: ${String(ajvSchema)}`);
@@ -70,6 +74,16 @@ function compare(ops: readonly OperationDef[]): Comparison {
     const extra = first !== null && typeof first === "object" ? [{ label: "追加の項目", value: { ...first, extra_key: 1 } }] : [];
     const itemCases: Case[] = [...items.map((value, i) => ({ label: `見本 ${i}`, value })), ...items.flatMap((v) => brokenCopies(v)), ...extra];
     result.items += check(op.name, op.item, `ops#/$defs/${op.name}.item`, itemCases);
+    if (op.endpoint === "user") {
+      const validate = openApi.getSchema(`openapi#/components/schemas/${op.name}.item`);
+      if (validate === undefined) throw new Error(`OpenAPI の要素の形が無い: ${op.name}`);
+      for (const c of itemCases) {
+        const byZod = op.item.safeParse(c.value).success;
+        const byOpenApi = validate(c.value) === true;
+        if (byZod !== byOpenApi) result.mismatches.push(`${op.name} ${c.label}: zod=${byZod} openapi=${byOpenApi}`);
+      }
+      result.openApiItems += itemCases.length;
+    }
 
     const body = { type: "array", minItems: 1, maxItems: max, items: { $ref: `ops#/$defs/${op.name}.item` } };
     check(op.name, itemsArray(op.item, max), body, [
@@ -102,6 +116,7 @@ describe("形の往復", () => {
     const result = compare([...shaped, ...FIXTURE_OPERATIONS]);
     expect(result.mismatches).toEqual([]);
     expect(result.items).toBeGreaterThan(0);
+    expect(result.openApiItems).toBeGreaterThan(0);
     expect(result.successes).toBeGreaterThan(0);
     expect(result.failures).toBeGreaterThan(0);
   });
