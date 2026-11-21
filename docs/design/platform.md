@@ -443,16 +443,16 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 ## 言語と書き方の決まり
 
-子の課題が詳細設計で引く、言語と画面の組み方と TypeScript の書き方の細則の正本である（決定 140）。値は今のリポジトリの設定と同じで、縛るのは根の `tsconfig.json`・`eslint.config.js`・`apps/web/package.json`・`apps/web/vite.config.ts` である。`AGENTS.md` は手順（`npm run generate`・`npm run check`）だけを持ち、細則はこの節を指す。
+子の課題が詳細設計で引く、言語と画面の組み方と TypeScript の書き方の細則の正本である（決定 140）。縛るのは根の `tsconfig.json`・`eslint.config.js`・`apps/web/package.json`・`apps/web/vite.config.ts` である。画面の組み方の行（React と TSX）を除き、値は今のリポジトリの設定と同じである。React と TSX の規約は #12 で入れ、その PR が `apps/web/package.json` の依存（LIB87・LIB90）、根の `tsconfig.json` の `jsx`、`apps/web/vite.config.ts` の React のプラグイン、画面の外から React と `.tsx` を import すると落とす ESLint の規則を整える。それまでの画面は今の骨組み（素の TypeScript）のままである。`AGENTS.md` は手順（`npm run generate`・`npm run check`）だけを持ち、細則はこの節を指す。
 
 | 項目 | 決まり | 縛るもの |
 | --- | --- | --- |
 | 言語 | コードは TypeScript だけで書く。画面の外（API・インフラ・設置のコマンド・検査）は Node 24 の型の剥がし（STD84）で直に打ち、出力のための変換の段を持たない（Lambda の束ねは esbuild）。画面は TSX で書き、Vite と vitest が変換する | 根の `tsconfig.json`（`noEmit`） |
 | 使う構文 | 型の注釈を消すだけで JavaScript に戻る構文だけを使う。enum・引数のプロパティ・namespace を使わない。閉じた語の集まりは zod の列挙で持つ（[定数とデータの置き場の基準](#定数とデータの置き場の基準)） | `erasableSyntaxOnly`（型検査が落とす） |
 | 型の厳しさ | `strict` と `noUncheckedIndexedAccess` を外さない | 根の `tsconfig.json` |
-| import | 型だけの import は `import type` で書く。相対の import は拡張子 `.ts` まで書く | `verbatimModuleSyntax`・`allowImportingTsExtensions`、ESLint の `consistent-type-imports` |
+| import | 型だけの import は `import type` で書く。相対の import は実ファイルの拡張子（`.ts` か `.tsx`）まで書く。画面や単体テストから部品を import するときは `.tsx` を書く | `verbatimModuleSyntax`・`allowImportingTsExtensions`、ESLint の `consistent-type-imports` |
 | 使わない名前 | 使わない引数と変数は `_` で始める | ESLint の `no-unused-vars` |
-| 画面の組み方 | 部品は React 19（LIB87）の関数の部品として TSX で書く。束ねと開発のサーバーは Vite（LIB86）と React の Vite のプラグイン（LIB90）。部品の単体テストは vitest で書く。画面の外のコードは TSX と React を import しない | `apps/web/package.json` の依存・根の `tsconfig.json` の `jsx`・`eslint.config.js` の置き場ごとの規則 |
+| 画面の組み方 | #12 から、部品は React 19（LIB87）の関数の部品として TSX で書く。束ねと開発のサーバーは Vite（LIB86）と React の Vite のプラグイン（LIB90）。部品の単体テストは vitest で書く。画面の外のコードは TSX と React を import しない | `apps/web/package.json` の依存・根の `tsconfig.json` の `jsx`・`eslint.config.js` の置き場ごとの規則 |
 | テスト | 振る舞いを足すときは先に落ちるテストを書く。単体は vitest、画面は Playwright の e2e | `npm run check`・`npm run e2e`（[基本の検査](#基本の検査)） |
 | NDF の版 | NDF の版の数字を読んで大小を比べない | 参照の検査 |
 
@@ -494,6 +494,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | STD82 | Security Hub の自動化ルール | 条件に合う検出結果の workflow の状態（`SUPPRESSED` など）と注記を自動で変える。作れるのは Security Hub の管理者のアカウントだけで、作ったリージョンにだけ効く | 今は作らない。ECS のサービスを足す日に比べる（決定 86） | https://docs.aws.amazon.com/securityhub/latest/userguide/automation-rules.html （2026-11-17） |
 | STD83 | PostgreSQL 16 の advisory lock | `pg_advisory_xact_lock` はトランザクションの単位の排他の鎖を取り、要れば待つ。トランザクションの終わりで外れる | 差し替えの番号を照らして書く間、同じ役割の差し替えを DB の側で 1 つにする（決定 95） | https://www.postgresql.org/docs/16/functions-admin.html （2026-11-18） |
 | STD84 | Node の型の剥がし（type stripping）と TypeScript の `erasableSyntaxOnly` | Node は型の注釈を消すだけで `.ts` を打つ。enum・引数のプロパティ・namespace のような JavaScript へ消すだけでは戻らない構文と、`.tsx` の JSX は打てない。`erasableSyntaxOnly` はそれらの構文を型検査で落とす | 書き方の細則を「消すだけで打てる構文だけを使う」にそろえ、型検査で縛る（決定 140） | https://nodejs.org/api/typescript.html ・ https://www.typescriptlang.org/tsconfig/#erasableSyntaxOnly （2026-11-18） |
+| STD85 | Lighthouse の通信の絞り | スマートフォンの既定の絞りは Slow 4G を模した RTT 150 ミリ秒・下り 1,638.4 Kbps と、CPU の 4 倍の遅さ | 配る束の転送の時間を LCP の目標と比べる目安に使う（決定 140） | https://github.com/GoogleChrome/lighthouse/blob/main/docs/throttling.md （2026-11-21） |
 
 ### ライブラリとサービス
 
@@ -506,9 +507,9 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | LIB84 | AWS Budgets と Amazon SNS（運用の知らせ） | — | AWS のサービス | — | 無し | 満たす。予算の監視と知らせは無料。動作つきの予算は 2 つまで無料。SNS は時間の課金を持たず、月 100 万回の要求とメールの 1,000 通までは無料の枠 | https://aws.amazon.com/aws-cost-management/aws-budgets/pricing/ （2026-11-17）・ https://aws.amazon.com/sns/pricing/ （2026-11-18） |
 | LIB85 | ECR のライフサイクルの規則 | — | AWS のサービス | — | 無し | 満たす。押した数（`imageCountMoreThan`）か日数で古いイメージを 24 時間のうちに消す | https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html （2026-11-17） |
 | LIB86 | `vite` | 8.3.8 | MIT | 2026-11-11 | 無し | 満たす。画面を束ね、開発のサーバーを持つ。開発の依存だけで、配る画面に実行の時の依存を足さない。今の `apps/web` が使っている | https://registry.npmjs.org/vite （2026-11-18） |
-| LIB87 | `react`・`react-dom` | 19.3.1 | MIT | 2026-10-14 | 無し | 満たす。採る（決定 140）。部品・国際化・PWA・テストの周りの部品と資料が最も多い。実行の時の依存が 2 つ増える（`react-dom` の展開後 約 7.7 MiB。配る束は圧縮と木の刈り込みの後で数十 KB〜百数十 KB）。TSX は Node の型の剥がしで打てないため、画面のコードは Vite と vitest で変換する（STD84） | https://registry.npmjs.org/react ・ https://registry.npmjs.org/react-dom （2026-11-18） |
-| LIB88 | `preact` | 11.2.0 | MIT | 2026-11-06 | 無し | 満たす。React と書き方が近く小さいが、互換の層を通すと React の周りの部品の動きが保証されない | https://registry.npmjs.org/preact （2026-11-18） |
-| LIB89 | `lit` | 3.3.3 | BSD-3-Clause | 2026-05-14 | 無し | 満たす。Web Components の上で JSX を使わずに書ける。宣言の書き方の多くがデコレーターに寄り、画面の周りの部品と資料が React より少ない | https://registry.npmjs.org/lit （2026-11-18） |
+| LIB87 | `react`・`react-dom` | 19.3.1 | MIT | 2026-10-14 | 無し | 満たす。採る（決定 140）。2026 年 10 月の npm の取得数は約 8.5 億回で、比べた候補の中で最も多い（preact 約 1.8 億回・lit 約 3,200 万回）。実行の時の依存が 2 つ増える（`react-dom` の展開後 約 7.7 MiB。React と `react-dom` だけを描く最小の画面を Vite 8.3.8 と LIB90 で束ねると 219 KB、gzip で約 68 KB。2026-11-21 に測った）。TSX は Node の型の剥がしで打てないため、画面のコードは Vite と vitest で変換する（STD84） | https://registry.npmjs.org/react ・ https://registry.npmjs.org/react-dom （2026-11-18）・ https://api.npmjs.org/downloads/point/2026-10-01:2026-10-31/react （同 preact・lit。2026-11-21） |
+| LIB88 | `preact` | 11.2.0 | MIT | 2026-11-06 | 無し | 満たす。React と書き方が近く小さい。React の周りの部品は互換の層 `preact/compat` を通して使う。互換の層は React との 100% の互換を目指す薄い層で、Preact は React の再実装ではなく、合成のイベントを持たないなどの違いが残る | https://registry.npmjs.org/preact （2026-11-18）・ https://preactjs.com/guide/v10/differences-to-react ・ https://preactjs.com/guide/v10/switching-to-preact （2026-11-21） |
+| LIB89 | `lit` | 3.3.3 | BSD-3-Clause | 2026-05-14 | 無し | 満たす。Web Components の上で JSX を使わずに書ける。宣言の書き方の多くがデコレーターに寄る。2026 年 10 月の npm の取得数は約 3,200 万回で、React の 4% ほど | https://registry.npmjs.org/lit （2026-11-18） |
 | LIB90 | `@vitejs/plugin-react` | 6.3.0 | MIT | 2026-11-09 | 無し | 満たす。Vite で TSX を変換し、開発のサーバーで部品を差し替える。開発の依存だけ | https://registry.npmjs.org/@vitejs/plugin-react （2026-11-21） |
 
 ### 確かめられなかったこと
@@ -767,14 +768,24 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 結論: 書き方の細則を [言語と書き方の決まり](#言語と書き方の決まり) に置き、`AGENTS.md` はそこを指す。画面は React 19（LIB87）の関数の部品を TSX で書き、Vite（LIB86）と React の Vite のプラグイン（LIB90）で束ねる。画面の外のコードは今までどおり Node の型の剥がしで直に打ち、TSX と React を持たない。
 
-理由: Value 2 は画面の基盤（画面の地図・共通の部品・端末の幅・オフライン・国際化）を先に固め、20 の機能の画面をダミーデータで作り切ることを求める。オフラインの確定待ちと控え・国際化・部品の組み合わせを DOM の API で自前に書くと、DOM の差分の更新と状態の扱いを作り直すことになる。実績のある最新のフレームワークを使えば、その部分を書かずに部品と画面へ手を回せ、周りの部品（国際化・PWA・テスト）も選べる。React は候補の中で部品と資料が最も多い。Value 6 は運用の費用が増える構成や依存を足すときに理由と代わりの案を示すことを求め、依存を足すこと自体は禁じていない。React で配る束が増えても CloudFront と S3 の費用はほぼ変わらず、理由と代わりの案はこの決定に置いた。TSX は Node の型の剥がしで打てないが（STD84）、画面は Vite と vitest が変換するため、変換の段を持たない決まりは画面の外に限れば保てる。
+理由: Value 2 は画面の基盤（画面の地図・共通の部品・端末の幅・オフライン・国際化）を先に固め、20 の機能の画面をダミーデータで作り切ることを求める。オフラインの確定待ちと控え・国際化・部品の組み合わせを DOM の API で自前に書くと、DOM の差分の更新と状態の扱いを作り直すことになる。実績のある最新のフレームワークを使えば、その部分を書かずに部品と画面へ手を回せ、周りの部品（国際化・PWA・テスト）も選べる。React は比べた候補の中で最も多く使われている（2026 年 10 月の npm の取得数で約 8.5 億回。LIB87）。国際化・PWA・テストの個々の部品が React 19 に対応するかは確かめていない（[未確認のまま残ること](#未確認のまま残ること)）。Value 6 は運用の費用が増える構成や依存を足すときに理由と代わりの案を示すことを求め、依存を足すこと自体は禁じていない。React で配る束は gzip で約 68 KB 増えるが、CloudFront の定額の Free プランは配信ごとに月 100 GB まで 0 ドルで（LIB83）、初めの読み込みで約 150 万回に当たるため、月の費用は 0 ドルのまま変わらない（下の表）。TSX は Node の型の剥がしで打てないが（STD84）、画面は Vite と vitest が変換するため、変換の段を持たない決まりは画面の外に限れば保てる。
 
-採らなかった案: UI のフレームワークを入れず、素の TypeScript と DOM の API で組む形（この決定の直す前の結論。骨組みの画面の形をそのまま決まりにしたもので、Value 6 を「依存を足さない」と読んでいた。画面の基盤の範囲に対して自前で書く量が多い）。Preact（LIB88）は小さいが、互換の層を通すと React の周りの部品の動きが保証されない。Lit（LIB89）は JSX を使わずに書けるが、宣言の書き方がデコレーターに寄り、周りの部品と資料が少ない。
+| 欄 | この決定で足すもの |
+| --- | --- |
+| 足すもの | 実行の時の依存 `react`・`react-dom`（LIB87）と、開発の依存 `@vitejs/plugin-react`（LIB90） |
+| 増える額 | 月 0 ドル。配る束は gzip で約 68 KB 増える（LIB87 で測った最小の画面）。CloudFront の定額の Free プランは配信ごとに月 100 万回・100 GB で 0 ドル、超えた分の課金を持たない（LIB83）。100 GB は 68 KB の初めの読み込みで約 150 万回で、2 回目からは Service Worker の控えから出す。S3 の保管は 0.22 MB 増え、[見込み](#見込み) の無料の枠の中 |
+| 理由 | Value 2 の画面の基盤（オフライン・国際化・共通の部品）を自前で書かずに組む |
+| 代案 | 素の TypeScript と DOM の API・Preact・Lit（下の採らなかった案） |
+| 使わない間 | 配る量に比例し、使わない月は 0 ドル。固定の額は無い |
+
+画面の性能への効き: 68 KB の転送は、Lighthouse のスマートフォンの絞り（下り 1,638.4 Kbps、STD85）で約 0.33 秒と計算でき、LCP の目標 2.5 秒（決定 94）の 13% ほどに当たる。解析と実行の時間を含む LCP は測っていない（[未確認のまま残ること](#未確認のまま残ること)）。
+
+採らなかった案: UI のフレームワークを入れず、素の TypeScript と DOM の API で組む形は、画面の基盤の範囲に対して自前で書く量が多い。Preact（LIB88）は小さいが、React の周りの部品は互換の層 `preact/compat` を通して使い、互換の層は React との 100% の互換を目指すもので React の再実装ではない（合成のイベントを持たないなどの違いが残る）。周りの部品ごとに互換の層の上で動くかを確かめることになる。Lit（LIB89）は JSX を使わずに書けるが、宣言の書き方がデコレーターに寄り、使われる数が React の 4% ほどである。
 
 見直す条件: React の大きな版が出て、今の版の保守が終わるとき。または配る束の大きさが画面の性能の目標（決定 94）を損なうと測れたとき。
 
 - 作り方: 既存の部品を使う
-- 比べた候補: LIB86 / LIB87 / LIB88 / LIB89 / LIB90 / STD84
+- 比べた候補: LIB86 / LIB87 / LIB88 / LIB89 / LIB90 / STD84 / STD85
 
 根拠: Value 2 / Value 6（MVV 版 1）
 
@@ -793,4 +804,6 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | `ALTER ROLE` と advisory lock の同じトランザクション | パスワードの変更と差し替えの番号の書き込みを 1 つのトランザクションで確定できること（決定 95） | 反映した環境の Aurora で実測（#13 の用意の手順の試験） |
 | `StopTask` から `STOPPED` までの時間 | 見回りの 1 回の起動の中で停止を読めるか。読めなければ次の見回りで読む（決定 96） | 反映した環境で測る（#13） |
 | `ListTasks` に起動したタスクが出るまでの時間 | 片付けで拾い漏らす割合。止めの正しさには効かない（決定 96） | 反映した環境で測る（#13） |
+| 画面の周りの部品の React 19 への対応 | 国際化・PWA・テストの部品のうち使うものが React 19 で動くこと（決定 140） | #12 で部品を選ぶときに、各部品の対応の版を読み、単体テストで確かめる |
+| React を入れた画面の LCP | 束の転送は計算で約 0.33 秒。解析と実行を含む LCP が 2.5 秒以内に収まること（決定 94・決定 140） | #12 の e2e で端末の幅と回線を絞って測る |
 | AWS のクォータの値 | Lambda の同時実行と Fargate の vCPU の既定の値は、アカウントとリージョンで違う | 設置する人が Service Quotas で読む（#14 の設置の予行） |
