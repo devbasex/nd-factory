@@ -846,7 +846,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | --- | --- | --- |
 | Aurora の一時停止（接続なし） | タスクの無い間に接続が 0 本のまま一時停止に入り続けること・保守で起きる回数 | 反映した環境で数日の観測（`ServerlessDatabaseCapacity` の 0 の時間）。DB へ接続しない（#13） |
 | Aurora の再開（接続あり） | 再開の待ちがランナーのタスクの起動に収まること | ランナーのタスクが接続する実測（#44。引き換えの経路は #6） |
-| Data API で打つ用意と差し替え | Data API で用意の手順と差し替えの文（`CREATE DATABASE`・`REVOKE`・`pg_terminate_backend`・`pg_advisory_xact_lock`）が打てること・Data API が接続を残さず一時停止を妨げないこと・再開の間の `DatabaseResumingException` を関数が再試行で待てること（決定 83） | 反映した環境の Aurora へ Data API で打つ実測（#44） |
+| Data API で打つ用意と差し替え | Data API で用意の手順と差し替えの文（`CREATE DATABASE`・`REVOKE`・`pg_terminate_backend`・`pg_advisory_xact_lock`）が打てること・Data API が接続を残さず一時停止を妨げないこと・再開の間の `DatabaseResumingException` を関数が再試行で待てること（決定 83）・`DatabaseResumingException` を返した要求の文が DB で打たれていないこと（関数は `transactionId` の無い文をこの例外で打ち直す。AWS の文書は要求が取り消されたことだけを言い、文が届いていないことまでは書いていない。外れていれば `CREATE DATABASE` の打ち直しが「既にある」で落ち、その回が `sql_failed` になる） | 反映した環境の Aurora へ Data API で打つ実測（#44）。後者は一時停止させた書き手へ、打たれたかを後で読める文（目印の表への `INSERT`）を `transactionId` なしで打ち、`DatabaseResumingException` が返った要求の行が残らないことを読む |
 | カタログの分け方 | Aurora の管理の役割でカタログと統計の読み取りを外せること・A の役割から B と `postgres`・`template1` へ接続できないこと | 反映した環境で接続する実測（#44） |
 | DBOS と Aurora の版 | NDF の固定の版の DBOS が、一時停止を持つ PostgreSQL の版で進行表を作れること・長い待ちの後も接続が保たれること | 固定の版の NDF で接続する実測（#44） |
 | ACU の平均 | 見込みは起きている間の平均を 1 ACU と置いた | 接続する実測（#44）と、反映した後の請求 |

@@ -31,8 +31,8 @@
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
-| U1 形の正本（準備） | Task 1 | 13:4・13:5 の前提（キーの形） | 約 350 | （実装の後に書き足す） |
-| U2 SQL を打つ口 | Task 2 | 13:9 の一部（Data API の実装と時間の関係） | 約 700 | |
+| U1 形の正本（準備） | Task 1 | 13:4・13:5 の前提（キーの形） | 約 350 | 524（#70） |
+| U2 SQL を打つ口 | Task 2 | 13:9 の一部（Data API の実装と時間の関係） | 約 700 | 1,487（レビューの直しの後）。本体は約 300 行で、残りはテストとテストの `pg` の実装。`pg-executor.ts`（`toPositional` を含む）を先の単位へ分けることも比べたが、分けなかった。テストの `pg` の実装は Data API の実装と同じ文を同じ型で打つことに意味があり（整数を `bigint` で送る直しは両方を同時に変えた）、Data API の実装の無い単位では、それに合っているかを読めないためである。読む順は本体の 3 ファイル → `prep-run.test.ts` → `sql-executor.test.ts` → `pg-executor.ts` |
 | U3 用意の手順と I10 | Task 3 | 13:1 | 約 700 | |
 | U4 差し替え | Task 4 | 13:9 の一部（差し替え） | 約 600 | |
 | U5 関数の本体 | Task 5 | 13:9 の一部（関数の分かれ） | 約 700 | |
@@ -55,7 +55,7 @@
 | リスク | 対処 |
 | --- | --- |
 | PostgreSQL のテストを手元で走らせないため、CI でだけ落ちる | 単位の PR を最初のコミットの後に Draft で出し、CI の `check` を監視して直す |
-| `NodejsFunction` の束ねで `pg` などの依存が合成に入る | `pg` は `apps/api` の devDependencies に置き、起点からは `escapeIdentifier`・`escapeLiteral` だけを使う。束ねの大きさは U7 の `synth` で読む |
+| `NodejsFunction` の束ねで `pg` などの依存が合成に入る | 本番は `pg` の `escapeIdentifier`・`escapeLiteral` だけを使うため `pg` を dependencies に置き（`@types/pg` は devDependencies）、接続の部品はテストの `pg-executor.ts` だけが使う。束ねの大きさは U7 の `synth` で読む |
 | #2 が後から横断の部品を入れ、ログと再試行が 2 か所に分かれる | #56 が寄せる。この課題は `db-prep/` の中で閉じる |
 
 ## 切り戻し手順
