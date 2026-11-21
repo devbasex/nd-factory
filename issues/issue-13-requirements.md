@@ -4,22 +4,22 @@
 
 ## 種類
 
-機能追加（設置のコマンドと縦の切れ端のスタック（`app`）は骨組みとして既にあり、そこへ網・進行表の DB・タスクの土台・予算と知らせを足す）
+機能追加（設置のコマンドとアプリのスタック（`app`）は骨組みとして既にあり、そこへネットワーク・進行表の DB・ECS のクラスタ・予算と知らせを足す）
 
 ## 今の姿
 
-縦の切れ端のスタック（`infra/lib/app-stack.ts`）は、利用者プール・画面の配信・API の関数 1 本・利用者の表だけを持つ。網・進行表の DB・ECS・予算と運用の知らせは無い。設定のファイル（[docs/operations/settings.md](https://github.com/devbasex/nd-factory/blob/main/docs/operations/settings.md)）は接頭辞・環境・ログインの IdP・反映のパイプラインのキーだけを持つ。全体の設計は、足す資源の形を [土台の文書のインフラ](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#インフラ) と [費用](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#費用) に、進行表の DB の用意を [データの文書の進行表の DB](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#進行表の-db) に決めている。
+アプリのスタック（`infra/lib/app-stack.ts`）は、利用者プール・画面の配信・API の関数 1 本・利用者の表だけを持つ。ネットワーク・進行表の DB・ECS・予算と運用の知らせは無い。設定のファイル（[docs/operations/settings.md](https://github.com/devbasex/nd-factory/blob/main/docs/operations/settings.md)）は接頭辞・環境・ログインの IdP・反映のパイプラインのキーだけを持つ。全体の設計は、足す資源の形を [プラットフォームの文書のインフラ](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#インフラ) と [費用](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#費用) に、進行表の DB の用意を [データの文書の進行表の DB](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#進行表の-db) に決めている。
 
 ## 何を足すか・変えるか
 
 | | 今 | 足した後 |
 | --- | --- | --- |
-| 網 | 無い | 自前の VPC（2 つの AZ に公開のサブネットと出口の無いサブネット）。NAT は置かない |
+| ネットワーク | 無い | 自前の VPC（2 つの AZ に公開のサブネットと出口の無いサブネット）。NAT は置かない |
 | 進行表の DB | 無い | Aurora Serverless v2（PostgreSQL・最小 0 ACU・書き手 1 台）と、プロジェクトごとのデータベースと役割を作る DB の用意のタスク |
-| タスクの土台 | 無い | ECS のクラスタ（サービスとタスクセットを作らない）・タスクの SG（受け入れなし）・権限の文を持たないタスクの役割 |
-| イメージ | CDK の資産として作る（全体の設計の決定 87） | 設置のコマンドと反映のパイプラインが作って `app` のスタックの nd-factory 専用の ECR へ push し、テンプレートがダイジェストで引く。古い版は ECR のライフサイクルの規則で消し、push の新しい版を戻したい版の数より十分多めに残す（下の「要求から変えたこと」） |
+| ECS のクラスタ | 無い | ECS のクラスタ（サービスとタスクセットを作らない）・タスクの SG（受け入れなし）・権限の文を持たないタスクの役割 |
+| イメージ | CDK のアセットとして作る（全体の設計の決定 87） | 設置のコマンドと反映のパイプラインが作って `app` のスタックの nd-factory 専用の ECR へ push し、テンプレートがダイジェストで引く。古い版は ECR のライフサイクルの規則で消し、push の新しい版を戻したい版の数より十分多めに残す（下の「要求から変えたこと」） |
 | 費用の見張り | 無い | AWS Budgets の月の予算と、運用の知らせの SNS のトピック |
-| 設定のファイル | 4 つのキー | 網の CIDR・最大 ACU・予算・運用の知らせの宛先のキーを足し、ほかの子が読むキーの名前と形を決める |
+| 設定のファイル | 4 つのキー | ネットワークの CIDR・最大 ACU・予算・運用の知らせの宛先のキーを足し、ほかの子が読むキーの名前と形を決める |
 | `diff` の出力 | 差分と確認の値 | 足りない設定の一覧の欄を足す（終了コードは足さない） |
 | スタックのテスト | 名前・タグ・時間で費用が掛かる資源 | NAT・受け入れの規則・VPC の中の Lambda・ECS のサービス・タスクの役割の許可の文・Aurora の最小・消せる設定・PITR の欠けを落とす行を足す |
 
@@ -27,24 +27,24 @@
 
 | 日付 | 誰の決定 | 変えたこと | 理由 |
 | --- | --- | --- | --- |
-| 2026-11-21 | 利用者 | ランナーと DB の用意のイメージを CDK の資産にせず、設置のコマンドと反映のパイプラインが作って自前の ECR へ push し、テンプレートがダイジェストで引く（全体の設計の決定 87 を直す）。ECR の残す数は、戻したい版の数より十分多めにしてこの課題が決める | CDK の資産のイメージは自前の ECR に置けず、自前の ECR のライフサイクルの規則で古い版を消せない。ダイジェストで引けば、中身が変わればテンプレートが変わり、確認の値で縛れる |
+| 2026-11-21 | 利用者 | ランナーと DB の用意のイメージを CDK のアセットにせず、設置のコマンドと反映のパイプラインが作って自前の ECR へ push し、テンプレートがダイジェストで引く（全体の設計の決定 87 を直す）。ECR の残す数は、戻したい版の数より十分多めにしてこの課題が決める | CDK のアセットのイメージは自前の ECR に置けず、自前の ECR のライフサイクルの規則で古い版を消せない。ダイジェストで引けば、中身が変わればテンプレートが変わり、確認の値で縛れる |
 | 2026-11-21 | 利用者 | 全体の設計（`docs/design/platform.md` の決定 87・ECR の行・LIB85・費用の見込みの ECR の行・設置の段の表・ランナーのイメージの前提・未確認のまま残ること）の直しを、この課題の設計 Pull Request に含める | 上の変更を全体の設計へ返さないと、#6 のランナーのイメージが古い答えを読む |
 | 2026-11-21 | 設計者（設計承認ゲートで確かめる） | 実測のうち進行表の DB へ接続する項目（再開の待ち・カタログの分け方・差し替えの排他・DBOS と Aurora の版・ACU の平均・タスクの停止と一覧の時間）を #44 へ分けた | DB の用意のタスクが Aurora へ着くには #6 の引き換えの経路が要り、この課題のスプリントの中で確かめられない（1 子は 1 スプリントの決まり） |
 
 ## なぜ困るか
 
-ホステッドのレーン（#6）と DB の用意は、網・進行表の DB・タスクの土台が無いと動かない。費用の見張りが無いと、自分で設置した人が使わない月の費用の増えに気づけない。全体の設計の費用の見込みは実測していないため、見込みの誤りが設置する人へそのまま届く。
+ホステッドのレーン（#6）と DB の用意は、ネットワーク・進行表の DB・ECS のクラスタが無いと動かない。費用の見張りが無いと、自分で設置した人が使わない月の費用の増えに気づけない。全体の設計の費用の見込みは実測していないため、見込みの誤りが設置する人へそのまま届く。
 
 ## 目的
 
 | MVV の項目 | この課題で受けること |
 | --- | --- |
 | Value 6 自前の構成で安く | 他の資源に相乗りせず、NAT を立てず、常駐する計算を持たない構成で、使わない間の費用を 0 に近づける |
-| Value 8 承認した範囲だけ反映 | 資源を縦の切れ端のスタックへまとめ、同じ確認の値と要約値で縛る |
+| Value 8 承認した範囲だけ反映 | 資源をアプリのスタックへまとめ、同じ確認の値と要約値で縛る |
 | Value 7 公開を前提に値を置かない | CIDR・最大 ACU・予算などの値を設定のファイルから受け、リポジトリに実際の値を置かない |
 | Vision（誰でも自分の AWS へ安く設置できる） | 予算と知らせで費用を見張り、実測で費用の見込みを確かめる |
 
-機能一覧の行は持たない（F1〜F22 の土台）。受け持つ不変条件は I10・I11 である。
+機能一覧の行は持たない（F1〜F22 のプラットフォーム）。受け持つ不変条件は I10・I11 である。
 
 | # | 中身 |
 | --- | --- |
@@ -64,7 +64,7 @@
 - 足りない設定の一覧を `diff` の出力の 1 欄に出す（終了コードは足さない）
 - 設定のファイルのキー（予算・最大 ACU・運用の知らせの宛先・設置全体の同時のレーンの数・差し替えの起こし直しの上限・承認資料と操作の記録の保存期間）の名前と形。読み手がこの課題に無いキーは、名前と形と既定だけを決め、形の正本へは読み手の子が足す
 - DB の用意のタスク向けの 2 つの HTTP の経路の要求と応答の項目（終わりの `rotation_superseded` と記した番号を含む）と、差し替えの起こし直し（I22）の見回りの値と上限の回数
-- ランナーのイメージの前提（設置の前提の表とパイプラインのスタックを直し、リリース承認ゲートの承認の後に設置のコマンドで反映してから、イメージを引く縦の切れ端を起点のブランチへ入れる）
+- ランナーのイメージの前提（設置の前提の表とパイプラインのスタックを直し、リリース承認ゲートの承認の後に設置のコマンドで反映してから、イメージを引くアプリのスタックを起点のブランチへ入れる）
 - 実測（接続の無い間の Aurora の一時停止・保守で起きる回数・単価）と、戻しの予行 1 回。接続する項目は #44
 - 全体の設計の直し（`platform.md` の決定 87・ECR の行・LIB85・費用の見込みの ECR の行・設置の段の表・ランナーのイメージの前提・未確認のまま残ること）
 
@@ -86,7 +86,7 @@
 - [ ] 1. I10: 同じチームの 2 つのプロジェクトのレーンへ渡す進行表の DB の資格情報のテストがある。データベースか役割が同じだと落ちる。プロジェクト A の進行表の役割で B のデータベースと役割を読めるか接続できると落ちる
 - [ ] 2. I11: コンテナのタスクの役割の方針のテストがある。許可の文があると落ちる（終わったレーンの token での送信は #6 が縛る）
 - [ ] 3. スタックのテストに上の行が足され、わざと違反を入れると落ちる
-- [ ] 4. 資源が縦の切れ端のスタック（`app`）にあり、`npm run nd-setup -- diff` の確認の値で縛られる
+- [ ] 4. 資源がアプリのスタック（`app`）にあり、`npm run nd-setup -- diff` の確認の値で縛られる
 - [ ] 5. `diff` の出力に足りない設定の一覧が出る
 - [ ] 6. 戻しの予行を 1 回行った記録がある
 - ~~7. 確かめる項目を実測し、結果を詳細設計と全体の設計の費用の見込みへ返す: Aurora の一時停止と再開（骨組みの環境で数日）・カタログの分け方と用意の手順の本文（4 で外せるか・接続できないこと）・DBOS と Aurora の版（#6 と）・ACU の平均・EventBridge のスケジュールと DynamoDB の PITR とストリームの単価~~ → 接続する項目を #44 へ分けた（2026-11-21、設計者の判断。設計承認ゲートで確かめる）
@@ -117,7 +117,7 @@
 | # | イベント | 引き金 | 失敗したとき | 順序の前提 |
 | --- | --- | --- | --- | --- |
 | E1 | 設置する人が `diff` でイメージの push・差分・確認の値・足りない設定の一覧を読んだ | 設置する人が `diff` を打った | 設定のファイルが形に合わなければ 1 件 1 行で示して止まる（終了コード 2・3）。Docker が無い・push できないときは合成せずに止まる | — |
-| E2 | 縦の切れ端を反映した（網・進行表の DB・タスクの土台・予算・ECR） | `deploy`、または反映のパイプラインの承認 | 確認の値が違えば反映しない。反映の途中の失敗は CloudFormation が戻す | E1。パイプラインで初めてイメージを引く版を入れるときは、準備のアクションが push できる版のパイプラインのスタックの反映の後 |
+| E2 | アプリのスタックを反映した（ネットワーク・進行表の DB・ECS のクラスタ・予算・ECR） | `deploy`、または反映のパイプラインの承認 | 確認の値が違えば反映しない。反映の途中の失敗は CloudFormation が戻す | E1。パイプラインで初めてイメージを引く版を入れるときは、準備のアクションが push できる版のパイプラインのスタックの反映の後 |
 | E3 | DB の用意のタスクがプロジェクトのデータベースと役割を作った | API の `RunTask`（最初のホステッドのレーン） | 作成の時間切れで見回りが止めて `無い` へ戻す（I18） | E2 |
 | E4 | 古い版のイメージが消えた | 新しい版が残す数を超えて push された（ECR のライフサイクルの規則） | 残す数より古い版へ戻すときは、その版のコミットからイメージを作り直して push し直す | E1 |
 | E5 | 実測と戻しの予行を記録した | リリース承認ゲートの後の反映 | 実測が見込みと外れたら、全体の設計の費用の見込みと詳細設計を直す | E2（E3 を前提にする接続の実測は #44） |
@@ -137,7 +137,7 @@
 | 項目 | 参照先 / 決めたこと |
 | --- | --- |
 | プロジェクト構造 | `AGENTS.md` の「リポジトリの形」。資源は `infra/lib/`、テストは `infra/test/`、形の正本は `packages/contracts/`、DB の用意のタスクは `apps/db-prep/`（plan.md の置き場） |
-| コーディング規約 | [土台の文書の言語と書き方の決まり](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#言語と書き方の決まり) |
+| コーディング規約 | [プラットフォームの文書の言語と書き方の決まり](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#言語と書き方の決まり) |
 | テスト戦略 | 資源の形はスタックのテスト（合成の出力）、I10 は DB の用意の手順を PostgreSQL に打つテスト、AWS の上の振る舞いは実測で担保する |
 
 ## 境界
@@ -151,7 +151,7 @@
 ## 設計への参照
 
 - [全体の設計: 不変条件](https://github.com/devbasex/nd-factory/blob/main/docs/design/overview.md#不変条件)・[テスト設計](https://github.com/devbasex/nd-factory/blob/main/docs/design/overview.md#テスト設計)
-- [土台: アーキテクチャ](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#アーキテクチャ)・[インフラ](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#インフラ)・[費用](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#費用)・[反映と設置](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#反映と設置)・[検査](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#検査)・[環境の値の受け方](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#環境の値の受け方)・[非機能の実現方式](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#非機能の実現方式)
+- [プラットフォーム: アーキテクチャ](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#アーキテクチャ)・[インフラ](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#インフラ)・[費用](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#費用)・[反映と設置](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#反映と設置)・[検査](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#検査)・[環境の値の受け方](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#環境の値の受け方)・[非機能の実現方式](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#非機能の実現方式)
 - [データ: 進行表の DB](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#進行表の-db)・[API: ランナー・手元のマシン・DB の用意のタスクの HTTP の経路](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#ランナー手元のマシンdb-の用意のタスクの-http-の経路)
 - [開発の計画: 子の一覧（K5）](https://github.com/devbasex/nd-factory/blob/main/docs/design-process/issue-24/plan.md#子の一覧)・[確かめる子](https://github.com/devbasex/nd-factory/blob/main/docs/design-process/issue-24/plan.md#確かめる子)
 
@@ -175,7 +175,7 @@
 
 > インフラ: 常駐する計算と NAT なしで、自前の VPC・Aurora・ECS を安く立てられる
 
-> 詳細設計で書くこと: VPC の CIDR の既定・Aurora の最大 ACU の既定・ECS のタスクの大きさの既定・予算の既定（土台の文書の費用の見込みから決める）・実測の手順
+> 詳細設計で書くこと: VPC の CIDR の既定・Aurora の最大 ACU の既定・ECS のタスクの大きさの既定・予算の既定（プラットフォームの文書の費用の見込みから決める）・実測の手順
 
 （書き手: 起票者、日付: 2026-11-18）
 
@@ -185,7 +185,7 @@
 
 > まず C 案にしてからドキュメントを整理してください
 
-（書き手: 利用者、日付: 2026-11-21。C 案は conductor が中継した次の形: `app` のスタックに nd-factory 専用の ECR を置き、ライフサイクルの規則で古い版を消す。ランナーと DB の用意のイメージは CDK の資産にせず、設置のコマンドと反映のパイプラインが作って自前の ECR へ push し、テンプレートはダイジェストで引いて確認の値で縛る。全体の設計の直しはこの課題の設計 Pull Request に含める。同じ日の前の指示は、この指示で取り消した）
+（書き手: 利用者、日付: 2026-11-21。C 案は conductor が中継した次の形: `app` のスタックに nd-factory 専用の ECR を置き、ライフサイクルの規則で古い版を消す。ランナーと DB の用意のイメージは CDK のアセットにせず、設置のコマンドと反映のパイプラインが作って自前の ECR へ push し、テンプレートはダイジェストで引いて確認の値で縛る。全体の設計の直しはこの課題の設計 Pull Request に含める。同じ日の前の指示は、この指示で取り消した）
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 

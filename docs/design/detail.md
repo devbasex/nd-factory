@@ -5,7 +5,7 @@
 | 設計 | 受ける項目 |
 | --- | --- |
 | [全体の設計](overview.md) | 不変条件 I2・I4・I5・I8・I9・I12〜I15 |
-| [土台](platform.md) | 「横断の部品と定数の置き場」「アーキテクチャ」 |
+| [プラットフォーム](platform.md) | 「横断の部品と定数の置き場」「アーキテクチャ」 |
 | [API と MCP](api.md) | 「呼び出しの規約」「認証と主体」「認可」「操作の記録」「形の正本」 |
 
 扱うのは、リポジトリのモジュールの置き場と依存の向き、横断の部品の最上位の関数の仕様・異常系・並行と排他・記録の出し方・テストの観点である。
@@ -24,7 +24,7 @@
 | `apps/api/src/entries/` の見回り | 見回りの起点と予定。処理ごとの中身は持ち主の子（失効のやり直し #5・マシンの途切れ #7・送達のやり直し #8） | #6 |
 | `apps/api/src/entries/` の知らせの送り手・`apps/api/src/modules/` の知らせ | 知らせ | #8 |
 | 要素の項目・型・理由のコード | 操作ごとの形の正本 | [API の文書の操作の一覧](api.md#操作の一覧) の受け持つ子の表 |
-| 設定のファイルのキー | 読む構成要素ごとのキー | [土台の文書の環境の値の受け方](platform.md#環境の値の受け方) の表 |
+| 設定のファイルのキー | 読む構成要素ごとのキー | [プラットフォームの文書の環境の値の受け方](platform.md#環境の値の受け方) の表 |
 
 ## ファイル配置
 
@@ -99,7 +99,7 @@ nd-factory/
 | `packages/core` | `packages/contracts` だけ | 各コンテキストの表の行を読む所（席・割り当て・委任・マシン・レーン）は、`core` が読み手の型（ポート）だけを持ち、`apps/api/src/modules/` が中身を渡す。これで `core` から `apps` への向きの依存を作らない |
 | `apps/api`・`apps/runner`・`apps/nd-runtime`・`apps/db-prep` | `packages/core` と `packages/contracts` | `apps/*` どうしは互いに import しない（ランナーと API は HTTP の経路だけでつながる） |
 | `apps/web` | `packages/contracts` と、`packages/core` のうちブラウザーで動くモジュール（`clock`・`ids`・`redact`・`log`）だけ | — |
-| `infra` | `packages/contracts` | `apps/*` を import せず、起点のファイルのパスを資産として束ねるだけにする |
+| `infra` | `packages/contracts` | `apps/*` を import せず、起点のファイルのパスをアセットとして束ねるだけにする |
 | `tools` | `packages/contracts` | ほかの置き場のコードを文字として読む |
 
 | 置き場 | モジュール | 最上位の関数 |
@@ -125,7 +125,7 @@ nd-factory/
 | `apps/nd-runtime/` | nd ランタイム | nd ランタイムの関数。API への送信は `callHttp` を通す |
 | `apps/db-prep/` | DB の用意 | DB の用意の関数。API への送信は `callHttp` を通す |
 | `infra/` | スタックと設置のコマンド | スタックの構築子と設置のコマンドの関数。`packages/core` の関数を使わない |
-| `tools/checks/` | 足す検査 | 検査の関数。境界の検査は [土台の横断の部品の置き場の基準](platform.md#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」を、`apps/` の 5 つの置き場の実行時のコードでだけ探す。`packages/core` は部品の置き場そのもので、`infra/`・`tools/` は組み立てと反映の時だけ動くため対象から外す（土台の決定 91） |
+| `tools/checks/` | 足す検査 | 検査の関数。境界の検査は [プラットフォームの横断の部品の置き場の基準](platform.md#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」を、`apps/` の 5 つの置き場の実行時のコードでだけ探す。`packages/core` は部品の置き場そのもので、`infra/`・`tools/` は組み立てと反映の時だけ動くため対象から外す（プラットフォームの決定 91） |
 
 境界の検査の対象は、実行の時に動くコード（`apps/` の 5 つの置き場）である。`infra/` と `tools/` は組み立てと反映の時だけ動くため、対象から外す。`infra/setup/` は AWS SDK のクライアントを直に作ってよい。
 
@@ -143,7 +143,7 @@ nd-factory/
 | `redact` | `packages/core`（`redact`） | 新設 | `(value: unknown) => unknown` | 値の木を写し、秘密の鍵の名前と秘密の形の値を伏せる | 無し | 戻り値に、秘密の形のデータに当たる鍵の値と、秘密の形に当たる文字列が残らない。元の値は変えない。循環は `"[cycle]"` に替える | 無し |
 | `createLogger` | `packages/core`（`log`） | 新設 | `(context: LogContext, sink?: (line: string) => void) => Logger` | 要求の ID などの文脈を持った、JSON の 1 行を出すログの書き手を作る | `context.request_id` がある | `Logger.info`・`warn`・`error` は、文脈と項目を `redact` に通して 1 行の JSON にし、`sink` へ渡す | 標準出力へ 1 行を書く（Lambda では CloudWatch Logs へ届く） |
 | `withRetry` | `packages/core`（`retry`） | 新設 | `<T>(op: (attempt: number) => Promise<T>, policy: RetryPolicy, opts: { classify: (e: unknown) => FailureClass; deadline?: number; sleep?: (ms: number) => Promise<void> }) => Promise<T>` | 方針のデータに従って、再試行してよい失敗だけを待って繰り返す | `op` は同じ引数で繰り返してよい処理（冪等か、届かなかったと分かる失敗だけを繰り返す方針） | 成功の値を返すか、最後の失敗を `RetryExhausted`（回数と分類を持つ）で投げる。`deadline` を越えて待たない | 渡した処理の副作用を最大 `policy.max_attempts` 回起こし、間で待つ |
-| `classifyFailure` | `packages/core`（`retry`） | 新設 | `(e: unknown) => FailureClass` | HTTP の状態・AWS SDK の例外の名前・網の誤りを 5 つの分類に分ける | 無し | 戻り値は `retryable`・`conflict`・`not_found`・`rejected`・`unknown` のどれか | 無し |
+| `classifyFailure` | `packages/core`（`retry`） | 新設 | `(e: unknown) => FailureClass` | HTTP の状態・AWS SDK の例外の名前・ネットワークの誤りを 5 つの分類に分ける | 無し | 戻り値は `retryable`・`conflict`・`not_found`・`rejected`・`unknown` のどれか | 無し |
 | `callHttp` | `packages/core`（`outbound`） | 新設 | `(req: OutboundRequest, policyName: RetryPolicyName, deps: OutboundDeps) => Promise<OutboundResult>` | 外への HTTP の呼び出しを時間切れ・再試行・分類つきで行う | `req.url` は `https:`。`req.idempotent` を呼び手が決めている | 戻り値は状態・頭書きの一部・本文と分類。冪等でない要求は、届かなかったと分かる失敗（接続の拒否・429）だけを繰り返す | 外部への HTTPS の要求（GitHub・IdP の鍵・Web Push・Slack・ランナーから API） |
 | `awsClient` | `packages/core`（`outbound`） | 新設 | `<C>(make: (config: AwsClientConfig) => C, policyName: RetryPolicyName) => C` | AWS SDK のクライアントを、方針のデータの回数と時間切れで作る | `make` は SDK のクライアントの構築子を包む関数 | 戻り値のクライアントは `maxAttempts` と要求ごとの時間切れが方針のデータの値。同じ方針の名前の 2 回目は同じクライアントを返す | 無し |
 | `putIfAbsent` | `packages/core`（`conditional-write`） | 新設 | `(spec: { table: TableName; item: Row; onConflict: ConflictRule }) => TransactItem` | 行が無いときだけ足す書き込みを組む | `item` は `pk`・`sk`・`schema_version` を持つ | 戻り値は `attribute_not_exists(pk)` を条件にした 1 件で、外れたときの扱い（`state_mismatch`・`return_existing` など）を持つ | 無し |
@@ -179,8 +179,8 @@ nd-factory/
 | `withRetry` | 回数を使い切った | 再試行してよい失敗が続いた | 回数の数え | 呼び出し元へ返す（`RetryExhausted`） | 呼び手が決める。API では 503 `unavailable` | 後始末なし。後から再実行できる |
 | `withRetry` | 再試行してはいけない失敗 | 分類が `conflict`・`not_found`・`rejected` | `classify` の戻り値 | 呼び出し元へ返す（最初の失敗のまま） | 呼び手が決める | 繰り返さない |
 | `withRetry` | 期限に届く | 次の待ちが `deadline` を越える | 待つ前の残り時間の照らし | 呼び出し元へ返す（`RetryExhausted`、理由は期限） | 呼び手が決める。API では 503 `unavailable` | 後から再実行できる |
-| `callHttp` | 時間切れ | 相手が遅い・網の不調 | `AbortSignal` の時間切れ | 冪等な要求は再試行、冪等でない要求は呼び出し元へ返す（届いたか分からない） | 呼び手が決める。届いたか分からない外への作成は「行う予定」の行に印を残し、作り直さない（[起票の依頼](execution.md#起票の依頼)） | 冪等なら再実行できる |
-| `createJwksCache` | 公開鍵を取れない | IdP の遅れ・網の不調・JWKS の形の誤り | `fetchJwks`（`callHttp` の時間切れと失敗） | 控えを変えずに取得の失敗を投げる。同じ時に待っていた取り直しも同じ失敗で終わる | `authenticate` が `unavailable` にし、API は 503 `unavailable` | 控えは前のまま残る。次の要求で取り直せる |
+| `callHttp` | 時間切れ | 相手が遅い・ネットワークの不調 | `AbortSignal` の時間切れ | 冪等な要求は再試行、冪等でない要求は呼び出し元へ返す（届いたか分からない） | 呼び手が決める。届いたか分からない外への作成は「行う予定」の行に印を残し、作り直さない（[起票の依頼](execution.md#起票の依頼)） | 冪等なら再実行できる |
+| `createJwksCache` | 公開鍵を取れない | IdP の遅れ・ネットワークの不調・JWKS の形の誤り | `fetchJwks`（`callHttp` の時間切れと失敗） | 控えを変えずに取得の失敗を投げる。同じ時に待っていた取り直しも同じ失敗で終わる | `authenticate` が `unavailable` にし、API は 503 `unavailable` | 控えは前のまま残る。次の要求で取り直せる |
 | `createJwksCache` | 取り直した JWKS にも `kid` が無い | 知らない鍵か偽の token | 取り直した後の控えの引き当て | 控えを新しい集まりに置き換え、鍵が無いと答える。次の取り直しは `JWKS_REFETCH_MS` の後まで起こさない | `authenticate` が `unauthorized` にし、API は 401 | 再実行しても同じ。鍵が回った後なら次の取り直しで通る |
 | `callHttp` | 相手の 429・5xx | 呼びすぎ・相手の障害 | 応答の状態 | 再試行（`Retry-After` を方針の上限まで守る） | 使い切れば呼び手へ `retryable` の結果 | 再実行できる |
 | `callHttp` | 相手の 4xx（429 を除く） | 要求の誤り・権限の無さ | 応答の状態 | 呼び出し元へ返す（`rejected`・`not_found`・`conflict`） | 呼び手が決める | 同じ要求の再実行は同じ結果 |
@@ -190,7 +190,7 @@ nd-factory/
 | `writeAtomically` | 表に届かない | 呼びすぎ・障害・時間切れ | SDK の例外 | 再試行の後に呼び出し元へ返す | 要求全体の 503（記録の行を含むなら `audit_unavailable`、含まなければ `unavailable`） | 何も書かれていない。冪等の鍵で再実行できる |
 | `writeAtomically` | 件の数が上限を越える | ハンドラーが組んだ書き込みが多すぎる | 送る前の数え | 止める（例外） | 要求全体の 503 `unavailable` とログの error | 設計の誤りで、テストが先に落とす |
 | `authenticate` | token が無い・形が違う・署名が違う・期限切れ・取り消し済み・受け口に合わない | 呼び手の誤りか古い token | 種類ごとの照らし | 呼び出し元へ返す（`unauthorized`） | 要求全体の 401 `unauthorized`（理由によらず同じ本文） | 後始末なし。新しい token で再実行できる |
-| `authenticate` | IdP の公開鍵を取れない・表に届かない | 網・依存先の障害 | `aws-jwt-verify` の鍵の取得の失敗（取得は `callHttp` を渡した取り手で行う）と読みの失敗 | 再試行の後に呼び出し元へ返す（`unavailable`） | 要求全体の 503 `unavailable`（401 にしない） | 再実行できる |
+| `authenticate` | IdP の公開鍵を取れない・表に届かない | ネットワーク・依存先の障害 | `aws-jwt-verify` の鍵の取得の失敗（取得は `callHttp` を渡した取り手で行う）と読みの失敗 | 再試行の後に呼び出し元へ返す（`unavailable`） | 要求全体の 503 `unavailable`（401 にしない） | 再実行できる |
 | `authenticate` | 委任の最後に使った時刻を書けない | 表の失敗・条件の外れ | 条件つきの更新の失敗 | 既定値で続ける（主体は決めたまま） | 無し。ログの warn | 次の要求で書き直す |
 | `visibleProjectIds` | 読み手が失敗する | 表に届かない | 読み手の例外 | 呼び出し元へ返す | 要求全体の 503 `unavailable` | 再実行できる |
 | `authorize` | 対象が見えない・無い | 割り当ての外・ID の種類の違い・消えた対象 | 対象のプロジェクトの引きと見える集まりの照らし | 呼び出し元へ返す（要素の拒み） | 要素の 404 `not_found`（無い対象と同じ本文） | 後始末なし |
@@ -200,7 +200,7 @@ nd-factory/
 | `appendAudit` | 書けない | 表に届かない・再試行の使い切り | `writeAtomically` の失敗 | 呼び出し元へ返す（`AuditUnavailable`） | 読む操作は値を返さず要求全体の 503 `audit_unavailable` | 再実行できる。値は渡していない |
 | `createMcpServer` | JSON-RPC の形の誤り・知らない方法・知らない道具・道具の入力の外側の形の誤り（`items` が配列でない・`MAX_ITEMS` を越える） | 呼び手の誤り | SDK の要求の読みと、SDK に登録した入力の形の照らし | SDK が JSON-RPC の誤りを返す（形の誤りは `-32700`・`-32600`、知らない方法は `-32601`、知らない道具と入力の誤りは `-32602`）。要素の形はここで照らさない | JSON-RPC の誤りの応答。HTTP の状態は SDK の決まりに従う。`serveMcp` が要約の行を 1 件書く | 後始末なし。呼び手が直して送り直せる |
 | `serveMcp` | token が無い・委任の token でない・照らしに外れる | 呼び手の誤りか古い token（Cognito の token を `/mcp` へ送るなど） | SDK へ渡す前の `authenticate` | 呼び出し元へ返す（SDK へ渡さない） | 要求全体の 401 `unauthorized`。主体の無い記録の行を 1 件 | 後始末なし。委任の token で再実行できる |
-| `serveMcp` | 認証の依存先に届かない | 網・依存先の障害 | `authenticate` の `unavailable` | 呼び出し元へ返す（SDK へ渡さない） | 要求全体の 503 `unavailable`。記録の行を試み、書けなくても 503 のまま | 再実行できる |
+| `serveMcp` | 認証の依存先に届かない | ネットワーク・依存先の障害 | `authenticate` の `unavailable` | 呼び出し元へ返す（SDK へ渡さない） | 要求全体の 503 `unavailable`。記録の行を試み、書けなくても 503 のまま | 再実行できる |
 | `serveMcp` | `dispatch` を通らなかった応答の要約の行を書けない | 表に届かない | `appendAudit` の失敗 | SDK の応答を捨てて呼び出し元へ返す | 要求全体の 503 `audit_unavailable`（道具の一覧などの値を返さない） | 何も書いていない。再実行できる |
 | `dispatch` | 要求全体の形の誤り | 本文の誤り | `readHttpCall` の戻り値。MCP の入口では `arguments.items` の空と同じ対象の重なりを `dispatch` が `readHttpCall` と同じ順で照らす | 呼び出し元へ返す | 要求全体の 400 と理由のコード（MCP では `writeMcpResponse` が `isError: true` にする）。記録の行を 1 件書く | 後始末なし |
 | `dispatch` | 要素の形の誤り | 要素が操作の形に合わない | 形の正本の zod の検証 | 呼び出し元へ返す（要素ごと） | 要素の 400 `item_invalid` と `fields` | 後始末なし |
@@ -252,7 +252,7 @@ nd-factory/
 | `judgeUsage` | 時点が「割り当てる」 | 同時に動くレーンの数がプランの数以上なら `concurrency_full`（待てば解ける）。上限なしの行は照らさない |
 | `judgeUsage` | 時点が「区間の境」 | 使った額が上限額以上なら `monthly_cap_reached`（待てば解ける: 上限額を変えるか月が替わる） |
 | `judgeUsage` | 使った額と上限額の通貨が違う | `currency_mismatch`（通さない。換算しない） |
-| `classifyFailure` | 429・500・502・503・504・網の誤り・時間切れ・`ThrottlingException`・`ProvisionedThroughputExceededException`・`TransactionConflict` | `retryable` |
+| `classifyFailure` | 429・500・502・503・504・ネットワークの誤り・時間切れ・`ThrottlingException`・`ProvisionedThroughputExceededException`・`TransactionConflict` | `retryable` |
 | `classifyFailure` | 409・`ConditionalCheckFailedException` | `conflict` |
 | `classifyFailure` | 404・`ResourceNotFoundException` | `not_found` |
 | `classifyFailure` | ほかの 4xx・`ValidationException`・`AccessDeniedException` | `rejected` |

@@ -1,4 +1,4 @@
-# 土台: 誰でも自分の AWS へ安く設置でき、承認した差分だけが反映され、値の漏れを検査で止められる
+# プラットフォーム: 誰でも自分の AWS へ安く設置でき、承認した差分だけが反映され、値の漏れを検査で止められる
 
 [全体の設計](overview.md)のドメインモデル（集約・不変条件 I1〜I16）を、置き場とインフラへ下ろす。
 MVV の項目と、それを受ける節は次のとおりである。
@@ -9,7 +9,7 @@ MVV の項目と、それを受ける節は次のとおりである。
 | Value 7 | 検査 |
 | Value 8 と P1 | 反映と設置 |
 
-画面・API・実行の振る舞いは [画面](screens.md)・[API と MCP](api.md)・[実行](execution.md) にあり、ここではそれらが動く土台だけを扱う。
+画面・API・実行の振る舞いは [画面](screens.md)・[API と MCP](api.md)・[実行](execution.md) にあり、ここではそれらが動くプラットフォームだけを扱う。
 アーキテクチャは arc42（STD1）の 12 章と C4（STD2）の図で書く。
 値はすべて作り物（AWS のアカウント `123456789012`・リージョン `us-west-2`・接頭辞 `acme`・環境 `test`）か設計の既定値である。
 
@@ -49,7 +49,7 @@ MVV の項目と、それを受ける節は次のとおりである。
 | --- | --- | --- |
 | 使わない間は止まる部品で組む | 画面は静的な配信、API は Lambda、レーンは動く間だけの Fargate のタスク、進行表の DB は 0 ACU で一時停止する Aurora | 決定 80・83・85 |
 | サービスの状態はサーバーの側の 1 つの置き場 | サービスの状態は DynamoDB、大きい本文は S3、NDF の状態は進行表の DB。どれもプロジェクトかチームの ID で区切り、認可の判定（I2）と同じ単位にそろえる | 決定 81・82・84 |
-| 反映の道筋は 2 つだけにする | 設置のコマンド（`diff` → `deploy --confirm`）と反映のパイプライン（push → 準備 → 人の承認 → 反映）。資源は縦の切れ端のスタックへ入れ、確認の値で縛る | 決定 89・87 |
+| 反映の道筋は 2 つだけにする | 設置のコマンド（`diff` → `deploy --confirm`）と反映のパイプライン（push → 準備 → 人の承認 → 反映）。資源はアプリのスタックへ入れ、確認の値で縛る | 決定 89・87 |
 | 値の漏れと規約の破れは検査で止める | 漏れ・参照・形の往復・境界・I8・I14 の検査を CI に置き、スタックのテストがインフラの決まりを照らす | 決定 92 |
 
 ### 文脈の図
@@ -350,12 +350,12 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 
 ### 2 つの反映の道筋
 
-反映は設置のコマンドと反映のパイプラインの 2 つの道筋で行う。VPC・Aurora・ECS・ECR・表・予算は、縦の切れ端のスタック（`app`）へ入れ、同じ確認の値と要約値で縛る（決定 89）。手順の正本は [setup.md](../operations/setup.md)・[pipeline-approval.md](../operations/pipeline-approval.md)・[settings.md](../operations/settings.md) である。
+反映は設置のコマンドと反映のパイプラインの 2 つの道筋で行う。VPC・Aurora・ECS・ECR・表・予算は、アプリのスタック（`app`）へ入れ、同じ確認の値と要約値で縛る（決定 89）。手順の正本は [setup.md](../operations/setup.md)・[pipeline-approval.md](../operations/pipeline-approval.md)・[settings.md](../operations/settings.md) である。
 
 | 環境 | 反映の道筋 | 人の承認 |
 | --- | --- | --- |
 | 自分で設置する人（A6） | `npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> --out <置き場>` で差分と確認の値を見て、`npm run nd-setup -- deploy --profile <profile> --assembly <置き場> --confirm <確認の値>` で反映する | 設置する人が差分を読んで確認の値を渡す |
-| 運用する環境の縦の切れ端（A7） | 起点のブランチへの push → 準備（合成・差分・要約値）→ 人の承認 → 反映（要約値を数え直して同じときだけ） | 承認のアクションで人が差分を承認する。AI の主体は承認を拒む方針で送れない |
+| 運用する環境のアプリのスタック（A7） | 起点のブランチへの push → 準備（合成・差分・要約値）→ 人の承認 → 反映（要約値を数え直して同じときだけ） | 承認のアクションで人が差分を承認する。AI の主体は承認を拒む方針で送れない |
 | 運用する環境のパイプラインのスタック | 設置のコマンドに `--stack pipeline` を渡す | `diff` の差分をリリース承認ゲートで承認した後にだけ `deploy` を打つ |
 
 `cdk deploy` を設置のコマンドの外で直に打たない。CI は検査だけを行い、AWS の資格情報を持たない（`tools/test/ci-definition.test.ts`）。
@@ -379,7 +379,7 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 
 | 項目 | 中身 |
 | --- | --- |
-| ランナーのイメージの前提 | イメージを作る場所（`diff` を打つ端末と、反映のパイプラインの準備のアクション）に Docker が要る。設置の前提の表（setup.md）に Docker を載せる。準備のアクションの CodeBuild は特権（`privileged`）にして Docker を持たせ、その役割に自前の ECR への push を許す。反映のアクションは変えない。パイプラインのスタックは設置のコマンド（`--stack pipeline`）でだけ反映され、起点のブランチへの push では変わらない。そのため、特権と push の権限を持つ版のパイプラインのスタックを先に反映し、その後でイメージを引く縦の切れ端を起点のブランチへ push する（逆の順では、準備のアクションがイメージを作れずに止まる） |
+| ランナーのイメージの前提 | イメージを作る場所（`diff` を打つ端末と、反映のパイプラインの準備のアクション）に Docker が要る。設置の前提の表（setup.md）に Docker を載せる。準備のアクションの CodeBuild は特権（`privileged`）にして Docker を持たせ、その役割に自前の ECR への push を許す。反映のアクションは変えない。パイプラインのスタックは設置のコマンド（`--stack pipeline`）でだけ反映され、起点のブランチへの push では変わらない。そのため、特権と push の権限を持つ版のパイプラインのスタックを先に反映し、その後でイメージを引くアプリのスタックを起点のブランチへ push する（逆の順では、準備のアクションがイメージを作れずに止まる） |
 | 足りない設定の一覧 | `diff` の出力の 1 欄。終了コードは持たない（足りない設定があっても反映はできる） |
 | 設定のファイルのキー | 予算・最大 ACU・推論の手段の可否・Web Push の公開鍵など。読む構成要素と同じ変更で足す |
 
@@ -484,7 +484,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | --- | --- | --- |
 | 標準・仕様 | 調べる | 画面の性能の目標と、Security Hub のコントロールに一次の定めがある。DB の側の排他は PostgreSQL の機能で、書き方の細則は Node の型の剥がしが打てる構文で決まる。arc42 と C4 は全体の設計の STD1・STD2 を引く |
 | 主要な製品 | 調べない | 置き場とインフラの選び方は MVV の Value 6（自前・NAT なし・Lambda は VPC の外・Fargate は公開のサブネット）と AWS のサービスの性質で決まり、他の製品の構成で変わらない |
-| ライブラリとサービス | 調べる | 進行表の DB・サービスの表・タスクの網と停止・配信・予算と運用の知らせ・イメージの置き場に AWS のサービスを使い、その性質と費用が設計を決める。画面の組み方は UI のフレームワークの候補と比べて決める |
+| ライブラリとサービス | 調べる | 進行表の DB・サービスの表・タスクのネットワークと停止・配信・予算と運用の知らせ・イメージの置き場に AWS のサービスを使い、その性質と費用が設計を決める。画面の組み方は UI のフレームワークの候補と比べて決める |
 
 ### 標準・仕様
 
@@ -502,7 +502,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | LIB80 | Aurora Serverless v2 の自動の一時停止（PostgreSQL） | PostgreSQL 16.3・15.7・14.12・13.15 以上 | AWS のサービス | — | 無し | 満たす。最小 0 ACU で、利用者の接続が無い状態が既定 300 秒（300〜86,400 秒）続くと止まり、止まる間の計算の費用は 0。再開は通常 約 15 秒、24 時間を超えた後は 30 秒以上。利用者の接続が 1 本でも開いていると止まらない。RDS Proxy を付けると止まらない。保守で起き、起きた後 20 分以上は止まらない | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html （2026-11-17） |
 | LIB81 | DynamoDB（要求の数の課金・TTL・条件式・ストリーム） | — | AWS のサービス | — | 無し | 満たす。要求の数の課金は使った分だけ。TTL は期限の後に数日のうちに書き込みの量を使わずに消す。条件式は鍵で指した 1 行を照らして外れたら書かない。ストリームを Lambda が 1 秒に 4 回読み、失敗は記録が切れるまでやり直す（1 つのストリームに 2 つの関数まで）。`TransactWriteItems` は 100 件までの書き込みを表をまたいで 1 つにまとめ、書かない行の条件は `ConditionCheck` で照らす。1 つのトランザクションで同じ行を 2 回指せない | https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/capacity-mode.html ・ 同 TTL.html ・ 同 Expressions.ConditionExpressions.html ・ 同 Streams.Lambda.html ・ https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html （2026-11-17・2026-11-18） |
-| LIB82 | ECS Fargate のタスク（網・`RunTask`・`StopTask`・`DescribeTasks`・`ListTasks`・タスクのメタデータの端点） | プラットフォームの版 1.4.0 | AWS のサービス | — | 無し | 満たす。イメージを取るには外への道筋が要り、公開のサブネットで公開 IP を付けるか、NAT か、ECR の Interface 型のエンドポイント。1.4.0 からは ECR・ログ・秘密の取得もタスクの網を通る。`StopTask` は SIGTERM を送り、既定 30 秒の後に SIGKILL で止める。`DescribeTasks` はタスクの `lastStatus` を返す。`RunTask` の `startedBy` に付けた値で `ListTasks` を絞れるが、ほかの絞り（`desiredStatus` を含む）と併せられず、`desiredStatus` の既定は `RUNNING` のため止まりかけ・止まったタスクは返らない。`clientToken` は起動の要求の冪等の鍵（64 字まで）。ECS の API は結果整合で、起動の直後は一覧に出ないことがある。タスクはメタデータの端点（`ECS_CONTAINER_METADATA_URI_V4` の `/task`）から自分の `TaskARN` を読める | https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-task-networking.html （2026-11-17）・ https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_StopTask.html ・ 同 API_DescribeTasks.html ・ 同 API_RunTask.html ・ 同 API_ListTasks.html ・ https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-metadata-endpoint-v4-fargate.html （2026-11-18） |
+| LIB82 | ECS Fargate のタスク（ネットワーク・`RunTask`・`StopTask`・`DescribeTasks`・`ListTasks`・タスクのメタデータの端点） | プラットフォームの版 1.4.0 | AWS のサービス | — | 無し | 満たす。イメージを取るには外への道筋が要り、公開のサブネットで公開 IP を付けるか、NAT か、ECR の Interface 型のエンドポイント。1.4.0 からは ECR・ログ・秘密の取得もタスクのネットワークを通る。`StopTask` は SIGTERM を送り、既定 30 秒の後に SIGKILL で止める。`DescribeTasks` はタスクの `lastStatus` を返す。`RunTask` の `startedBy` に付けた値で `ListTasks` を絞れるが、ほかの絞り（`desiredStatus` を含む）と併せられず、`desiredStatus` の既定は `RUNNING` のため止まりかけ・止まったタスクは返らない。`clientToken` は起動の要求の冪等の鍵（64 字まで）。ECS の API は結果整合で、起動の直後は一覧に出ないことがある。タスクはメタデータの端点（`ECS_CONTAINER_METADATA_URI_V4` の `/task`）から自分の `TaskARN` を読める | https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-task-networking.html （2026-11-17）・ https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_StopTask.html ・ 同 API_DescribeTasks.html ・ 同 API_RunTask.html ・ 同 API_ListTasks.html ・ https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-metadata-endpoint-v4-fargate.html （2026-11-18） |
 | LIB83 | CloudFront の OAC | — | AWS のサービス | — | 無し | 満たす。OAI より OAC を推す（全リージョンの S3・SSE-KMS）。定額の Free プランは配信ごとに月 100 万回・100 GB | https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html ・ https://aws.amazon.com/cloudfront/pricing/ （2026-11-17） |
 | LIB84 | AWS Budgets と Amazon SNS（運用の知らせ） | — | AWS のサービス | — | 無し | 満たす。予算の監視と知らせは無料。動作つきの予算は 2 つまで無料。SNS は時間の課金を持たず、月 100 万回の要求とメールの 1,000 通までは無料の枠 | https://aws.amazon.com/aws-cost-management/aws-budgets/pricing/ （2026-11-17）・ https://aws.amazon.com/sns/pricing/ （2026-11-18） |
 | LIB85 | ECR のライフサイクルの規則 | — | AWS のサービス | — | 無し | 満たす。押した数（`imageCountMoreThan`）か日数で古いイメージを 24 時間のうちに消す | https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html （2026-11-17） |
@@ -618,7 +618,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 理由: Value 8 は差分を見て承認した範囲だけを反映することを求める。ダイジェストは中身の要約値で、テンプレートが引く値が変われば確認の値も変わるため、承認した確認の値と違う中身は反映されない。push は承認の前に起きるが、反映されなければどのタスクの定義からも引かれない。Value 6 は保管の費用を抑えることを求め、自前のリポジトリならライフサイクルの規則（LIB85）で古い版を確実に消せる。x86_64 にすると、反映のパイプライン（x86 の CodeBuild）と多くの設置する人の端末で、まねをせずにイメージを作れる。ARM との差は 5 人のチームの見込みで月 1 ドルに満たない（[見込み](#見込み)）。
 
-採らなかった案: イメージを CDK の資産にする形（この決定の直す前の結論）。資産のイメージは bootstrap の資産のリポジトリにしか置けず（bootstrap の `image-publishing` の役割の書き込み先がそのリポジトリだけ）、bootstrap の規則はタグの付く資産を消さない。自前の ECR へ写しても bootstrap の側に古い版が残る。古い版を CDK の CLI の資産の片付け（`cdk gc`）で消す形も比べたが、片付けが設置する人の手の操作に依り、その機能は安定でない（`--unstable` を付けたときだけ動く）。bootstrap はほかのアプリと共有されうるため、その片付けはほかのアプリの資産にも及ぶ。公開のレジストリのイメージをタグで引く形は、タグの指す中身が承認の後に変わりうり、外部のレジストリへの依存が増える。ARM64 にする形は、x86 の環境でのまねのビルドが遅く、設置の手順が増える。
+採らなかった案: イメージを CDK のアセットにする形（この決定の直す前の結論）。アセットのイメージは bootstrap のアセットのリポジトリにしか置けず（bootstrap の `image-publishing` の役割の書き込み先がそのリポジトリだけ）、bootstrap の規則はタグの付くアセットを消さない。自前の ECR へ写しても bootstrap の側に古い版が残る。古い版を CDK の CLI のアセットの片付け（`cdk gc`）で消す形も比べたが、片付けが設置する人の手の操作に依り、その機能は安定でない（`--unstable` を付けたときだけ動く）。bootstrap はほかのアプリと共有されうるため、その片付けはほかのアプリのアセットにも及ぶ。公開のレジストリのイメージをタグで引く形は、タグの指す中身が承認の後に変わりうり、外部のレジストリへの依存が増える。ARM64 にする形は、x86 の環境でのまねのビルドが遅く、設置の手順が増える。
 
 根拠: Value 8 / Value 6（MVV 版 1）
 
@@ -635,13 +635,13 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 根拠: Value 1 / Vision（MVV 版 1）
 
-### 決定 89: 承認する人が 1 つの差分と確認の値で反映を承認できるよう、資源を縦の切れ端のスタックへまとめる
+### 決定 89: 承認する人が 1 つの差分と確認の値で反映を承認できるよう、資源をアプリのスタックへまとめる
 
 結論: VPC・Aurora・ECS・ECR・サービスの表・状態の S3・予算は `app` のスタックに入れ、スタックの種類（`app`・`pipeline`）を増やさない。状態を持つ資源（表・バケット・クラスタ）は、スタックから消しても残る設定にする。
 
 理由: Value 8 は差分を見て承認した範囲だけを反映することを求める。反映のパイプラインは `app` だけを反映し、パイプライン自身は設置のコマンドで反映する（[pipeline-approval.md](../operations/pipeline-approval.md)）。スタックを増やすと、確認の値・反映のアクション・承認の資料がスタックごとに分かれ、承認する人が読む差分も分かれる。消しても残す設定で、1 つのスタックに状態を持つ資源を置いても、差分の誤りで消えない。
 
-採らなかった案: 網と状態を別のスタックに分ける形は、パイプラインが複数のスタックの順序と差分を扱うように変わり、承認する人が読む差分が分かれる。
+採らなかった案: ネットワークと状態を別のスタックに分ける形は、パイプラインが複数のスタックの順序と差分を扱うように変わり、承認する人が読む差分が分かれる。
 
 根拠: Value 8（MVV 版 1）
 
@@ -763,11 +763,11 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 根拠: Value 9（MVV 版 1）
 
-### 決定 140: 子の課題が言語と画面の組み方を 1 か所から読めるよう、書き方の細則を土台の文書に置き、画面は UI のフレームワークを入れずに素の TypeScript で組む
+### 決定 140: 子の課題が言語と画面の組み方を 1 か所から読めるよう、書き方の細則をプラットフォームの文書に置き、画面は UI のフレームワークを入れずに素の TypeScript で組む
 
 結論: 書き方の細則を [言語と書き方の決まり](#言語と書き方の決まり) に置き、`AGENTS.md` はそこを指す。画面は UI のフレームワークを入れず、素の TypeScript と DOM の API で部品を組み、Vite で束ねる。
 
-理由: 画面の部品は UX の土台として先に固める（Value 2）。部品の数は画面の文書の部品の一覧に収まり、状態の持ち方も確定待ちと控えに限られるため、フレームワークの仮想 DOM や状態の管理の仕組みを使う場面が少ない。フレームワークを入れると配る画面に実行の時の依存が増え（Value 6）、JSX で書いた部品は Node の型の剥がしで打てず、単体テストに変換の段が要る（STD84）。
+理由: 画面の部品は画面の共通の仕組みとして先に固める（Value 2）。部品の数は画面の文書の部品の一覧に収まり、状態の持ち方も確定待ちと控えに限られるため、フレームワークの仮想 DOM や状態の管理の仕組みを使う場面が少ない。フレームワークを入れると配る画面に実行の時の依存が増え（Value 6）、JSX で書いた部品は Node の型の剥がしで打てず、単体テストに変換の段が要る（STD84）。
 
 採らなかった案: React（LIB87）は依存が 2 つ増え、JSX が型の剥がしで打てない。Preact（LIB88）は小さいが JSX の事情が同じ。Lit（LIB89）は JSX を使わずに書けるが、依存が 1 つ増え、宣言の書き方の多くがデコレーターに寄る。どれも要件は満たすが、部品の数と状態の範囲に対して依存を足す分の得が無い。
 

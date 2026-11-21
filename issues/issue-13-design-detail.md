@@ -1,4 +1,4 @@
-# #13 の詳細設計: 網・進行表の DB・タスクの土台・費用の見張り・DB の用意のタスク・設置のコマンドの足し
+# #13 の詳細設計: ネットワーク・進行表の DB・ECS のクラスタ・費用の見張り・DB の用意のタスク・設置のコマンドの足し
 
 設計文書 [issue-13-design.md](./issue-13-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 2 つ以上あるため別のファイルにした。値の理由は設計文書の決定にあり、ここでは繰り返さない。ソースのコメントや型で読める情報は写さない。
 
@@ -101,7 +101,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `infraValues` | キーの無い設定で既定 | — | — |
 | `dbPrepCompletionRequest` | 3 つの `result` | — | `rotation_superseded` で `recorded_seq` が無い・`create` で `rotation_seq` がある |
 
-## 網
+## ネットワーク
 
 満たす決定: 決定 3、受け入れ条件 3・4
 
@@ -141,7 +141,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | --- | --- | --- | --- |
 | `ProgressDb` | 合成の出力に最小 0・最大 2・一時停止 300 秒・書き手 1 台 | `maxAcu` 16 | — |
 
-## タスクの土台
+## ECS のクラスタ
 
 満たす決定: 決定 5・11、受け入れ条件 2・3・4
 
@@ -231,7 +231,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `buildAndPushImages` | Docker が無い・作れない | 端末に Docker が無い・`docker login` の失敗・Dockerfile の誤り | `docker` の終了コード | 合成せずに止める | 「Docker が要る」か docker の出力、`EXIT.BUILD` | 何も合成していない。2 つ目以降のキーで止まったときは、先に処理したキーの push の済んだ版が残る。再実行できる |
-| `buildAndPushImages` | push できない・読めない | ECR の許しが無い・網 | `docker push` の終了コード・SDK の例外 | 合成せずに止める | docker の出力か例外の名前と文、`EXIT.BUILD` | push の済んだ版が残ることがある（どのタスクの定義からも引かれない）。原因を直して再実行できる |
+| `buildAndPushImages` | push できない・読めない | ECR の許しが無い・ネットワーク | `docker push` の終了コード・SDK の例外 | 合成せずに止める | docker の出力か例外の名前と文、`EXIT.BUILD` | push の済んだ版が残ることがある（どのタスクの定義からも引かれない）。原因を直して再実行できる |
 
 ### 単体テストの観点
 
@@ -261,7 +261,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `runDiff` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 確認の値を出した後に `collectMissingSettings` と `printMissingSettings` を打つ。終了コードは変えない |
 
 - `SetupDeps` に `readCostAllocationTags`・`readOrganizationManager`・`readGetAzsCount` を足す（テストは本物の AWS を呼ばない）
-- `MISSING_CHECKS` の 5 種類: Google のクライアントの ID が無い・`budget.scope` が `tags` でタグ `app-prefix`・`app-env` が `Active` でない（下のタグの行と、読めないときの行。`account` なら照らさない）・`ops.notify_emails` が空・`buildAndPushImages` の `noRepository` が空でない（キーごとに 1 行。「<キー> の ECR がまだ無いため、そのイメージのタスクの定義を持たない版を合成した。この差分を反映した後に、新しい置き場でもう一度 `diff` を打ち、出た確認の値で `deploy` を打つ」。順は下の「初めての設置の手順」）・`readGetAzsCount` が 2 未満（「`Fn::GetAZs` が返す AZ が <数> つで、反映が網を作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --availability-zone <AZ>`）か、既定のサブネットをすべて消す」。読めなければ「確かめられない（`ec2:DescribeSubnets`・`ec2:DescribeAvailabilityZones` を許した profile で読む）」）
+- `MISSING_CHECKS` の 5 種類: Google のクライアントの ID が無い・`budget.scope` が `tags` でタグ `app-prefix`・`app-env` が `Active` でない（下のタグの行と、読めないときの行。`account` なら照らさない）・`ops.notify_emails` が空・`buildAndPushImages` の `noRepository` が空でない（キーごとに 1 行。「<キー> の ECR がまだ無いため、そのイメージのタスクの定義を持たない版を合成した。この差分を反映した後に、新しい置き場でもう一度 `diff` を打ち、出た確認の値で `deploy` を打つ」。順は下の「初めての設置の手順」）・`readGetAzsCount` が 2 未満（「`Fn::GetAZs` が返す AZ が <数> つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（`aws ec2 create-default-subnet --availability-zone <AZ>`）か、既定のサブネットをすべて消す」。読めなければ「確かめられない（`ec2:DescribeSubnets`・`ec2:DescribeAvailabilityZones` を許した profile で読む）」）
 - 読めないときの行の文（設計文書の決定 12）: 「コスト配分タグ `app-prefix`・`app-env` が有効かを確かめられない。有効でなければ予算は 0 を数え続け、予算の知らせは鳴らない。次の操作: <操作>」。読めない原因は SDK の例外だけでは権限の不足と組織の制限を分けられないため、`readOrganizationManager` で分ける。<操作> は、`member: false` なら「`ce:ListCostAllocationTags` を許した profile で `diff` を打ち直す」、`member: true` なら「組織の管理のアカウント <ID> にタグの有効化を確かめて頼む（メンバーのアカウントでは権限を足しても有効にできない）。頼めなければ設定のファイルの `budget.scope` を `account` にする」、`unknown` なら両方を「組織に入っていなければ …。組織のメンバーなら …」の 2 つに分けて示す（管理のアカウントの ID は「組織の管理のアカウント」とだけ示す）
 - タグの行の文（設計文書の決定 6）: 「コスト配分タグ <有効でないタグ> が有効でない。有効になるまで予算は 0 を数え続け、予算の知らせは鳴らない。有効にする先: <先>。有効にできなければ設定のファイルの `budget.scope` を `account` にする（アカウントの全体を数える）」。<先> は `readOrganizationManager` が `member: false` なら「このアカウント（請求の画面のコスト配分タグ）」、`member: true` なら「組織の管理のアカウント <ID>（メンバーのアカウントでは有効にできない）」、`unknown` なら「組織に入っていなければこのアカウント、組織のメンバーなら組織の管理のアカウント」
 
@@ -294,7 +294,7 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 
 ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回目の反映が DB の用意のタスクの定義を足す。`setup.md` の「使い方の場面」の「自分で設置する人」の段 2・3（`diff` と `deploy`）を、次の 4 つの段に置き換えてこのまま写す。どの段も同じ profile と設定のファイルで打つ。
 
-1. `npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> --out <置き場 1>` を打つ。足りない設定の一覧に「db-prep の ECR がまだ無いため、そのイメージのタスクの定義を持たない版を合成した」の行があり、差分が自前の ECR のリポジトリを足し、DB の用意のタスクの定義が無いことを読む。網・表・Aurora など、ほかの資源の差分も読み、足す・変える・消す資源のそれぞれに納得する。確認の値（確認の値 1）を控える
+1. `npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> --out <置き場 1>` を打つ。足りない設定の一覧に「db-prep の ECR がまだ無いため、そのイメージのタスクの定義を持たない版を合成した」の行があり、差分が自前の ECR のリポジトリを足し、DB の用意のタスクの定義が無いことを読む。ネットワーク・表・Aurora など、ほかの資源の差分も読み、足す・変える・消す資源のそれぞれに納得する。確認の値（確認の値 1）を控える
 2. 段 1 の差分に納得したときだけ、`npm run nd-setup -- deploy --profile <profile> --assembly <置き場 1> --confirm <確認の値 1>` を打ち、0 で終わることを読む
 3. 新しい置き場で `npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> --out <置き場 2>` を打つ。DB の用意のイメージを push した行とダイジェストがあり、差分が DB の用意のタスクの定義（イメージは `<リポジトリ>@sha256:…` で、ダイジェストが push の行と同じ）を足し、ほかの資源の消しが無いことを読む。確認の値（確認の値 2）を控える
 4. 段 3 の差分に納得したときだけ（段 1 の承認は段 3 の差分を含まない）、`npm run nd-setup -- deploy --profile <profile> --assembly <置き場 2> --confirm <確認の値 2>` を打ち、0 で終わることを読む
@@ -369,9 +369,9 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `readTaskArn` | 読めない | 端点が無い（ECS の外） | `fetch` の失敗 | 止める | ログに理由、終了コード 1 | 何も書いていない。見回りが時間切れで扱う |
-| `connectAdmin` | 開けない | Aurora の再開の遅れ・網 | 再試行の尽き | `failed`・`admin_connect_failed` を報告 | 終了コード 0 | 見回りが起こし直す |
+| `connectAdmin` | 開けない | Aurora の再開の遅れ・ネットワーク | 再試行の尽き | `failed`・`admin_connect_failed` を報告 | 終了コード 0 | 見回りが起こし直す |
 | `provisionProject` | SQL の失敗 | 権限・名前の衝突 | `pg` の例外 | `failed`・`sql_failed` を報告 | ログに SQLSTATE だけ（値は出さない） | 手順は何度打っても同じ結果。起こし直しで続く |
-| `complete` | 届かない | 網・API の 5xx | 再試行の尽き | 止める | 終了コード 1 | API は用意の ID で冪等。見回りが時間切れで扱う |
+| `complete` | 届かない | ネットワーク・API の 5xx | 再試行の尽き | 止める | 終了コード 1 | API は用意の ID で冪等。見回りが時間切れで扱う |
 
 ### 並行と排他
 

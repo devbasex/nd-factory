@@ -143,7 +143,7 @@
         {
           "target": "AWS（設置のコマンド npm run nd-setup と反映のパイプライン）",
           "kind": "manual",
-          "trigger": "npm run nd-setup -- diff で差分と確認の値を示し、承認の後に npm run nd-setup -- deploy --confirm <確認の値>。運用する環境の縦の切れ端は反映のパイプラインの承認の後に反映される",
+          "trigger": "npm run nd-setup -- diff で差分と確認の値を示し、承認の後に npm run nd-setup -- deploy --confirm <確認の値>。運用する環境のアプリのスタックは反映のパイプラインの承認の後に反映される",
           "versioned": false
         }
       ]
