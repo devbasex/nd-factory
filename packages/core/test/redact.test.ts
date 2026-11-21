@@ -26,6 +26,15 @@ describe("redact", () => {
     });
   });
 
+  it("自分の鍵の __proto__ を項目として残し、写しのプロトタイプを差し替えない", () => {
+    const value = JSON.parse('{"__proto__": {"token": "x", "n": 1}, "a": 1}') as unknown;
+    const out = redact(value) as Record<string, unknown>;
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(Object.hasOwn(out, "__proto__")).toBe(true);
+    expect(JSON.parse(JSON.stringify(out))).toEqual(JSON.parse('{"__proto__": {"token": "[redacted]", "n": 1}, "a": 1}'));
+    expect(JSON.stringify(out)).toBe('{"__proto__":{"token":"[redacted]","n":1},"a":1}');
+  });
+
   it("入れ子の深い所と配列の中も伏せる", () => {
     const value = { a: { b: { c: [{ d: { token: "x" } }, "ok"] } }, list: [[{ secret: 1 }]] };
     expect(redact(value)).toEqual({ a: { b: { c: [{ d: { token: R } }, "ok"] } }, list: [[{ secret: R }]] });
