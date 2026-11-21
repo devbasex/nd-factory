@@ -20,7 +20,7 @@
 | `packages/core/`・`packages/contracts/` | 横断の部品・操作の表の枠・サービスの表の列と索引・表の移し | detail.md（この文書）と #2 |
 | `apps/runner/` | ランナー | #6 |
 | `apps/nd-runtime/` | nd ランタイム | #7 |
-| `apps/api/src/entries/` の DB の用意の関数 | DB の用意。用意と差し替えの SQL は `SqlExecutor` のインタフェースの裏に置き、本番は Data API の実装、CI は `pg` の実装（PostgreSQL のサービスコンテナ）で同じ手順を照らす | #13 |
+| `apps/api/src/entries/db-prep.ts`（DB の用意の関数の起点）・`apps/api/src/db-prep/`（その処理の本体） | DB の用意。用意と差し替えの SQL は `SqlExecutor` のインタフェースの裏に置き、本番は Data API の実装、CI は `pg` の実装（PostgreSQL のサービスコンテナ）で同じ手順を照らす。起点へつなぐ終わりの記録の口の本番の実装は #6 | #13 |
 | `apps/api/src/entries/` の見回り | 見回りの起点と予定。処理ごとの中身は持ち主の子（失効のやり直し #5・マシンの途切れ #7・送達のやり直し #8） | #6 |
 | `apps/api/src/entries/` の知らせの送り手・`apps/api/src/modules/` の知らせ | 知らせ | #8 |
 | 要素の項目・型・理由のコード | 操作ごとの形の正本 | [API の文書の操作の一覧](api.md#操作の一覧) の受け持つ子の表 |
@@ -75,7 +75,8 @@ nd-factory/
 │   ├── api/                API と MCP の 1 つの関数・見回り・知らせの送り手・表の移し・DB の用意
 │   │   └── src/
 │   │       ├── entries/  * Lambda ごとの起点（api-fn・patrol・notifier・migrate・db-prep）
-│   │       └── modules/  * コンテキストごとのモジュール（操作のハンドラーと、認可の判定へ渡す読み手）
+│   │       ├── modules/  * コンテキストごとのモジュール（操作のハンドラーと、認可の判定へ渡す読み手）
+│   │       └── db-prep/  * DB の用意の関数の処理の本体（SQL の手順・秘密の器の版・終わりの記録の口の型）
 │   ├── web/                画面
 │   ├── runner/           * ランナー（ECS のタスクと手元のコンテナで同じものが動く）
 │   └── nd-runtime/       * nd ランタイム（手元のマシンで動く）
@@ -119,13 +120,14 @@ nd-factory/
 | `packages/core/` | `dispatch` | `readHttpCall`・`readMcpCall`・`createMcpHandler`・`createMcpServer`・`serveMcp`・`dispatch`・`writeHttpResponse`・`writeMcpResponse`（新設） |
 | `apps/api/src/entries/` | API と MCP の 1 つの関数の起点・見回り・知らせの送り手・表の移し・DB の用意 | 起点の関数（HTTP は `readHttpCall` → `dispatch` → `writeHttpResponse`、MCP は `readMcpCall` → `serveMcp` を呼ぶだけ。`serveMcp` は SDK へ渡す前に `authenticate` で主体を決め、実行環境ごとに 1 回作った `createMcpHandler` のハンドラーへ渡す。ハンドラーは要求ごとに `createMcpServer` でサーバーを作り、`tools/call` の道具の処理の中で決めた主体のまま `dispatch` → `writeMcpResponse` を呼ぶ。`dispatch` を通らなかった応答は、返す前に `serveMcp` が `appendAudit` で要約の行を書く） |
 | `apps/api/src/modules/` | コンテキストごとのモジュール | 操作ごとのハンドラーと、`authorize` へ渡す読み手 |
+| `apps/api/src/db-prep/` | DB の用意の関数の処理の本体 | `createDbPrepHandler` ほか（関数の粒度は #13 の詳細設計）。`packages/contracts`（と、できた後の `packages/core`）だけに依り、`modules/` を import しない。終わりの記録の口は型（ポート）だけを持ち、中身は `entries/db-prep.ts` が `modules/` のプロジェクトのモジュールから渡す（#6）。`entries/db-prep.ts` のほかは `db-prep/` を import しない |
 | `apps/web/` | 画面 | 画面ごとの関数（[画面](screens.md)） |
 | `apps/runner/` | ランナー | ランナーの関数。API への送信は `callHttp` を通す |
 | `apps/nd-runtime/` | nd ランタイム | nd ランタイムの関数。API への送信は `callHttp` を通す |
 | `infra/` | スタックと設置のコマンド | スタックの構築子と設置のコマンドの関数。`packages/core` の関数を使わない |
-| `tools/checks/` | 足す検査 | 検査の関数。境界の検査は [プラットフォームの横断の部品の置き場の基準](platform.md#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」を、`apps/` の 4 つの置き場の実行時のコードでだけ探す。`packages/core` は部品の置き場そのもので、`infra/`・`tools/` は組み立てと反映の時だけ動くため対象から外す（プラットフォームの決定 91） |
+| `tools/checks/` | 足す検査 | 検査の関数。境界の検査は [プラットフォームの横断の部品の置き場の基準](platform.md#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」を、`apps/` の 4 つの置き場の実行時のコード（`apps/api/src/` の `entries/`・`modules/`・`db-prep/` を含む）でだけ探す。`packages/core` は部品の置き場そのもので、`infra/`・`tools/` は組み立てと反映の時だけ動くため対象から外す（プラットフォームの決定 91） |
 
-境界の検査の対象は、実行の時に動くコード（`apps/` の 4 つの置き場）である。`infra/` と `tools/` は組み立てと反映の時だけ動くため、対象から外す。`infra/setup/` は AWS SDK のクライアントを直に作ってよい。
+境界の検査の対象は、実行の時に動くコード（`apps/` の 4 つの置き場。`apps/api/src/db-prep/` を含む）である。`packages/core` より先にできる `db-prep/` は、AWS SDK のクライアント・`pino`・`p-retry` を直に使う。境界の検査を CI に載せる変更より前に、#56 がこれらを横断の部品へ寄せる。`infra/` と `tools/` は組み立てと反映の時だけ動くため、対象から外す。`infra/setup/` は AWS SDK のクライアントを直に作ってよい。
 
 ## 関数の仕様
 
@@ -236,7 +238,7 @@ nd-factory/
 | `authorize` | 主体が人 | 見える集まり = 席を持つチームの今の割り当て。役割は席の役割 |
 | `authorize` | 主体が委任 | 見える集まり = 委任した人の今の集まり ∩ 委任の範囲のプロジェクト。役割は委任した人の席の役割 |
 | `authorize` | 主体がランナーか手元のマシン | 自分向けの HTTP の経路の操作だけ。見える集まりは自分のレーンのプロジェクトだけ |
-| `authorize` | 主体が DB の用意の関数 | 関数の中から呼ぶ用意の終わりの記録の操作だけ。見える集まりは呼び出しで渡されたプロジェクトだけ。利用者向けの操作は要求全体で拒む |
+| `authorize` | 主体が DB の用意の関数 | 関数の中から呼ぶ 3 つの処理（`db_prep.is_current`・`db_prep.read_target`・`db_prep.record`。[API の文書](api.md#ランナー手元のマシンの-http-の経路)）だけ。見える集まりは呼び出しで渡されたプロジェクトだけ。利用者向けの操作は要求全体で拒む |
 | `authorize` | 主体が見回り | 保守の操作だけ。利用者向けの操作は要求全体で拒む |
 | `authorize` | 要素の対象が割り当てを移す途中のプロジェクトで、主体が移す先のチームの持ち主 | 名前だけを読む操作の要素だけ通す（I2 の例外）。ほかは 404 |
 | `authorize` | 対象の ID の種類の頭が操作と合わない | 404 `not_found`（`parseId` が `null`） |
