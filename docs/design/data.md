@@ -247,7 +247,8 @@ sequenceDiagram
     participant DB as 進行表の DB
     participant PT as 見回り
     API->>API: 作る: 名前と用意の ID を置き 作成中 にする / 差し替え: 番号 n に上げ、用意の ID を置き保留にする
-    API-)FN: 非同期で呼ぶ（用意の ID・プロジェクトの ID・種類・番号 n。自動の再試行は 0 回）
+    API-)FN: 非同期で呼ぶ（用意の ID・プロジェクトの ID・種類・番号 n。自動の再試行は 0 回・待ち行列の最大の年齢は 60 秒）
+    FN->>API: 用意の ID が今の値かを読む（違えば何もせずに終える）
     FN->>SM: プロジェクトの役割のパスワードを保留の版から読む
     alt 作る
         FN->>DB: Data API で用意の手順の 1〜6
