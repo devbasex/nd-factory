@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +36,21 @@ const WORKSPACES: { dir: string; manifest: Record<string, unknown> }[] = [
 /** 生成した画面の呼び出しの置き場（K2-2） */
 const GENERATED = "apps/web/src/generated/calls.ts";
 const GENERATED_BASE = "export const usedCall = 1;\n/** @screenPending #4 */\nexport const pendingCall = 2;\n";
+/**
+ * 生成した画面の呼び出しを production の入口にする `apps/web` の `entry` の行（K2-2）。画面から参照の無い生成した
+ * ファイルを使われないファイルとして落とさず、`includeEntryExports` で書き出しを照らす。生成先が空だと knip が
+ * 当たらない入口として誤りにするので、生成を置く #2 の Pull Request が足す
+ */
+const GENERATED_ENTRY = "src/generated/**/*.ts!";
+
+/** `apps/web` の `entry` に生成した画面の呼び出しの行を足す（あれば重ねない）・外す */
+function withGeneratedEntry(config: KnipConfig, present: boolean): KnipConfig {
+  const web = config.workspaces["apps/web"] ?? {};
+  const rest = (web.entry ?? []).filter((e) => e !== GENERATED_ENTRY);
+  const entry = present ? [...rest, GENERATED_ENTRY] : rest;
+  const { entry: _e, ...others } = web;
+  return { ...config, workspaces: { ...config.workspaces, "apps/web": entry.length > 0 ? { ...others, entry } : others } };
+}
 
 /** 設定の手掛かりに依らない木の中身。ルートのスクリプトが打つファイルと exports が入口になる */
 const BASE_FILES: Record<string, string> = {
@@ -79,7 +94,8 @@ function buildTree({ config, manifest = (_d, m) => m, files = {} }: Tree): strin
     const base: Record<string, unknown> = { name: `@nd-factory/${ws.dir.split("/").at(-1)}`, private: true, type: "module", ...ws.manifest };
     const withIgnored = { ...base, devDependencies: { ...(base.devDependencies as object | undefined), ...ignored } };
     write(root, join(ws.dir, "package.json"), JSON.stringify(manifest(ws.dir, withIgnored)));
-    for (const entry of wsConfig.entry ?? []) {
+    // 生成した画面の呼び出しの入口は、木の生成したファイルが当たる
+    for (const entry of (wsConfig.entry ?? []).filter((e) => !(ws.dir === "apps/web" && e === GENERATED_ENTRY))) {
       if (/[*?{}[\]!]/.test(entry)) throw new Error(`入口の glob はこのテストの木に置けない: ${ws.dir} の ${entry}`);
       write(root, join(ws.dir, entry), 'import { schema } from "@nd-factory/contracts/schema";\nexport const entry = schema;\n');
     }
@@ -280,7 +296,7 @@ describe("受け入れ条件 1・5・12: knip.jsonc の使っていないもの�
   it(
     "設定の入口を外すと、その入口のファイルがどこからも読まれないファイルとして当たる",
     () => {
-      const withEntry = Object.entries(config.workspaces).filter(([, ws]) => (ws.entry ?? []).length > 0);
+      const withEntry = Object.entries(withGeneratedEntry(config, false).workspaces).filter(([, ws]) => (ws.entry ?? []).length > 0);
       expect(withEntry.length).toBeGreaterThan(0);
       for (const [dir, ws] of withEntry) {
         const { entry: _entry, ...rest } = ws;
@@ -293,4 +309,60 @@ describe("受け入れ条件 1・5・12: knip.jsonc の使っていないもの�
     },
     KNIP_TIMEOUT,
   );
+
+  // 画面がまだ一つも無い段階や、操作ごとにファイルを生成して画面から参照の無いファイルがある段階（K2-2）
+  describe("生成した画面の呼び出しを production の入口にする行（K2-2）", () => {
+    const allPending = {
+      "apps/web/src/main.ts": 'console.log("no screens");\n',
+      [GENERATED]: "/** @screenPending #4 */\nexport const listUsers = 1;\n",
+      "apps/web/src/generated/put-user.ts": "/** @screenPending #4 */\nexport const putUser = 2;\n",
+    };
+
+    it("リポジトリに生成先があるときだけ、knip.jsonc の apps/web はその行を持つ（空の生成先への行は knip が誤りにする）", () => {
+      const hasGenerated = existsSync(join(ROOT, "apps/web/src/generated"));
+      expect(config.workspaces["apps/web"]?.entry?.includes(GENERATED_ENTRY) ?? false).toBe(hasGenerated);
+    });
+
+    it(
+      "すべての操作が保留中で画面から参照が無くても、スクリプト knip は当たりが 0 件",
+      () => {
+        const run = runKnipScript(buildTree({ config: withGeneratedEntry(config, true), files: allPending }));
+        expect(run.output).not.toMatch(/Configuration hints/);
+        expect({ status: run.status, files: run.files, exports: exportsOf(run), deps: depsOf(run) }).toEqual({ status: 0, files: [], exports: [], deps: [] });
+      },
+      KNIP_TIMEOUT,
+    );
+
+    it(
+      "行の無い設定では、すべて保留中でも画面から参照の無い生成したファイルが使われないファイルとして当たる（行が要る）",
+      () => {
+        const run = runKnip(buildTree({ config: withGeneratedEntry(config, false), files: allPending }));
+        expect(run.status).toBe(1);
+        expect([...run.files].sort()).toEqual([GENERATED, "apps/web/src/generated/put-user.ts"].sort());
+      },
+      KNIP_TIMEOUT,
+    );
+
+    it(
+      "行があっても、画面から参照の無いファイルの保留中でない書き出しは当たる",
+      () => {
+        const run = runKnipScript(
+          buildTree({ config: withGeneratedEntry(config, true), files: { ...allPending, "apps/web/src/generated/delete-user.ts": "export const deleteUser = 3;\n" } }),
+        );
+        expect(run.status).toBe(1);
+        expect(exportsOf(run)).toEqual(["apps/web/src/generated/delete-user.ts:deleteUser"]);
+      },
+      KNIP_TIMEOUT,
+    );
+
+    it(
+      "行があっても、テストだけが呼ぶ生成した呼び出しはスクリプト knip が落とす",
+      () => {
+        const run = runKnipScript(buildTree({ config: withGeneratedEntry(config, true), manifest: withVitest, files: testOnlyCall }));
+        expect(run.status).toBe(1);
+        expect(exportsOf(run)).toEqual([`${GENERATED}:unusedCall`]);
+      },
+      KNIP_TIMEOUT,
+    );
+  });
 });

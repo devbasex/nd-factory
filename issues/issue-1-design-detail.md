@@ -157,7 +157,7 @@ nd-factory/
 
 満たす決定: 設計の決定 4・8、受け入れ条件 5・12
 
-`knip.jsonc`: `workspaces` に `.`・`packages/*`・`apps/*`・`infra`・`tools` を置き、ワークスペースごとの入口（Lambda の起点・画面の起点・設置のコマンド・検査の CLI・設定のファイル）と `treatConfigHintsAsErrors: true` を書く。`npm run knip`（`knip --no-progress && knip --no-progress --production --workspace apps/web`）を `check` のジョブで打つ。2 つ目の実行は画面の入口からの参照だけで数え、テストだけが import する生成した呼び出しを落とす（通常のモードはテストからの参照も使用に数えるため。K2-2）。テストのために書き出す画面のものは、knip の標準の JSDoc の `@internal` を付けて production の実行から外す（今は `apps/web/src/runtime-config.ts` の `RuntimeConfigError`）。生成は `@internal` を付けない。生成した画面の呼び出しのファイルは `apps/web/src/generated/` に置き、`knip.jsonc` の `entry` にも `package.json` の `exports` にも載せない（knip は入口のファイルの書き出しを既定で照らさないため。K2-2）。入口にされても落ちるよう、`apps/web` のワークスペースに `includeEntryExports: true` を置く。画面がまだ無い操作の書き出しは、生成が付ける JSDoc の `@screenPending` を knip の標準の `tags: ["-screenPending"]` で外す。
+`knip.jsonc`: `workspaces` に `.`・`packages/*`・`apps/*`・`infra`・`tools` を置き、ワークスペースごとの入口（Lambda の起点・画面の起点・設置のコマンド・検査の CLI・設定のファイル）と `treatConfigHintsAsErrors: true` を書く。`npm run knip`（`knip --no-progress && knip --no-progress --production --workspace apps/web`）を `check` のジョブで打つ。2 つ目の実行は画面の入口からの参照だけで数え、テストだけが import する生成した呼び出しを落とす（通常のモードはテストからの参照も使用に数えるため。K2-2）。テストのために書き出す画面のものは、knip の標準の JSDoc の `@internal` を付けて production の実行から外す（今は `apps/web/src/runtime-config.ts` の `RuntimeConfigError`）。生成は `@internal` を付けない。生成した画面の呼び出しのファイルは `apps/web/src/generated/` に置き、`package.json` の `exports` に載せない（K2-2）。入口のファイルの書き出しも照らすよう、`apps/web` のワークスペースに `includeEntryExports: true` を置く。画面がまだ無い操作の書き出しは、生成が付ける JSDoc の `@screenPending` を knip の標準の `tags: ["-screenPending"]` で外す。タグは書き出しにしか効かず、画面から参照の無い生成したファイル（画面がまだ一つも無い段階や、操作ごとに生成したファイル）は使われないファイルとして落ちるので、生成を置く #2 の Pull Request で `apps/web` の `entry` に `src/generated/**/*.ts!` を足す。末尾の `!` で production の実行でも入口になり、ファイルは使われないものに数えず、書き出しは `includeEntryExports` で照らし続ける（保留中でない使われない書き出しと、テストだけが呼ぶ書き出しは、参照の無いファイルでも落ちる）。生成先が空のうちに足すと knip が当たらない入口（`entry-empty`）として誤りにするので、今は置かない。`knip-config.test.ts` は、リポジトリに `apps/web/src/generated/` があることと `entry` にこの行があることが揃うことを照らす。
 
 - 今の当たり（使われない開発の依存 `infra/package.json` の `esbuild`、使われない書き出し 4 件）は、検査を足す Pull Request で直す。CDK が実行の時に読む `esbuild` のように直せないものだけを `ignoreDependencies` に置き、`knip.jsonc` の行の注に理由と課題の番号を書く
 
@@ -165,7 +165,7 @@ nd-factory/
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `knip.jsonc`（一時の木にワークスペースの形を組み、設定を写して knip を子のプロセスで打つ） | 揃った木で当たり 0 件 | 入口から使う書き出しは当たらない | 使われない書き出し・使われない依存・どこからも読まれないファイルをそれぞれ 1 つ足すと当たる。`apps/web/src/generated/` の `@screenPending` の無い使われない呼び出しは、`apps/web` の `exports` に載せても当たる（`includeEntryExports` を外した設定では当たらない）。テストだけが import する生成した呼び出しは、スクリプト `knip` のとおりに打つと当たる（通常のモードだけでは当たらない）。使われない `ignoreDependencies` の行で誤りになる |
+| `knip.jsonc`（一時の木にワークスペースの形を組み、設定を写して knip を子のプロセスで打つ） | 揃った木で当たり 0 件 | 入口から使う書き出しは当たらない | 使われない書き出し・使われない依存・どこからも読まれないファイルをそれぞれ 1 つ足すと当たる。`apps/web/src/generated/` の `@screenPending` の無い使われない呼び出しは、`apps/web` の `exports` に載せても当たる（`includeEntryExports` を外した設定では当たらない）。テストだけが import する生成した呼び出しは、スクリプト `knip` のとおりに打つと当たる（通常のモードだけでは当たらない）。`entry` に `src/generated/**/*.ts!` を足した設定で、すべての操作が `@screenPending` で画面から参照の無い生成したファイルはスクリプト `knip` で当たり 0 件（行の無い設定では使われないファイルとして当たる）、参照の無いファイルの `@screenPending` の無い書き出しとテストだけが呼ぶ書き出しは当たる。リポジトリの生成先の有無と `entry` の行の有無が食い違うと落ちる。使われない `ignoreDependencies` の行で誤りになる |
 
 ## zizmor の設定と CI の定義のテスト
 

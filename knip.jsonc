@@ -16,7 +16,8 @@
     },
     // 画面の起点（index.html の script）は knip が vite の設定から拾う。生成した画面の呼び出しは
     // apps/web/src/generated/ に置く（K2-2）。入口（package.json の exports など）にされても使われない書き出しを
-    // 落とすよう、入口のファイルの書き出しも照らす
+    // 落とすよう、入口のファイルの書き出しも照らす。生成を置く #2 の Pull Request で entry に "src/generated/**/*.ts!" を
+    // 足し、画面から参照の無い生成したファイルも使われないファイルに数えない（生成先が空のうちは当たらない入口として誤りになる）
     "apps/web": {
       "includeEntryExports": true
     },
