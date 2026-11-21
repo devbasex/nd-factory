@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -103,17 +104,19 @@ async function operationFiles(ops: readonly OperationDef[]): Promise<Array<[stri
   ];
 }
 
-// generated/dummy/ の中で、どの操作にも当たらないファイル
+// generated/dummy/ の直下の通常のファイルで、名前が .json で終わり、どの操作にも当たらないもの。
+// 生成が書くのはこの形だけなので、サブディレクトリや .json でない補助のファイルは対象にせず消さない
 async function staleDummies(root: string, wanted: ReadonlySet<string>): Promise<string[]> {
-  let names: string[];
+  let entries: Dirent[];
   try {
-    names = await readdir(join(root, DUMMY_DIR));
+    entries = await readdir(join(root, DUMMY_DIR), { withFileTypes: true });
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw e;
   }
-  return names
-    .map((n) => `${DUMMY_DIR}/${n}`)
+  return entries
+    .filter((d) => d.isFile() && d.name.endsWith(".json"))
+    .map((d) => `${DUMMY_DIR}/${d.name}`)
     .filter((rel) => !wanted.has(rel))
     .sort();
 }
@@ -151,7 +154,7 @@ export async function generateArtifactsFor(root: string, mode: Mode, ops: readon
     return [...differ, ...stale];
   }
 
-  for (const rel of stale) await rm(join(root, rel), { recursive: true, force: true });
+  for (const rel of stale) await rm(join(root, rel), { force: true });
   for (const [rel, text] of wanted) {
     if (text === null) continue;
     const path = join(root, rel);

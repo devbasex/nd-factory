@@ -1,7 +1,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand, type TransactWriteCommandInput } from "@aws-sdk/lib-dynamodb";
 import { AuditAppendOnlyError, checkAuditAppendOnly, expressionsOf, type Condition, type TransactItem, type Update } from "./conditional-write.ts";
-import { awsClient, type AwsClientConfig } from "./outbound.ts";
+import { awsClient } from "./outbound.ts";
 
 // Db のポートと、DynamoDB の文書のクライアントで満たす実装。条件式は conditional-write の expressionsOf だけが書き出す
 
@@ -175,10 +175,10 @@ export function createDb(client: DynamoDBDocumentClient, names: TableNames): Db 
   };
 }
 
-// 文書のクライアントの構築子。モジュールの最上位に置き、awsClient が実行環境ごとに 1 つだけ作る（方針 dynamodb）
-const makeDocumentClient = (config: AwsClientConfig): DynamoDBDocumentClient =>
-  DynamoDBDocumentClient.from(new DynamoDBClient(config), { marshallOptions: { removeUndefinedValues: true } });
+// 文書のクライアントは実行環境ごとに 1 つ。下の DynamoDBClient は awsClient が方針 dynamodb で 1 つだけ作り、文書のクライアントはそれを包んで控える
+let documentClient: DynamoDBDocumentClient | undefined;
 
 export function dynamoDocumentClient(): DynamoDBDocumentClient {
-  return awsClient(makeDocumentClient, "dynamodb");
+  documentClient ??= DynamoDBDocumentClient.from(awsClient(DynamoDBClient, "dynamodb"), { marshallOptions: { removeUndefinedValues: true } });
+  return documentClient;
 }

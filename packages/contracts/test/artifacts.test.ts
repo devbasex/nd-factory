@@ -22,6 +22,108 @@ import { awsAccountId, money } from "../src/values.ts";
 import { FIXTURE_CREATE, FIXTURE_LIST, FIXTURE_OPERATIONS } from "./fixtures/operations.ts";
 
 const ALL: readonly OperationDef[] = [...OPERATIONS, ...FIXTURE_OPERATIONS];
+
+// JSON Schema の値が参照のキーワード $ref を持つか。列挙値・定数などの値と、properties などの名前の鍵は $ref と見ない
+const DATA_KEYWORDS = new Set(["enum", "const", "default", "examples", "example"]);
+const NAME_MAP_KEYWORDS = new Set(["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]);
+function hasRefKeyword(schema: unknown): boolean {
+  if (Array.isArray(schema)) return schema.some(hasRefKeyword);
+  if (schema === null || typeof schema !== "object") return false;
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "$ref") return true;
+    if (DATA_KEYWORDS.has(key)) continue;
+    if (NAME_MAP_KEYWORDS.has(key) && value !== null && typeof value === "object") {
+      if (Object.values(value).some(hasRefKeyword)) return true;
+      continue;
+    }
+    if (hasRefKeyword(value)) return true;
+  }
+  return false;
+}
+
+// JSON Schema の値が持つ $ref の参照先の文字列を集める。列挙値・定数などの値と、properties などの名前の鍵は $ref と見ない
+function refsOf(schema: unknown, out: string[] = []): string[] {
+  if (Array.isArray(schema)) {
+    for (const value of schema) refsOf(value, out);
+    return out;
+  }
+  if (schema === null || typeof schema !== "object") return out;
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "$ref") {
+      if (typeof value === "string") out.push(value);
+      continue;
+    }
+    if (DATA_KEYWORDS.has(key)) continue;
+    if (NAME_MAP_KEYWORDS.has(key) && value !== null && typeof value === "object") {
+      for (const inner of Object.values(value)) refsOf(inner, out);
+      continue;
+    }
+    refsOf(value, out);
+  }
+  return out;
+}
+
+// components.schemas の roots から #/components/schemas/ の $ref をたどって届く名前（roots 自身は含めない）
+const COMPONENT_REF = "#/components/schemas/";
+function reachableComponents(schemas: Record<string, unknown>, roots: readonly string[]): Set<string> {
+  const seen = new Set<string>(roots);
+  const reached = new Set<string>();
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    for (const ref of refsOf(schemas[name])) {
+      if (!ref.startsWith(COMPONENT_REF)) continue;
+      const target = decodeURIComponent(ref.slice(COMPONENT_REF.length)).replaceAll("~1", "/").replaceAll("~0", "~");
+      if (seen.has(target)) continue;
+      seen.add(target);
+      reached.add(target);
+      queue.push(target);
+    }
+  }
+  return reached;
+}
+
+// buildOpenApi の components.schemas のうち、再帰しない形（$defs の値に $ref を持たない形。z.toJSONSchema は再帰だけを $ref で出す）が $defs と同じ値か。
+// 再帰する形が無ければ components.schemas の名前は problem と操作の名前だけ。再帰する形があるときは、zod-openapi が再帰を切り出す __schemaN のうち、
+// 再帰する形から $ref をたどって届くものだけを余分に許し、再帰する形の値は照らさない。schemas は混入を照らすテストが差し替えるためのもの
+function expectFlatSchemasMatchDefs(
+  ops: readonly OperationDef[],
+  schemas: Record<string, unknown> = buildOpenApi(ops).components?.schemas ?? {},
+): void {
+  const defs = buildOperationSchemas(ops).$defs;
+  const names = ops.filter((op) => op.endpoint === "user").flatMap((op) => [`${op.name}.item`, `${op.name}.result`]);
+  expect(Object.keys(defs)).toEqual(expect.arrayContaining(names));
+  const flat = names.filter((name) => !hasRefKeyword(defs[name]));
+  expect(flat.length).toBeGreaterThan(0);
+  const expected = ["problem", ...names].sort();
+  if (flat.length === names.length) {
+    expect(Object.keys(schemas).sort()).toEqual(expected);
+  } else {
+    expect(Object.keys(schemas)).toEqual(expect.arrayContaining(expected));
+    const recursive = names.filter((name) => !flat.includes(name));
+    const reachable = reachableComponents(schemas, recursive);
+    const extra = Object.keys(schemas).filter((name) => !expected.includes(name));
+    for (const name of extra) {
+      expect(name).toMatch(/^__schema\d+$/);
+      expect(reachable.has(name), `${name} は再帰する形から $ref で届かない`).toBe(true);
+    }
+  }
+  for (const name of flat) expect(schemas[name], name).toEqual(defs[name]);
+}
+
+describe("hasRefKeyword", () => {
+  it.each([
+    ["列挙値の $ref", { type: "string", enum: ["$ref"] }, false],
+    ["定数の $ref", { const: { $ref: "#" } }, false],
+    ["$ref という名前の項目", { type: "object", properties: { $ref: { type: "string" } }, required: ["$ref"] }, false],
+    ["項目の値の $ref", { type: "object", properties: { $ref: { $ref: "#/$defs/a" } } }, true],
+    ["配列の要素の $ref", { type: "array", items: { $ref: "#" } }, true],
+    ["anyOf の中の $ref", { anyOf: [{ type: "null" }, { $ref: "#/$defs/a" }] }, true],
+  ] as const)("%s は %s", (_label, schema, expected) => {
+    expect(hasRefKeyword(schema)).toBe(expected);
+  });
+});
+
 const UUID_V7 = "01935b4e-7c2a-7d10-8f3e-2b6f0c9a1d42";
 
 // 見本を書いた操作。値の形と作り物の値の決まりを照らす
@@ -316,16 +418,80 @@ describe("buildMcpTools", () => {
   });
 });
 
+describe("自分へ戻る形の $ref", () => {
+  type Node = { name: string; children: Node[] };
+  const node: z.ZodType<Node> = z.strictObject({
+    name: z.string(),
+    get children() {
+      return z.array(node);
+    },
+  });
+  // 要素は自分へ戻る形（"#"）、結果は共有した形（"#/$defs/__schema0"）を参照する
+  const tree = z.strictObject({ root: node, again: node.optional() });
+  const op = defineOperation({
+    ...FIXTURE_CREATE,
+    name: "fixture_trees.create",
+    item: node as unknown as z.ZodObject,
+    result: okItem(tree),
+    examples: null,
+    owner: "#2",
+  });
+  const doc = buildOperationSchemas([op]);
+  const good = { name: "a", children: [{ name: "b", children: [] }] };
+  const bad = { name: "a", children: [{ name: "b", children: [{ name: 1, children: [] }] }] };
+
+  it("operations.schema.json の要素と結果が自分の $defs の場所を根に参照し、深い層まで照らす", () => {
+    const ajv = new Ajv2020({ strict: true, validateFormats: false });
+    ajv.addSchema(doc, "ops");
+    const item = ajv.getSchema("ops#/$defs/fixture_trees.create.item");
+    const result = ajv.getSchema("ops#/$defs/fixture_trees.create.result");
+    expect(item?.(good)).toBe(true);
+    expect(item?.(bad)).toBe(false);
+    expect(result?.({ ok: true, item: { root: good, again: good } })).toBe(true);
+    expect(result?.({ ok: true, item: { root: good, again: bad } })).toBe(false);
+    expect(JSON.stringify(doc)).not.toContain('"$ref":"#"');
+  });
+
+  // zod-openapi は再帰を components.schemas の __schemaN へ切り出すため、値は $defs と一致しない。一致の照らしは再帰しない形に限り、ここでは参照が解けて合否が Zod と同じことを照らす
+  it("openapi.json の components.schemas は参照が解け、要素と結果を深い層まで Zod と同じ合否で照らす", () => {
+    const schemas = buildOpenApi([op]).components?.schemas ?? {};
+    expect(JSON.stringify(schemas)).toContain('"$ref":"#/components/schemas/');
+    const ajv = new Ajv2020({ strict: false, validateFormats: false });
+    ajv.addSchema({ components: { schemas } }, "oa");
+    const item = ajv.getSchema("oa#/components/schemas/fixture_trees.create.item");
+    const result = ajv.getSchema("oa#/components/schemas/fixture_trees.create.result");
+    expect(item?.(good)).toBe(true);
+    expect(item?.(bad)).toBe(false);
+    expect(result?.({ ok: true, item: { root: good, again: good } })).toBe(true);
+    expect(result?.({ ok: true, item: { root: good, again: bad } })).toBe(false);
+    expect((node as z.ZodType).safeParse(bad).success).toBe(false);
+  });
+
+  it("再帰する形を操作の表に足しても、再帰しない形の $defs との一致の照らしは通る", () => {
+    expectFlatSchemasMatchDefs([...ALL, op]);
+  });
+
+  it("再帰する形から $ref で届かない __schemaN が混じると、一致の照らしが落ちる", () => {
+    const schemas = buildOpenApi([...ALL, op]).components?.schemas ?? {};
+    expect(Object.keys(schemas).some((name) => /^__schema\d+$/.test(name))).toBe(true);
+    expect(() => expectFlatSchemasMatchDefs([...ALL, op], { ...schemas, __schema999: { type: "string" } })).toThrow(/__schema999/);
+  });
+
+  it("MCP の道具の outputSchema は単独の文書として参照が解ける", () => {
+    const [tool] = buildMcpTools([op], doc);
+    const validate = new Ajv2020({ strict: true, validateFormats: false }).compile(tool!.outputSchema);
+    expect(validate([{ ok: true, item: { root: good } }])).toBe(true);
+    expect(validate([{ ok: true, item: { root: bad } }])).toBe(false);
+  });
+});
+
 describe("buildOpenApi", () => {
   const doc = buildOpenApi(ALL);
-  const defs = buildOperationSchemas(ALL).$defs;
 
-  it("OpenAPI 3.1.1 で、components.schemas の各値が operations.schema.json の同じ名前の $defs と一致する（zod-openapi と z.toJSONSchema の差を拾う）", () => {
+  // 再帰する形は zod-openapi が components.schemas の __schemaN へ切り出し一致しないため、「自分へ戻る形の $ref」で参照の解けと合否を照らす
+  it("OpenAPI 3.1.1 で、再帰しない形の components.schemas の各値が operations.schema.json の同じ名前の $defs と一致する（zod-openapi と z.toJSONSchema の差を拾う）", () => {
     expect(doc.openapi).toBe("3.1.1");
-    const schemas = doc.components?.schemas ?? {};
-    const names = Object.keys(schemas).filter((n) => n !== "problem");
-    expect(names.length).toBe(ALL.filter((op) => op.endpoint === "user").length * 2);
-    for (const name of names) expect(schemas[name], name).toEqual(defs[name]);
+    expectFlatSchemasMatchDefs(ALL);
   });
 
   it("受け口 user の操作だけを POST で持ち、形の未定は not の形", () => {
@@ -449,5 +615,28 @@ describe("buildReasons・buildRoutes・buildPending", () => {
     expect(pending.find((p) => p.operation === "projects.get")).toEqual({ operation: "projects.get", owner: "#5" });
     const half = defineOperation({ ...FIXTURE_LIST, name: "fixture_notes.find", order: null, result: pendingShape("#9"), owner: "#9" });
     expect(buildPending([half])).toEqual([{ operation: "fixture_notes.find", owner: "#9" }]);
+  });
+});
+
+describe("__proto__ という名前の項目", () => {
+  // 計算した鍵で書くと、__proto__ は原型でなく自身の項目になる
+  const shape = z.strictObject({ ["__proto__"]: z.string(), name: z.string() });
+  const op = defineOperation({
+    ...FIXTURE_CREATE,
+    name: "fixture_protos.create",
+    item: shape,
+    result: okItem(shape),
+    examples: null,
+    owner: "#2",
+  });
+  const doc = buildOperationSchemas([op]);
+
+  // Ajv は properties の __proto__ を自身の項目として扱わず、正しい Schema でもこの項目を余分と見るため、Zod の出力と照らす
+  it("operations.schema.json の properties に Zod の出力と同じく残る（required だけに名前が残らない）", () => {
+    const item = doc.$defs["fixture_protos.create.item"] as { properties: Record<string, unknown>; required: string[] };
+    expect(Object.hasOwn(item.properties, "__proto__")).toBe(true);
+    expect(item.required).toContain("__proto__");
+    const zod = z.toJSONSchema(shape, { io: "input" }) as { properties: Record<string, unknown> };
+    expect(JSON.stringify(item.properties)).toBe(JSON.stringify(zod.properties));
   });
 });

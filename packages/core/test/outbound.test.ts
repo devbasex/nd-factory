@@ -227,11 +227,97 @@ describe("callHttp", () => {
     expect(records().at(-1)).toMatchObject({ level: "error", msg: "外への呼び出しが再試行を使い切った", status: 429, retries: 3 });
   });
 
-  // 頭書きと最初の一片だけを返し、本文を閉じない
-  const stalled = () => {
+  // 頭書きと最初の一片だけを返し、本文を閉じない応答
+  function stalled(): Response {
     const body = new ReadableStream<Uint8Array>({ start: (c) => c.enqueue(new TextEncoder().encode('{"a":')) });
     return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
-  };
+  }
+
+  it.each([
+    // http-github は要求ごとに 10 秒・全体で 30 秒のため、回数（3 回の繰り返し）が残っていても全体の期限で 3 回目の試行が最後になる
+    ["冪等な要求は残りの回数を使って繰り返し", get(), 3, "外への呼び出しが再試行を使い切った"],
+    ["冪等でない要求は繰り返さず（2xx を受けたため届いている）", post(), 1, "外への呼び出しが一時の失敗で、繰り返さずに返した"],
+  ])("2xx の頭書きの後に本文が止まると、%s、方針の期限で状態 0 の retryable を返す", async (_why, req, attempts, msg) => {
+    let count = 0;
+    const fetch = () => {
+      count += 1;
+      return Promise.resolve(stalled());
+    };
+    const { log, records } = logs();
+    const started = Date.now();
+    // settle は残ったタイマーまで時計を進めるため、時間は結果が決まった時点で測る
+    let settledAt = 0;
+    const result = await settle(callHttp(req, "http-github", { log, clock: createClock(), fetch }).finally(() => (settledAt = Date.now())));
+    expect(result).toEqual({ status: 0, headers: {}, body: null, class: "retryable" });
+    expect(settledAt - started).toBeLessThanOrEqual(RETRY_POLICIES["http-github"].total_timeout_ms);
+    expect(count).toBe(attempts);
+    expect(records().at(-1)).toMatchObject({ level: "error", msg, status: 0, class: "retryable" });
+    for (const r of records().slice(0, -1)) expect(r).toMatchObject({ level: "warn", class: "retryable", error: "TimeoutError" });
+  });
+
+  // 頭書きを afterHead ミリ秒後に、本文をさらに body ミリ秒後に返す応答
+  function slow(afterHead: number, body: number): () => Promise<Response> {
+    return () =>
+      new Promise((resolve) =>
+        setTimeout(() => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const stream = new ReadableStream<Uint8Array>({
+            start: (c) => {
+              timer = setTimeout(() => {
+                c.enqueue(new TextEncoder().encode('{"slow":true}'));
+                c.close();
+              }, body);
+            },
+            // 期限で取り消されたら本文を送らない
+            cancel: () => clearTimeout(timer),
+          });
+          resolve(new Response(stream, { status: 200, headers: { "content-type": "application/json" } }));
+        }, afterHead),
+      );
+  }
+
+  it.each([
+    ["冪等な要求は時間切れとして繰り返す", get(), 2, { status: 200, body: { ok: true }, class: "ok" }],
+    ["冪等でない要求は繰り返さず時間切れで返す", post(), 1, { status: 0, body: null, class: "retryable" }],
+  ])("頭書きと本文の合計が要求ごとの期限（10 秒）を超えると、%s", async (_why, req, attempts, expected) => {
+    // http-github の timeout_ms は 10 秒。頭書きに 9 秒・本文に 9 秒かかる試行は期限を超える
+    const { calls, fetch } = fakeFetch([slow(9_000, 9_000), json(200, { ok: true })]);
+    const result = await settle(callHttp(req, "http-github", { log: logs().log, clock: createClock(), fetch }));
+    expect(calls).toHaveLength(attempts);
+    expect(result).toMatchObject(expected);
+  });
+
+  it("全体の期限が本文の読み途中で切れると、中断を本文へ伝えない fetch でも本文の流れを取り消す", async () => {
+    const started = Date.now();
+    let cancelledAt: number | undefined;
+    // 頭書きはすぐ返し、本文は終わらない。要求の signal を見ないため、中断は流れへ届かない
+    const endless = () =>
+      new Response(new ReadableStream<Uint8Array>({ cancel: () => void (cancelledAt = Date.now()) }), { status: 200, headers: { "content-type": "application/json" } });
+    // 2 回の時間切れ（10 秒ずつ）と待ちの後、3 回目の本文の途中で全体の期限（30 秒）が来る。3 回目の試行の期限はその後
+    let count = 0;
+    const fetch = (input: Request) => {
+      count += 1;
+      return count < 3 ? hang(input) : Promise.resolve(endless());
+    };
+    const result = await settle(callHttp(get(), "http-github", { log: logs().log, clock: createClock(), fetch }));
+    expect(count).toBe(3);
+    expect(result).toMatchObject({ status: 0, body: null, class: "retryable" });
+    expect(cancelledAt).toBeDefined();
+    expect((cancelledAt ?? 0) - started).toBeLessThanOrEqual(30_000);
+  });
+
+  it("頭書きと本文の合計が要求ごとの期限の中なら、その本文を返す", async () => {
+    const { calls, fetch } = fakeFetch([slow(4_000, 4_000)]);
+    const result = await settle(callHttp(get(), "http-github", { log: logs().log, clock: createClock(), fetch }));
+    expect(calls).toHaveLength(1);
+    expect(result).toMatchObject({ status: 200, body: { slow: true }, class: "ok" });
+  });
+
+  it("冪等な要求の 204 の空の本文は null で返す", async () => {
+    const { fetch } = fakeFetch(() => new Response(null, { status: 204 }));
+    const result = await settle(callHttp(get(), "http-github", { log: logs().log, clock: createClock(), fetch }));
+    expect(result).toEqual({ status: 204, headers: {}, body: null, class: "ok" });
+  });
 
   it("2xx の頭書きの後に本文が止まると、冪等な要求は ky の回数と全体の期限の中で繰り返し、使い切ると状態 0 の retryable を返す", async () => {
     const { calls, fetch } = fakeFetch(stalled);
@@ -299,7 +385,7 @@ describe("callHttp", () => {
     expect(stream.cancelled()).toBe(calls.length);
   });
 
-  it("注入の時計が先へ跳んでも、2xx の本文を時間切れにしない（全体の期限の残りは実時間の単調な元で測る）", async () => {
+  it("注入の時計が先へ跳んでも、2xx の本文を時間切れにしない（期限は注入の時計で測らない）", async () => {
     let offset = 0;
     const clock = createClock(() => Date.now() + offset);
     const { fetch } = fakeFetch(() => {
@@ -310,7 +396,7 @@ describe("callHttp", () => {
     expect(result).toMatchObject({ status: 200, body: { a: 1 }, class: "ok" });
   });
 
-  it("204 の空の本文は null の本文で ok を返す", async () => {
+  it("冪等でない要求の 204 の空の本文は null の本文で ok を返す", async () => {
     const { fetch } = fakeFetch(() => new Response(null, { status: 204 }));
     const result = await settle(callHttp(post(), "http-github", { log: logs().log, clock: createClock(), fetch }));
     expect(result).toMatchObject({ status: 204, body: null, class: "ok" });
@@ -319,16 +405,16 @@ describe("callHttp", () => {
   it.each([
     ["冪等でない POST の 307", post(), 307],
     ["冪等な GET の 301", get(), 301],
+    ["冪等な GET の 304", get(), 304],
     ["冪等な GET の 308", get(), 308],
-  ])("転送に自動で従わず、%s は Location を付けた rejected の結果で返し、繰り返さず warn に残す（http: の転送先へ本文を送り直さない）", async (_why, req, status) => {
+  ])("転送に自動で従わず繰り返さない。%s は Location を付けた rejected の結果で返し、ログは転送に従わずに返したと書く（http: の転送先へ本文を送り直さない）", async (_why, req, status) => {
     const { calls, fetch } = fakeFetch(() => new Response(null, { status, headers: { location: "http://api.example.com/v1/issues" } }));
     const { log, records } = logs();
     const result = await settle(callHttp(req, "http-github", { log, clock: createClock(), fetch }));
     expect(calls).toHaveLength(1);
     expect(calls[0]?.redirect).toBe("manual");
-    expect(result).toMatchObject({ status, headers: { location: "http://api.example.com/v1/issues" }, class: "rejected" });
-    expect(records()).toHaveLength(1);
-    expect(records()[0]).toMatchObject({ level: "warn", msg: "外への呼び出しが転送を返し、従わずに返した", status, class: "rejected", retries: 0 });
+    expect(result).toEqual({ status, headers: { location: "http://api.example.com/v1/issues" }, body: null, class: "rejected" });
+    expect(records()).toMatchObject([{ level: "warn", msg: "外への呼び出しが 3xx を返し、転送に従わずに返した", status, class: "rejected", retries: 0 }]);
   });
 
   it("http: の URL は送る前に止まる", async () => {
@@ -365,10 +451,15 @@ describe("callHttp", () => {
 });
 
 describe("awsClient", () => {
-  const makeDynamo = (config: AwsClientConfig) => new DynamoDBClient({ region: "us-west-2", ...config });
+  beforeEach(() => {
+    vi.stubEnv("AWS_REGION", "us-west-2");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
 
   it("方針の retryMode・回数・要求の期限を持つクライアントを作る", async () => {
-    const client = awsClient(makeDynamo, "dynamodb");
+    const client = awsClient(DynamoDBClient, "dynamodb");
     expect(client.config.retryMode).toBe("standard");
     expect(await client.config.maxAttempts()).toBe(3);
     expect(client.config.requestHandler).toBeInstanceOf(DeadlineHttpHandler);
@@ -383,24 +474,45 @@ describe("awsClient", () => {
     }
   });
 
-  it("同じ構築子と方針の 2 回目は同じインスタンスで、構築子を 1 回だけ呼ぶ", () => {
-    const make = vi.fn((config: AwsClientConfig) => ({ config }));
-    const first = awsClient(make, "aws-control");
-    expect(awsClient(make, "aws-control")).toBe(first);
-    expect(make).toHaveBeenCalledTimes(1);
-    expect(awsClient(make, "dynamodb")).not.toBe(first);
+  // 作られた数を数える偽のクライアントの class
+  function countingClass() {
+    const made: AwsClientConfig[] = [];
+    class FakeClient {
+      readonly config: AwsClientConfig;
+      constructor(config: AwsClientConfig) {
+        this.config = config;
+        made.push(config);
+      }
+    }
+    return { FakeClient, made };
+  }
+
+  it("同じ class と方針の 2 回目は同じインスタンスで、1 回だけ作る", () => {
+    const { FakeClient, made } = countingClass();
+    const first = awsClient(FakeClient, "aws-control");
+    expect(awsClient(FakeClient, "aws-control")).toBe(first);
+    expect(made).toHaveLength(1);
+    expect(awsClient(FakeClient, "dynamodb")).not.toBe(first);
   });
 
-  it("同じ方針でも構築子が違えば別のクライアント（aws-control を共有する ECS・STS など）", () => {
-    const makeA = (config: AwsClientConfig) => ({ kind: "a", config });
-    const makeB = (config: AwsClientConfig) => ({ kind: "b", config });
-    expect(awsClient(makeA, "aws-control").kind).toBe("a");
-    expect(awsClient(makeB, "aws-control").kind).toBe("b");
+  it("呼び出しの場で書いても、同じ class なら作り直さない（扱い手のソケットの束を増やさない）", () => {
+    const { FakeClient, made } = countingClass();
+    const get = () => awsClient(FakeClient, "dynamodb");
+    expect(get()).toBe(get());
+    expect(made).toHaveLength(1);
+    expect(awsClient(DynamoDBClient, "dynamodb")).toBe(awsClient(DynamoDBClient, "dynamodb"));
+  });
+
+  it("同じ方針でも class が違えば別のクライアント（aws-control を共有する ECS・STS など）", () => {
+    const a = countingClass();
+    const b = countingClass();
+    expect(awsClient(a.FakeClient, "aws-control")).toBeInstanceOf(a.FakeClient);
+    expect(awsClient(b.FakeClient, "aws-control")).toBeInstanceOf(b.FakeClient);
   });
 
   it("aws でない方針の名前は型で弾く", () => {
     // @ts-expect-error http-github は http の方針
-    const call = () => awsClient(makeDynamo, "http-github");
+    const call = () => awsClient(DynamoDBClient, "http-github");
     expect(typeof call).toBe("function");
   });
 });

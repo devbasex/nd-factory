@@ -10,13 +10,16 @@ export type FailureClass = "retryable" | "conflict" | "not_found" | "rejected" |
 // 408 は callHttp が繰り返す状態（RETRY_STATUS_CODES）と揃える。使い切った 408 は相手が断ったのでなく時間切れ
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
-// ky の時間切れとネットワークの誤り・AbortSignal.timeout の時間切れ・AWS SDK の呼びすぎと相手の障害（SDK が再試行を使い切った後に届く）
+// ky の時間切れとネットワークの誤り・AbortSignal.timeout の時間切れ・AWS SDK の呼びすぎと相手の障害（SDK が再試行を使い切った後に届く）。
+// 呼びすぎは HTTP の状態が 400 のもの（DynamoDB の RequestLimitExceeded など）があり、状態では retryable にならないため名前で見る
 const RETRYABLE_NAMES = new Set([
   "TimeoutError",
   "NetworkError",
   "ThrottlingException",
+  "ThrottledException",
   "ProvisionedThroughputExceededException",
   "RequestLimitExceeded",
+  "TooManyRequestsException",
   "InternalServerError",
   "ServiceUnavailable",
   "ServiceUnavailableException",
@@ -48,6 +51,8 @@ function classOfStatus(status: number): FailureClass {
   if (status === 409) return "conflict";
   if (status === 404) return "not_found";
   if (RETRYABLE_STATUS.has(status)) return "retryable";
+  // 3xx は callHttp が転送に従わずに返す応答（redirect: "manual"）。同じ要求を繰り返しても同じ応答のため rejected にし、
+  // 転送先（location）へ送り直すか・304 を済みとみなすかは呼び手が状態と頭書きを読んで決める
   if (status === 501 || (status >= 300 && status < 500)) return "rejected";
   return "unknown";
 }
@@ -56,12 +61,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
 
-// TransactWriteItems の取り消しの理由のうち一時の失敗。ほかのトランザクションとの衝突と、書き込みの呼びすぎ（SDK はトランザクションの取り消しを繰り返さない）
+// TransactWriteItems の取り消しの理由のうち一時の失敗。ほかのトランザクションとの衝突と、書き込みの呼びすぎ・容量の不足（SDK はトランザクションの取り消しを繰り返さない）。
+// 取り消しは HTTP の状態が 400 のため、状態へ落とす前に理由で見る
 const RETRYABLE_CANCELLATION_CODES = new Set(["TransactionConflict", "ThrottlingError", "ProvisionedThroughputExceeded", "RequestLimitExceeded"]);
+
+// TransactWriteItems の取り消しの理由のうち、条件の外れ（ConditionalCheckFailedException と同じ conflict）
+const CONFLICT_CANCELLATION_CODES = new Set(["ConditionalCheckFailed"]);
 
 // TransactWriteItems の取り消しの理由のうち、表が断ったと言い切れるもの（行の形の誤りと、項目の集まりの大きさの上限）
 const REJECTED_CANCELLATION_CODES = new Set(["ValidationError", "ItemCollectionSizeLimitExceeded"]);
 
+// TransactWriteItems の取り消しの理由のうち、codes のどれかを持つものがあるか
 function hasCancellationCode(e: Record<string, unknown>, codes: ReadonlySet<string>): boolean {
   const reasons = e["CancellationReasons"];
   return (
@@ -78,7 +88,7 @@ export function isRetryableCancellation(e: unknown): boolean {
   return isRecord(e) && hasCancellationCode(e, RETRYABLE_CANCELLATION_CODES) && !hasCancellationCode(e, REJECTED_CANCELLATION_CODES);
 }
 
-// AWS SDK の例外が持つ応答の状態（$metadata.httpStatusCode）
+// AWS SDK の例外が持つ応答の HTTP の状態（$metadata.httpStatusCode）
 function sdkStatusOf(e: Record<string, unknown>): number | undefined {
   const metadata = e["$metadata"];
   if (!isRecord(metadata)) return undefined;
@@ -104,8 +114,9 @@ export function classifyFailure(e: unknown): FailureClass {
   if (typeof name === "string") {
     // 断った取り消しの理由を、一時の失敗の理由より先に見る（断った件は時を置いても通らず、トランザクションは全件が通るか全件が通らない）
     if (hasCancellationCode(e, REJECTED_CANCELLATION_CODES)) return "rejected";
+    // 一時の失敗の取り消しの理由を、条件の外れより先に見る（時を置けば通り得る件があれば retryable）
     if (RETRYABLE_NAMES.has(name) || hasCancellationCode(e, RETRYABLE_CANCELLATION_CODES)) return "retryable";
-    if (CONFLICT_NAMES.has(name)) return "conflict";
+    if (CONFLICT_NAMES.has(name) || hasCancellationCode(e, CONFLICT_CANCELLATION_CODES)) return "conflict";
     if (NOT_FOUND_NAMES.has(name)) return "not_found";
     if (REJECTED_NAMES.has(name)) return "rejected";
   }

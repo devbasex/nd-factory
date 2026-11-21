@@ -32,6 +32,19 @@ describe("createLogger（ブラウザー版の pino）", () => {
     expect(record?.["time"]).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 
+  it.each([
+    ["Error", () => new TypeError("壊れた")],
+    ["name と message を持つ物", () => ({ name: "TypeError", message: "壊れた", stack: "at x" })],
+  ])("err と error の項目（%s）は name と文だけを写し、pino の標準のエラーの直列化を掛けない", (_why, make) => {
+    const out = capture();
+    const error = make();
+    createLogger(context, out.sink).error("失敗した", { err: error, error });
+    const [record] = out.records();
+    const expected = error instanceof Error ? { name: "TypeError", message: "壊れた" } : { name: "TypeError", message: "壊れた", stack: "at x" };
+    expect(record?.["err"]).toEqual(expected);
+    expect(record?.["error"]).toEqual(expected);
+  });
+
   it("文・項目・文脈・child の秘密が formatters.log で伏せられる", () => {
     const out = capture();
     const secrets = Object.values(SECRET_SAMPLES);

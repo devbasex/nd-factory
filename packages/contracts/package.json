@@ -15,7 +15,9 @@
     "./operations": "./src/operations/index.ts",
     "./ndf": "./src/ndf.ts",
     "./data": "./src/data.ts",
-    "./client": "./src/client.ts"
+    "./client": "./src/client.ts",
+    "./rows/*": "./src/rows/*.ts",
+    "./tables": "./src/tables.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."
