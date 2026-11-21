@@ -64,11 +64,12 @@ nd-factory/
 | `apps/*` | `@typescript-eslint/no-restricted-imports`（`allowTypeImports`） | `@aws-sdk/*`・`node:http`・`node:https`・`node:crypto` の `randomUUID`・`randomBytes`・`uuid` | 外部の呼び出し・条件つきの書き込み・操作の記録の書き手・ID |
 | `apps/**` と `packages/core/src/**`（使える量の判定のモジュール `packages/core/src/usage-limit*` を除く） | `no-restricted-imports` | 料金プランの値の書き出し（#29 が置く 1 つの書き出し） | I8 |
 | `apps/web/src/**` | `no-restricted-syntax` | 料金プランの名前と同じ文字列（JSX の属性の値と `JSXText` を含む）。名前は #29 の書き出しから読み、無ければこの選び方を作らない | I8（画面） |
+| `apps/web/src/**` | `no-restricted-imports`（`importNames`） | `screen-pending.json` に並ぶ操作の生成した呼び出しの import（画面を作るなら同じ Pull Request で行を消す。K2-2）。データが無ければこの選び方を作らない | I14（画面の無い間の除外の陳腐化） |
 | `apps/web/src/**`・`apps/api/src/**`・`infra/lib/**` | `no-restricted-syntax` | `/v1/` を含む文字列とテンプレートの文字列（経路は形の正本の登録の書き出しからだけ読む。K2-2・K2-3） | I14（画面の呼び出し・HTTP の経路の登録） |
 | `apps/web/**` の外の `*.tsx` | `no-restricted-syntax` の `Program` | ファイルそのもの（1 ファイル 1 件） | 言語と書き方の決まりの画面の行（決定 140） |
 
 - すべての塊に `linterOptions: { reportUnusedDisableDirectives: "error" }` を置く（決定 9）。骨組みのコードの今の当たりは、当たる行の前に `// eslint-disable-next-line <規則> -- #2 が横断の部品へ移す` の形（`#4` の行は「#4 が置き換える」）で外す。外す行は「今の姿」の 5 つのファイルの当たる行だけで、実装で ESLint を打って決める
-- `eslint.config.js` は最上位の `await` で #29 の料金プランの名前の書き出しを読み、読めなければ名前の選び方を作らない
+- `eslint.config.js` は最上位の `await` で #29 の料金プランの名前の書き出しと、#2 の `packages/contracts/data/screen-pending.json` を読み、読めなければその選び方を作らない
 
 ### 単体テストの観点（`tools/test/lint-config.test.ts`）
 
@@ -132,7 +133,7 @@ nd-factory/
 
 満たす決定: 設計の決定 4・8、受け入れ条件 5・12
 
-`knip.jsonc`: `workspaces` に `.`・`packages/*`・`apps/*`・`infra`・`tools` を置き、ワークスペースごとの入口（Lambda の起点・画面の起点・設置のコマンド・検査の CLI・設定のファイル）と `treatConfigHintsAsErrors: true` を書く。`npm run knip`（`knip --no-progress`）を `check` のジョブで打つ。生成した画面の呼び出しのファイルは入口にしない（使われない書き出しを報告させるため。K2-2）。
+`knip.jsonc`: `workspaces` に `.`・`packages/*`・`apps/*`・`infra`・`tools` を置き、ワークスペースごとの入口（Lambda の起点・画面の起点・設置のコマンド・検査の CLI・設定のファイル）と `treatConfigHintsAsErrors: true` と `tags: ["-screenPending"]`（画面の無い操作の生成した呼び出しを、使われない書き出しの報告から外す。設計文書の決定 8 の段ごとの扱い）を書く。`npm run knip`（`knip --no-progress`）を `check` のジョブで打つ。生成した画面の呼び出しのファイルは入口にしない（使われない書き出しを報告させるため。K2-2）。
 
 - 今の当たり（使われない開発の依存 `infra/package.json` の `esbuild`、使われない書き出し 4 件）は、検査を足す Pull Request で直す。CDK が実行の時に読む `esbuild` のように直せないものだけを `ignoreDependencies` に置き、`knip.jsonc` の行の注に理由と課題の番号を書く
 
@@ -140,7 +141,7 @@ nd-factory/
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `knip.jsonc`（一時の木にワークスペースの形を組み、設定を写して knip を子のプロセスで打つ） | 揃った木で当たり 0 件 | 入口から使う書き出しは当たらない | 使われない書き出し・使われない依存・どこからも読まれないファイルをそれぞれ 1 つ足すと当たる。使われない `ignoreDependencies` の行で誤りになる |
+| `knip.jsonc`（一時の木にワークスペースの形を組み、設定を写して knip を子のプロセスで打つ） | 揃った木で当たり 0 件 | 入口から使う書き出しは当たらない。`@screenPending` の印の付いた使われない書き出しは当たらない | 使われない書き出し・使われない依存・どこからも読まれないファイルをそれぞれ 1 つ足すと当たる。使われない `ignoreDependencies` の行で誤りになる |
 
 ## zizmor の設定と CI の定義のテスト
 
@@ -190,12 +191,13 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | 5 | 利用者向けの操作の要求と応答の形が配列（I12） |
 | 6 | 名前が `_at` で終わる項目が UTC の日時の形、`amount_minor` を持つ要素が `currency` を必須にする（I15） |
 | 7 | HTTP の経路の登録の経路の集まりが、操作の表の経路の集まりと等しい（形の正本の中の照らし。実際の登録は下の「実際の経路の照らし」） |
+| 8 | `screen-pending.json` の行が、表の利用者向けの操作の名前と課題の番号を持ち、同じ操作が 2 回出ない。生成した呼び出しの `@screenPending` の印の集合が行の集合と等しい |
 
 ### 単体テストの観点
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| 照らすこと 1〜7（作り物の操作の表をテストの中で組む） | 揃った表で 0 件 | 人だけの操作は 3 つの形で比べる。空の配列の見本 | 照らすことごとに、1 か所を壊した表（JSON Schema だけ必須の項目を外す・道具を 1 つ消す・人だけの操作の読み出しを消す・機能を消す・配列でない要求・時刻帯の無い日時・通貨の無い金額・表に無い経路）で 1 件 |
+| 照らすこと 1〜8（作り物の操作の表をテストの中で組む） | 揃った表で 0 件 | 人だけの操作は 3 つの形で比べる。空の配列の見本 | 照らすことごとに、1 か所を壊した表（JSON Schema だけ必須の項目を外す・道具を 1 つ消す・人だけの操作の読み出しを消す・機能を消す・配列でない要求・時刻帯の無い日時・通貨の無い金額・表に無い経路・表に無い操作か課題の番号の無い `screen-pending.json` の行）で 1 件 |
 
 ## 実際の経路の照らし
 
