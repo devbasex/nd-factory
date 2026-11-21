@@ -117,8 +117,10 @@ describe("OPERATIONS", () => {
       expect(op.delegationKind).toBeNull();
       expect(op.humanOnly).toBe("never");
       expect(op.ownerOnly).toBe(false);
-      expect(op.access).toBe(op.verb === "list" ? "read" : "write");
     }
+    // 自分向けの経路の読み書きは動詞で決めない。答えの受け取りは送達の状態を記す書き込み
+    expect(selfOps.filter((op) => op.access !== "write").map((op) => op.name)).toEqual([]);
+    expect(operationByName("runner.answers.list")?.access).toBe("write");
     expect(new Set(selfOps.map((op) => op.endpoint))).toEqual(new Set(["runner", "machine", "db_prep"]));
   });
 
@@ -164,6 +166,8 @@ describe("OPERATIONS", () => {
     expect(IDEMPOTENT_NAMED.length).toBeGreaterThan(0);
     for (const name of IDEMPOTENT_NAMED) expect([name, operationByName(name)?.idempotencyKey]).toEqual([name, true]);
     for (const op of userOps.filter((o) => o.verb === "create" || o.verb === "add")) expect([op.name, op.idempotencyKey]).toEqual([op.name, true]);
+    // 招待を受けると新しい席を作るため、create・add でなくても鍵を持つ
+    expect(operationByName("invitations.accept")?.idempotencyKey).toBe(true);
     for (const op of OPERATIONS.filter((o) => o.access === "read")) expect(op.idempotencyKey).toBe(false);
   });
 

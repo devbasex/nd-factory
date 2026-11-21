@@ -7,6 +7,7 @@ export const RUNNER_OPERATIONS = [
   self("runner", "runner.exchanges.create", "write"),
   self("runner", "runner.events.create", "write"),
   self("runner", "runner.heartbeats.create", "write"),
-  self("runner", "runner.answers.list", "read"),
+  // 受け取りは送達の状態を「渡し中」にし受け取った世代を記す書き込み（docs/design/execution.md#答えの送達）
+  self("runner", "runner.answers.list", "write"),
   self("runner", "runner.answer_deliveries.create", "write"),
 ] as const;

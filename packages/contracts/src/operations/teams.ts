@@ -13,6 +13,6 @@ export const TEAM_OPERATIONS = [
   human("seats.delete", ["F3"], "seats.list", OWNER_ONLY),
   read("invitations.list", ["F3"]),
   human("invitations.create", ["F3"], "invitations.list", OWNER_ONLY_IDEMPOTENT),
-  human("invitations.accept", ["F3"], "invitations.list"),
+  human("invitations.accept", ["F3"], "invitations.list", IDEMPOTENT),
   human("invitations.delete", ["F3"], "invitations.list", OWNER_ONLY),
 ] as const;
