@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { requireBinary } from "./support/require-binary.ts";
 
 // zizmor の設定（.github/zizmor.yml）と ci.yml の workflow-audit のジョブの点検が、広すぎる権限・資格情報を残す取得・
 // SHA で固定していない動作の参照を落とすことを確かめる（#1 の決定 5、受け入れ条件 1・13）。
@@ -53,8 +54,7 @@ afterEach(() => {
 });
 
 beforeAll(() => {
-  const version = spawnSync("zizmor", ["--version"], { encoding: "utf8" });
-  if (version.status !== 0) throw new Error("zizmor が PATH に無い。workflow-audit のジョブと同じ固定の版を置いて打つ");
+  requireBinary("zizmor", ["--version"], "zizmor が PATH に無い。workflow-audit のジョブと同じ固定の版を置いて打つ");
 });
 
 /** 今のワークフローと zizmor の設定を写し、足すワークフローを置いた一時の木で、ジョブの点検を打つ */

@@ -4,6 +4,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
+import { requireBinary } from "./support/require-binary.ts";
 import { useTempTree, write } from "./support/temp-tree.ts";
 
 // gitleaks の設定（.gitleaks.toml と tools/checks/gitleaks-default.toml）と、除外を効かなくするスクリプト
@@ -28,8 +29,7 @@ type ScanResult = { status: number | null; output: string; reportText: string | 
 const { tempDir, makeTree } = useTempTree("leak-scan-");
 
 beforeAll(() => {
-  const version = spawnSync("gitleaks", ["version"], { encoding: "utf8" });
-  if (version.status !== 0) throw new Error("gitleaks が PATH に無い。leak-check のジョブと同じ固定の版を置いて打つ");
+  requireBinary("gitleaks", ["version"], "gitleaks が PATH に無い。leak-check のジョブと同じ固定の版を置いて打つ");
 });
 
 function pick(chars: string, length: number): string {
