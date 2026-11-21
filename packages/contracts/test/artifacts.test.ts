@@ -41,10 +41,55 @@ function hasRefKeyword(schema: unknown): boolean {
   return false;
 }
 
+// JSON Schema の値が持つ $ref の参照先の文字列を集める。列挙値・定数などの値と、properties などの名前の鍵は $ref と見ない
+function refsOf(schema: unknown, out: string[] = []): string[] {
+  if (Array.isArray(schema)) {
+    for (const value of schema) refsOf(value, out);
+    return out;
+  }
+  if (schema === null || typeof schema !== "object") return out;
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "$ref") {
+      if (typeof value === "string") out.push(value);
+      continue;
+    }
+    if (DATA_KEYWORDS.has(key)) continue;
+    if (NAME_MAP_KEYWORDS.has(key) && value !== null && typeof value === "object") {
+      for (const inner of Object.values(value)) refsOf(inner, out);
+      continue;
+    }
+    refsOf(value, out);
+  }
+  return out;
+}
+
+// components.schemas の roots から #/components/schemas/ の $ref をたどって届く名前（roots 自身は含めない）
+const COMPONENT_REF = "#/components/schemas/";
+function reachableComponents(schemas: Record<string, unknown>, roots: readonly string[]): Set<string> {
+  const seen = new Set<string>(roots);
+  const reached = new Set<string>();
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    for (const ref of refsOf(schemas[name])) {
+      if (!ref.startsWith(COMPONENT_REF)) continue;
+      const target = decodeURIComponent(ref.slice(COMPONENT_REF.length)).replaceAll("~1", "/").replaceAll("~0", "~");
+      if (seen.has(target)) continue;
+      seen.add(target);
+      reached.add(target);
+      queue.push(target);
+    }
+  }
+  return reached;
+}
+
 // buildOpenApi の components.schemas のうち、再帰しない形（$defs の値に $ref を持たない形。z.toJSONSchema は再帰だけを $ref で出す）が $defs と同じ値か。
-// 再帰する形が無ければ components.schemas の名前は problem と操作の名前だけ。再帰する形があるときは、zod-openapi が再帰を切り出す __schemaN だけを余分に許し、再帰する形の値は照らさない
-function expectFlatSchemasMatchDefs(ops: readonly OperationDef[]): void {
-  const schemas = buildOpenApi(ops).components?.schemas ?? {};
+// 再帰する形が無ければ components.schemas の名前は problem と操作の名前だけ。再帰する形があるときは、zod-openapi が再帰を切り出す __schemaN のうち、
+// 再帰する形から $ref をたどって届くものだけを余分に許し、再帰する形の値は照らさない。schemas は混入を照らすテストが差し替えるためのもの
+function expectFlatSchemasMatchDefs(
+  ops: readonly OperationDef[],
+  schemas: Record<string, unknown> = buildOpenApi(ops).components?.schemas ?? {},
+): void {
   const defs = buildOperationSchemas(ops).$defs;
   const names = ops.filter((op) => op.endpoint === "user").flatMap((op) => [`${op.name}.item`, `${op.name}.result`]);
   expect(Object.keys(defs)).toEqual(expect.arrayContaining(names));
@@ -55,8 +100,13 @@ function expectFlatSchemasMatchDefs(ops: readonly OperationDef[]): void {
     expect(Object.keys(schemas).sort()).toEqual(expected);
   } else {
     expect(Object.keys(schemas)).toEqual(expect.arrayContaining(expected));
+    const recursive = names.filter((name) => !flat.includes(name));
+    const reachable = reachableComponents(schemas, recursive);
     const extra = Object.keys(schemas).filter((name) => !expected.includes(name));
-    for (const name of extra) expect(name).toMatch(/^__schema\d+$/);
+    for (const name of extra) {
+      expect(name).toMatch(/^__schema\d+$/);
+      expect(reachable.has(name), `${name} は再帰する形から $ref で届かない`).toBe(true);
+    }
   }
   for (const name of flat) expect(schemas[name], name).toEqual(defs[name]);
 }
@@ -419,6 +469,12 @@ describe("自分へ戻る形の $ref", () => {
 
   it("再帰する形を操作の表に足しても、再帰しない形の $defs との一致の照らしは通る", () => {
     expectFlatSchemasMatchDefs([...ALL, op]);
+  });
+
+  it("再帰する形から $ref で届かない __schemaN が混じると、一致の照らしが落ちる", () => {
+    const schemas = buildOpenApi([...ALL, op]).components?.schemas ?? {};
+    expect(Object.keys(schemas).some((name) => /^__schema\d+$/.test(name))).toBe(true);
+    expect(() => expectFlatSchemasMatchDefs([...ALL, op], { ...schemas, __schema999: { type: "string" } })).toThrow(/__schema999/);
   });
 
   it("MCP の道具の outputSchema は単独の文書として参照が解ける", () => {
