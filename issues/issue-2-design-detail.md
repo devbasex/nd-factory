@@ -87,8 +87,8 @@ infra/
 | `packages/contracts/src/values.ts` | 新設 | 国や地域で読み違えない値の形を 1 か所に置く | zod | values | `utcDateTime`・`calendarMonth`・`money`・`currencyCode`・`languageTag`・`timeZone`・`githubRepo`・`githubIssueRef`・`itemsArray` |
 | `packages/contracts/src/ids.ts` | 新設 | ID の頭の集まりと ID の形 | values | ids | `ID_KINDS`・`IdKind`・`idOf` |
 | `packages/contracts/src/tokens.ts` | 新設 | 委任と登録の token の形 | ids | tokens | `delegationToken`・`machineToken` |
-| `packages/contracts/src/reasons.ts` | 新設 | 理由のコードの共通の集まり | zod | reasons | `REQUEST_REASONS`・`ITEM_REASONS` |
-| `packages/contracts/src/operation.ts` | 新設 | 操作の定義の型と組み立て | values・reasons | operation | `defineOperation`・`pendingShape`・`isPending`・`okItem`・`okList`・`itemFailure`・`OperationDef`・`ItemOf`・`ResultOf` |
+| `packages/contracts/src/reasons.ts` | 新設 | 理由のコードの共通の集まりと型 | zod | reasons | `REQUEST_REASONS`・`ITEM_REASONS`・`ReasonDef` |
+| `packages/contracts/src/operation.ts` | 新設 | 操作の定義の型と組み立て | values・reasons | operation | `defineOperation`・`pendingShape`・`isPending`・`okItem`・`okList`・`itemFailure`・`itemReasonsOf`・`OperationDef`・`ItemOf`・`ResultOf` |
 | `packages/contracts/src/operations/*.ts` | 新設 | 操作の表の全行 | operation・ids・values | operations | `OPERATIONS`・`operationByName`・`operationByRoute` |
 | `packages/contracts/src/rows/*.ts` | 新設 | 表の行の形 | values・ids | rows | 行ごとの `<行>Row` の zod と `ROW_CODECS` |
 | `packages/contracts/src/tables.ts` | 新設 | 10 の表の仕様 | rows | tables | `TABLES`・`TableSpec` |
@@ -126,8 +126,9 @@ infra/
 | `ID_KINDS` | `ids.ts` | 新設 | `["usr","team","inv","prj","repo","trf","spr","lane","apr","qst","ntc","dst","dlg","mch","key","aud"] as const` | ID の頭（[値の形](../docs/design/api.md#値の形)） |
 | `idOf` | `ids.ts` | 新設 | `(kind: IdKind) => z.ZodString`。形は `^<頭>_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` | 種類ごとの ID の形。`parseId`（core）はこれを呼ぶ |
 | `delegationToken`・`machineToken` | `tokens.ts` | 新設 | `^ndfd_<usr の形>\.<dlg の形>\.[A-Za-z0-9_-]{43}$`・`^ndfm_<team の形>\.<mch の形>\.[A-Za-z0-9_-]{43}$` | token の形（[detail.md の内部のデータと定数](../docs/design/detail.md#内部のデータと定数)） |
-| `REQUEST_REASONS` | `reasons.ts` | 新設 | `body_not_json`・`body_not_array`・`body_empty`・`too_many_items`・`duplicate_item`・`cursor_invalid`・`unauthorized`・`human_only`・`scope_insufficient`・`unavailable`・`audit_unavailable`・`too_many_requests` | 要求全体の理由のコード |
-| `ITEM_REASONS` | `reasons.ts` | 新設 | `item_invalid`・`not_found`・`role_insufficient`・`human_only`・`version_mismatch`・`state_mismatch`・`idempotency_key_reused`・`in_progress`・`not_applied` | どの操作の要素にも出うる理由のコード。操作ごとのコードは `reasons` に足す |
+| `ReasonDef` | `reasons.ts` | 新設 | `{ code: string; status: 400 \| 401 \| 403 \| 404 \| 409 \| 422 \| 429 \| 503; when: "always" \| "write" \| "idempotency" \| "all_or_nothing" \| "human_only_per_item" }`。`code` は `^[a-z][a-z0-9_]*$` | 理由のコード・HTTP の状態・起きうる操作の条件の 1 組。共通の集まりも操作ごとのコードもこの型で持つ |
+| `REQUEST_REASONS` | `reasons.ts` | 新設 | `ReasonDef` の配列。`body_not_json`・`body_not_array`・`body_empty`・`too_many_items`・`duplicate_item`・`cursor_invalid`・`unauthorized`・`human_only`・`scope_insufficient`・`unavailable`・`audit_unavailable`・`too_many_requests` | 要求全体の理由のコード |
+| `ITEM_REASONS` | `reasons.ts` | 新設 | `ReasonDef` の配列。`item_invalid`（400・`always`）・`not_found`（404・`always`）・`role_insufficient`（403・`always`）・`human_only`（403・`human_only_per_item`）・`version_mismatch`（409・`write`）・`state_mismatch`（409・`write`）・`idempotency_key_reused`（422・`idempotency`）・`in_progress`（409・`idempotency`）・`not_applied`（409・`all_or_nothing`） | どの操作の要素にも出うる理由のコード。操作ごとのコードは `reasons` に足す |
 
 `UTC_DATE_TIME`（`values.ts` の定数。`refine` を使わずに日付の実在を照らすため、月ごとの日の数とうるう年を正規表現で書く。JSON Schema の `pattern` へそのまま写り、Ajv も同じ合否になる）:
 
@@ -159,7 +160,8 @@ infra/
 | `defineOperation` | `operation.ts` | 新設 | `<N extends string, I extends ZodType, R extends ZodType>(def: OperationInput<N, I, R>) => OperationDef<N, I, R>` | 印を照らし、HTTP の経路と既定の値を足した定義を返す |
 | `pendingShape` | `operation.ts` | 新設 | `(owner: `#${number}`) => PendingShape` | どの値も通さない形と、受け持つ子の番号 |
 | `isPending` | `operation.ts` | 新設 | `(shape: ZodType \| PendingShape) => shape is PendingShape` | 形の未定かを返す |
-| `okItem`・`okList`・`itemFailure` | `operation.ts` | 新設 | `(item: R) => z.ZodObject`・`(item: R) => z.ZodObject`・`(reasons: readonly string[]) => z.ZodObject` | 要素の結果の封筒（`{ok: true, item}`・`{ok: true, items, next_cursor}`・`{ok: false, status, reason, fields?}`） |
+| `okItem`・`okList`・`itemFailure` | `operation.ts` | 新設 | `(item: R) => z.ZodObject`・`(item: R) => z.ZodObject`・`(reasons: readonly ReasonDef[]) => z.ZodObject` | 要素の結果の封筒（`{ok: true, item}`・`{ok: true, items, next_cursor}`・`{ok: false, status, reason, fields?}`）。`itemFailure` は渡した `ReasonDef` ごとに `status` と `reason` の組を `z.literal` で縛った判別の和にする |
+| `itemReasonsOf` | `operation.ts` | 新設 | `(op: OperationDef) => readonly ReasonDef[]` | その操作で起きうる要素の理由。`ITEM_REASONS` のうち `when` が操作に当たるもの（`write` は `access` が `write`、`idempotency` は `idempotencyKey`、`all_or_nothing` は `allOrNothing`、`human_only_per_item` は `humanOnly` が `per_item`）に、`op.reasons` を続けた配列。結果の形の `itemFailure`・`generated/reasons.json`・失敗のダミーはどれもこの戻り値から作る |
 | `operationByName` | `operations/index.ts` | 新設 | `(name: string) => OperationDef \| undefined` | 名前で引く |
 | `operationByRoute` | `operations/index.ts` | 新設 | `(path: string) => OperationDef \| undefined` | `/v1/...` の経路で引く（`readHttpCall` が使う） |
 
@@ -192,7 +194,7 @@ infra/
 | 11 | `allOrNothing` | `{ maxItems: number } \| null` | `null` |
 | 12 | `idempotencyKey` | 真偽 | 偽 |
 | 13 | `item`・`result` | zod \| `PendingShape` | — |
-| 14 | `reasons` | 文字列の配列 | `[]`（共通の `ITEM_REASONS` は足さずに生成が合わせる） |
+| 14 | `reasons` | `readonly ReasonDef[]`（操作ごとのコードだけ。`when` は `always`） | `[]`（共通の `ITEM_REASONS` は書かずに `itemReasonsOf` が合わせる）。`ITEM_REASONS` と同じコードを書くと `defineOperation` が投げる |
 | 15 | `auditKeys` | 要素の鍵の名前の配列 | `[]` |
 | 16 | `order` | 文字列 \| `null` | `list` 以外は `null` |
 | 17 | `examples` | `{ normal: unknown[]; edge: unknown[] } \| null` | 形の未定なら `null`、形があれば必須 |
@@ -298,11 +300,11 @@ infra/
 | `generated/openapi.json` | `openapi: "3.1.1"`・`info`（題 `nd-factory API`・版 `1`）・`paths`（受け口 `user` の操作だけ。`post` の `operationId` は操作の名前、要求は `itemsArray(item)`、応答 200 は結果の配列、`default` は problem）・`components.schemas`（`operations.schema.json` の `$defs` の写し）・`components.securitySchemes.bearer` |
 | `generated/mcp-tools.json` | `[{name, description, inputSchema, outputSchema, annotations}]`（操作の表の順） |
 | `generated/routes.json` | `[{method: "POST", path, operation, endpoint}]`（操作の表の順。GitHub の Webhook は I12 の外のため載せず、受け持つ #5 が足す） |
-| `generated/reasons.json` | `{"request": [...REQUEST_REASONS], "item": [...ITEM_REASONS], "operations": {"<操作>": [...]}}` |
-| `generated/dummy/<操作>.json` | `{"operation", "normal": [...], "empty": [...], "edge": [...], "failures": [{"ok": false, "status", "reason"}…]}`。`empty` は `list` で `[{"ok": true, "items": [], "next_cursor": null}]`、`get` で `[{"ok": false, "status": 404, "reason": "not_found"}]`、それ以外は `[]`。`failures` は `reasons` と `ITEM_REASONS` のうちその操作で起きうるもの（読む操作は `version_mismatch` などの書く理由を含めない）ごとに 1 つ |
+| `generated/reasons.json` | `{"request": [{code, status}…], "item": [{code, status}…], "operations": {"<操作>": [{code, status}…]}}`。`operations` の値は `itemReasonsOf(op)` の `code` と `status` |
+| `generated/dummy/<操作>.json` | `{"operation", "normal": [...], "empty": [...], "edge": [...], "failures": [{"ok": false, "status", "reason"}…]}`。`empty` は `list` で `[{"ok": true, "items": [], "next_cursor": null}]`、`get` で `[{"ok": false, "status": 404, "reason": "not_found"}]`、それ以外は `[]`。`failures` は `itemReasonsOf(op)` の要素ごとに 1 つで、`status` と `reason` はその `ReasonDef` の値（読む操作は `when` が `write` の `version_mismatch` などを含めない）。どの失敗のダミーも、同じ `itemReasonsOf(op)` から作った `ResultOf` の zod を通る |
 | `generated/pending.json` | `[{"operation", "owner"}]` |
 
-理由のコードと HTTP の状態の対応は `reasons.ts` に表で持つ（`not_found` → 404 ほか）。操作ごとのコードは、定義の `reasons` の要素に `{code, status}` で書く。
+理由のコードと HTTP の状態の対応は、共通の集まりも操作ごとのコードも `ReasonDef` の `status` だけが持つ（別の対応の表を持たない）。
 
 ### 単体テストの観点
 
@@ -311,7 +313,8 @@ infra/
 | 往復（`operations-roundtrip.test.ts`） | 形のある操作ごとに、見本と反例（時刻帯の無い日時・通貨の無い金額・頭の違う ID・配列でない本文）が zod と Ajv（`Ajv2020`、`strict: true`、`validateFormats: false`）で同じ合否 | 要素 1 個と上限ちょうどの配列 | `refine` を使う形をテストの中で足すと食い違いを検出する（検出の仕組みのテスト） |
 | `checkExamples` | 作り物の値だけの見本は問題 0 | — | 通貨の無い金額・`ghs_` の値・`ops@corp.test`・12 桁の別の数で問題が出る |
 | `buildMcpTools` | 人だけの操作と受け口 `user` でない操作が無い。道具の順が操作の表の順 | 全部か無かの操作の `maxItems` | — |
-| `buildDummy` | `list` の空・`get` の 404・理由のコードごとの失敗 | 形の未定は `null` | — |
+| `buildDummy` | `list` の空・`get` の 404・`itemReasonsOf(op)` のコードごとの失敗で、`status` が `ReasonDef` と同じ。どの失敗も `ResultOf` の zod を通る | 形の未定は `null` | — |
+| `itemReasonsOf` | 書く操作は `version_mismatch` を含み、操作ごとのコードが後ろに続く | 冪等の鍵の無い操作は `in_progress` を含まない | 操作ごとのコードに `not_found` を書くと `defineOperation` が投げる |
 | `generateArtifacts` | `write` の後の `check` が空 | 消えた操作のダミーのファイルが `check` で差になる | 見本の誤りで書かずに投げる |
 
 ## 横断の部品

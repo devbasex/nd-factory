@@ -136,7 +136,7 @@ graph TB
 | `allOrNothing` | `{ maxItems }` か `null` | 「全部か無か」の 2 つの操作 |
 | `idempotencyKey` | 真偽 | [冪等の鍵](../docs/design/api.md#冪等の鍵) |
 | `item`・`result` | zod か「形の未定」 | 受け持つ子。未定の間は `pendingShape("#<番号>")` |
-| `reasons` | 理由のコードの配列 | 共通の集まりと、受け持つ子が足す操作ごとのコード |
+| `reasons` | 理由のコードと HTTP の状態の組（`{code, status}`）の配列 | 受け持つ子が足す操作ごとのコード。共通の集まりは書かずに生成が足す |
 | `auditKeys` | 要素の鍵の名前の配列 | 受け持つ子。未定の間は空 |
 | `order` | 並びの説明（`list` だけ） | 受け持つ子 |
 | `examples` | `{ normal, edge }`（結果の要素の配列） | 受け持つ子（決定 3） |
