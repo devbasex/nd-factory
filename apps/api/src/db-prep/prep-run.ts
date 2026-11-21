@@ -3,8 +3,11 @@ import { ADMIN_DATABASE, type SqlExecutor } from "./sql-executor.ts";
 // 受け取りの行を残す日数。待ち行列の最大の年齢（60 秒）より十分長い
 export const PREP_RUN_RETENTION_DAYS = 7;
 
-// 表の有無を見る前に排他の鎖を取る。鎖の後に見るので、別の配信が作り終えた表を必ず見て、作る文どうしが重ならない
-// （鎖より前に見ると、見た後に作られた表に CREATE … IF NOT EXISTS が重なり、カタログの一意の制約で落ちうる）
+// 表を作るときだけ取る排他の鎖。表の有無は 2 回見る: 鎖なしで見て、有れば鎖を取らない（ふだんの受け取りは鎖で直列に
+// ならず、鎖の待ちが Data API の 45 秒の取り消しに数えられない）。無ければ鎖を取ってから見直す。トランザクションは
+// READ COMMITTED（PostgreSQL と Data API の既定）で文ごとに新しい写しを読むため、見直しは鎖の前に別の配信が作り終えた
+// 表を必ず見て、作る文どうしが重ならない（見直さずに作ると、CREATE … IF NOT EXISTS が重なり、カタログの一意の制約で落ちうる）。
+// 作る配信は表と権限の外しを 1 つのトランザクションで確定するため、鎖なしで「有る」と見えた表は権限を外し終えている
 // 関数を FROM に置き、void の列を行に載せない
 const SCHEMA_LOCK = "SELECT 1::int AS locked FROM pg_advisory_xact_lock(hashtext('nd-prep:schema'))";
 const TABLE_PRESENT = "SELECT to_regclass('nd_prep.prep_runs') IS NOT NULL AS present";
@@ -18,6 +21,11 @@ const DELETE_OLD = "DELETE FROM nd_prep.prep_runs WHERE claimed_at < now() - mak
 // 同じ ID の 2 つの挿入は主キーの一意の索引で直列になり、後の方は前の確定を待って何も足さない
 const INSERT_RUN = "INSERT INTO nd_prep.prep_runs (prep_id) VALUES (:prep_id) ON CONFLICT (prep_id) DO NOTHING RETURNING prep_id";
 
+async function tablePresent(sql: SqlExecutor, opts: { database: string; transactionId: string }): Promise<boolean> {
+  const [row] = await sql.execute(TABLE_PRESENT, undefined, opts);
+  return row?.present === true;
+}
+
 // 同じ用意の ID の重複の配信のうち、1 つだけに SQL と終わりの記録を許す
 export async function claimPrepRun(sql: SqlExecutor, prepId: string): Promise<"first" | "duplicate"> {
   if (prepId.length === 0) throw new Error("用意の ID が空");
@@ -25,12 +33,13 @@ export async function claimPrepRun(sql: SqlExecutor, prepId: string): Promise<"f
   const opts = { database: ADMIN_DATABASE, transactionId: tx };
   let inserted: boolean;
   try {
-    // 鎖は確定か巻き戻しまで持つ。受け取りどうしは短いトランザクションで直列になる
-    await sql.execute(SCHEMA_LOCK, undefined, opts);
-    const [presence] = await sql.execute(TABLE_PRESENT, undefined, opts);
-    if (presence?.present !== true) {
-      for (const stmt of [CREATE_SCHEMA, REVOKE_SCHEMA, CREATE_TABLE, REVOKE_TABLE]) {
-        await sql.execute(stmt, undefined, opts);
+    if (!(await tablePresent(sql, opts))) {
+      // 鎖は確定か巻き戻しまで持つ。表の無い間の受け取りどうしだけが直列になる
+      await sql.execute(SCHEMA_LOCK, undefined, opts);
+      if (!(await tablePresent(sql, opts))) {
+        for (const stmt of [CREATE_SCHEMA, REVOKE_SCHEMA, CREATE_TABLE, REVOKE_TABLE]) {
+          await sql.execute(stmt, undefined, opts);
+        }
       }
     }
     await sql.execute(DELETE_OLD, [{ name: "retention_days", value: PREP_RUN_RETENTION_DAYS }], opts);

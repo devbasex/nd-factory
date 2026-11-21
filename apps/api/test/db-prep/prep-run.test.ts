@@ -37,26 +37,40 @@ describe("claimPrepRun（作り物の SqlExecutor）", () => {
     expect(PREP_RUN_RETENTION_DAYS).toBe(7);
   });
 
-  it("表の有無を見る前に排他の鎖を取り、表が無ければ鎖の下で作ってから記す", async () => {
+  it("表が無ければ鎖を取ってから見直し、鎖の下で作ってから記す", async () => {
     const fake = fakeWith(false, true);
     expect(await claimPrepRun(fake, "prep-1")).toBe("first");
     const s = fake.statements();
-    const lock = s.findIndex((x) => x.includes("pg_advisory_xact_lock(hashtext('nd-prep:schema'))"));
-    expect(lock).toBe(0);
-    expect(s.findIndex((x) => x.includes("to_regclass"))).toBe(1);
+    expect(s[0]).toContain("to_regclass");
+    expect(s[1]).toContain("pg_advisory_xact_lock(hashtext('nd-prep:schema'))");
+    expect(s[2]).toContain("to_regclass");
     const schema = s.findIndex((x) => x.includes("CREATE SCHEMA IF NOT EXISTS nd_prep"));
     const table = s.findIndex((x) => x.includes("CREATE TABLE IF NOT EXISTS nd_prep.prep_runs"));
     const insert = s.findIndex((x) => x.includes("ON CONFLICT (prep_id) DO NOTHING RETURNING prep_id"));
-    expect(lock).toBeGreaterThanOrEqual(0);
-    expect(lock).toBeLessThan(schema);
+    expect(schema).toBe(3);
     expect(schema).toBeLessThan(table);
     expect(table).toBeLessThan(insert);
   });
 
-  it("表があっても鎖を取ってから見て、作る文を打たない", async () => {
+  it("表があれば鎖を取らず、作る文を打たない", async () => {
     const fake = fakeWith(true, true);
     await claimPrepRun(fake, "prep-1");
-    expect(fake.statements()[0]).toContain("pg_advisory_xact_lock");
+    expect(fake.statements()[0]).toContain("to_regclass");
+    expect(fake.statements().some((x) => x.includes("pg_advisory_xact_lock"))).toBe(false);
+    expect(fake.statements().some((x) => x.includes("CREATE"))).toBe(false);
+  });
+
+  it("鎖の前に無かった表が鎖の後の見直しで有れば、作る文を打たない", async () => {
+    const fake = fakeWith(true, true);
+    let looks = 0;
+    const respond = fake.respond;
+    fake.respond = (sql, params) => {
+      if (sql.includes("to_regclass")) return [{ present: ++looks > 1 }];
+      return respond(sql, params);
+    };
+    expect(await claimPrepRun(fake, "prep-1")).toBe("first");
+    expect(looks).toBe(2);
+    expect(fake.statements().some((x) => x.includes("pg_advisory_xact_lock"))).toBe(true);
     expect(fake.statements().some((x) => x.includes("CREATE"))).toBe(false);
   });
 
@@ -161,12 +175,13 @@ describePg("claimPrepRun（PostgreSQL）", () => {
     });
   });
 
-  it("別の配信が鎖を持つ間は表の有無を見ずに待ち、その確定の後に作られた表を見て作らずに first", async () => {
+  it("表の無い間に別の配信が鎖を持てば待ち、その確定の後の見直しで作られた表を見て作らずに first", async () => {
     await withTestDatabase(async (db) => {
       // 別の配信の代わり: 鎖を取り、確定しないまま持つ
       const other = await db.connect();
       await other.query("BEGIN");
       await other.query("SELECT pg_advisory_xact_lock(hashtext('nd-prep:schema'))");
+      let holding = true;
 
       // 受け取りが打った文を、DB へ送る前に残す
       const inner = db.executor();
@@ -178,25 +193,76 @@ describePg("claimPrepRun（PostgreSQL）", () => {
           return inner.execute(s, p, o);
         },
       };
-      const claim = claimPrepRun(sql, "prep-a");
-      const watcher = await db.connect();
-      for (;;) {
-        const res = await watcher.query<{ n: number }>(
-          "SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
-        );
-        if (res.rows[0]!.n > 0) break;
-        await new Promise((r) => setTimeout(r, 20));
-      }
-      // 鎖を待つ間に、表の有無はまだ見ていない
-      expect(sent).toHaveLength(1);
-      expect(sent[0]).toContain("pg_advisory_xact_lock");
+      // 受け取りの失敗は起動の直後から捕まえる（鎖を待つ前に落ちても、未処理の拒否にせずに下で投げる）
+      let settled = false;
+      const outcome = claimPrepRun(sql, "prep-a").then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+      void outcome.finally(() => {
+        settled = true;
+      });
 
-      // 別の配信が表を作って確定する。受け取りは鎖の後に見るので、作られた表を見て作る文を打たない
-      await other.query("CREATE SCHEMA nd_prep");
-      await other.query("CREATE TABLE nd_prep.prep_runs (prep_id text PRIMARY KEY, claimed_at timestamptz NOT NULL DEFAULT now())");
-      await other.query("COMMIT");
-      expect(await claim).toBe("first");
+      try {
+        const watcher = await db.connect();
+        // 監視は期限で止める。受け取りが鎖を取らなくなる回帰では、Vitest の時間切れより前に落ちて後始末へ届く
+        const deadline = performance.now() + 10_000;
+        for (;;) {
+          if (settled) throw new Error("受け取りが鎖を待たずに終えた", { cause: await outcome });
+          if (performance.now() > deadline) throw new Error("受け取りが期限のうちに鎖を待たなかった");
+          const res = await watcher.query<{ n: number }>(
+            "SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
+          );
+          if (res.rows[0]!.n > 0) break;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        // 鎖なしで表の無いことを見て、鎖を待っている。見直しはまだ打っていない
+        expect(sent).toHaveLength(2);
+        expect(sent[0]).toContain("to_regclass");
+        expect(sent[1]).toContain("pg_advisory_xact_lock");
+
+        // 別の配信が表を作って確定する。受け取りは鎖の後に見直すので、作られた表を見て作る文を打たない
+        await other.query("CREATE SCHEMA nd_prep");
+        await other.query("CREATE TABLE nd_prep.prep_runs (prep_id text PRIMARY KEY, claimed_at timestamptz NOT NULL DEFAULT now())");
+        await other.query("COMMIT");
+        holding = false;
+      } catch (e) {
+        // 持っている鎖を外してから受け取りの終わりを待つ（外さないと受け取りが鎖を待ち続け、後始末へ届かない）
+        if (holding) await other.query("ROLLBACK").catch(() => undefined);
+        await outcome;
+        throw e;
+      }
+      expect(await outcome).toEqual({ value: "first" });
+      expect(sent[2]).toContain("to_regclass");
       expect(sent.some((x) => x.includes("CREATE"))).toBe(false);
+    });
+  });
+
+  it("表があれば、別の配信が鎖を持っていても待たずに受け取る", async () => {
+    await withTestDatabase(async (db) => {
+      const sql = db.executor();
+      expect(await claimPrepRun(sql, "prep-a")).toBe("first");
+      const other = await db.connect();
+      await other.query("BEGIN");
+      await other.query("SELECT pg_advisory_xact_lock(hashtext('nd-prep:schema'))");
+      // 鎖を待つ回帰では、鎖を持ったままなので期限で打ち切る。打ち切っても鎖を外し、受け取りの終わりを待ってから照らす
+      const claim = claimPrepRun(sql, "prep-b").then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+      let timer: NodeJS.Timeout | undefined;
+      const timeout = new Promise<"timeout">((r) => {
+        timer = setTimeout(() => r("timeout"), 5_000);
+      });
+      let first: Awaited<typeof claim> | "timeout";
+      try {
+        first = await Promise.race([claim, timeout]);
+      } finally {
+        clearTimeout(timer);
+        await other.query("ROLLBACK");
+        await claim;
+      }
+      expect(first).toEqual({ value: "first" });
     });
   });
 
