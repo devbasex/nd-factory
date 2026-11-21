@@ -25,6 +25,7 @@
 | --- | --- | --- |
 | `CustomData`（承認の画面の注記） | 準備が書き出したコミット・合成の結果の要約値の先頭 12 桁・スタックの名前 | コミットが、反映するつもりの起点のブランチの先頭か |
 | `ExternalEntityLink`（承認の画面のリンク） | 準備の実行の記録（CodeBuild のビルドの頁）。差分の全文がある | 差分の全文 |
+| `CustomData` のコミットの GitHub の検査 | そのコミットで動いたジョブ `ndf-contract`（NDF の契約の照合。main への push か手動の起動）の結論。`gh api repos/<起点のリポジトリ>/commits/<コミット>/check-runs --jq '.check_runs[] \| select(.name == "ndf-contract") \| .conclusion'` で読む | `success` が 1 件以上あるか。無い（`failure`・終わっていない・実行が無い）なら承認しない。起点のブランチが main でなく push の実行が無いときは、その枝を選んで `ndf-contract` を手動で起こし、成功してから承認する（[実行の文書の決定 79](../design/execution.md#決定の記録)） |
 
 差分を読むときは次を確かめる。
 

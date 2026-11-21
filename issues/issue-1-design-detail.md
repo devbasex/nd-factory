@@ -84,7 +84,7 @@ nd-factory/
   - 事前条件: 組の ID が一意。控えの `group` が組の ID のどれか
   - 事後条件: どのファイルにも、規則ごとに 1 つの塊だけが効く（ESLint は同じ規則を後の塊で上書きするため、選び方を塊の中で合わせる）。縛る塊は `linterOptions.noInlineConfig: true` を持つ
   - 副作用: 無し
-- `eslint.config.js` は最上位の `await` で料金プランの名前（#29 の書き出し。無ければ空）と控えを読み、`buildLintConfigs` の結果を今の設定の後ろに足す
+- `eslint.config.js` は最上位の `await` で料金プランの名前（#29 の書き出し）と控えを読み、`buildLintConfigs` の結果を今の設定の後ろに足す。書き出しを読み込めないとき、`lint-rules.ts` の定数 `PLAN_EXPORT_REQUIRED` が偽なら名前を空にして続け、真なら止める。#29 の Pull Request がこの定数を真にする（設計文書の K29-2）
 - 規則の組の `files` は `*.ts` と `*.tsx` を両方書く。`*.tsx` の構文は typescript-eslint の解析器が拡張子で JSX として読む（今の設定は `**/*.ts` にだけ型の規則を掛けているので、`**/*.tsx` を同じ塊へ足す）。React の部品の規則（フックの使い方など）は画面を組む課題が足し、この組は持たない
 
 規則の組（`apps/*` は `apps/api`・`apps/web`・`apps/runner`・`apps/nd-runtime`・`apps/db-prep` の `src/` の `*.ts` と、画面の `apps/web/src/` の `*.tsx`。テストのディレクトリと e2e を含まない。画面は React 19 の部品を TSX で書く（プラットフォームの決定 140）ので、画面の組はどれも `*.ts` と `*.tsx` の両方に掛ける）:
@@ -139,7 +139,8 @@ nd-factory/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `loadLintExceptions` | 形の誤り | JSON でない・項目の欠け・知らない組の ID | 読んだ直後 | 止める（例外） | `npm run lint` が設定の読み込みの誤りで終了コード 2 | 直して打ち直す |
-| `eslint.config.js` | 料金プランの書き出しが無い | #29 がまだ置いていない | 動的な import の失敗 | 既定値で続ける（名前を空にし `usage.plan-names` を作らない） | 無し | — |
+| `eslint.config.js` | 料金プランの書き出しが無い（`PLAN_EXPORT_REQUIRED` が偽） | #29 がまだ置いていない | 動的な import の失敗 | 既定値で続ける（名前を空にし `usage.plan-names` を作らない） | 無し | — |
+| `eslint.config.js` | 料金プランの書き出しを読み込めない（`PLAN_EXPORT_REQUIRED` が真） | 書き出しを消した・名前を変えた・読み込みが壊れた | 動的な import の失敗 | 止める（例外） | `npm run lint` が設定の読み込みの誤りで終了コード 2 | 書き出しを直して打ち直す |
 
 ### 単体テストの観点
 
@@ -148,6 +149,7 @@ nd-factory/
 | `buildLintConfigs` と ESLint の API（`ESLint#lintText` に置き場のパスを渡す） | 組ごとに違反の文字列で誤りが 1 件出る。画面の組は `*.tsx` のパス（JSX の属性の値と本文を含む）でも出る。`apps/web` の外で `react` を import する・`apps/web` の外に `*.tsx` を置くと出て、`apps/web/src` の `*.tsx` で `react` を import しても出ない | 掛けない置き場（`packages/core`・`infra`・`tools`・`apps/*/test`）で出ない。型だけの import が依存の向きで出て、`@aws-sdk/*` では出ない。`new Date(0)` は出ない | 行の中の `eslint-disable` が効かない |
 | 控えの照らし（テスト） | 控えの行のファイルが、今もその組に当たる | 控えの無いファイルは同じ違反で落ちる | 当たらなくなった控えの行で落ちる |
 | `loadLintExceptions` | 正しい形を読む | 空の配列 | 知らない組の ID で例外 |
+| 料金プランの書き出しの読み込み（`eslint.config.js` が使う読み込みの関数） | `PLAN_EXPORT_REQUIRED` が真なら、実際の書き出しから読んだ名前で画面の名前の文字列に `usage.plan-names` の誤りが出て、`usage.plan-values` が落とす指定子を `import()` で読め、判定の外のその import に誤りが出る（真のときだけ走る実物のテスト。名前と指定子をテストに写さない） | 偽で書き出しが無いと名前が空 | 真で書き出しを読み込めないと例外 |
 
 ## 漏れの検査
 
@@ -408,12 +410,12 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | --- | --- | --- | --- |
 | 1 | 見本 26 件を呼び出しの判定へ通し、`valid` と同じ判定になる | `C/domains/entrypoint-cases.json`・`C/domains/entrypoints.json` | 呼び出しの判定 |
 | 2 | `version.json` の `history` の最後の行（版と sha256）が受ける組にある | `C/version.json` | 受ける組 |
-| 3 | `set_by: service` の名前と使う口の `env` 列の名前が、ランナーが渡す環境変数の名前を含む | `C/domains/env.json`・`C/domains/entrypoints.json` | 渡す環境変数の名前 |
+| 3 | 使う口と実行の場（ホステッド・手元のマシン）の組ごとに、`set_by: service` の名前と、その口の `env` 列の名前が、使い方のその組の渡す環境変数の名前を含む | `C/domains/env.json`・`C/domains/entrypoints.json` | 口と実行の場の組ごとの渡す環境変数の名前（設計文書の K2-6） |
 | 4 | `reader: service` の読むファイルの `fields` が、翻訳が読む項目を含む。読むファイルの行が契約にある | `C/domains/ndf-files.json` | 読むファイルと項目 |
 | 5 | 区間の報告の `shape.values` と `shape.items` が、ランナーが読む結果の値と項目を含む | `C/hooks/unattended-report.json` | 区間の報告から読む値と項目 |
 | 6 | 使う口がすべて契約の口の表にある | `C/domains/entrypoints.json` | 使う口 |
 
-この 6 つは、形の正本の判定とデータ（#2）を契約と照らす。ランナー（#6）が実際に組み立てた呼び出しと環境変数を判定とデータに照らすのは、`apps/runner` のテスト（設計文書の K6-2。#6 の受け入れ条件）で、この検査ではない。
+この 6 つは、形の正本の判定とデータ（#2）を契約と照らす。ランナー（#6）が実際に組み立てた呼び出しと環境変数を判定とデータに照らすのは、`apps/runner` のテスト（設計文書の K6-2。#6 の受け入れ条件）で、この検査ではない。判定が拒む呼び出しで NDF が起きないこと（起動の経路が判定を呼び、拒否に従うこと）も、`apps/runner` のテスト（K6-3）が照らす。
 
 `ask-journal` の行が `fields` を持つようになったら、4 の照らしに入る前に、要約の「知らせ」の行へその点と `fields` を出す（失敗にしない。#41 の決定 106 の答えを知るため）。
 
