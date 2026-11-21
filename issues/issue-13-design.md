@@ -502,6 +502,7 @@ sequenceDiagram
 | LIB17 | `cdk-nag` | — | Apache-2.0 | — | 無し | 条件つきで満たす。CDK のスタックを規則の集まりで照らす広く使われる道具で、独自の規則も書ける | 試していない（下の「確かめられなかったこと」） |
 | LIB18 | Aurora PostgreSQL の TLS（`rds.force_ssl`） | — | AWS のサービス | — | 無し | 満たす。`rds.force_ssl` を 1 にすると TLS でない接続を断る。既定は Aurora PostgreSQL 17 以上で 1、16 以下で 0 | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.Security.html （2026-11-21） |
 | LIB19 | ECS の `RunTask` のタグの伝播（`propagateTags`） | — | AWS のサービス | — | 無し | 満たす。`propagateTags` に `TASK_DEFINITION` を渡すと、タスクの定義のタグを作る時に実行するタスクへ写す。値を渡さなければ写さず、作った後には `TagResource` でしか付けられない | https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RunTask.html （2026-11-21） |
+| LIB20 | AWS Budgets の SNS の知らせ | — | AWS のサービス | — | 無し | 満たす。トピックの資源の方針で `budgets.amazonaws.com` に `SNS:Publish` を許す。許していないトピックは「Invalid SNS topic」として受けない。暗号化したトピックは追加の許しが要る | https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-sns-policy.html （2026-11-21） |
 
 ### 確かめられなかったこと
 

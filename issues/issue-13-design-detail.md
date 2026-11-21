@@ -175,11 +175,13 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | --- | --- | --- | --- | --- |
 | `CostWatch` の `constructor` | `infra/lib/cost-watch.ts` | 新設 | `(scope, id, props: { budgetUsd: number; budgetScope: "tags" \| "account"; emails: string[]; tags: { prefix: string; env: string }; names: AppResourceNames })` | SNS のトピック `<prefix>-<environment>-ops`（予算のサービスに発行を許す方針つき）・宛先ごとのメールの購読（空なら作らない）・予算 `<prefix>-<environment>-budget`（月・費用・USD。`budgetScope` が `tags` ならタグ `user:app-prefix$<prefix>` と `user:app-env$<environment>` で絞り、`account` なら絞らない）・実績 80%・100%・見込み 100% の 3 つの知らせをトピックへ |
 
+- トピックの方針は `sns.TopicPolicy` の別の資源で作り、`budgets.amazonaws.com` に `SNS:Publish` を許す（条件は `aws:SourceAccount` がこのアカウント、`aws:SourceArn` が `arn:aws:budgets::<アカウント>:*`）。予算はトピックの ARN を参照するだけでは方針への依存を CloudFormation に伝えず、方針より先に作られうる。AWS Budgets は発行を許されていないトピックを無効と扱うため（LIB20）、`CfnBudget` に `budget.node.addDependency(topicPolicy)` を付け、初回の反映でも方針の後に予算を作る。トピックは KMS で暗号化しない（暗号化すると予算のサービスに鍵の許しが別に要る。LIB20）
+
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `CostWatch` | 予算の額・3 つの知らせ・タグの絞り | 宛先 0 件で購読が 0 件。`account` で `CostFilters` も `FilterExpression` も無い | — |
+| `CostWatch` | 予算の額・3 つの知らせ・タグの絞り。合成の出力の `AWS::Budgets::Budget` の `DependsOn` に `AWS::SNS::TopicPolicy` の論理 ID があり、方針が `budgets.amazonaws.com` の `SNS:Publish` を許す | 宛先 0 件で購読が 0 件。`account` で `CostFilters` も `FilterExpression` も無い | 依存を外す・トピックに `KmsMasterKeyId` を付けると落ちる |
 
 ## スタックの決まりの検査
 
