@@ -1,0 +1,166 @@
+import {
+  DescribeSecretCommand,
+  GetSecretValueCommand,
+  ResourceNotFoundException,
+  SecretsManagerClient,
+  UpdateSecretVersionStageCommand,
+} from "@aws-sdk/client-secrets-manager";
+import { describe, expect, it } from "vitest";
+import { promoteVersion, readVersionPassword } from "../../src/db-prep/secret-version.ts";
+
+// 作り物の値だけを使う
+const SECRET = "acme/test/progress-db/prj_01890a5d-ac96-7a3b-8c4d-0123456789ab";
+const VERSION = "0b9c3c1e-5f0a-4d6b-9a51-2f6c8e1d7a01";
+const OLD_VERSION = "7d2f4a10-3c8b-4e9f-8a26-91b0c5e4d3f2";
+const PASSWORD = "acme-Version-0123456789abcdefghijklmnop";
+const URL_VALUE = `postgresql://acme_role_aaaaaaaa:${PASSWORD}@acme-progress.example.com:5432/acme_db_aaaaaaaa`;
+
+type Command = GetSecretValueCommand | DescribeSecretCommand | UpdateSecretVersionStageCommand;
+
+// Secrets Manager のクライアントの代わり。送られた命令を残し、答えを差し込める
+class FakeSecrets {
+  calls: Command[] = [];
+  handle: (cmd: Command) => unknown = () => ({});
+
+  asClient(): SecretsManagerClient {
+    const client = new SecretsManagerClient({
+      region: "us-west-2",
+      credentials: { accessKeyId: "AKIDEXAMPLE", secretAccessKey: "secret" },
+    });
+    client.send = ((cmd: Command) => this.send(cmd)) as unknown as SecretsManagerClient["send"];
+    return client;
+  }
+
+  async send(cmd: Command): Promise<unknown> {
+    this.calls.push(cmd);
+    return this.handle(cmd);
+  }
+
+  updates(): UpdateSecretVersionStageCommand[] {
+    return this.calls.filter((c): c is UpdateSecretVersionStageCommand => c instanceof UpdateSecretVersionStageCommand);
+  }
+}
+
+// 版とラベルの作り物。UpdateSecretVersionStage を受けると AWSCURRENT を移す（moves が偽なら移さない）
+function stagesFake(initial: Record<string, string[]>, opts: { moves?: boolean } = {}): FakeSecrets {
+  const fake = new FakeSecrets();
+  const stages: Record<string, string[]> = structuredClone(initial);
+  fake.handle = (cmd) => {
+    if (cmd instanceof DescribeSecretCommand) return { VersionIdsToStages: structuredClone(stages) };
+    if (cmd instanceof UpdateSecretVersionStageCommand && opts.moves !== false) {
+      const { MoveToVersionId: to, RemoveFromVersionId: from, VersionStage: stage } = cmd.input;
+      if (from !== undefined) stages[from] = (stages[from] ?? []).filter((s) => s !== stage);
+      if (to !== undefined && stage !== undefined) stages[to] = [...(stages[to] ?? []), stage];
+    }
+    return {};
+  };
+  return fake;
+}
+
+async function caught(p: Promise<unknown>): Promise<Error> {
+  const e = await p.then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  if (!(e instanceof Error)) throw new Error("投げなかった");
+  return e;
+}
+
+function expectNoSecret(e: Error): void {
+  for (const text of [e.message, e.stack ?? "", String(e.cause ?? "")]) {
+    expect(text).not.toContain(PASSWORD);
+    expect(text).not.toContain(URL_VALUE);
+  }
+}
+
+describe("readVersionPassword", () => {
+  it("版の ID で読み、URL のパスワードを返す。ラベルを渡さない", async () => {
+    const fake = new FakeSecrets();
+    fake.handle = () => ({ SecretString: URL_VALUE, VersionId: VERSION });
+    expect(await readVersionPassword(fake.asClient(), SECRET, VERSION)).toBe(PASSWORD);
+    expect(fake.calls).toHaveLength(1);
+    const cmd = fake.calls[0];
+    expect(cmd).toBeInstanceOf(GetSecretValueCommand);
+    expect(cmd?.input).toEqual({ SecretId: SECRET, VersionId: VERSION });
+    expect(cmd?.input).not.toHaveProperty("VersionStage");
+  });
+
+  it("URL の中で符号化されたパスワードを戻して返す", async () => {
+    const fake = new FakeSecrets();
+    fake.handle = () => ({ SecretString: "postgresql://acme_role_aaaaaaaa:acme%2Fpw%40x@example.com:5432/acme_db_aaaaaaaa" });
+    expect(await readVersionPassword(fake.asClient(), SECRET, VERSION)).toBe("acme/pw@x");
+  });
+
+  it("版が無ければ投げる", async () => {
+    const fake = new FakeSecrets();
+    fake.handle = () => {
+      throw new ResourceNotFoundException({ message: "Secrets Manager can't find the specified secret value", $metadata: {} });
+    };
+    const e = await caught(readVersionPassword(fake.asClient(), SECRET, VERSION));
+    expect(e.name).toBe("ResourceNotFoundException");
+  });
+
+  it("値が無い・URL の形でない・URL にパスワードが無い・パスワードを戻せないと投げ、例外の文にパスワードと URL が現れない", async () => {
+    const values: Array<string | undefined> = [
+      undefined,
+      `acme ${PASSWORD} not a url`,
+      "postgresql://acme_role_aaaaaaaa@example.com:5432/acme_db_aaaaaaaa",
+      `postgresql://acme_role_aaaaaaaa:${PASSWORD}%E0%A4%A@example.com:5432/acme_db_aaaaaaaa`,
+    ];
+    for (const value of values) {
+      const fake = new FakeSecrets();
+      fake.handle = () => (value === undefined ? { SecretBinary: new Uint8Array([1]) } : { SecretString: value });
+      const e = await caught(readVersionPassword(fake.asClient(), SECRET, VERSION));
+      expectNoSecret(e);
+    }
+  });
+});
+
+describe("promoteVersion", () => {
+  it("AWSCURRENT の付かない版へ、今の版から移し、読み直す", async () => {
+    const fake = stagesFake({ [OLD_VERSION]: ["AWSCURRENT"], [VERSION]: ["AWSPENDING"] });
+    await promoteVersion(fake.asClient(), SECRET, VERSION);
+    expect(fake.calls.map((c) => c.constructor.name)).toEqual([
+      "DescribeSecretCommand",
+      "UpdateSecretVersionStageCommand",
+      "DescribeSecretCommand",
+    ]);
+    expect(fake.calls[0]?.input).toEqual({ SecretId: SECRET });
+    expect(fake.updates()[0]?.input).toEqual({
+      SecretId: SECRET,
+      VersionStage: "AWSCURRENT",
+      MoveToVersionId: VERSION,
+      RemoveFromVersionId: OLD_VERSION,
+    });
+  });
+
+  it("どの版にも AWSCURRENT が付いていなければ、外す版を渡さずに移す", async () => {
+    const fake = stagesFake({ [VERSION]: ["AWSPENDING"] });
+    await promoteVersion(fake.asClient(), SECRET, VERSION);
+    expect(fake.updates()[0]?.input).toEqual({ SecretId: SECRET, VersionStage: "AWSCURRENT", MoveToVersionId: VERSION });
+  });
+
+  it("既に付いていれば UpdateSecretVersionStage を呼ばない（中断からの再開）", async () => {
+    const fake = stagesFake({ [OLD_VERSION]: [], [VERSION]: ["AWSCURRENT", "AWSPENDING"] });
+    await promoteVersion(fake.asClient(), SECRET, VERSION);
+    expect(fake.updates()).toHaveLength(0);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it("読み直しで付いていなければ投げる", async () => {
+    const fake = stagesFake({ [OLD_VERSION]: ["AWSCURRENT"], [VERSION]: ["AWSPENDING"] }, { moves: false });
+    await expect(promoteVersion(fake.asClient(), SECRET, VERSION)).rejects.toThrow("AWSCURRENT を移せなかった");
+    expect(fake.updates()).toHaveLength(1);
+  });
+
+  it("移しが投げれば、そのまま投げる", async () => {
+    const fake = stagesFake({ [OLD_VERSION]: ["AWSCURRENT"] });
+    const inner = fake.handle;
+    fake.handle = (cmd) => {
+      if (cmd instanceof UpdateSecretVersionStageCommand) throw new Error("権限が無い");
+      return inner(cmd);
+    };
+    await expect(promoteVersion(fake.asClient(), SECRET, VERSION)).rejects.toThrow("権限が無い");
+    expect(fake.calls).toHaveLength(2);
+  });
+});

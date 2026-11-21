@@ -64,6 +64,17 @@ export const DB_PREP_TIMING: DbPrepTiming = Object.freeze({
   patrolIntervalSeconds: 300,
 });
 
+// DB の用意の関数へ渡す環境変数の名前。資源（infra/lib/db-prep-function.ts、#13 の U7）が値を入れ、
+// 起点（apps/api/src/entries/db-prep.ts）が読む。両方がこの定数を参照し、名前を写さない
+export const DB_PREP_ENV = Object.freeze({
+  // 進行表の DB のクラスタの ARN（Data API の resourceArn）
+  clusterArn: "DB_PREP_CLUSTER_ARN",
+  // 管理の役割の秘密の器の ARN（Data API の secretArn）
+  adminSecretArn: "DB_PREP_ADMIN_SECRET_ARN",
+  // プロジェクトの秘密の器の名前の頭（<prefix>/<environment>/progress-db/）
+  secretPrefix: "DB_PREP_SECRET_PREFIX",
+} as const);
+
 export type DbPrepInvocation = z.infer<typeof dbPrepInvocation>;
 export type DbPrepOutcome = z.infer<typeof dbPrepOutcome>;
 export type DbPrepFailureReason = (typeof DB_PREP_FAILURE_REASONS)[number];
