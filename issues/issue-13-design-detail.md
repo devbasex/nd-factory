@@ -226,10 +226,10 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `KEEP_IMAGES` | 同上 | 新設 | 定数 `30` | リポジトリごとに残す版の数（設計文書の決定 2） |
 | `imageRepositoryName` | 同上 | 新設 | `(s: Settings, key: ImageKey) => string` | リポジトリの名前 `<prefix>-<environment>-<key>` を返す。`ImageRepository` と `buildAndPushImages` がこれで名前を作る |
 | `ImageRepository` の `constructor` | 同上 | 新設 | `(scope, id, props: { name: string })` | ECR のリポジトリ（名前は `imageRepositoryName` の値・タグは書き換え不可・push の時の検査・`RemovalPolicy.RETAIN`）と、規則 1 つ（`tagStatus: any`・`imageCountMoreThan: KEEP_IMAGES`） |
-| `readImageDigests` | 同上 | 新設 | `(scope: Construct) => ImageDigests` | CDK の context `nd:images` が指す一覧のファイル（`nd-setup-images.json`。形は `{ "<key>": { "repository": "<名前>", "digest": "sha256:…" } }`）を `node.tryGetContext` で読み、キーごとの組を返す。無ければ空。形が違えば投げる |
+| `readImageDigests` | 同上 | 新設 | `(scope: Construct) => ImageDigests` | CDK の context `nd:images` が指す一覧のファイル（`nd-setup-images.json`。形は `{ "<key>": { "repository": "<名前>", "digest": "sha256:…" } }`）を `node.tryGetContext` で読み、キーごとの組を返す。context が未指定（`undefined`）なら空。値は絶対のパスの文字列に限り、空の文字列・文字列でない値・相対のパス・読めないファイルは投げる（`cdk synth` を打つ作業のディレクトリと一覧を書いた基準が違いうるため、相対のパスを解かない）。形が違えば投げる |
 | `buildAndPushImages` | `infra/setup/images.ts` | 新設 | `(target: Target, s: Settings, out: string, deps: ImageDeps) => Promise<ImagesResult>` | `IMAGE_SPECS` のキーごとにリポジトリがあるかを読み、あるキーごとに `docker build --platform linux/amd64` → `build-<UTC の時刻>` のタグで push → ダイジェストを読み、得たキーだけを組で `<out>/nd-setup-images.json` に書く。結果は `{ digests: ImageDigests; noRepository: ImageKey[] }`。リポジトリのあるキーが 1 つも無ければ一覧を書かない |
 | `main` | `infra/setup/images-cli.ts` | 新設 | `(argv: string[], deps: ImageDeps) => Promise<number>` | `push --settings <file> --out <dir>` を打つ。パイプラインの CodeBuild の資格情報（既定の解き方）で動く |
-| `synthesize` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 選んだスタックに `app` が含まれるときだけ、画面のビルドの後、合成の前に `buildAndPushImages` を打ち、一覧のファイルのパスを `cdk synth -c nd:images=<パス>` で合成へ渡す。一覧は合成の結果の置き場にあるため要約値に入る。`app` を含まない（`--stack pipeline` だけ）ときは push せず、一覧も書かない |
+| `synthesize` | `infra/setup/nd-setup.ts` | 変更 | 変えない | 選んだスタックに `app` が含まれるときだけ、画面のビルドの後、合成の前に `buildAndPushImages` を打ち、一覧のファイルのパスを `path.resolve` で絶対にしてから `cdk synth -c nd:images=<絶対のパス>` で合成へ渡す。一覧は合成の結果の置き場にあるため要約値に入る。`app` を含まない（`--stack pipeline` だけ）ときは push せず、一覧も書かない |
 
 - `SetupDeps` と `ImageDeps` に同じ型の `docker: (args: string[], opts?: { stdin?: string }) => Promise<{ code: number; stdout: string }>` と `ecr`（`DescribeRepositories`・`GetAuthorizationToken`・`DescribeImages` の包み）を置く（テストは本物の Docker と AWS を呼ばない）。`ImageDeps` は `SetupDeps` から `docker`・`ecr` を取り出した部分の型にし、2 つで形を分けない。本物の `docker` は `opts.stdin` があれば子のプロセスの標準入力へ書いて閉じ、無ければ標準入力を開かない。`opts.stdin` の値はログ・出力・例外の文に入れない（失敗の出力は `docker` の終了コードと標準エラーだけ）
 - push の前の `docker login` は `docker(["login", "--username", "AWS", "--password-stdin", <レジストリ>], { stdin: <トークンを復号したパスワード> })` で打ち、パスワードを `args` に入れない
@@ -251,9 +251,9 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 | `imageRepositoryName` | `prefix` `nd`・`environment` `prod`・キー `db-prep` で `nd-prod-db-prep` | — | — |
 | `ImageRepository` | 合成の出力のリポジトリの名前が `imageRepositoryName` の値で、タグ書き換え不可のリポジトリと、`imageCountMoreThan` が 30 の規則 1 つがある | — | 規則が日数になる・数が変わると落ちる |
 | `AppStack`（ダイジェストあり） | DB の用意のタスクの定義のイメージが `<リポジトリ>@sha256:…` | ダイジェストなしでタスクの定義を作らない。一覧が `db-prep` だけでも DB の用意のタスクの定義を作る | ダイジェストを変えると要約値が変わる（合成の結果の要約値の比べ）。組の `repository` が違うと合成が投げる |
-| `readImageDigests` | 一覧の組をキーごとに返す | context `nd:images` が無ければ空 | `digest` か `repository` の無い組・`sha256:` で始まらないダイジェストで投げる |
+| `readImageDigests` | 絶対のパスの一覧の組をキーごとに返す | context `nd:images` が未指定なら空 | `-c nd:images=` の空の文字列・相対のパス（`./cdk.out/nd-setup-images.json`）・無いファイルで投げる。`digest` か `repository` の無い組・`sha256:` で始まらないダイジェストで投げる |
 | `buildAndPushImages` | リポジトリがあれば作って push し、一覧を書く | リポジトリが 1 つも無ければ何もしない。`db-prep` のリポジトリだけがあると `db-prep` だけを push し、`noRepository` が `runner` になる | Docker の失敗・push の失敗で投げ、一覧を書かない。login の値が作り物の `docker` の `args` に無く `opts.stdin` にだけあり、login が失敗したときも出力と例外の文に出ない |
-| `synthesize` | `--stack app` と既定で `buildAndPushImages` を呼ぶ | `--stack pipeline` だけで呼ばず、置き場に一覧が無い | — |
+| `synthesize` | `--stack app` と既定で `buildAndPushImages` を呼び、相対の `--out` でも合成へ渡す `nd:images` が絶対のパス | `--stack pipeline` だけで呼ばず、置き場に一覧が無い | — |
 
 ## 設置のコマンド
 
@@ -320,7 +320,7 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `PipelineStack` の `constructor` | `infra/lib/pipeline-stack.ts` | 変更 | 変えない | 準備のアクションの CodeBuild を `privileged: true` にし、その役割に `ecr:GetAuthorizationToken`（資源を絞れない）と、`<prefix>-<environment>-` の頭の自前のリポジトリへの `DescribeRepositories`・`DescribeImages`・`BatchCheckLayerAvailability`・`InitiateLayerUpload`・`UploadLayerPart`・`CompleteLayerUpload`・`PutImage`・`BatchGetImage` を許す。反映のアクションは変えない（引き受ける bootstrap の役割は今の `deploy`・`file-publishing` のまま） |
-| `prepareBuildSpec` | 同上 | 変更 | 変えない | 画面のビルドの後、`infra/setup/images-cli.ts` があれば `node infra/setup/images-cli.ts push --settings <設定> --out .nd-images` を打つ。リポジトリのまだ無いキーごとに「<キー> の ECR がまだ無いため、そのイメージのタスクの定義を持たない版を合成した。この反映の後に準備を再び走らせる（決定 11）」を記録へ出す。一覧があれば `-c nd:images=<そのパス>` を付けて合成し、一覧を `cdk.out/nd-setup-images.json` へ写す（要約値に入る） |
+| `prepareBuildSpec` | 同上 | 変更 | 変えない | 画面のビルドの後、`infra/setup/images-cli.ts` があれば `node infra/setup/images-cli.ts push --settings <設定> --out .nd-images` を打つ。リポジトリのまだ無いキーごとに「<キー> の ECR がまだ無いため、そのイメージのタスクの定義を持たない版を合成した。この反映の後に準備を再び走らせる（決定 11）」を記録へ出す。一覧があれば `-c nd:images="$CODEBUILD_SRC_DIR/.nd-images/nd-setup-images.json"`（絶対のパス）を付けて合成し、一覧を `cdk.out/nd-setup-images.json` へ写す（要約値に入る） |
 
 ### 移行の間の動き
 
@@ -334,7 +334,7 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `PipelineStack`・`prepareBuildSpec` | 合成の出力の準備の役割が上の操作だけを持ち、準備の CodeBuild が特権 | 準備の手順が `images-cli.ts` の有無で分かれる | 反映の役割に ECR の権限が増えると落ちる |
+| `PipelineStack`・`prepareBuildSpec` | 合成の出力の準備の役割が上の操作だけを持ち、準備の CodeBuild が特権。準備の手順の `-c nd:images=` が `$CODEBUILD_SRC_DIR` から始まる | 準備の手順が `images-cli.ts` の有無で分かれる | 反映の役割に ECR の権限が増えると落ちる |
 
 `docs/operations/setup.md` の前提の表に Docker（`diff` を打つ端末）と、profile に要る ECR の許し（`ecr:DescribeRepositories`・`ecr:DescribeImages`・`ecr:GetAuthorizationToken` と push の 5 つの操作。足りなければ `diff` が 6 で止まる）を足す。手順には「パイプラインで初めてイメージを引く版は、パイプラインのスタックを先に反映する」と、上の「初めての設置の手順」を足す。あわせて、先の反映の前に保存するもの・戻しを始める条件・前の版へ戻す 4 つの段・マージの後に準備を再び走らせる段（設計文書の決定 11）を、運用する環境の節に手順として写す。
 
