@@ -22,7 +22,7 @@ import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import type { Construct } from "constructs";
 import { appResourceNames, applyTags, loginDomainUrl } from "./naming.ts";
 
-// 縦の切れ端のスタック: 利用者プール・画面の配信・API・利用者の表・画面の設定の値。
+// アプリのスタック: 利用者プール・画面の配信・API・利用者の表・画面の設定の値。
 // 戻り先の URL が配信の名前を要り、画面の設定の値がすべてを要るため、1 つのスタックに置く
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
