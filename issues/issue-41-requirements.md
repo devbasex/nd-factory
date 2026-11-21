@@ -50,7 +50,7 @@ NDF 11.0 が配布された（ndf v11.0.0 が 2026-11-18、最新の v11.0.12 �
 - `ndf-pin.json` の `ndf_ref` を ndf v11.0.12 の配布のコミットへ付け替える（版の数字は比べない）
 - 受ける契約の組を `{版 8, v11.0.12 の sha256}` に直す（全体の設計の記述。形の正本のデータは #2 が作る）
 - #1 から移す: NDF 11 の改名（#23）と `spec-declarations` の改名の確かめ
-- 契約の照合の定期の検査（F23）が読む「NDF の先の契約」の置き場を、止まった `develop` から配布の置き場へ直す（全体の設計の記述。検査そのものは #1）
+- 契約の照合の定期の検査（F23）が読む「NDF の先の契約」の置き場を、止まった `develop` から配布のタグを切る枝（ai-plugins の既定の枝）へ直す（全体の設計の記述。検査そのものは #1）
 - `ask-journal` の `fields` が無いことへの扱いを決めて全体の設計に書く
 
 含まない:
@@ -68,7 +68,7 @@ NDF 11.0 が配布された（ndf v11.0.0 が 2026-11-18、最新の v11.0.12 �
 - [ ] 3. 全体の設計が書く契約の版と sha256 が、v11.0.12 の `plugins/ndf/contracts/version.json` の `history` の最後の行（版 8・`ed8b0365…`）と一致する
 - [ ] 4. 全体の設計の調査の行（STD62・STD63）が新しい置き場（`plugins/ndf/contracts/`）と調べた日（2026-11-21）を持つ
 - [ ] 5. `ask-journal` の `fields` が無いことへの扱い（残すか起票するか）が全体の設計の「未確認のまま残ること」に書かれている
-- [ ] 6. 契約の照合の定期の検査（F23）が読む先の契約が、`develop` の先端でなく配布の置き場として全体の設計に書かれている
+- [ ] 6. 契約の照合の定期の検査（F23）が読む先の契約が、`develop` の先端でなく配布のタグを切る枝（ai-plugins の既定の枝）の先端として全体の設計に書かれている
 - [ ] 7. `npm run check` が通る（CI の `check`。参照の検査 `ref-check` も通る）
 
 ## 影響
@@ -84,7 +84,7 @@ NDF 11.0 が配布された（ndf v11.0.0 が 2026-11-18、最新の v11.0.12 �
 | 項目 | 手段 |
 | --- | --- |
 | テスト・静的解析・型検査 | Pull Request の CI の `check`（`npm run check`）と `ref-check`。このリポジトリはテストを CI に寄せる（`.ndf/project.json` の `test.ci.only`） |
-| 手動確認（マージ前） | `git grep -nE 'plugins/ndf-next/contracts\|spec-declarations\|table_id' -- docs/design` が 0 件。`gh api 'repos/devbasex/ai-plugins/contents/plugins/ndf/contracts/version.json?ref=<ndf_ref>'` の `history` の最後の行が全体の設計の版と sha256 と一致する |
+| 手動確認（マージ前） | `git grep -nE 'plugins/ndf-next/contracts\|spec-declarations\|table_id' -- docs/design` が 0 件。`gh api 'repos/devbasex/ai-plugins/contents/plugins/ndf/contracts/version.json?ref=752a9cf48a6d36c00ffb3197c8668d1c898c32e2'` の `history` の最後の行が全体の設計の版と sha256 と一致する |
 
 ## 前提とする取り決め
 
@@ -99,7 +99,7 @@ NDF 11.0 が配布された（ndf v11.0.0 が 2026-11-18、最新の v11.0.12 �
 | --- | --- | --- | --- |
 | 1 | 付け替える先は配布の最新の v11.0.12 にする | 利用者の答え（2026-11-21） | 受け入れ条件 1・3（利用者が答え済み） |
 | 2 | #1 から NDF 11 の行を外してこの課題で先に流す | 利用者の答え（2026-11-21） | 対象範囲の「#1 から移す」（利用者が答え済み） |
-| 3 | F23 が読む先を `develop` から配布の置き場へ直す | 要求を書くときの調べ（`develop` の先端が 2026-11-17 の `f37ea4c` のまま止まり、v11 のタグは `main` にある） | 受け入れ条件 6 |
+| 3 | F23 が読む先を `develop` から配布のタグを切る枝へ直す | 要求を書くときの調べ（`develop` の先端が 2026-11-17 の `f37ea4c` のまま止まり、v11 のタグは `main` にある） | 受け入れ条件 6 |
 | 4 | 「進行表」の語の言い換えと用語集の描画の形はこの課題に含めない | 要求を書くときの判断（契約の照合に要るのは `machine_id` の引数の名前だけ） | 含まない |
 
 ## リクエスト（原文）
