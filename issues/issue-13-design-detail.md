@@ -33,6 +33,7 @@ infra/
 └── test/（support.ts・app-stack・stack-rules*・pipeline-stack・naming・nd-setup・missing-settings*・images*）
 apps/db-prep/                   *
 ├── package.json・tsconfig.json・Dockerfile
+├── certs/rds-global-bundle.pem
 ├── src/main.ts・exchange.ts・provision.ts・rotate.ts
 └── test/exchange.test.ts・provision.test.ts・rotate.test.ts
 docs/operations/settings.md・setup.md・pipeline-approval.md
@@ -136,13 +137,15 @@ docs/operations/settings.md・setup.md・pipeline-approval.md
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `ProgressDb` の `constructor` | `infra/lib/progress-db.ts` | 新設 | `(scope, id, props: { network: Network; maxAcu: number; names: AppResourceNames })` | Aurora PostgreSQL 16.13・出口の無いサブネット・`ClusterInstance.serverlessV2` の書き手 1 台・最小 0・最大 `maxAcu`・自動の一時停止 300 秒・削除の保護・`RemovalPolicy.RETAIN`・管理の役割 `nd_admin` の生成した秘密の器 `<prefix>/<environment>/progress-db-admin`・保存の暗号化 |
+| `ProgressDb` の `constructor` | `infra/lib/progress-db.ts` | 新設 | `(scope, id, props: { network: Network; maxAcu: number; names: AppResourceNames })` | Aurora PostgreSQL 16.13・出口の無いサブネット・`ClusterInstance.serverlessV2` の書き手 1 台・最小 0・最大 `maxAcu`・自動の一時停止 300 秒・削除の保護・`RemovalPolicy.RETAIN`・管理の役割 `nd_admin` の生成した秘密の器 `<prefix>/<environment>/progress-db-admin`・保存の暗号化・クラスタのパラメータの群（`rds.force_ssl: 1`。Aurora PostgreSQL 16 は既定が 0 で、TLS でない接続を受けてしまう。LIB18） |
+
+- 接続する側の TLS: DB の用意のタスクは、管理の接続（`connectAdmin`）とプロジェクトのデータベースへの接続（`provisionProject` の `connectTo`）のどちらも `pg` の `ssl: { ca: <RDS の CA の束>, rejectUnauthorized: true }` で開く。名前の検証は Node.js の TLS の既定（`servername` は `host`）で行い、`checkServerIdentity` を差し替えない。そのため `admin.host` はクラスタの端点の DNS の名前で渡す（IP では名前が合わず開けない）。CA の束は RDS の全リージョンの束（`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`）を `apps/db-prep/certs/rds-global-bundle.pem` としてリポジトリに置き（公開の証明書で秘密でない）、`Dockerfile` がイメージへ写す。束の入れ替えは Pull Request で行う。CI の PostgreSQL のサービスコンテナは TLS を持たないため、DB のテストは `connectAdmin` を通らずに作った `pg.Client` を渡す
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `ProgressDb` | 合成の出力に最小 0・最大 2・一時停止 300 秒・書き手 1 台 | `maxAcu` 16 | — |
+| `ProgressDb` | 合成の出力に最小 0・最大 2・一時停止 300 秒・書き手 1 台・クラスタのパラメータの群の `rds.force_ssl` が `1` | `maxAcu` 16 | パラメータの群を外す・`rds.force_ssl` を `0` にすると落ちる |
 
 ## ECS のクラスタ
 
@@ -412,7 +415,7 @@ ECR がまだ無い設置先では、1 回目の反映が ECR を作り、2 回�
 | `checkIsolationGuard` | 新しい名前で `ok` | 作り直し（片方だけある）で `ok`。A の作成を `CREATE DATABASE … ALLOW_CONNECTIONS false` の直後・`REVOKE` の前で止め、同じ結び付きの打ち直しが `ok` になり、`provisionProject` が用意を終えて A の役割だけが `CONNECT` を持つ | B のデータベースに A の役割を渡す・A の役割に B のデータベースを渡すと `conflict`。`ALLOW_CONNECTIONS true` で `PUBLIC` が `CONNECT` を持つ既存のデータベースで `conflict` |
 | `rotateRole` | 記した番号 < n で書く | 記した番号 = n で書かない | 記した番号 > n で何も変えない。2 つを同時に打って番号の大きい方だけが残る |
 | `terminateRoleConnections`（PostgreSQL のサービスコンテナ） | 書く前に開いた役割の接続を切り、残り 0 | 境の時刻が記されていれば記し直さない。`pg_terminate_backend` が `false`（5 秒の待ちの切れ）を返しても、期限の中で残りが 0 になれば 0 を返す（作り物の数え方で、1 回目の読み直しが 1・2 回目が 0）。期限の 15 秒を過ぎても残れば残りの数を返す（時計は差し替える） | 順序の逆転: タスク T1 が番号 n を書いて切りの前で止まり、起こし直しの T2（同じ n）が `superseded_equal`・切り・終わりまで進み、その後に新しいパスワードで接続 C を開き、T1 を再開すると C が切られずに残る（C が切られると落ちる）。T1 が `rotateRole` の前で止まり、T2 が終わって C を開いた後に T1 を最初から打っても C が残る。記した番号が n+1 に上がった後の T1（n）は何も切らずに `superseded_greater` |
-| `connectAdmin` | 3 回目の試行で開ければ返す | 作り物の接続が応答を返さず保留のままでも、試行ごとに `connectTimeoutMs` で打ち切って次へ進む。`deadlineMs` を過ぎた後は次の試行を始めない（時計は差し替える） | 期限の尽きで投げ、`main` が `admin_connect_failed` を報告する |
+| `connectAdmin` | 3 回目の試行で開ければ返す。作り物の `pg.Client` が受けた設定の `ssl` が CA の束と `rejectUnauthorized: true` を持ち、`checkServerIdentity` を差し替えない | 作り物の接続が応答を返さず保留のままでも、試行ごとに `connectTimeoutMs` で打ち切って次へ進む。`deadlineMs` を過ぎた後は次の試行を始めない（時計は差し替える） | 期限の尽きで投げ、`main` が `admin_connect_failed` を報告する |
 | `exchange`・`complete` | 形の正本に合う `ok: true` の要素 | HTTP 200 の `ok: false`・`status: 409` を、HTTP 401 と別の結果として返す | 形の違う応答を誤りにする・HTTP 401 と HTTP 200 の `status: 409` の要素のどちらでも再試行しない |
 | `main` | 処理の手順の表の 6 行 | — | パスワードがログに出ると落ちる |
 

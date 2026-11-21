@@ -233,7 +233,7 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | 可用性 | 表とバケットと Aurora のクラスタはスタックから消しても残る | `RemovalPolicy.RETAIN` と、表の PITR・クラスタの削除の保護 | スタックのテストの行。戻しの予行 |
 | 運用・保守性 | 予算の知らせと運用の知らせが宛先へ届く | 予算の 3 つの知らせを運用の知らせのトピックへ送り、宛先のメールを購読にする。タグを有効にできない設置先はアカウントの全体を数える（決定 6） | 低い額の予算で知らせを試す（実測） |
-| セキュリティ | タスクは権限を持たず、外から入れない | タスクの役割に文を持たせず、タスクの SG の受け入れを空にする。管理の役割の秘密は器に置き、合成の出力には動的な参照だけ | スタックのテスト |
+| セキュリティ | タスクは権限を持たず、外から入れない。進行表の DB への通信は TLS | タスクの役割に文を持たせず、タスクの SG の受け入れを空にする。管理の役割の秘密は器に置き、合成の出力には動的な参照だけ。クラスタは `rds.force_ssl: 1` で TLS でない接続を断り、DB の用意のタスクは RDS の CA の束と端点の名前を検証して接続する（LIB18。詳細設計の「進行表の DB」） | スタックのテスト・`connectAdmin` の単体テスト |
 | システム環境 | 合成は資格情報なしで通る | AZ は `Fn::GetAZs` から選び、lookup を使わない（決定 3）。`Fn::GetAZs` が 2 つ以上の AZ を返す設置先を前提にし、`diff` の一覧で確かめる | CI の `synth`。前提の照らしは単体テスト |
 
 ## 決定の記録
@@ -458,7 +458,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #13 | 実装する | — | `packages/contracts/src/settings.ts`、`packages/contracts/src/db-prep-api.ts`（新設）、`packages/contracts/test/settings.test.ts`、`packages/contracts/test/db-prep-api.test.ts`（新設）、`packages/contracts/schema/settings.schema.json`、`packages/contracts/data/exit-codes.json`、`infra/settings.example.json`、`docs/operations/settings.md`、`docs/operations/setup.md`、`docs/operations/pipeline-approval.md`、`infra/lib/app-stack.ts`、`infra/lib/naming.ts`、`infra/lib/network.ts`（新設）、`infra/lib/progress-db.ts`（新設）、`infra/lib/tasks.ts`（新設）、`infra/lib/cost-watch.ts`（新設）、`infra/lib/images.ts`（新設）、`infra/bin/app.ts`、`infra/lib/pipeline-stack.ts`、`infra/test/support.ts`、`infra/test/app-stack.test.ts`、`infra/test/stack-rules.test.ts`（新設）、`infra/test/pipeline-stack.test.ts`、`infra/test/naming.test.ts`、`infra/setup/nd-setup.ts`、`infra/setup/missing-settings.ts`（新設）、`infra/setup/images.ts`（新設）、`infra/setup/images-cli.ts`（新設）、`infra/setup/aws-reader.ts`、`infra/test/nd-setup.test.ts`、`infra/test/missing-settings.test.ts`（新設）、`infra/test/images.test.ts`（新設）、`apps/db-prep/package.json`（新設）、`apps/db-prep/tsconfig.json`（新設）、`apps/db-prep/Dockerfile`（新設）、`apps/db-prep/src/main.ts`（新設）、`apps/db-prep/src/exchange.ts`（新設）、`apps/db-prep/src/provision.ts`（新設）、`apps/db-prep/src/rotate.ts`（新設）、`apps/db-prep/test/provision.test.ts`（新設）、`apps/db-prep/test/rotate.test.ts`（新設）、`apps/db-prep/test/exchange.test.ts`（新設）、`.github/workflows/ci.yml`、`package-lock.json` |
+| #13 | 実装する | — | `packages/contracts/src/settings.ts`、`packages/contracts/src/db-prep-api.ts`（新設）、`packages/contracts/test/settings.test.ts`、`packages/contracts/test/db-prep-api.test.ts`（新設）、`packages/contracts/schema/settings.schema.json`、`packages/contracts/data/exit-codes.json`、`infra/settings.example.json`、`docs/operations/settings.md`、`docs/operations/setup.md`、`docs/operations/pipeline-approval.md`、`infra/lib/app-stack.ts`、`infra/lib/naming.ts`、`infra/lib/network.ts`（新設）、`infra/lib/progress-db.ts`（新設）、`infra/lib/tasks.ts`（新設）、`infra/lib/cost-watch.ts`（新設）、`infra/lib/images.ts`（新設）、`infra/bin/app.ts`、`infra/lib/pipeline-stack.ts`、`infra/test/support.ts`、`infra/test/app-stack.test.ts`、`infra/test/stack-rules.test.ts`（新設）、`infra/test/pipeline-stack.test.ts`、`infra/test/naming.test.ts`、`infra/setup/nd-setup.ts`、`infra/setup/missing-settings.ts`（新設）、`infra/setup/images.ts`（新設）、`infra/setup/images-cli.ts`（新設）、`infra/setup/aws-reader.ts`、`infra/test/nd-setup.test.ts`、`infra/test/missing-settings.test.ts`（新設）、`infra/test/images.test.ts`（新設）、`apps/db-prep/package.json`（新設）、`apps/db-prep/tsconfig.json`（新設）、`apps/db-prep/Dockerfile`（新設）、`apps/db-prep/certs/rds-global-bundle.pem`（新設）、`apps/db-prep/src/main.ts`（新設）、`apps/db-prep/src/exchange.ts`（新設）、`apps/db-prep/src/provision.ts`（新設）、`apps/db-prep/src/rotate.ts`（新設）、`apps/db-prep/test/provision.test.ts`（新設）、`apps/db-prep/test/rotate.test.ts`（新設）、`apps/db-prep/test/exchange.test.ts`（新設）、`.github/workflows/ci.yml`、`package-lock.json` |
 
 ## 未確認のまま残ること
 
@@ -500,6 +500,7 @@ sequenceDiagram
 | LIB15 | `cdk-ecr-deployment` | 4.2.92 | Apache-2.0 | 2026-11-17 | 無し | 満たさない。CDK のアセットのイメージを別の ECR へ写すため、写す元の bootstrap のリポジトリに古い版が残る | `npm view cdk-ecr-deployment version license time.modified`（2026-11-21） |
 | LIB16 | `cdk-docker-image-deployment` | 0.0.1042 | Apache-2.0 | 2026-11-16 | 無し | 満たさない。手元のイメージをアセットの仕組みで中継の ECR に置き、CodeBuild がタグを付けて送り先へ push する。版が 0.0 のままで、送り先をダイジェストで引く形は書かれていない | https://github.com/cdklabs/cdk-docker-image-deployment ・ `npm view cdk-docker-image-deployment version license time.modified`（2026-11-21） |
 | LIB17 | `cdk-nag` | — | Apache-2.0 | — | 無し | 条件つきで満たす。CDK のスタックを規則の集まりで照らす広く使われる道具で、独自の規則も書ける | 試していない（下の「確かめられなかったこと」） |
+| LIB18 | Aurora PostgreSQL の TLS（`rds.force_ssl`） | — | AWS のサービス | — | 無し | 満たす。`rds.force_ssl` を 1 にすると TLS でない接続を断る。既定は Aurora PostgreSQL 17 以上で 1、16 以下で 0 | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.Security.html （2026-11-21） |
 
 ### 確かめられなかったこと
 
