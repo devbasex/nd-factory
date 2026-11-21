@@ -69,6 +69,36 @@ describe("checkExamples", () => {
     const op = defineOperation({ ...FIXTURE_LIST, name: "fixture_notes.list", examples: { empty: { ok: true, items: [] } }, owner: "#2" });
     expect(checkExamples([op])).toEqual([expect.objectContaining({ scene: "empty", index: 0 })]);
   });
+
+  it("list・get でない操作に書いた empty も結果の形と作り物の値の決まりで照らす", () => {
+    const written = (empty: unknown) => defineOperation({ ...FIXTURE_CREATE, name: "fixture_notes.create", examples: { empty }, owner: "#2" });
+    const fine = { ok: true, item: { note_id: `ntc_${UUID_V7}`, version: 1, created_at: "2026-11-17T03:04:05Z" } };
+    expect(checkExamples([written(fine)])).toEqual([]);
+    expect(checkExamples([written({ ok: true, item: { version: 0 } })])).toEqual([expect.objectContaining({ scene: "empty", index: 0 })]);
+    expect(checkExamples([written(null)])).toEqual([]);
+  });
+
+  it("見本のレコードのキーも照らし、診断にキーを含めない", () => {
+    const op = (key: string) =>
+      defineOperation({
+        ...FIXTURE_CREATE,
+        name: "fixture_flags.create",
+        result: okItem(z.strictObject({ flags: z.record(z.string(), z.boolean()) })),
+        examples: { normal: [{ ok: true, item: { flags: { [key]: true } } }], edge: [] },
+        owner: "#2",
+      });
+    expect(checkExamples([op("ops@example.com")])).toEqual([]);
+    for (const [key, needle] of [
+      ["ops@corp.test", "example.com"],
+      ["acct 210987654321", "123456789012"],
+      ["ghs_abcdefABCDEF0123", "github_app_token"],
+    ] as const) {
+      const problems = checkExamples([op(key)]);
+      expect(problems, key).toHaveLength(1);
+      expect(problems[0]?.problem).toContain(needle);
+      expect(problems[0]?.problem).not.toContain(key);
+    }
+  });
 });
 
 describe("fakeExamples", () => {
@@ -122,6 +152,42 @@ describe("fakeExamples", () => {
   });
 });
 
+describe("再帰する形の作り物の値", () => {
+  type Node = { mail: string; account_id: string; children: Node[] };
+  const byGetter: z.ZodType<Node> = z.strictObject({
+    mail: z.email(),
+    account_id: awsAccountId,
+    get children() {
+      return z.array(byGetter).max(1);
+    },
+  });
+  const lazyNode: z.ZodType<Node> = z.lazy(() => z.strictObject({ mail: z.email(), account_id: awsAccountId, children: z.array(lazyNode).max(1) }));
+
+  // 木をたどり、深さとメール・アカウント ID の値を集める
+  function walk(n: Node, depth = 1, out = { depth: 0, mails: new Set<string>(), ids: new Set<string>() }) {
+    out.depth = Math.max(out.depth, depth);
+    out.mails.add(n.mail);
+    out.ids.add(n.account_id);
+    for (const c of n.children) walk(c, depth + 1, out);
+    return out;
+  }
+
+  it.each([
+    ["shape の getter", byGetter],
+    ["z.lazy", lazyNode],
+  ] as const)("%s で循環して戻った深い層もメールとアカウント ID が作り物の値", (_label, node) => {
+    const op = defineOperation({ ...FIXTURE_CREATE, name: "fixture_trees.create", result: okItem(z.strictObject({ root: node })), examples: null, owner: "#2" });
+    const { normal, edge } = fakeExamples(op);
+    const seen = [...normal, ...edge].map((v) => walk((v as { item: { root: Node } }).item.root));
+    expect(Math.max(...seen.map((s) => s.depth))).toBeGreaterThan(3);
+    for (const s of seen) {
+      expect([...s.mails]).toEqual(["ops@example.com"]);
+      expect([...s.ids]).toEqual(["123456789012"]);
+    }
+    expect(checkExamples([op])).toEqual([]);
+  });
+});
+
 describe("edgeOf", () => {
   const never = () => {
     throw new Error("fallback を呼ばない");
@@ -141,6 +207,27 @@ describe("edgeOf", () => {
 
   it("端の無いときは fallback", () => {
     expect(edgeOf(undefined, "upper", () => 42)).toBe(42);
+  });
+
+  it.each([
+    [{ min: 0.1, max: 0.3, multipleOf: 0.1 }, "upper", 0.3],
+    [{ min: 0.1, max: 0.3, multipleOf: 0.1 }, "lower", 0.1],
+    [{ min: 0.15, max: 0.35, multipleOf: 0.1 }, "upper", 0.3],
+    [{ min: 0.15, max: 0.35, multipleOf: 0.1 }, "lower", 0.2],
+    [{ min: 0, max: 0.7, multipleOf: 0.01 }, "upper", 0.7],
+    [{ max: 1.1, multipleOf: 0.2 }, "upper", 1],
+  ] as const)("小数の倍数 %o の %s の端は %d（端そのものが倍数なら端）", (opts, side, expected) => {
+    const v = edgeOf(opts, side, never);
+    expect(v).toBe(expected);
+    expect(z.number().multipleOf(opts.multipleOf).safeParse(v).success).toBe(true);
+  });
+
+  it("小数の倍数の数の形は、上の端と下の端が上限・下限そのもの", () => {
+    const op = defineOperation({ ...FIXTURE_CREATE, name: "fixture_ratios.create", result: okItem(z.strictObject({ r: z.number().min(0.1).max(0.3).multipleOf(0.1) })), examples: null, owner: "#2" });
+    const [upper, lower] = fakeExamples(op).edge as Array<{ item: { r: number } }>;
+    expect(upper?.item.r).toBe(0.3);
+    expect(lower?.item.r).toBe(0.1);
+    expect(checkExamples([op])).toEqual([]);
   });
 
   it("下限と倍数だけの数の形は、下の端の見本が形を通る", () => {
@@ -240,21 +327,41 @@ describe("buildDummy", () => {
     expect(buildDummy(get)?.empty).toEqual({ ok: false, status: 404, reason: "not_found" });
   });
 
-  it("封筒が items・next_cursor のほかに必ず持つ項目は、空の一覧にも入り結果の形を通る", () => {
+  it("封筒が items・next_cursor のほかに必須の項目を持つ list は、examples.empty を書かなければ問題になり、書けばそれを使う", () => {
     const answers = defineOperation({
       name: "runner.fixture_answers.list",
       endpoint: "runner",
       access: "write",
       item: z.strictObject({ lane_id: z.string() }),
-      result: okList(z.strictObject({ answer_id: z.string() })).extend({ delivered_seqs: z.array(z.int().min(0)) }),
+      result: okList(z.strictObject({ answer_id: z.string() })).extend({ total: z.int().min(0), delivered_seqs: z.array(z.int().min(0)) }),
       owner: "#2",
     });
-    const doc = buildDummy(answers);
-    expect(doc?.empty).toMatchObject({ ok: true, items: [], next_cursor: null, delivered_seqs: expect.any(Array) });
-    expect(resultSchemaOf(answers).safeParse(doc?.empty).success).toBe(true);
-    expect(checkExamples([answers])).toEqual([]);
-    const written = defineOperation({ ...answers, examples: { empty: { ok: true, items: [], next_cursor: null, delivered_seqs: [3] } }, owner: "#2" });
-    expect(examplesOf(written).empty).toEqual({ ok: true, items: [], next_cursor: null, delivered_seqs: [3] });
+    // 正常の見本の total や delivered_seqs を写さない（items: [] と食い違う値を空の見本に入れない）
+    expect(buildDummy(answers)?.empty).toEqual({ ok: true, items: [], next_cursor: null });
+    const problems = checkExamples([answers]);
+    expect(problems.some((p) => p.scene === "empty" && p.problem.includes("examples.empty"))).toBe(true);
+    const written = defineOperation({ ...answers, examples: { empty: { ok: true, items: [], next_cursor: null, total: 0, delivered_seqs: [3] } }, owner: "#2" });
+    expect(examplesOf(written).empty).toEqual({ ok: true, items: [], next_cursor: null, total: 0, delivered_seqs: [3] });
+    expect(checkExamples([written])).toEqual([]);
+  });
+
+  it("省ける項目だけを足した list の封筒は、examples.empty なしで空の一覧が形を通る", () => {
+    const list = defineOperation({
+      name: "runner.fixture_pages.list",
+      endpoint: "runner",
+      access: "write",
+      item: z.strictObject({ lane_id: z.string() }),
+      result: okList(z.strictObject({ page_id: z.string() })).extend({ total: z.int().min(0).optional() }),
+      owner: "#2",
+    });
+    expect(buildDummy(list)?.empty).toEqual({ ok: true, items: [], next_cursor: null });
+    expect(checkExamples([list])).toEqual([]);
+  });
+
+  it("list・get でない操作に書いた empty は、その値をダミーの空の場面に置く", () => {
+    const empty = { ok: true, item: { note_id: `ntc_${UUID_V7}`, version: 1, created_at: "2026-11-17T03:04:05Z" } };
+    const op = defineOperation({ ...FIXTURE_CREATE, name: "fixture_notes.create", examples: { empty }, owner: "#2" });
+    expect(buildDummy(op)?.empty).toEqual(empty);
   });
 
   it("読む操作の失敗は書く操作の理由を含めない", () => {

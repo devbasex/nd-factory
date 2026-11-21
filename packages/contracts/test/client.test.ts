@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildDummy } from "../scripts/artifacts.ts";
 import { createDummyTransport, createOperationClient, type DummyDoc, type DummyScenario, httpTransport, type Transport } from "../src/client.ts";
-import { type ItemOf, MAX_ITEMS, resultSchemaOf } from "../src/operation.ts";
+import { defineOperation, type ItemOf, MAX_ITEMS, resultSchemaOf } from "../src/operation.ts";
 import { OPERATIONS } from "../src/operations/index.ts";
 import { FIXTURE_CREATE, FIXTURE_LIST, FIXTURE_OPERATIONS } from "./fixtures/operations.ts";
 
@@ -130,6 +130,13 @@ describe("createDummyTransport", () => {
     const empty = { ok: true, items: [], next_cursor: null };
     expect(await dummyClient("empty").call("fixture_notes.list", [LIST_ITEM, LIST_ITEM])).toEqual({ ok: true, results: [empty, empty] });
     expect(await dummyClient("empty").call("fixture_notes.create", [CREATE_ITEM])).toEqual(await dummyClient("normal").call("fixture_notes.create", [CREATE_ITEM]));
+  });
+
+  it("examples.empty を書いた create の empty はその値を要素ごとに返す", async () => {
+    const empty = { ok: true, item: { note_id: NOTE_ID, version: 2, created_at: "2026-11-17T03:04:05Z" } };
+    const written = defineOperation({ ...FIXTURE_CREATE, examples: { empty }, owner: "#2" });
+    const res = await dummyClient("empty", { ...DUMMIES, [written.name]: buildDummy(written) }).call("fixture_notes.create", [CREATE_ITEM, CREATE_ITEM]);
+    expect(res).toEqual({ ok: true, results: [empty, empty] });
   });
 
   it("上限ちょうどの要素で件数が要求と同じ", async () => {

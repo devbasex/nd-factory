@@ -170,16 +170,38 @@ function seedOf(name: string): number {
 type Bounds = { min?: number; max?: number; multipleOf?: number };
 type Side = "upper" | "lower";
 
-// 端の値。上の端は上限（無ければ下限）、下の端は下限（無ければ上限）に寄せ、multipleOf の倍数のうち範囲の内側へ丸める
+// 倍数かの判定は Zod の multipleOf と同じにする（Zod は小数の倍数を桁をそろえて照らし、0.3 を 0.1 の倍数とみなす）
+function isMultipleOf(value: number, step: number): boolean {
+  return z.number().multipleOf(step).safeParse(value).success;
+}
+
+// 数の小数の桁数（1e-7 のような指数の書き方も数える）。toFixed の上限の 100 で止める
+function decimalsOf(n: number): number {
+  const [mantissa = "", exponent = "0"] = n.toExponential().split("e");
+  return Math.min(100, Math.max(0, (mantissa.split(".")[1] ?? "").length - Number(exponent)));
+}
+
+// 端の値。上の端は上限（無ければ下限）、下の端は下限（無ければ上限）に寄せる。multipleOf があり端そのものが倍数でなければ、
+// 範囲の内側で端に最も近い倍数へ丸める。小数の倍数は除算と乗算の誤差（0.3 / 0.1 = 2.9999…・3 * 0.1 = 0.3000…04）が出るため、
+// 端そのものを Zod と同じ判定で先に照らし、丸めた値は倍数の小数の桁でそろえてから照らす
 export function edgeOf(opts: Bounds | undefined, side: Side, fallback: () => number): number {
   const lo = opts?.min !== undefined && Number.isFinite(opts.min) ? opts.min : undefined;
   const hi = opts?.max !== undefined && Number.isFinite(opts.max) ? opts.max : undefined;
   const end = side === "upper" ? (hi ?? lo) : (lo ?? hi);
   if (end === undefined) return fallback();
   const step = opts?.multipleOf;
-  if (!step) return end;
+  if (!step || isMultipleOf(end, step)) return end;
   const towardLower = end === hi;
-  return (towardLower ? Math.floor(end / step) : Math.ceil(end / step)) * step;
+  const digits = decimalsOf(step);
+  const at = (k: number) => Number((k * step).toFixed(digits));
+  const k = towardLower ? Math.floor(end / step) : Math.ceil(end / step);
+  // 誤差で k が 1 つずれても拾えるよう、端に近い側から前後 1 つを照らす
+  const near = towardLower ? [k + 1, k, k - 1] : [k - 1, k, k + 1];
+  for (const c of near) {
+    const v = at(c);
+    if ((towardLower ? v <= end : v >= end) && isMultipleOf(v, step)) return v;
+  }
+  return at(k);
 }
 
 // 形の中の文字列の上限・下限の長さのうち最大のもの。境目の見本の文字列の元をこの長さにし、どの上限も満たせるようにする
@@ -234,6 +256,8 @@ function fakeValueOf(def: z.core.$ZodTypeDef & Record<string, unknown>): string 
   return null;
 }
 
+// 形が自分へ戻れるのは z.lazy と、shape に getter を持つ object だけである。この 2 つは子を写す前に写しを作って memo に入れ、
+// 子は初めて読まれたときに写す。循環で戻ってきた枝も同じ写しを指すため、再帰の深い層まで作り物の値になる
 export function withFakeValues(schema: z.core.$ZodType, memo = new Map<z.core.$ZodType, z.core.$ZodType>()): z.core.$ZodType {
   const known = memo.get(schema);
   if (known) return known;
@@ -244,40 +268,50 @@ export function withFakeValues(schema: z.core.$ZodType, memo = new Map<z.core.$Z
     memo.set(schema, literal);
     return literal;
   }
-  memo.set(schema, schema);
   const map = (v: unknown): unknown =>
     v instanceof z.core.$ZodType ? withFakeValues(v, memo) : Array.isArray(v) ? v.map(map) : v;
+  const once = <T>(make: () => T): (() => T) => {
+    let done = false;
+    let value: T;
+    return () => {
+      if (!done) {
+        value = make();
+        done = true;
+      }
+      return value;
+    };
+  };
+  const clone = (next: Record<string, unknown>) => (schema as z.ZodType).clone({ ...def, ...next } as z.core.$ZodTypeDef);
+  if (def.type === "object") {
+    const source = def.shape as Record<string, unknown>;
+    const shape: Record<string, unknown> = {};
+    for (const k of Object.keys(source)) {
+      Object.defineProperty(shape, k, { get: once(() => map(source[k])), enumerable: true, configurable: true });
+    }
+    // catchall は自分を直に持てず（持つなら lazy か getter の object を挟み、それらはすぐ写しを返す）、先に写しても戻ってこない
+    const copy = clone(def.catchall ? { shape, catchall: map(def.catchall) } : { shape });
+    memo.set(schema, copy);
+    return copy;
+  }
+  if (def.type === "lazy") {
+    const getter = def.getter as () => z.core.$ZodType;
+    const copy = clone({ getter: once(() => withFakeValues(getter(), memo)) });
+    memo.set(schema, copy);
+    return copy;
+  }
   const next: Record<string, unknown> = {};
   let changed = false;
-  const take = (key: string, value: unknown) => {
+  for (const key of CHILD_KEYS) {
+    if (!(key in def) || def[key] === undefined) continue;
+    const value = def[key];
     const mapped = map(value);
     const same = Array.isArray(value) ? value.every((x, i) => x === (mapped as unknown[])[i]) : mapped === value;
     if (!same) changed = true;
     next[key] = mapped;
-  };
-  if (def.type === "object") {
-    const shape: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(def.shape as Record<string, unknown>)) {
-      const mapped = map(v);
-      if (mapped !== v) changed = true;
-      shape[k] = mapped;
-    }
-    next.shape = shape;
-    if (def.catchall) take("catchall", def.catchall);
-  } else if (def.type === "lazy") {
-    const inner = (def.getter as () => z.core.$ZodType)();
-    const mapped = withFakeValues(inner, memo);
-    if (mapped !== inner) {
-      changed = true;
-      next.getter = () => mapped;
-    }
-  } else {
-    for (const key of CHILD_KEYS) if (key in def && def[key] !== undefined) take(key, def[key]);
   }
-  if (!changed) return schema;
-  const copy = (schema as z.ZodType).clone({ ...def, ...next } as z.core.$ZodTypeDef);
-  memo.set(schema, copy);
-  return copy;
+  const out = changed ? clone(next) : schema;
+  memo.set(schema, out);
+  return out;
 }
 
 // 境目の見本の生成器。zod-schema-faker は組み込みの形の生成器を差し替える口を持たないため、
@@ -331,15 +365,24 @@ export function fakeExamples(op: OperationDef): Examples {
 
 const NOT_FOUND = { ok: false, status: 404, reason: "not_found" } as const;
 
-// 空の場面の結果。list は空の一覧で、封筒が items・next_cursor のほかに必ず持つ項目（runner.answers.list の delivered_seqs など）は
-// 正常の見本の 1 件目から写す。get は 404、それ以外は null（空の場面が無い）。examples.empty を書いた操作はそれを使う
-function emptyOf(op: OperationDef, normal: readonly unknown[]): unknown {
+// 空の場面の結果。examples.empty を書いた操作は動詞によらずそれを使う。書かなければ list は空の一覧、get は 404、
+// それ以外は null（空の場面が無い）。封筒が ok・items・next_cursor のほかに必須の項目を持つ list は examples.empty を必須にする
+// （extraListKeysOf。書かなければ checkExamples が問題にする）
+function emptyOf(op: OperationDef): unknown {
   if (op.examples && "empty" in op.examples) return op.examples.empty ?? null;
   if (op.verb === "get") return NOT_FOUND;
   if (op.verb !== "list") return null;
-  const first = normal[0];
-  const rest = first !== null && typeof first === "object" && !Array.isArray(first) ? first : {};
-  return { ...rest, ok: true, items: [], next_cursor: null };
+  return { ok: true, items: [], next_cursor: null };
+}
+
+const LIST_ENVELOPE_KEYS = new Set(["ok", "items", "next_cursor"]);
+
+// 一覧の封筒が ok・items・next_cursor のほかに持つ必須の項目。空の一覧でのその値（件数・届いた番号など）は items と結びつきうる。
+// 正常の見本から写すと items: [] と食い違い（total: 3 など）、しかも結果の形は通るため、生成で決めず examples.empty に書かせる
+function extraListKeysOf(op: OperationDef): string[] {
+  if (op.verb !== "list" || isPending(op.result)) return [];
+  const shape: Record<string, z.core.$ZodType> = op.result.shape;
+  return Object.entries(shape).filter(([k, v]) => !LIST_ENVELOPE_KEYS.has(k) && !z.safeParse(v, undefined).success).map(([k]) => k);
 }
 
 // 見本。examples を書いた場面はそれを、書かない場面は生成した値を使う
@@ -352,7 +395,7 @@ export function examplesOf(op: OperationDef): ExampleSet {
           const faked = fakeExamples(op);
           return { normal: written?.normal ?? faked.normal, edge: written?.edge ?? faked.edge };
         })();
-  return { ...picked, empty: emptyOf(op, picked.normal) };
+  return { ...picked, empty: emptyOf(op) };
 }
 
 export function buildDummy(op: OperationDef): DummyDoc | null {
@@ -362,10 +405,16 @@ export function buildDummy(op: OperationDef): DummyDoc | null {
   return { operation: op.name, normal, empty, edge, failures };
 }
 
+// 照らす文字列と数。オブジェクトはキーも含める（z.record の見本のキーにメールや ID が入りうる）
 function leaves(value: unknown, out: Array<string | number> = []): Array<string | number> {
   if (typeof value === "string" || typeof value === "number") out.push(value);
   else if (Array.isArray(value)) for (const v of value) leaves(v, out);
-  else if (value !== null && typeof value === "object") for (const v of Object.values(value)) leaves(v, out);
+  else if (value !== null && typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      out.push(k);
+      leaves(v, out);
+    }
+  }
   return out;
 }
 
@@ -402,6 +451,10 @@ export function checkExamples(ops: readonly OperationDef[]): ExampleProblem[] {
     if (isPending(op.result)) continue;
     const schema = resultSchemaOf(op);
     const examples = examplesOf(op);
+    const extra = extraListKeysOf(op);
+    if (extra.length > 0 && !(op.examples && "empty" in op.examples)) {
+      problems.push({ operation: op.name, scene: "empty", index: 0, problem: `一覧の封筒が ok・items・next_cursor のほかに必須の項目（${extra.join("・")}）を持つため、examples.empty を書く` });
+    }
     const scenes: Array<[ExampleScene, unknown[]]> = [
       ["normal", examples.normal],
       ["edge", examples.edge],

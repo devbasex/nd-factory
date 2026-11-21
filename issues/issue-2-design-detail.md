@@ -285,14 +285,14 @@ infra/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `checkExamples` | `scripts/artifacts.ts` | 新設 | `(ops: readonly OperationDef[]) => ExampleProblem[]` | 見本（`normal`・`edge`・`empty`）を結果の形・秘密の形・作り物の値の決まりで照らす。診断は操作の名前・見本の場面と位置・違反の種類（形に合わないときは Zod の issue の code）だけを持ち、当たった値を含めない（生成のコマンドが標準エラーに出し、CI のログに残るため） |
+| `checkExamples` | `scripts/artifacts.ts` | 新設 | `(ops: readonly OperationDef[]) => ExampleProblem[]` | 見本（`normal`・`edge`・`empty`。`empty` は動詞によらず `null` でなければ照らす）を結果の形・秘密の形・作り物の値の決まりで照らす。秘密の形と作り物の値は、文字列と数の値に加えてオブジェクトのキー（`z.record` の見本のキーなど）も照らす。`list` の封筒が `ok`・`items`・`next_cursor` のほかに必須の項目を持つのに `examples.empty` を書いていなければ問題にする（下の生成物の表の `empty`）。診断は操作の名前・見本の場面と位置・違反の種類（形に合わないときは Zod の issue の code）だけを持ち、当たった値を含めない（生成のコマンドが標準エラーに出し、CI のログに残るため） |
 | `buildOperationSchemas` | 同上 | 新設 | `(ops) => JsonSchemaDoc` | 操作ごとの要素と結果の JSON Schema を `$defs` に並べる。要素は入力のモード（`io: "input"`）、結果は出力のモードで出し、`zod-openapi` が要求と応答に使うモードとそろえる（`z.object` の要素は追加の項目を受け、`strictObject` だけが拒む） |
 | `buildOpenApi` | 同上 | 新設 | `(ops) => OpenApiDoc` | `zod-openapi`（LIB42。開発の依存）の `createDocument` に、操作の表の要素と結果の zod の形（`.meta({ id: "<操作>.item" })` で名前を付ける）を渡して OpenAPI 3.1.1 の文書を組む（全体の設計の決定 55） |
 | `buildMcpTools` | 同上 | 新設 | `(ops, schemas) => McpToolDoc[]` | 人だけでない利用者向けの操作の道具の定義 |
 | `buildRoutes` | 同上 | 新設 | `(ops) => RouteDoc[]` | 経路の登録 |
 | `buildReasons` | 同上 | 新設 | `(ops) => ReasonsDoc` | 理由のコードの一覧 |
 | `buildDummy` | 同上 | 新設 | `(op) => DummyDoc \| null` | 1 つの操作のダミーデータ（形の未定は `null`）。`normal` と `edge` は `examples` があればそれを、無ければ `fakeExamples` の値を使う。`empty` は `examples.empty` があればそれを、無ければ下の生成物の表の既定を使う |
-| `fakeExamples` | 同上 | 新設 | `(op) => { normal: unknown[]; edge: unknown[] }` | 結果の zod の形から `zod-schema-faker`（`zod-schema-faker/v4` の `fake`）で見本を作る。種は操作の名前の SHA-256 の頭 8 桁、`normal` は 3 件、`edge` は上の端（文字列を上限の長さ・配列を上限の件数・数を上限・省ける項目を置く）と下の端（文字列を下限の長さ・配列を下限の件数・数を下限・省ける項目を省く）の 2 件（形の `max`・`min` を受け取る faker の関数を端へ寄せたものに差し替えて寄せる。文字列の元は形の中の最も長い上限か 1024 字の長い方、倍数の数は範囲の内側の倍数へ丸める）。メール・アカウント ID の形（`values.ts` の `awsAccountId`）・接頭辞（`settings.ts` の `PREFIX_SHAPE`）は、生成の前に形の木を写してそれぞれの作り物の値（`ops@example.com`・`123456789012`・`acme`）の literal へ置き換える（`zod-schema-faker` の `custom` は `z.custom` の形にしか効かず、メールは内部の randexp で作るため、faker の上書きでは届かない） |
+| `fakeExamples` | 同上 | 新設 | `(op) => { normal: unknown[]; edge: unknown[] }` | 結果の zod の形から `zod-schema-faker`（`zod-schema-faker/v4` の `fake`）で見本を作る。種は操作の名前の SHA-256 の頭 8 桁、`normal` は 3 件、`edge` は上の端（文字列を上限の長さ・配列を上限の件数・数を上限・省ける項目を置く）と下の端（文字列を下限の長さ・配列を下限の件数・数を下限・省ける項目を省く）の 2 件（形の `max`・`min` を受け取る faker の関数を端へ寄せたものに差し替えて寄せる。文字列の元は形の中の最も長い上限か 1024 字の長い方、倍数の数は端そのものが倍数なら端を、そうでなければ範囲の内側で端に最も近い倍数を選ぶ。倍数かは Zod の `multipleOf` と同じ判定で照らし、小数の倍数の丸めの誤差は倍数の小数の桁でそろえるため、`min(0.1).max(0.3).multipleOf(0.1)` の上の端は `0.3`）。メール・アカウント ID の形（`values.ts` の `awsAccountId`）・接頭辞（`settings.ts` の `PREFIX_SHAPE`）は、生成の前に形の木を写してそれぞれの作り物の値（`ops@example.com`・`123456789012`・`acme`）の literal へ置き換える（`zod-schema-faker` の `custom` は `z.custom` の形にしか効かず、メールは内部の randexp で作るため、faker の上書きでは届かない）。再帰する形（`z.lazy` と shape に getter を持つ object）は、子を写す前に写しを作り、子は初めて読まれたときに写すため、循環で戻った深い層も作り物の値になる |
 | `buildPending` | 同上 | 新設 | `(ops) => PendingDoc[]` | 形の未定の操作と受け持つ子 |
 | `generateArtifacts` | `scripts/generate.ts` | 変更 | `(root: string, mode: "write" \| "check") => Promise<string[]>`（変えない） | 今の 3 つに上の生成物を足す。`generated/dummy/` の中の、どの操作にも当たらないファイルは `check` で差に数え、`write` で消す |
 
@@ -326,7 +326,7 @@ infra/
 | `generated/mcp-tools.json` | `[{name, description, inputSchema, outputSchema, annotations}]`（操作の表の順） |
 | `generated/routes.json` | `[{method: "POST", path, operation, endpoint}]`（操作の表の順。GitHub の Webhook は I12 の外のため載せず、受け持つ #5 が足す） |
 | `generated/reasons.json` | `{"request": [{code, status}…], "item": [{code, status}…], "operations": {"<操作>": [{code, status}…]}}`。`operations` の値は `itemReasonsOf(op)` の `code` と `status` |
-| `generated/dummy/<操作>.json` | `{"operation", "normal": [...], "empty": <結果 1 件> | null, "edge": [...], "failures": [{"ok": false, "status", "reason"}…]}`。`normal` と `failures` は送り手が要素ごとに 1 件を選ぶ元の並びで、要求の件数の写しではない。`empty` は要素 1 個に返す結果 1 件で、`list` で `{"ok": true, "items": [], "next_cursor": null}`（その要素の空の一覧。封筒がほかに必ず持つ項目、たとえば `runner.answers.list` の `delivered_seqs` は、正常の見本の 1 件目から写す。`examples.empty` で書き換えられ、どちらも `checkExamples` が結果の形で照らす）、`get` で `{"ok": false, "status": 404, "reason": "not_found"}`、それ以外は `null`（空の場面が無く、`normal` と同じに返す）。`failures` は `itemReasonsOf(op)` の要素ごとに 1 つで、`status` と `reason` はその `ReasonDef` の値（読む操作は `when` が `write` の `version_mismatch` などを含めない）。どの失敗のダミーも、同じ `itemReasonsOf(op)` から作った `resultSchemaOf` の zod を通る |
+| `generated/dummy/<操作>.json` | `{"operation", "normal": [...], "empty": <結果 1 件> | null, "edge": [...], "failures": [{"ok": false, "status", "reason"}…]}`。`normal` と `failures` は送り手が要素ごとに 1 件を選ぶ元の並びで、要求の件数の写しではない。`empty` は要素 1 個に返す結果 1 件である。`examples.empty` を書いた操作は、動詞によらずその値を使う（`null` なら空の場面を持たない。`null` でない値は `checkExamples` が結果の形と作り物の値の決まりで照らし、ダミーの送り手は `create` などでもその値を `empty` の場面に返す）。`examples.empty` が無ければ、`list` で `{"ok": true, "items": [], "next_cursor": null}`（その要素の空の一覧）、`get` で `{"ok": false, "status": 404, "reason": "not_found"}`、それ以外は `null`（空の場面が無く、`normal` と同じに返す）。封筒が `ok`・`items`・`next_cursor` のほかに必須の項目を持つ `list`（たとえば `runner.answers.list` の `delivered_seqs`）は、`examples.empty` を必須にする。その項目の空の一覧での値は件数などで `items` と結びつきうる。正常の見本から写すと `items: []` と食い違う値（`total: 3` など）が結果の形を通って入るため、生成で決めずに書き手が書く（書かなければ `checkExamples` が問題にする）。`failures` は `itemReasonsOf(op)` の要素ごとに 1 つで、`status` と `reason` はその `ReasonDef` の値（読む操作は `when` が `write` の `version_mismatch` などを含めない）。どの失敗のダミーも、同じ `itemReasonsOf(op)` から作った `resultSchemaOf` の zod を通る |
 | `generated/pending.json` | `[{"operation", "owner"}]` |
 
 理由のコードと HTTP の状態の対応は、共通の集まりも操作ごとのコードも `ReasonDef` の `status` だけが持つ（別の対応の表を持たない）。
@@ -336,7 +336,7 @@ infra/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | 往復（`operations-roundtrip.test.ts`） | 比べる操作は、`OPERATIONS` のうち形のある操作と、テスト用の操作（下の段落）の和。操作ごとに、要素（見本と反例: 時刻帯の無い日時・通貨の無い金額・頭の違う ID・配列でない本文・追加の項目。追加の項目は `z.object` の要素で受け、`strictObject` で拒む合否を、`openapi.json` の `components.schemas` の要素の形でも照らす）・成功の結果（`examples` の `normal` と `edge`）・失敗の結果（`buildDummy` の `failures` と、`ReasonDef` に無い `status` と `reason` の組の反例）を、zod（`ItemOf`・`resultSchemaOf`）と、`buildOperationSchemas` が出した `<操作>.item`・`<操作>.result` を Ajv（`Ajv2020`、`strict: true`、`validateFormats: false`）で検証した結果とで同じ合否 | 要素 1 個と上限ちょうどの配列 | `refine` を使う形をテストの中で足すと食い違いを検出する（検出の仕組みのテスト）。比べた操作・要素・成功・失敗のどれかの件の数が 0 なら落ちる |
-| `checkExamples` | 作り物の値だけの見本は問題 0。メール・アカウント ID・接頭辞を持つ結果の形は見本を書かずに問題 0 | 1024 字を超える上限の文字列の上の端が上限の長さ。下限と倍数だけの数の下の端が形を通る | 通貨の無い金額・`ghs_` の値・`ops@corp.test`・12 桁の別の数・形に合わない空の結果で問題が出る。診断に当たった値が入らない |
+| `checkExamples` | 作り物の値だけの見本は問題 0。メール・アカウント ID・接頭辞を持つ結果の形は見本を書かずに問題 0 | 1024 字を超える上限の文字列の上の端が上限の長さ。下限と倍数だけの数の下の端が形を通る。`min(0.1).max(0.3).multipleOf(0.1)` の上の端が `0.3`、下の端が `0.1`。再帰する形（`z.lazy`・getter の object）の深い層のメールとアカウント ID が作り物の値 | 通貨の無い金額・`ghs_` の値・`ops@corp.test`・12 桁の別の数・形に合わない空の結果（`create` に書いた `empty` も）・見本のレコードのキーの `ops@corp.test` や 12 桁の別の数・`examples.empty` の無い、必須の項目を足した `list` の封筒で問題が出る。診断に当たった値とキーが入らない |
 | `buildMcpTools` | 人だけの操作と受け口 `user` でない操作が無い。道具の順が操作の表の順 | 全部か無かの操作の `maxItems` | — |
 | `buildOpenApi` | 文書が OpenAPI 3.1.1 で、`components.schemas` の各値が `operations.schema.json` の同じ名前の `$defs` と一致する | 形の未定の操作の `not` の形 | 一致しないと落ちる（`zod-openapi` と `z.toJSONSchema` の出力の差を拾う） |
 | `buildDummy` | `list` の空・`get` の 404・`itemReasonsOf(op)` のコードごとの失敗で、`status` が `ReasonDef` と同じ。どの失敗も `resultSchemaOf` の zod を通る | 形の未定は `null` | — |
@@ -388,7 +388,7 @@ infra/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `createOperationClient` | 偽の送り手の応答を型つきの結果で返す | 要素 1 個と上限ちょうど | 結果の形に合わない応答で `response_invalid`、problem の本文で要求全体の誤り |
-| `createDummyTransport` | 場面ごとに `normal`・`empty`・`failures`・404 を要素ごとに 1 件ずつ返し、`createOperationClient` を通して結果の zod に合う | 要素 1 個の `normal` は 1 件（見本 3 件を返さない）、要素 5 個の `normal` は見本を順に回して 5 件。要素 1 個の `error` は 1 件、`list` の要素 2 個の `empty` は空の一覧 2 件、`create` の `empty` は `normal` と同じ。要素 1 個と上限ちょうどで件数が要求と同じ | 形の未定の操作・`failures` が 0 件の操作の `error` は要求全体の `unavailable` の 503 |
+| `createDummyTransport` | 場面ごとに `normal`・`empty`・`failures`・404 を要素ごとに 1 件ずつ返し、`createOperationClient` を通して結果の zod に合う | 要素 1 個の `normal` は 1 件（見本 3 件を返さない）、要素 5 個の `normal` は見本を順に回して 5 件。要素 1 個の `error` は 1 件、`list` の要素 2 個の `empty` は空の一覧 2 件、`create` の `empty` は `normal` と同じ（`examples.empty` を書いた `create` はその値）。要素 1 個と上限ちょうどで件数が要求と同じ | 形の未定の操作・`failures` が 0 件の操作の `error` は要求全体の `unavailable` の 503 |
 
 ## 横断の部品
 
