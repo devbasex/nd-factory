@@ -91,6 +91,14 @@ describe("workflow-audit の点検", () => {
       EXTRA.replace("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1", "actions/checkout@main"),
       "unpinned-uses",
     ],
+    [
+      "行の中の zizmor: ignore で外そうとした、枝の名前で参照した動作（--no-ignores で効かない）",
+      EXTRA.replace(
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+        "actions/checkout@main # zizmor: ignore[unpinned-uses]",
+      ),
+      "unpinned-uses",
+    ],
   ])("ci.yml の外のワークフローの %s で当たる", (_label, extra, audit_id) => {
     expect(extra).not.toBe(EXTRA);
     const result = audit(extra);

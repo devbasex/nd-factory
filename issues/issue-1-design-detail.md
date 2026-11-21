@@ -173,7 +173,7 @@ nd-factory/
 
 満たす決定: 設計の決定 5、受け入れ条件 1・8・10・13
 
-`.github/zizmor.yml` は既定の点検を外さず、外すときは点検の名前と理由を書く。ジョブ `workflow-audit` は `persist-credentials: false` で取り、`ZIZMOR_VERSION` の版の linux の実行ファイルの資産を `ZIZMOR_SHA256` と直接比べてから置き、`zizmor --offline --config .github/zizmor.yml .github/workflows` を打つ。当たりで失敗する。`.github/zizmor.yml` は `unpinned-uses` の方針 `"*": hash-pin`（すべての動作を SHA での固定に限る。v1.32.0 の既定と同じだが、版を上げても緩まないよう明示する）だけを持つ。結合のテストは `ci.yml` の点検の手順の `run` を読んで同じ引数で打つ。
+`.github/zizmor.yml` は既定の点検を外さず、外すときは点検の名前と理由を書く。ジョブ `workflow-audit` は `persist-credentials: false` で取り、`ZIZMOR_VERSION` の版の linux の実行ファイルの資産を `ZIZMOR_SHA256` と直接比べてから置き、`zizmor --offline --no-ignores --config .github/zizmor.yml .github/workflows` を打つ（`--no-ignores` で行の中の `# zizmor: ignore[...]` を効かなくする。gitleaks の `gitleaks:allow` を効かなくした承認で足したこと 1 と揃え、外すときは `.github/zizmor.yml` に点検の名前と理由を書く）。当たりで失敗する。`.github/zizmor.yml` は `unpinned-uses` の方針 `"*": hash-pin`（すべての動作を SHA での固定に限る。v1.32.0 の既定と同じだが、版を上げても緩まないよう明示する）だけを持つ。結合のテストは `ci.yml` の点検の手順の `run` を読んで同じ引数で打つ。
 
 CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテストを残し、ワークフローを `yaml` で読む。
 
