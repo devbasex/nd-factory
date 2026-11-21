@@ -136,13 +136,20 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 
 名前は設定の接頭辞と環境から決まり、変える口を持たない。名前が衝突する資源を残したまま同じ設定で `deploy` を打つと、作成が失敗して CloudFormation が戻す（終了コード 8）。作り直す前に、残った資源を次の順で消す。データが要るときは、各段の退避を先に取る。
 
-1. 書き手とクラスタの名前を読む: `aws rds describe-db-clusters --db-cluster-identifier <prefix>-<environment>-progress-db --query 'DBClusters[0].DBClusterMembers[].DBInstanceIdentifier'`
-2. クラスタの削除の保護を外す: `aws rds modify-db-cluster --db-cluster-identifier <prefix>-<environment>-progress-db --no-deletion-protection --apply-immediately`
-3. 書き手を消す: `aws rds delete-db-instance --db-instance-identifier <1 の名前>`。消え終わるまで待つ（`aws rds wait db-instance-deleted --db-instance-identifier <1 の名前>`）
-4. クラスタを消す: `aws rds delete-db-cluster --db-cluster-identifier <prefix>-<environment>-progress-db --final-db-snapshot-identifier <スナップショットの名前>`。退避が要らなければ `--final-db-snapshot-identifier` の代わりに `--skip-final-snapshot` を渡す
-5. 管理の役割の秘密の器を消す: `aws secretsmanager delete-secret --secret-id <prefix>/<environment>/progress-db-admin --force-delete-without-recovery`。回復の期間を置くと、その間は同じ名前で作れない
-6. 利用者の表を消す: 退避が要れば `aws dynamodb create-backup --table-name <prefix>-<environment>-accounts --backup-name <名前>` を先に打ち、`aws dynamodb delete-table --table-name <prefix>-<environment>-accounts`
+各コマンドには、`deploy` に渡した profile と、そのリージョンを `--profile <profile> --region <region>` で必ず渡す。省くと既定の profile とリージョン（環境変数 `AWS_PROFILE`・`AWS_REGION` を含む）が先になり、同じ接頭辞と環境の名前を持つ別のアカウントかリージョンの DB・秘密の器・表を消しうる。初めに接続先を確かめる。
+
+0. 接続先を確かめる: `aws configure get region --profile <profile>` の値を `<region>` とし、`aws sts get-caller-identity --profile <profile> --region <region> --query Account` が反映した先のアカウントであることを見る
+
+以下の 1〜6 の AWS CLI のコマンドは、どれも末尾に `--profile <profile> --region <region>` を付けて打つ（例では「…」と略す）。
+
+1. 書き手とクラスタの名前を読む: `aws rds describe-db-clusters --db-cluster-identifier <prefix>-<environment>-progress-db --query 'DBClusters[0].DBClusterMembers[].DBInstanceIdentifier' …`
+2. クラスタの削除の保護を外す: `aws rds modify-db-cluster --db-cluster-identifier <prefix>-<environment>-progress-db --no-deletion-protection --apply-immediately …`
+3. 書き手を消す: `aws rds delete-db-instance --db-instance-identifier <1 の名前> …`。消え終わるまで待つ（`aws rds wait db-instance-deleted --db-instance-identifier <1 の名前> …`）
+4. クラスタを消す: `aws rds delete-db-cluster --db-cluster-identifier <prefix>-<environment>-progress-db --final-db-snapshot-identifier <スナップショットの名前> …`。退避が要らなければ `--final-db-snapshot-identifier` の代わりに `--skip-final-snapshot` を渡す。削除は非同期のため、消え終わるまで待つ（`aws rds wait db-cluster-deleted --db-cluster-identifier <prefix>-<environment>-progress-db …`）。待ちが時間切れで止まったときは、同じ待ちを打ち直す
+5. 管理の役割の秘密の器を消す: `aws secretsmanager delete-secret --secret-id <prefix>/<environment>/progress-db-admin --force-delete-without-recovery …`。回復の期間を置くと、その間は同じ名前で作れない。回復の期間を置かなくても削除は非同期で、名前がすぐには空かない。`aws secretsmanager describe-secret --secret-id <prefix>/<environment>/progress-db-admin …` が `ResourceNotFoundException` を返すまで、間を置いて打ち直す
+6. 利用者の表を消す: 退避が要れば `aws dynamodb create-backup --table-name <prefix>-<environment>-accounts --backup-name <名前> …` を先に打ち、`aws dynamodb delete-table --table-name <prefix>-<environment>-accounts …`。消え終わるまで待つ（`aws dynamodb wait table-not-exists --table-name <prefix>-<environment>-accounts …`）
 7. 残った DB のグループ・サブネット・SG・VPC は、クラスタが消えた後に消せる。消さなくても作り直しは衝突しないが、VPC はリージョンごとの数の上限（既定 5）に数えられる
+8. 4〜6 の待ちと確かめがすべて終わってから、`diff` と `deploy` を打つ。終わる前に打つと、名前がまだ空いておらず作成が失敗する（終了コード 8）
 
 退避したスナップショットやバックアップを新しいスタックの資源へ戻す手順は、まだこの文書に無い。
 
