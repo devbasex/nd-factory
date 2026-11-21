@@ -146,8 +146,8 @@ stateDiagram-v2
 | --- | --- | --- |
 | `完了` で、`ndf-next` のブロックがある（カットポイント） | 成功で閉じる | 動いているまま。ブロックの中身（`block-next` の口の形）で次の区間を起こす |
 | `完了` で、ブロックが無い | 成功で閉じる | その課題が終わった。レーンの次の課題があれば `#N` で次の区間、無ければ「完了」 |
-| `判断が要る` | 成功で閉じる | 「人を待つ」。区分・承認ゲート・問い・Pull Request・材料から承認の依頼か問いを作る（E10。[承認と問いの流れ](#承認と問いの流れ)） |
-| `できなかった` で、区分が `ndf-ask:human-action` | 成功で閉じる | 「人を待つ」。「人に頼むこと」を問いにし、人が「済んだ」と答えたら `次のコマンド:` の行で同じレーンを続ける |
+| `判断が要る` | 成功で閉じる | 「人を待つ」。区分・承認ゲート・問い（項目「質問」）・Pull Request・材料から承認の依頼か問いを作る（E10。[承認と問いの流れ](#承認と問いの流れ)） |
+| `できなかった` で、区分が `ndf-ask:human-action` | 成功で閉じる | 「人を待つ」。「人に頼むこと」を問いにし、人が「済んだ」と答えたら `次のコマンド:` の行で同じレーンを続ける。この行は契約の項目に無く、続きの起こし方は未確認である（決定 108。[未確認のまま残ること](#未確認のまま残ること)） |
 | `できなかった`（ほか） | 失敗で閉じる | 「失敗」。理由の行を進捗の事象に残す |
 | `- 結果:` の行が無い | 失敗で閉じる | 「失敗」。理由のコードは `result_line_missing` |
 | 値が `完了`・`判断が要る`・`できなかった` のどれでもない（例: `保留`） | 失敗で閉じる | 「失敗」。理由のコードは `result_value_unknown` と読んだ値（伏せ字を通す） |
@@ -155,10 +155,15 @@ stateDiagram-v2
 
 失敗で閉じた区間は自動で繰り返さない。
 
+区間の報告の決まりは、契約の `C/hooks/unattended-report.json`（`C/` は [NDF との契約](#ndf-との契約) の略）にある（決定 108）。
+
 | 決まり | 書かれている所 |
 | --- | --- |
-| 結果の値の 3 つ | 契約の `report-unattended` の行 |
-| 「最後の行で読む」 | NDF の手順の文書（`asking.md` の「人のいない実行」）。契約のファイルには無い |
+| 「最後の `- 結果:` の行で読む」と、結果の行より後ろの `- <項目>: <値>` の行を項目として読むこと | `rule` |
+| 結果の値の 3 つ | `shape.values` |
+| 項目の名前（結果・課題・区分・承認ゲート・質問・Pull Request・材料・人に頼むこと・理由） | `shape.items` |
+| 値ごとに要る項目 | `shape.required` |
+| 材料の形（`本文` か `https://` の URL） | `shape.material` |
 
 ## 実行の場所
 
@@ -297,19 +302,19 @@ sequenceDiagram
 | 防ぐ: 別の OS の利用者 | コンテナの中で、ランナーと claude を別の OS の利用者で動かす。レーンの token・GitHub の token の取り直し・推論の資格情報の取り直しはランナーの利用者だけが持つ |
 | 防ぐ: 答えのファイル | NDF が答えを書くファイルはランナーの利用者が持ち、claude の利用者に書き込みの権限を与えない。権限は OS が掛けるため、claude が起こす子のプロセスにも効く。承認の依頼を書くファイルは claude の利用者が書ける |
 | 防ぐ: 許可の設定 | claude の許可の設定でも `ndf answer` と答えのファイルへの書き込みを拒む。許可の設定は claude のツールと認識できるコマンドにだけ効くため、重ねる守りに留める |
-| 照らす | 控えは、API が `/v1/runner/answers/list` の応答の `delivered_seqs` で返すそのレーンの届いた答えの事象の番号から組む（起動し直したランナーも受け取りの 1 回目で取り直し、照らしには最後の E14 の確定を反映した控えを使う。[答えの送達](#答えの送達)）。区間の後に `ndf progress show <表の ID>` で答えの事象（`answered`・`row_answered`）を読み、控えの番号に無い答えが現れたら、レーンを「失敗」（理由 `answer_outside_runner`）にし、始めた人とチームの持ち主へ知らせ、進捗の事象に残す（I5） |
+| 照らす | 控えは、API が `/v1/runner/answers/list` の応答の `delivered_seqs` で返すそのレーンの届いた答えの事象の番号から組む（起動し直したランナーも受け取りの 1 回目で取り直し、照らしには最後の E14 の確定を反映した控えを使う。[答えの送達](#答えの送達)）。区間の後に `ndf progress show <進行表の ID（machine_id）>` で答えの事象（`answered`・`row_answered`）を読み、控えの番号に無い答えが現れたら、レーンを「失敗」（理由 `answer_outside_runner`）にし、始めた人とチームの持ち主へ知らせ、進捗の事象に残す（I5） |
 
 答えが進行表の DB の行として書かれる版の NDF では、claude の利用者も `NDF_PROGRESS_DB` の URL で答えの行を書ける。そのときはファイルの権限の守りが効かない。そこで、ランナーと claude で DB のログインの役割を分け、claude の役割から答えの表へ書けないようにする形へ設計を戻す（[未確認のまま残ること](#未確認のまま残ること)）。
 
 ## NDF との契約
 
-NDF（devbasex/ai-plugins の `ndf-next` プラグイン）は上流である。nd-factory は、契約のファイル（`plugins/ndf-next/contracts/`）に載るものだけでやり取りする。NDF の集約を直に書かず、NDF の内部のスクリプトと状態のファイルに頼らない。以下の表の `C/` は `plugins/ndf-next/contracts/` の略である。
+NDF（devbasex/ai-plugins の `ndf` プラグイン）は上流である。nd-factory は、契約のファイル（`plugins/ndf/contracts/`）に載るものだけでやり取りする。NDF の集約を直に書かず、NDF の内部のスクリプトと状態のファイルに頼らない。以下の表の `C/` は `plugins/ndf/contracts/` の略である。
 
 | 項目 | 決まり | 契約の置き場 |
 | --- | --- | --- |
 | 固定の置き場 | 使う NDF のコミットは `ndf-pin.json` のキー `ndf_ref` の 1 か所だけに置く。ランナーのイメージはその版の NDF を入れて作る | `ndf-pin.json`（このリポジトリ） |
-| NDF 11 の名前 | この文書の NDF の名前（記録の ID `ask-journal`・口 `file-journals`・答えの語 `request_changes`）は NDF 11 の契約の名前で、旧い名前（NDF 11 の前の契約の名前）を書かない。今の `ndf_ref` の点の契約は旧い名前を持つため、`ndf_ref` を NDF 11.0.0 の配布のコミットへ付け替え、受ける契約の版と sha256 の組を同じ変更で直す（#1。版の数字は比べない） | `C/domains/ndf-files.json`・`C/domains/entrypoints.json`・`C/facts/answers.json`・`C/schemas/io/answer.args.schema.json` |
-| 契約の版の照らし | 契約の版は `C/version.json` の `history` の最後の行（版と sha256）。nd-factory は「受ける契約の版と sha256 の組」の集合を形の正本のデータに 1 か所だけ置き、ランナーは起動の時に照らす。集合に無ければ claude を起こさずにレーンを「失敗」（理由 `contract_mismatch`）にする | `C/version.json`（今の `ndf_ref` の点で版 4。NDF 11.0.0 へ付け替えるときに受ける組を直す） |
+| NDF 11 の名前 | この文書の NDF の名前（記録の ID `ask-journal`・口 `file-journals`・設定のスキーマの口 `spec-ndf_settings`・答えの語 `request_changes`・`ndf answer` と `ndf progress` の位置引数と結果の ID `machine_id`）は、固定の点（ndf v11.0.12 の配布のコミット）の契約の名前である。旧い名前（NDF 11 の前の契約の名前）を書かない | `C/domains/ndf-files.json`・`C/domains/entrypoints.json`・`C/facts/answers.json`・`C/schemas/io/answer.args.schema.json` |
+| 契約の版の照らし | 契約の版は `C/version.json` の `history` の最後の行（版と sha256）。nd-factory は「受ける契約の版と sha256 の組」の集合を形の正本のデータに 1 か所だけ置き、ランナーは起動の時に照らす。集合に無ければ claude を起こさずにレーンを「失敗」（理由 `contract_mismatch`）にする | `C/version.json`（固定の点で版 8・sha256 `ed8b036584bec284dfc93a2bb5b988e2385b4f8f297d659399f5d3cb91b520c4`。受ける組はこの 1 つ。固定の点を付け替える変更で、受ける組も同じ変更で直す。決定 104） |
 | 版の数字を比べない | NDF の版の数字（`NDF_VERSION` の値・プラグインの版）を読んで大小を比べる処理を書かない。参照の検査が落とす。機能の有無は契約の版と sha256 で判断する | — |
 | 呼べる口 | `C/domains/entrypoints.json` の 15 行の口だけ。nd-factory が使うのは下の「使う口」の表の行だけ | `C/domains/entrypoints.json` |
 | 渡す環境変数 | 口の行の `env` 列に載る名前だけ。値の出所は下の「渡す環境変数」の表 | `C/domains/env.json`・各口の `env` |
@@ -325,12 +330,12 @@ NDF（devbasex/ai-plugins の `ndf-next` プラグイン）は上流である。
 | --- | --- | --- |
 | `skill-workflow` | skill | レーンの課題ごとの最初の区間を `#N` で起こす。`--loop` は使わない |
 | `block-next` | block | カットポイントと答えの後の続きの区間を、区間の報告の `ndf-next` のブロックの中身で起こす |
-| `report-unattended` | report | 区間の報告の `- 結果:` の値（3 つ）を読む |
+| `report-unattended` | report | `C/hooks/unattended-report.json` の形（`rule`・`shape`）で区間の報告を読む。口の行の `source` は無い置き場（`forms/unattended-report.json`）を指すため、置き場は `source` から引かない（決定 108） |
 | `hook-unattended-start`・`hook-unattended-stop`・`hook-unattended-end` | hook | NDF のプラグインが claude に登録する。ランナーは `NDF_FACTORY_RUN` を入れるだけで、hook を足さない・外さない |
 | `file-plan-progress`・`file-journals`・`file-issue-request` | file | 読むファイルの置き場 |
 | `gate-record` | command | ランナーは打たない。承認ゲートの名前の正の値の出所として使う |
 | `spec-io` | spec | `ndf answer` と `ndf progress show` の引数を `C/schemas/io/` の引数のスキーマで組み、打つ前に照らす |
-| 使わない口 | — | `file-organizer`（オーガナイザーを使わない、決定 73）・`file-loop-record`（ループを使わない）・`spec-pages`・`spec-declarations`（設定のページを最初の版に持たない） |
+| 使わない口 | — | `file-organizer`（オーガナイザーを使わない、決定 73）・`file-loop-record`（ループを使わない）・`spec-pages`・`spec-ndf_settings`（設定のページを最初の版に持たない） |
 
 渡す環境変数:
 
@@ -363,9 +368,9 @@ NDF（devbasex/ai-plugins の `ndf-next` プラグイン）は上流である。
 | 項目 | 中身 |
 | --- | --- |
 | いつ | 毎日 1 回と、`ndf-pin.json` を変える Pull Request |
-| 何を読むか | 固定の点の契約のファイルと、NDF の develop の先端の契約のファイル（読むだけ） |
+| 何を読むか | 固定の点の契約のファイルと、ai-plugins の既定の枝（リポジトリの `default_branch`。枝の名前は書き込まずリポジトリの設定から引く）の先端の契約のファイル（読むだけ。決定 107） |
 | 何を照らすか | (1) `C/domains/entrypoint-cases.json` の 26 件の見本を、ランナーの呼び出しの組み立てと環境変数の組み立てへ通し、`valid` と同じ判定になるか。(2) `C/version.json` の最後の行が、受ける契約の版の集合にあるか。(3) `C/domains/env.json` の `set_by: service` の名前と、口の `env` 列の名前が、ランナーが組む環境変数の一覧を含むか。(4) `C/domains/ndf-files.json` の `reader: service` の行の `fields` が、翻訳が読む項目を含むか |
-| 落ちたとき | 固定の点で落ちたら検査を失敗にする（CI の失敗として運用する人が受ける）。develop の先端だけが食い違うときは、固定の点を変えずに検査の要約へ食い違った見本の id と契約のファイルのパスを並べる |
+| 落ちたとき | 固定の点で落ちたら検査を失敗にする（CI の失敗として運用する人が受ける）。既定の枝の先端だけが食い違うときは、固定の点を変えずに検査の要約へ食い違った見本の id と契約のファイルのパスを並べる |
 
 ## 承認と問いの流れ
 
@@ -398,7 +403,9 @@ NDF（devbasex/ai-plugins の `ndf-next` プラグイン）は上流である。
 
 | 項目 | 出所 |
 | --- | --- |
-| 題・区分・承認ゲート・問い | 区間の報告 |
+| 区分・問い（項目「質問」） | 区間の報告（`C/hooks/unattended-report.json` の項目。決定 108） |
+| 承認ゲートの正規の名前 | 区間の報告の項目から読まず、区分から決める。`ndf-gate:1` は「設計承認ゲート」、`ndf-gate:2` は「リリース承認ゲート」。`ndf-ask:redline:<番号>` は承認ゲートの名前を持たず「無し」と書く（決定 108） |
+| 題 | ランナーが作る（契約の項目に無い）。区間の報告の項目「承認ゲート」があり値が「無し」でなければ、その文言（「設計 Pull Request のマージ」「本番系へ届く操作」など。正規の名前ではない）と問いから作る。項目が無いか「無し」なら（`ndf-ask:redline:<番号>` など）、問いだけから作る（決定 108） |
 | 対象の課題の番号の並び | 区間の報告と `plan-progress`。設計承認ゲートで外す課題（`--drop`）はこの並びから選ぶ |
 | 目的と判断の材料 | 区間の報告の「材料」（`本文` なら最後の応答の「判断の材料」の節） |
 | Pull Request の URL・head の SHA・変えたファイルの数と行の数・CI の結果 | ランナーが GitHub の API で読む（レーンの token の GitHub の token） |
@@ -434,7 +441,7 @@ sequenceDiagram
         R->>API: 引き換えと指示の問い合わせ
     end
     API-->>R: 答え（答えの ID・語・理由・要約値・head の SHA）
-    R->>N: ndf answer 表の ID --gate 問いの ID --result 語 --reason 理由 --by service:利用者 --key 答えの ID --material-sha256 要約値 --head SHA（設計承認ゲートで外す課題があるときだけ --drop 課題の番号…）
+    R->>N: ndf answer 進行表の ID（machine_id） --gate 問いの ID --result 語 --reason 理由 --by service:利用者 --key 答えの ID --material-sha256 要約値 --head SHA（設計承認ゲートで外す課題があるときだけ --drop 課題の番号…）
     alt 鍵に結んだ事象の番号（metrics.seqs）を得た
         R->>API: 送達の事象（E14。事象の番号つき）
     else 番号を得られない・ndf answer が失敗した
@@ -521,7 +528,7 @@ stateDiagram-v2
 
 ### 問いの答え
 
-問いの答えも、承認の依頼と同じく答えの ID を冪等の鍵にして `ndf answer` で渡す。問いの ID と表の ID は、区間の報告と `ask.jsonl` の行から得る。問いの行がこの 2 つを持つかは契約の `fields` に無く、未確認である（[未確認のまま残ること](#未確認のまま残ること)）。`ndf-ask:human-action` の答えは送達の対象外で `ndf answer` を打たず、「済んだ」なら区間の報告の `次のコマンド:` の行で続きの区間を起こし、「取り消す」ならレーンを取り消す（E19）。
+問いの答えも、承認の依頼と同じく答えの ID を冪等の鍵にして `ndf answer` で渡す。問いの ID と進行表の ID（`machine_id`）は、区間の報告と `ask.jsonl` の行から得る。問いの行がこの 2 つを持つかは契約に無い（`ask-journal` の行が `fields` を持たない）。上流へ契約への追加を依頼しており、足されるまで未確認である（決定 106。[未確認のまま残ること](#未確認のまま残ること)）。`ndf-ask:human-action` の答えは送達の対象外で `ndf answer` を打たず、「済んだ」なら区間の報告の `次のコマンド:` の行で続きの区間を起こし、「取り消す」ならレーンを取り消す（E19）。`次のコマンド:` の行は契約の項目に無く、続きの起こし方は未確認である（決定 108）。
 
 ## 起票の依頼
 
@@ -650,8 +657,10 @@ Slack の本文にはプロジェクトの中身を載せない。チャンネ�
 | --- | --- | --- | --- | --- |
 | STD60 | VAPID（RFC 8292） | アプリのサーバーが ES256 の JWT（`aud` 必須、`exp` は要求から 24 時間以内）と公開鍵で名乗る。購読をサーバーの公開鍵に結ぶと、push のサービスはその秘密鍵で署名した送信だけを受ける | Web Push の購読をアプリの公開鍵に結び、秘密鍵は秘密の器に置く | https://www.rfc-editor.org/rfc/rfc8292（2026-11-17） |
 | STD61 | Web Push のプロトコル（RFC 8030） | 切れた購読への送信に push のサービスは 404 を返す。TTL の間だけ保つ。TLS は push のサービスから中身を守らず、端から端までの暗号化を求める | 404 で通知先を無効にする。本文は暗号化し、載せる中身も絞る | https://www.rfc-editor.org/rfc/rfc8030（2026-11-17） |
-| STD62 | NDF の契約のファイル（`plugins/ndf-next/contracts/`、固定の点のコミット） | 呼び手が使える口・環境変数・読むファイル・答えの引数・答えの語・契約の版 | [NDF との契約](#ndf-との契約) の表の全体 | `gh api repos/devbasex/ai-plugins/contents/plugins/ndf-next/contracts`（`ref` は `ndf-pin.json` の固定の値）（2026-11-17） |
-| STD63 | NDF の契約の `ndf answer` の引数と結果（`C/schemas/io/answer.args.schema.json`・`answer.result.schema.json`、固定の点） | 必須は `table_id`・`--gate`・`--result`・`--reason`・`--by`・`--key`。`--drop` は整数の配列で「設計承認ゲートで外す課題の番号」。`--key` は「同じ鍵の答え直しは書かない」。結果の `metrics.seqs` は書いた事象の番号、`metrics.replayed` は同じ鍵の答えが書いてあったか。一覧の `items` は事象ごとに `seq`・`gate_id`・`by` を持つ | 確定から NDF への図の `--reason` と `--drop`。起こし直しの打ち直しを `--key` に任せ、照らす守りを事象の番号で行う（決定 100・103） | `gh api repos/devbasex/ai-plugins/contents/plugins/ndf-next/contracts/schemas/io/answer.args.schema.json` と同じ置き場の `answer.result.schema.json`（`ref` は `ndf-pin.json` の固定の値）（2026-11-18） |
+| STD62 | NDF の契約のファイル（固定の点 `752a9cf`（`ndf--v11.0.12`）の `plugins/ndf/contracts/`。前の固定の点 `f37ea4c` の `ndf-next` プラグインの契約のディレクトリと突き合わせた） | 呼び手が使える口・環境変数・読むファイル・答えの引数・答えの語・契約の版。置き場は `ndf-next` プラグインの下から `plugins/ndf/contracts/` へ移った。`version.json` の最後の行は版 4・`e80d8578…` から版 8・`ed8b036584bec284dfc93a2bb5b988e2385b4f8f297d659399f5d3cb91b520c4` へ（v11.0.0 は版 6）。口は 15 行・見本は 26 件・`set_by: service` の環境変数は 6 つのまま。記録の口と見本の id・設定のスキーマの口・答えの語は NDF 11 の名前（`file-journals`・`ask-journal`・`spec-ndf_settings`・`request_changes`）へ改名された。`reader: service` の読むファイルの `fields` は変わらず、`ask-journal` は `fields` を持たない | [NDF との契約](#ndf-との契約) の表の全体（決定 104・106） | `gh api repos/devbasex/ai-plugins/contents/plugins/ndf/contracts`（`ref` は `ndf-pin.json` の固定の値）と、2 つの点の契約のディレクトリの突き合わせ（2026-11-21） |
+| STD63 | NDF の契約の `ndf answer` と `ndf progress` の引数と結果（`C/schemas/io/answer.args.schema.json`・`answer.result.schema.json`・`progress.args.schema.json`・`progress.result.schema.json`、固定の点） | `ndf answer` の必須は `machine_id`（位置引数。進行表の ID。前の固定の点から改名された）・`--gate`・`--result`・`--reason`・`--by`・`--key`。`--drop` は整数の配列で「設計承認ゲートで外す課題の番号」。`--key` は「同じ鍵の答え直しは書かない」。結果の `metrics.seqs` は書いた事象の番号、`metrics.replayed` は同じ鍵の答えが書いてあったか。一覧の `items` は事象ごとに `seq`・`gate_id`・`by` を持つ。`ndf progress` の副命令の位置引数も `machine_id`。結果の ID は 2 つとも `metrics.machine_id`（前の固定の点から改名された） | 確定から NDF への図の `--reason` と `--drop`。起こし直しの打ち直しを `--key` に任せ、照らす守りを事象の番号で行う（決定 100・103・105） | `gh api repos/devbasex/ai-plugins/contents/plugins/ndf/contracts/schemas/io/answer.args.schema.json` と同じ置き場の `answer.result`・`progress.args`・`progress.result`（`ref` は `ndf-pin.json` の固定の値）。前の固定の点の同じ 4 つと `diff` で突き合わせた（2026-11-21） |
+| STD64 | devbasex/ai-plugins の枝とタグ | 既定の枝は `main`。`develop` の先端は 2026-11-17 の `f37ea4c`（ndf v10.27.75 の配布）から進んでいない。`ndf--v11.0.12` のタグは軽量のタグ（参照が直にコミットを指す）で、`main` の上の `752a9cf`（2026-11-20） | 固定の点と、契約の照合の検査が読む先（決定 104・107） | `gh api repos/devbasex/ai-plugins --jq .default_branch`、`gh api repos/devbasex/ai-plugins/git/ref/tags/ndf--v11.0.12`、`git log -1 origin/develop`（2026-11-21） |
+| STD65 | NDF の契約の区間の報告（固定の点の `C/hooks/unattended-report.json`。前の固定の点には無い） | `rule` が最後の `- 結果:` の行の値（前後の空白を除く）で読むことと、結果の行より後ろの `- <項目>: <値>` の行を項目として読むことを定める。`shape.values` は `判断が要る`・`完了`・`できなかった`、`shape.items` は 結果・課題・区分・承認ゲート・質問・Pull Request・材料・人に頼むこと・理由、`shape.required` は `判断が要る` に区分・質問・材料（区分が `ndf-gate:` なら承認ゲート、承認ゲートが「設計 Pull Request のマージ」なら Pull Request）、`できなかった` に理由（区分が `ndf-ask:human-action` なら人に頼むこと）、`shape.material` は `本文`（前に `## 判断の材料` の節）か `https://` の URL。`source` は「Factory のランナーが読むのは結果の行だけ」と注する。`entrypoints.json` の `report-unattended` の `source` は無い `forms/unattended-report.json` を指す。`次のコマンド:` の行と承認資料の「題」は `shape.items` に無い | [区間と結果の行](#区間と結果の行)・[承認資料](#承認資料)・使う口の `report-unattended`（決定 108） | `git show 752a9cf:plugins/ndf/contracts/hooks/unattended-report.json`・`hooks/guards.json`・`domains/entrypoints.json` と、前の固定の点の契約のディレクトリの一覧を突き合わせた（2026-11-21） |
 
 ### 主要な製品
 
@@ -679,7 +688,7 @@ Slack の本文にはプロジェクトの中身を載せない。チャンネ�
 | Claude Code の `-p` の結果の出力が推論の量（token の数）を持つ項目の名前 | 試していない | 固定の版の claude で確かめる |
 | 同じ鍵で `ndf answer` を 2 回打ったときの終了コードと出力（STD63） | 試していない。読んだのはスキーマの説明だけ | 打つと NDF の進行表へ答えが書かれるため打っていない。#6 の詳細設計で、試しの進行表に対して実測する |
 
-調べた量: 候補 9 件・取得の試み 13 回（2026-11-17）。#32 で候補 2 件を足した（2026-11-18）。
+調べた量: 候補 9 件・取得の試み 13 回（2026-11-17）。#32 で候補 2 件を足した（2026-11-18）。#41 で STD62・STD63 を固定の点の契約で調べ直し、候補 2 件（STD64・STD65）を足した（2026-11-21）。
 
 ## 決定の記録
 
@@ -855,9 +864,9 @@ Slack のチャンネルの参加者はサービスの認可の外にある（Va
 
 根拠: Value 4 / Value 9（MVV 版 1）
 
-### 決定 79: NDF の契約の食い違いを反映の前に知るため、固定の点と develop の先端の契約を、毎日と固定の点を変える Pull Request で CI が照らす
+### 決定 79: NDF の契約の食い違いを反映の前に知るため、固定の点と既定の枝の先端の契約を、毎日と固定の点を変える Pull Request で CI が照らす
 
-契約の見本（`entrypoint-cases.json`）は呼び手の側の判定を確かめる材料として NDF が出している。CI で照らせば、AWS の資格情報を持たずに検査できる（Value 8）。develop の先端だけの食い違いは、固定の点を変える前の予告として要約に出す。
+契約の見本（`entrypoint-cases.json`）は呼び手の側の判定を確かめる材料として NDF が出している。CI で照らせば、AWS の資格情報を持たずに検査できる（Value 8）。既定の枝の先端だけの食い違いは、固定の点を変える前の予告として要約に出す。読む先は初め NDF の `develop` の先端だったが、`develop` が 2026-11-17 から進まず配布のタグが既定の枝から切られるようになったため、既定の枝の先端へ移した（決定 107・STD64）。
 
 採らなかった案: ランナーの起動の時だけ照らす形は、反映した後にしか食い違いが分からない。
 
@@ -900,18 +909,81 @@ NDF の答えの事象は鍵を持たない（決定 70）。そこで、正規�
 
 根拠: Value 4 / Value 1（MVV 版 1）
 
+### 決定 104: 古い契約の点を残さず、上流の最新の配布と同じ契約で作るため、固定の点を ndf v11.0.12 のタグのコミットにし、受ける契約の組を版 8 の 1 つにする
+
+固定の点は `ndf--v11.0.12` のタグのコミット（`752a9cf`）で、受ける組は `{版 8, ed8b0365…}` の 1 つである（64 桁は [NDF との契約](#ndf-との契約) の「契約の版の照らし」の行）。受ける組は、契約の `version.json` の `history` の最後の行が持つ契約の版と、その版の契約のファイルの sha256 の対である。ランナーは起動の時にこの対だけを照らし、版の数字の大小は比べない。形の正本のデータへ置くのは #2 である。利用者の手元の NDF と同じ配布の契約で作れば、ランナーと検査が古い置き場と名前で作られない（Value 8）。
+
+採らなかった案: ndf v11.0.0 の配布のコミット（版 6）へ付け替える形は、その後 v11.0.12 までに契約が 2 版進んでおり、付け替えた直後に古い点になる。受ける組に版 6〜8 の 3 つを持つ形は、動いているランナーがまだ無く古い組を受ける理由が無いうえ、照合の検査が見る形も増える。既定の枝の先端のコミットを固定の点にする形は、配布していない変更を含み、利用者の手元の NDF と同じにならない。
+
+代償: NDF の配布が進むたびに、固定の点と受ける組を同じ Pull Request で直す手間が残る。
+
+- 作り方: 標準に倣う
+- 比べた候補: STD62
+
+根拠: Value 8 / Value 4（MVV 版 1）
+
+### 決定 105: nd-factory の語を変えずに契約の引数の名前に合わせるため、「進行表」の語を残し、ID を「進行表の ID（`machine_id`）」と書く
+
+契約は `ndf answer` と `ndf progress` の位置引数と結果の ID を `machine_id`（ステートマシンの ID）と呼ぶ（STD63）。この文書で ID を指す箇所（照らす・確定から NDF までの図・問いの答え・未確認のまま残ること）は引数の名前を `machine_id` にし、語は「進行表の ID（`machine_id`）」と書く。「進行表」「進行表の DB」の語は用語集のまま残す。
+
+採らなかった案: この文書の「進行表」をすべて NDF 11 の語「ステートマシン」へ言い換える形は、7 本で 60 か所を超え、用語集の語「進行表の DB」と環境変数 `NDF_PROGRESS_DB` の読みも変わる。語の揃えは #34 の範囲である。
+
+代償: nd-factory の語（進行表）と NDF の語（ステートマシン）が違うまま残り、読み手は括弧の識別子で対応を読む。
+
+根拠: Value 4（MVV 版 1）
+
+### 決定 106: 契約に載るものだけで問いに答えるため、`ask-journal` の `fields` を上流の契約へ足すよう依頼し、足されるまで未確認として残す
+
+ランナーが `ndf answer` に渡す問いの ID（`--gate`）と進行表の ID（`machine_id`）の取り出し元が、固定の点の契約にも無い（`ask-journal` の行が `fields` を持たない。STD62）。そこで devbasex/ai-plugins へ、`ask-journal` の行に `fields`（問いの ID・進行表の ID・区分）を足す依頼を起こした（[devbasex/ai-plugins#3947](https://github.com/devbasex/ai-plugins/issues/3947)）。同じ依頼に、決定 108 の区間の報告の 2 件（`report-unattended` の行の `source` が無い置き場を指すこと・`ndf-ask:human-action` の後の続きの区間の起こし方が `shape.items` に無いこと）を入れた。他のリポジトリへの起票はレッドライン C5 に当たるため、設計承認ゲートで人が承認した後に起こした。足されるまで [未確認のまま残ること](#未確認のまま残ること) に残し、#6 の詳細設計はこの行を前提にしない。
+
+採らなかった案: 契約に無いまま、固定の版の NDF で承認ゲートを 1 回通して実測で確かめる形は、得た形が契約に無く NDF の内部の形に頼ることになり、照合の検査（F23）で食い違いを拾えない。NDF の実装（`ask.jsonl` を書くスクリプト）を読んで項目を決める形も、同じく契約の外の形に頼る。
+
+代償: 上流が契約を足すまで、ランナーの問いの答えの渡し方（#6）が決まらない。上流の返事を待つ時間が #6 の詳細設計の前に入りうる。
+
+根拠: Value 4 / Value 8（MVV 版 1）
+
+### 決定 107: 次の配布の契約の食い違いを先に知るため、契約の照合の検査（F23）は固定の点と ai-plugins の既定の枝の先端を照らす
+
+読む先は、配布のタグを切る枝である ai-plugins の既定の枝（GitHub のリポジトリの `default_branch`。今は `main`）の先端の `plugins/ndf/contracts/` である。枝の名前を設計と検査に書き込まず、リポジトリの設定から引く。`develop` の先端は 2026-11-17 から進まず、今は固定の点の前の点と同じで、予告にならない（STD64）。タグは既定の枝から切られるので、既定の枝の先端は次のタグの候補を先に含む（決定 79）。
+
+採らなかった案: 最新の配布のタグ（`ndf--v*`）を読む形は、どれが最新かを決める規則が上流の契約に無い。タグの名前の版の数字で並べると版の数字を比べない決まりに反し、作った日付で並べると上流のタグの作り方に頼る。
+
+代償: 既定の枝の先端は配布の前の変更を含むため、要約に出る食い違いには配布されないまま変わるものも入る。検査を失敗にするのは固定の点の契約が食い違ったときだけで、先端の食い違いは要約に出すだけという扱いは変えない。
+
+- 作り方: 標準に倣う
+- 比べた候補: STD64
+
+根拠: Value 8（MVV 版 1）
+
+### 決定 108: 区間の報告を契約に載るものだけで読むため、決まりの出所を契約の `C/hooks/unattended-report.json` にし、読む項目を契約の項目と照らす
+
+固定の点の契約に区間の報告の決まり（`C/hooks/unattended-report.json`）が入った（STD65）。最後の `- 結果:` の行は `rule`、値の 3 つは `shape.values`、項目は `shape.items`、値ごとに要る項目は `shape.required`、材料の形は `shape.material` から読む（[区間と結果の行](#区間と結果の行)）。報告から読む項目は契約の項目の名前で書く（問いは項目「質問」）。
+
+報告の項目「承認ゲート」には、契約の例で「設計 Pull Request のマージ」「本番系へ届く操作」など止まった操作の文言が入り、この文書が API・画面・事象に許す正規の名前「設計承認ゲート」「リリース承認ゲート」とは値が違う。そこで正規の名前は区分から決め（`ndf-gate:1` は設計承認ゲート、`ndf-gate:2` はリリース承認ゲート、`ndf-ask:redline:<番号>` は名前を持たない）、報告の項目「承認ゲート」の文言は題にだけ使う（[承認資料](#承認資料)）。契約に無い 2 つは次のとおり扱う。承認資料の「題」は報告から読まずランナーが作る。`ndf-ask:human-action` の後の `次のコマンド:` の行は、手順書が任意で残してよいとし守りも通すので報告に残せるが、契約の項目に無いため、続きの区間を起こすのに使える項目として契約に定めるかを上流へ確かめる（決定 106 の依頼に含めた。[devbasex/ai-plugins#3947](https://github.com/devbasex/ai-plugins/issues/3947)）。`report-unattended` の口の行の `source` は無い置き場を指すため、置き場は `source` から引かず `C/hooks/unattended-report.json` として読む。
+
+採らなかった案: 出所を NDF の手順の文書（`asking.md`）のまま残す形は、契約に入った決まりを契約の外で読むことになり、F23 が食い違いを拾えない。契約の `source` の注（「Factory のランナーが読むのは結果の行だけ」）に合わせ、ランナーは結果の値だけを読み承認の依頼の中身を人に読ませる形は、承認の依頼の区分と承認ゲートを選べず E10 が成り立たない。項目の名前と要る項目は `shape` に契約として載っているので、読むのは契約の内である。
+
+代償: 上流が項目の名前を手順書の語に合わせて変えると、nd-factory の読み方も変わる（F23 が `shape.items` の差分として知らせる）。
+
+- 作り方: 標準に倣う
+- 比べた候補: STD65
+
+根拠: Value 4 / Value 8（MVV 版 1）
+
 ## 未確認のまま残ること
 
 | 項目 | 何が分からないか | いつ・何で分かるか |
 | --- | --- | --- |
 | 複数の課題を 1 つのレーンで回す口 | 契約の `skill-workflow` は `#N` 1 つだけを受ける。NDF が複数の課題の口を契約に足すか | 契約の照合の検査が、固定の点を変える Pull Request で `entrypoints.json` の差分として知らせる |
-| 問いと承認ゲートの ID の得方 | `ndf answer` の `table_id`・`--gate` の値を、ランナーが `ask.jsonl` の行か区間の報告から得られるか（`fields` に無い） | 固定の版の NDF で承認ゲートを 1 回通して確かめる |
-| 防ぐ守りの下での承認ゲート | 答えを書くファイルを claude の利用者から書けない権限の下で、承認ゲートが承認の依頼を書き、区間が `判断が要る` で終わるか | 同上。あわせて claude の利用者から `ndf answer` を打つと書き込みが失敗することを確かめる |
+| 問いと承認ゲートの ID の得方 | `ndf answer` の位置引数 `machine_id`（進行表の ID）と `--gate` の値を、ランナーが `ask.jsonl` の行か区間の報告から得られるか（`ask-journal` の行が `fields` を持たない） | 上流へ `ask-journal` の行に `fields`（問いの ID・進行表の ID・区分）を足すよう依頼した（[devbasex/ai-plugins#3947](https://github.com/devbasex/ai-plugins/issues/3947)。決定 106）。上流の答えで分かり、足されたらその配布の点へ付け替える Pull Request でこの行を消す。足されるまで #6 の詳細設計はこの行を前提にしない |
+| 防ぐ守りの下での承認ゲート | 答えを書くファイルを claude の利用者から書けない権限の下で、承認ゲートが承認の依頼を書き、区間が `判断が要る` で終わるか | 固定の版の NDF の試しの進行表で承認ゲートを 1 回通して確かめる。あわせて claude の利用者から `ndf answer` を打つと書き込みが失敗することを確かめる |
 | 答えの置き場が進行表の DB か | 答えの事象が進行表の DB の行に書かれ、claude の利用者が `NDF_PROGRESS_DB` で書けるか | 同上。書けるなら DB のログインの役割を分ける形へ設計を戻す |
-| 答えの事象の項目 | `answered`・`row_answered` の 1 行が表の ID と時刻を持つか（契約の事象の表は種類と主体だけ） | 同上 |
+| 答えの事象の項目 | `answered`・`row_answered` の 1 行が進行表の ID と時刻を持つか（契約の事象の表は種類と主体だけ） | 同上 |
 | 休止の後の続き | 状態の S3 から戻したファイルと進行表の DB だけで、新しいタスクが `ndf answer` の後の区間を続けられるか | 同上 |
 | 1 時間を超える区間での GitHub の token | `GH_TOKEN` は claude の起動時の環境で、区間が 1 時間を超えると切れる。`gh` が環境の値以外から取り直す手段を NDF の流れで使えるか | 固定の版で長い区間を通して確かめる。切れるなら区間の時間の上限を NDF の宣言で 1 時間より短くする |
 | `awsCredentialExport` の読み直し | 期限の 5 分前を過ぎた後にコマンドが打ち直されること（文書は「読み直しのたび」と書く） | 固定の版の claude で 1 時間を超える区間を通して確かめる |
 | 推論の量の項目 | claude の `-p` の結果の出力の、token の数の項目の名前 | 固定の版の claude で確かめる |
 | 同じ鍵の `ndf answer` の 2 回目 | 成功の終了コードを返すか、見分けられる失敗を返すか。`metrics.replayed` が真のときに `metrics.seqs` が最初に書いた事象の番号を返すか（決定 100） | #6 の詳細設計で実測する。見分けられなければ決定 100 を決め直す |
 | リポジトリの `visibility` の値の集まり | `private`・`internal`・`public` の 3 つで尽きるか（I21） | #8 の実装の時に GitHub の REST の文書の応答の形で確かめる |
+| 契約の `report-unattended` の出所のファイル | `C/domains/entrypoints.json` の `report-unattended` の行の `source` は `plugins/ndf/contracts/forms/unattended-report.json` を指すが、固定の点に `forms/` は無く、同じ名前の契約は `C/hooks/unattended-report.json` にある（`C/hooks/guards.json` の `unattended` もこの置き場を引く）。この文書はこの置き場を読み、#1 の照合の検査も置き場を `source` から引かない（決定 108） | `source` の直しを上流へ依頼した（[devbasex/ai-plugins#3947](https://github.com/devbasex/ai-plugins/issues/3947)。決定 106・108）。上流の答えで分かる |
+| `ndf-ask:human-action` の後の続きの区間の起こし方 | この文書は、人が「済んだ」と答えたら区間の報告の `次のコマンド:` の行で続きを起こす。手順書 `plugins/ndf/skills/development-workflow/references/asking.md` の「人のいない実行」は区分が `ndf-ask:human-action` なら再開用に `次のコマンド:` を残して終えてよいと書き、守りもそれを通すので、行は報告に残せる。未確認なのは、この行が手順書でも任意（「残してよい」）で、`C/hooks/unattended-report.json` の `shape.items` に無く、続きの区間を起こすのに使える項目として契約に定められていないことである（決定 108） | 契約に定めるかを上流へ依頼した（[devbasex/ai-plugins#3947](https://github.com/devbasex/ai-plugins/issues/3947)。決定 106・108）。上流の答えで分かり、#6 の詳細設計はこの行を前提にしない |

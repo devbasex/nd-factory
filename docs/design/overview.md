@@ -38,7 +38,7 @@
 | 支える姿 | 根拠 | 種類 | 何を示すか |
 | --- | --- | --- | --- |
 | 姿 1〜5 | [プロジェクト MVV 版 1](../../.ndf/mvv.md)（Mission・Vision・Value 1〜9・P1・P2） | 利用者が承認した MVV | 目指す姿と判断の基準。項目ごとの受け先は下の「MVV と設計の節の対応」 |
-| 姿 1 | NDF の契約のファイル（`plugins/ndf-next/contracts/`、[実行の文書の NDF との契約](execution.md#ndf-との契約)、調査の番号 STD62） | 外部の一次情報 | 外の呼び手が NDF を起動する口・環境変数・結果の行の形。レーンが NDF の工程をこの口だけで回せる |
+| 姿 1 | NDF の契約のファイル（`plugins/ndf/contracts/`、[実行の文書の NDF との契約](execution.md#ndf-との契約)、調査の番号 STD62） | 外部の一次情報 | 外の呼び手が NDF を起動する口・環境変数・結果の行の形。レーンが NDF の工程をこの口だけで回せる |
 | 姿 1 | [GitHub Actions の自前のランナー](https://docs.github.com/en/actions/reference/runners/self-hosted-runners)（[実行の文書の主要な製品](execution.md#主要な製品)、PRD60） | 外部の一次情報 | 利用者のマシンを外から開かず、外向きの HTTPS だけで仕事を受ける形が広く使われている。手元のマシンを実行の場所にできる |
 | 姿 2 | W3C の [Web Application Manifest](https://www.w3.org/TR/appmanifest/)・[Service Workers](https://www.w3.org/TR/service-workers/)・[Push API](https://www.w3.org/TR/push-api/)（[画面の文書の標準・仕様](screens.md#標準仕様)、STD20・STD22） | 外部の一次情報 | Web の画面を端末に入れ、つながらなくても読め、承認待ちの知らせを受けられる標準がある |
 | 姿 2 | [iOS・iPadOS の Safari の Web Push](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)（[画面の文書の主要な製品](screens.md#主要な製品)、PRD20） | 外部の一次情報 | ホーム画面に加えた Web アプリなら iPhone にも知らせが届く |
