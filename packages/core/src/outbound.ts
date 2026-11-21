@@ -330,6 +330,9 @@ export class DeadlineHttpHandler {
         controller.abort(timeoutError);
         body?.destroy(timeoutError);
       }, ms);
+      // 呼び手が本文を読まずに捨てると close が来ず期限まで残るため、プロセスの終わり（設置のコマンドなど）を引き止めない。
+      // 読み途中の要求はソケットがイベントループを保つため、期限は変わらず効く
+      timer.unref();
       result = await this.#inner.handle(request, { ...options, abortSignal: controller.signal });
     } catch (error) {
       release();
