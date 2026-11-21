@@ -19,7 +19,10 @@ const TIMEOUT = 60_000;
 /** 許可に書いた作り物の値と印。生成した値がこれらを含まないことを確かめてから木に置く */
 const ALLOWED_MARKS = ["123456789012", "210987654321", "EXAMPLE", "acme", "example.com", "00000000-0000-7000-8000-"];
 
-type Finding = { RuleID: string; File: string; Commit: string };
+type Finding = { RuleID: string; File: string; StartLine: number; EndLine: number; Commit: string };
+
+/** スクリプトが報告に残す項目。当たった行・伏せた値・コミットの本文と作者を残さない */
+const REPORT_KEYS = ["Commit", "EndLine", "File", "RuleID", "StartLine"];
 type ScanResult = { status: number | null; output: string; reportText: string | null; findings: Finding[] };
 
 const temps: string[] = [];
@@ -145,12 +148,17 @@ const ENDPOINTS: [() => string, string][] = [
   [() => `${lower(8)}-login`, "auth.us-west-2.amazoncognito.com"],
   [() => `${lower(8)}.${lower(12)}.us-west-2`, "rds.amazonaws.com"],
   [() => lower(12), "s3.amazonaws.com"],
+  [() => `nd-${lower(10)}`, "s3.us-west-2.amazonaws.com"],
+  [() => `nd-${lower(10)}`, "s3-us-west-2.amazonaws.com"],
+  [() => `nd-${lower(10)}`, "s3.dualstack.us-west-2.amazonaws.com"],
+  [() => `nd-${lower(10)}`, "s3-website-us-west-2.amazonaws.com"],
 ];
 
 /** 架空の値（許可に合わず、nd-factory の規則に合う）を規則ごとに `docs/` の下のファイルへ置いた木 */
 function leakTree(realWord: string) {
   const account = fakeAccount();
   const arnAccount = fakeAccount();
+  const role = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
   const bucket = fake(() => `nd-${lower(12)}`, /^[a-z0-9-]+$/);
   const resources = [fake(() => `vpc-${hex(17)}`, /^vpc-[0-9a-f]{17}$/), fake(() => `sg-${hex(8)}`, /^sg-[0-9a-f]{8}$/)];
   const endpoints = ENDPOINTS.map(([resource, service]) =>
@@ -158,13 +166,13 @@ function leakTree(realWord: string) {
   );
   const files = {
     "docs/account.md": `作り物でないアカウント ${account} の行\n`,
-    "docs/arn.md": `役割 arn:aws:iam::${arnAccount}:role/${lower(8)}\n`,
+    "docs/arn.md": `役割 arn:aws:iam::${arnAccount}:role/${role}\n`,
     "docs/s3.md": `置き場 arn:aws:s3:::${bucket}/key\n`,
     "docs/resource.md": resources.map((id) => `資源 ${id}\n`).join(""),
     "docs/endpoint.md": endpoints.map((host) => `端点 https://${host}/path\n`).join(""),
     "docs/real.md": `環境の名前 ${realWord} の行\n`,
   };
-  return { files, values: [account, arnAccount, bucket, ...resources, ...endpoints, realWord] };
+  return { files, values: [account, arnAccount, role, bucket, ...resources, ...endpoints, realWord] };
 }
 
 const ND_RULES_BY_FILE = {
@@ -172,7 +180,7 @@ const ND_RULES_BY_FILE = {
   "docs/arn.md": ["nd-aws-account-id", "nd-aws-arn"],
   "docs/s3.md": ["nd-aws-arn-s3"],
   "docs/resource.md": ["nd-aws-resource-id", "nd-aws-resource-id"],
-  "docs/endpoint.md": Array.from({ length: 6 }, () => "nd-aws-endpoint"),
+  "docs/endpoint.md": Array.from({ length: ENDPOINTS.length }, () => "nd-aws-endpoint"),
 };
 
 describe("nd-factory の規則（.gitleaks.toml）", () => {
@@ -200,7 +208,71 @@ describe("nd-factory の規則（.gitleaks.toml）", () => {
     expect(result.findings.length).toBeGreaterThan(0);
     const shown = `${result.output}${result.reportText ?? ""}`;
     expect(values.filter((value) => shown.includes(value))).toEqual([]);
-    expect(result.output).toContain("REDACTED");
+    expect(result.output).toContain("leak-scan: 当たり nd-aws-arn docs/arn.md:1");
+    expect([...new Set(result.findings.flatMap((f) => Object.keys(f)))].sort()).toEqual(REPORT_KEYS);
+  }, TIMEOUT);
+
+  it("1 つの行に別の規則の値が並んでも、どの当たりの出力にも行の残りが現れない", () => {
+    const realWord = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    const account = fakeAccount();
+    const role = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    const vpc = fake(() => `vpc-${hex(17)}`, /^vpc-[0-9a-f]{17}$/);
+    const values = [account, role, vpc, realWord];
+    const root = makeTree({ "docs/line.md": `役割 arn:aws:iam::${account}:role/${role} 資源 ${vpc} 名前 ${realWord}\n` });
+    const result = scan(root, ["dir", overlayConfig(realWord)]);
+    expect(result.status).toBe(1);
+    expect(result.findings.map((f) => [f.RuleID, f.File, f.StartLine]).sort()).toEqual([
+      ["nd-aws-account-id", "docs/line.md", 1],
+      ["nd-aws-arn", "docs/line.md", 1],
+      ["nd-aws-resource-id", "docs/line.md", 1],
+      ["nd-real-value", "docs/line.md", 1],
+    ]);
+    const shown = `${result.output}${result.reportText ?? ""}`;
+    expect(values.filter((value) => shown.includes(value))).toEqual([]);
+    expect(shown).not.toContain("role/");
+  }, TIMEOUT);
+
+  it("隣り合う 12 桁を 1 文字の区切りでそれぞれ当て、英数字に接した数と作り物の値は当てない", () => {
+    const lines = [
+      ...[",", ";", " ", "\t", "|", ":", "/", "-", "_"].map((sep) => [fakeAccount(), fakeAccount(), fakeAccount()].join(sep)),
+      `123456789012,${fakeAccount()}`,
+      `${fakeAccount()},123456789012,210987654321`,
+      `00000000-0000-7000-8000-${digits(12)},${fakeAccount()}`,
+      `spr_00000000-0000-7000-8000-${digits(12)}`,
+      `x${fakeAccount()} ${fakeAccount()}x ${digits(13)}`,
+      `prod_${fakeAccount()} ${fakeAccount()}_role`,
+    ];
+    const root = makeTree({ "docs/list.md": `${lines.join("\n")}\n` });
+    const result = scan(root, ["dir", ND_CONFIG]);
+    const perLine: Record<number, number> = {};
+    for (const f of result.findings) perLine[f.StartLine] = (perLine[f.StartLine] ?? 0) + 1;
+    // 区切りごとに 3 件。作り物の値と UUID の最後の組は数えず、英数字に接した数と 13 桁は当てない
+    expect(perLine).toEqual({ 1: 3, 2: 3, 3: 3, 4: 3, 5: 3, 6: 3, 7: 3, 8: 3, 9: 3, 10: 1, 11: 1, 12: 1, 15: 2 });
+    expect(result.findings.filter((f) => f.StartLine === 9).map((f) => f.RuleID).sort()).toEqual([
+      "nd-aws-account-id",
+      "nd-aws-account-id",
+      "nd-aws-account-id-joined",
+    ]);
+  }, TIMEOUT);
+
+  it("文書の区切り（<…> の自動のリンク・波括弧）に接した実際の名前を、置き場所の記号として許さない", () => {
+    const host = fake(() => `d${lower(13)}`, /^d[a-z]{13}$/);
+    const bucket = fake(() => `nd-${lower(10)}`, /^nd-[a-z]{10}$/);
+    const regional = fake(() => `nd-${lower(10)}`, /^nd-[a-z]{10}$/);
+    const root = makeTree({
+      "docs/autolink.md": `端点 <${host}.${"cloudfront.net"}>\n`,
+      "docs/brace.md": `置き場 {arn:aws:s3:::${bucket}}\n`,
+      "docs/s3-autolink.md": `端点 <https://${regional}.${"s3.us-west-2.amazonaws.com"}/key>\n`,
+      "docs/arn-autolink.md": `役割 <arn:aws:iam::${fakeAccount()}:role/${lower(8)}>\n`,
+    });
+    const result = scan(root, ["dir", ND_CONFIG]);
+    expect(result.status).toBe(1);
+    expect(rulesByFile(result.findings)).toEqual({
+      "docs/autolink.md": ["nd-aws-endpoint"],
+      "docs/brace.md": ["nd-aws-arn-s3"],
+      "docs/s3-autolink.md": ["nd-aws-endpoint"],
+      "docs/arn-autolink.md": ["nd-aws-account-id", "nd-aws-arn"],
+    });
   }, TIMEOUT);
 
   it.each([
@@ -218,6 +290,8 @@ describe("nd-factory の規則（.gitleaks.toml）", () => {
         "置き場 arn:aws:s3:::assets.example.com と arn:aws:s3:::nd-EXAMPLE-logs",
         "端点 https://<api-id>.execute-api.<region>.amazonaws.com と https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com",
         "端点 https://acme-test-login.auth.us-west-2.amazoncognito.com と https://EXAMPLE1234.cloudfront.net",
+        "端点 https://<bucket>.s3.<region>.amazonaws.com と ${AssetsBucket}.s3.${AWS::Region}.amazonaws.com と <bucket>.s3-us-west-2.amazonaws.com",
+        "端点 https://s3.us-west-2.amazonaws.com/acme-assets と 置き場 arn:aws:s3:::<bucket>/key と 役割 arn:aws:iam::123456789012:role/${RoleName}",
         "",
       ].join("\n"),
     });
@@ -273,6 +347,19 @@ describe("履歴の探し", () => {
     const result = scan(root, ["git", ND_CONFIG, "--range", `${base}..HEAD`]);
     expect(result.status).toBe(1);
     expect(result.findings.map((f) => [f.RuleID, f.File, f.Commit])).toEqual([["nd-aws-account-id", "docs/a.md", added]]);
+    expect(result.output).toContain(`leak-scan: 当たり nd-aws-account-id docs/a.md:2 ${added}`);
+  }, TIMEOUT);
+
+  it("git の探しの出力と報告に、当たったコミットの本文が現れない", () => {
+    const root = makeTree({ "docs/a.md": "はじめ\n" });
+    initRepo(root);
+    const subject = fake(() => `nd${lower(10)}`, /^nd[a-z]{10}$/);
+    write(root, "docs/a.md", `はじめ\nアカウント ${fakeAccount()}\n`);
+    commitAll(root, `add ${subject}`);
+    const result = scan(root, ["git", ND_CONFIG]);
+    expect(result.status).toBe(1);
+    expect(result.findings.map((f) => f.RuleID)).toEqual(["nd-aws-account-id"]);
+    expect(`${result.output}${result.reportText ?? ""}`).not.toContain(subject);
   }, TIMEOUT);
 
   it("マージのコミットの競合の解消でだけ足して後で消した値が、マージのコミットの当たりとして報告される", () => {

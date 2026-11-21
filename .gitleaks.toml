@@ -7,16 +7,19 @@
 title = "nd-factory"
 
 # 前後が英数字でない 12 桁。作り物の UUID（00000000-0000-7000-8000-<12 桁>）の最後の組を許可で見分けるため、
-# UUID の前の 4 組があれば当てた文字列に含める
+# UUID の前の 4 組があれば当てた文字列に含める。
+# 境界は \b（文字を消費しない）で見て、隣り合う値（<12 桁>,<12 桁>）の間の 1 文字の区切りを次の値に残す。
+# \b は _ を英数字と同じに扱うので、_ だけは消費して区切りとして受ける。_ 1 文字で 2 つの 12 桁を繋いだときの
+# 後ろの値は、次の規則 nd-aws-account-id-joined が当てる
 [[rules]]
 id = "nd-aws-account-id"
 description = "AWS のアカウント ID"
-regex = '''(?m)(?:^|[^0-9A-Za-z])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-)?([0-9]{12})(?:[^0-9A-Za-z]|$)'''
+regex = '''(?:\b|_)(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-)?([0-9]{12})(?:\b|_)'''
 secretGroup = 1
 
 [[rules.allowlists]]
-description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<…>・${…}。実際の名前に現れない文字）"
-regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''[<>{}]''', '''EXAMPLE''']
+description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<名前>・${名前} の全体。記号の 1 文字だけでは許さない）"
+regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''<[A-Za-z0-9_-]+>''', '''\$\{[^{}\s]+\}''', '''EXAMPLE''']
 
 [[rules.allowlists]]
 description = "別のアカウントの作り物。設置のコマンドのテストが、確認したアカウントと違う profile を作る（infra/test/nd-setup.test.ts。#1）"
@@ -27,26 +30,39 @@ description = "作り物の UUID の最後の組（docs/design/screens.md の「
 regexTarget = "match"
 regexes = ['''00000000-0000-7000-8000-[0-9]{12}''']
 
-# アカウントの欄が 12 桁の ARN。秘密は ARN の全体（アカウントの欄の 12 桁は nd-aws-account-id も当てる）
+# _ 1 文字の後ろの 12 桁で、その _ の前も 12 桁のもの（<12 桁>_<12 桁> の後ろの値）。
+# nd-aws-account-id は前の値の後ろの _ を消費するので、後ろの値をこの規則で当てる
 [[rules]]
-id = "nd-aws-arn"
-description = "AWS の ARN（アカウントの欄つき）"
-regex = '''arn:(?:aws|aws-cn|aws-us-gov):[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:[^\s"'`]*'''
-
-[[rules.allowlists]]
-description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<…>・${…}。実際の名前に現れない文字）"
-regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''[<>{}]''', '''EXAMPLE''']
-
-# アカウントとリージョンの欄の無い S3 の ARN。秘密は置き場の名前
-[[rules]]
-id = "nd-aws-arn-s3"
-description = "S3 の置き場の ARN"
-regex = '''arn:(?:aws|aws-cn|aws-us-gov):s3:::([A-Za-z0-9.<>${}_-]+)'''
+id = "nd-aws-account-id-joined"
+description = "AWS のアカウント ID（_ で前の 12 桁と繋いだもの）"
+regex = '''[0-9]{12}_([0-9]{12})(?:\b|_)'''
 secretGroup = 1
 
 [[rules.allowlists]]
-description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<…>・${…}。実際の名前に現れない文字）"
-regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''[<>{}]''', '''EXAMPLE''']
+description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）"
+regexes = ['''123456789012''', '''^210987654321$''']
+
+# アカウントの欄が 12 桁の ARN。秘密は ARN の全体（アカウントの欄の 12 桁は nd-aws-account-id も当てる）。
+# 資源の欄は置き場所の記号（<名前>・${名前}）の全体か、空白・引用符・<>{} の外の文字。値に接した文書の区切り（<…> の閉じ・} ）を含めない
+[[rules]]
+id = "nd-aws-arn"
+description = "AWS の ARN（アカウントの欄つき）"
+regex = '''arn:(?:aws|aws-cn|aws-us-gov):[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[^\s"'`<>{}])*'''
+
+[[rules.allowlists]]
+description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<名前>・${名前} の全体。記号の 1 文字だけでは許さない）"
+regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''<[A-Za-z0-9_-]+>''', '''\$\{[^{}\s]+\}''', '''EXAMPLE''']
+
+# アカウントとリージョンの欄の無い S3 の ARN。秘密は置き場の名前（置き場所の記号の全体か、名前に使える文字の並び）
+[[rules]]
+id = "nd-aws-arn-s3"
+description = "S3 の置き場の ARN"
+regex = '''arn:(?:aws|aws-cn|aws-us-gov):s3:::((?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[A-Za-z0-9._-])+)'''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<名前>・${名前} の全体。記号の 1 文字だけでは許さない）"
+regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''<[A-Za-z0-9_-]+>''', '''\$\{[^{}\s]+\}''', '''EXAMPLE''']
 
 # AWS の資源の ID（頭と 8 か 17 桁の 16 進）
 [[rules]]
@@ -56,16 +72,19 @@ regex = '''\b((?:vpc|subnet|sg|i|vol|snap|ami|igw|rtb|eni|nat|eipalloc|lt)-(?:[0
 secretGroup = 1
 
 [[rules.allowlists]]
-description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<…>・${…}。実際の名前に現れない文字）"
-regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''[<>{}]''', '''EXAMPLE''']
+description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<名前>・${名前} の全体。記号の 1 文字だけでは許さない）"
+regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''<[A-Za-z0-9_-]+>''', '''\$\{[^{}\s]+\}''', '''EXAMPLE''']
 
-# 資源ごとに名前の付く AWS の端点。秘密は資源の部分（サービスとリージョンより前のラベル）
+# 資源ごとに名前の付く AWS の端点。秘密は資源の部分（サービスとリージョンより前のラベル）。
+# ラベルは置き場所の記号（<名前>・${名前}）の全体か英数字と _- の並び。<実際の名前.cloudfront.net> の < は記号の一部にならず、秘密に含めない。
+# S3 はリージョンなし（<bucket>.s3.amazonaws.com）・リージョンつき（<bucket>.s3.<region>.amazonaws.com・<bucket>.s3-<region>.amazonaws.com）・
+# dualstack と website の形（<bucket>.s3.dualstack.<region>.amazonaws.com・<bucket>.s3-website-<region>.amazonaws.com）を当てる
 [[rules]]
 id = "nd-aws-endpoint"
 description = "AWS の資源ごとの端点"
-regex = '''((?:[A-Za-z0-9<>${}_-]+\.)*[A-Za-z0-9<>${}_-]+)\.(?:execute-api\.[^.\s"'`/]+\.amazonaws\.com|lambda-url\.[^.\s"'`/]+\.on\.aws|cloudfront\.net|auth\.[^.\s"'`/]+\.amazoncognito\.com|rds\.amazonaws\.com|s3\.amazonaws\.com)'''
+regex = '''((?:(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[A-Za-z0-9_-])+\.)*(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[A-Za-z0-9_-])+)\.(?:execute-api\.[^.\s"'`/]+\.amazonaws\.com|lambda-url\.[^.\s"'`/]+\.on\.aws|cloudfront\.net|auth\.[^.\s"'`/]+\.amazoncognito\.com|rds\.amazonaws\.com|s3(?:[.-][^.\s"'`/]+)*\.amazonaws\.com)'''
 secretGroup = 1
 
 [[rules.allowlists]]
-description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<…>・${…}。実際の名前に現れない文字）"
-regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''[<>{}]''', '''EXAMPLE''']
+description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<名前>・${名前} の全体。記号の 1 文字だけでは許さない）"
+regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''<[A-Za-z0-9_-]+>''', '''\$\{[^{}\s]+\}''', '''EXAMPLE''']
