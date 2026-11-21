@@ -138,11 +138,15 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 
 各コマンドには、消したアプリのスタックがあったアカウントで作業する profile と、そのリージョンを `--profile <profile> --region <region>` で必ず渡す。省くと既定の profile とリージョン（環境変数 `AWS_PROFILE`・`AWS_REGION` を含む）が先になり、同じ接頭辞と環境の名前を持つ別のアカウントかリージョンの DB・秘密の器・表を消しうる。初めに接続先を確かめる。
 
-0. 接続先を確かめる: 消したアプリのスタック `<prefix>-<environment>-app` があったアカウントとリージョンを、アプリのスタックを反映した仕方に応じて次から取る。profile の `region`（`aws configure get region`）は出所にしない。反映のときに環境変数 `AWS_REGION` が先になっていると、実際の反映先と食い違う
+アプリのスタックを消すときは、消す前に `aws cloudformation describe-stacks --stack-name <prefix>-<environment>-app --query 'Stacks[0].StackId' --profile <profile> --region <region>` の Stack ID と、消した日時を削除の記録として控えておく。Stack ID はスタックごとに一意で、消してからの日数によらず接続先の出所になる。
+
+0. 接続先を確かめる: 消したアプリのスタック `<prefix>-<environment>-app` があったアカウントとリージョンを、次の出所のうち手元にあるものから取る。上のものほど確かである。profile の `region`（`aws configure get region`）は出所にしない。反映のときに環境変数 `AWS_REGION` が先になっていると、実際の反映先と食い違う
    - 設置のコマンドで反映した場合（自分で設置する人）: 反映したときに `diff` が出し `deploy` へ渡した確認の値（`<要約値>:<アカウント>:<リージョン>:<スタックの一覧>`）の 2 つ目をアカウント、3 つ目を `<region>` とする
-   - 反映のパイプラインで反映した場合（運用する環境）: アプリのスタックの反映に使った確認の値は無い。パイプラインは、パイプラインのスタックと同じアカウントとリージョンでアプリのスタックを合成して反映する。そのため、パイプラインのスタック `<prefix>-<environment>-pipeline` を設置したときの確認の値の 2 つ目と 3 つ目を使う
-   - 確認の値を控えていない場合: CloudFormation が残す、消したスタックの記録（消してから 90 日残る）から取る。候補のリージョンで `aws cloudformation list-stacks --stack-status-filter DELETE_COMPLETE --query "StackSummaries[?StackName=='<prefix>-<environment>-app'].StackId" --profile <profile> --region <候補のリージョン>` を打つ。出た `arn:aws:cloudformation:<リージョン>:<アカウント>:stack/...` の 4 つ目がリージョン、5 つ目がアカウントである。空なら、そのアカウントとリージョンに消したスタックは無いため、別の候補で打ち直す。パイプラインのスタックが残っていれば、`aws cloudformation describe-stacks --stack-name <prefix>-<environment>-pipeline --query 'Stacks[0].StackId' --profile <profile> --region <候補のリージョン>` の ARN からも同じ 2 つを取れる
-   - どの場合も、最後に次の 2 つで照合する。`aws sts get-caller-identity --profile <profile> --region <region> --query Account` が上のアカウントと同じであること。同じ profile とリージョンで上の `list-stacks` を打ち、消したアプリのスタックの記録が出ること
+   - 反映のパイプラインで反映した場合（運用する環境）: アプリのスタックの反映に使った確認の値は無い。パイプラインは、パイプラインのスタックと同じアカウントとリージョンでアプリのスタックを合成して反映する。そのため、パイプラインのスタック `<prefix>-<environment>-pipeline` を設置したときの確認の値（承認の記録と一緒に控えたもの）の 2 つ目と 3 つ目を使う
+   - 確認の値は無いが削除の記録に Stack ID がある場合: Stack ID（`arn:aws:cloudformation:<リージョン>:<アカウント>:stack/<スタックの名前>/<一意の ID>`）の 4 つ目をリージョン、5 つ目をアカウントとする。スタックの名前が `<prefix>-<environment>-app` であることも確かめる
+   - 上のどれも無い場合: CloudFormation が残す、消したスタックの記録（消してから 90 日残る）から探す。候補のアカウントの profile と候補のリージョンの組を、思い当たるものすべてで `aws cloudformation list-stacks --stack-status-filter DELETE_COMPLETE --query "StackSummaries[?StackName=='<prefix>-<environment>-app'].[StackId,DeletionTime]" --profile <候補の profile> --region <候補のリージョン>` を打つ。出た Stack ID の 4 つ目がリージョン、5 つ目がアカウントである。同じ名前は別のアカウントやリージョン（別の環境）にも、同じ組の中にも何度でも残りうるため、出た 1 件で決めない。削除の記録（消した日時、パイプラインの実行やチケットの記録など）と `DeletionTime` を照らし、合う記録が全候補を通して 1 件だけのときに限ってその Stack ID を使う。パイプラインのスタックが残っていれば、`aws cloudformation describe-stacks --stack-name <prefix>-<environment>-pipeline --query 'Stacks[0].[StackId,CreationTime]' --profile <候補の profile> --region <候補のリージョン>` の Stack ID からも同じ 2 つを取れる。このときも全候補で打ち、残っているのが 1 か所だけで、作った日時がパイプラインを設置した記録と合うときに限る
+   - どれからも 1 つに決められない場合（控えも削除の記録も無く、消してから 90 日を過ぎて記録も出ない。記録が複数の候補に出て削除の記録で絞れない。など）: 1 以降の削除へ進まない。作業を止め、反映や削除をした人・パイプラインの記録・アカウントの管理者に当たって接続先を調べる。名前だけで決めて消すと、別の環境の DB や表を消しうる
+   - 決めた後、どの出所でも `aws sts get-caller-identity --profile <profile> --region <region> --query Account` が上のアカウントと同じであることを確かめる。確認の値か削除の記録の Stack ID から取った場合の照合はこれだけで、`list-stacks` で消したスタックの記録が出ることは求めない（消してから 90 日を過ぎると出ないため、出なくても止めない）。違えば profile を選び直す
 
 以下の 1〜6 の AWS CLI のコマンドは、どれも末尾に `--profile <profile> --region <region>` を付けて打つ（例では「…」と略す）。
 
