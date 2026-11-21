@@ -350,7 +350,7 @@ infra/
 
 満たす決定: 決定 16（決定 140 の改め）、受け入れ条件 1
 
-`client.ts` は zod と `operations/` だけを import し、React・DOM・`node:` の組み込みを import しない。画面（React 19 の TSX）・e2e・API のテストが同じ口を使う。React のフックの包みと、取得の控えの層（LIB-A20）・Service Worker のダミー（LIB-A21）を採るかは画面の基盤（#12）が決める。
+画面の実装方針の正本は [platform.md の言語と書き方の決まり](../docs/design/platform.md#言語と書き方の決まり) と決定 140 で、画面は React 19 の関数の部品を TSX で書き、画面の外のコードは TSX と React を import しない。`client.ts` は形の正本（画面の外）に置くため、zod と `operations/` だけを import し、React・DOM・`node:` の組み込みを import しない。画面（React 19 の TSX）・e2e・API のテストが同じ口を使う。React のフックの包みと、取得の控えの層（LIB-A20）・Service Worker のダミー（LIB-A21）を採るかは画面の基盤（#12）が決める。
 
 ### 関数の仕様
 
