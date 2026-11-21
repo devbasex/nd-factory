@@ -182,13 +182,10 @@ describe("createDataApiExecutor", () => {
     }
   });
 
-  it("createRdsDataClient で作っていないクライアントでは、何も送らずに投げる", async () => {
+  it("createRdsDataClient で作っていないクライアントは、作る時に投げる", () => {
     const fake = new FakeRdsData();
     const client = { config: { maxAttempts: async () => 1 }, send: (cmd: Command) => fake.send(cmd) } as unknown as RDSDataClient;
-    const sql = createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN });
-    await expect(sql.execute("SELECT 1", undefined, { database: ADMIN_DATABASE })).rejects.toThrow(/createRdsDataClient/);
-    await expect(sql.begin({ database: ADMIN_DATABASE })).rejects.toThrow(/createRdsDataClient/);
-    await expect(sql.commit("tx-1")).rejects.toThrow(/createRdsDataClient/);
+    expect(() => createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN })).toThrow(/createRdsDataClient/);
     expect(fake.calls).toHaveLength(0);
   });
 
@@ -392,10 +389,10 @@ describe("createRdsDataClient（SDK の再試行）", () => {
     expect(h.count()).toBe(3);
   });
 
-  it("既定の RDSDataClient を渡すと送る前に投げる", async () => {
+  it("既定の RDSDataClient を渡すと作る時に投げる", () => {
     const h = unavailableHandler();
-    const sql = createDataApiExecutor({ client: new RDSDataClient({ ...base, requestHandler: h }), resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN });
-    await expect(sql.execute("SELECT 1", undefined, { database: ADMIN_DATABASE })).rejects.toThrow(/createRdsDataClient/);
+    const client = new RDSDataClient({ ...base, requestHandler: h });
+    expect(() => createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN })).toThrow(/createRdsDataClient/);
     expect(h.count()).toBe(0);
   });
 
@@ -413,7 +410,7 @@ describe("createRdsDataClient（SDK の再試行）", () => {
     };
   }
 
-  it("maxAttempts: 1 と独自の retryStrategy を持つ RDSDataClient を渡すと送る前に投げる", async () => {
+  it("maxAttempts: 1 と独自の retryStrategy を持つ RDSDataClient を渡すと作る時に投げる", async () => {
     // この差し替えが戦略で打ち直すことの確かめ
     const probe = unavailableHandler();
     const raw = new RDSDataClient({ ...base, maxAttempts: 1, retryStrategy: retryingStrategy(), requestHandler: probe });
@@ -423,9 +420,7 @@ describe("createRdsDataClient（SDK の再試行）", () => {
 
     const h = unavailableHandler();
     const client = new RDSDataClient({ ...base, maxAttempts: 1, retryStrategy: retryingStrategy(), requestHandler: h });
-    const sql = createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN });
-    await expect(sql.commit("tx-1")).rejects.toThrow(/createRdsDataClient/);
-    await expect(sql.execute("SELECT 1", undefined, { database: ADMIN_DATABASE })).rejects.toThrow(/createRdsDataClient/);
+    expect(() => createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN })).toThrow(/createRdsDataClient/);
     expect(h.count()).toBe(0);
   });
 
@@ -462,27 +457,45 @@ describe("createRdsDataClient（SDK の再試行）", () => {
     expect(h.count()).toBe(2);
   });
 
-  it("createRdsDataClient で作った後に config の戦略を差し替えると、送る前に投げる", async () => {
-    const h = unavailableHandler();
-    const client = createRdsDataClient({ ...base, requestHandler: h });
+  // 作った後に config の戦略と回数を差し替える。どちらも書き換えられない項目のため投げる
+  function replaceRetry(client: RDSDataClient): void {
     const strategy = retryingStrategy();
-    (client.config as { retryStrategy: unknown }).retryStrategy = async () => strategy;
-    const sql = createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN });
-    await expect(sql.commit("tx-1")).rejects.toThrow(/差し替えられた/);
-    expect(h.count()).toBe(0);
-  });
+    const config = client.config as { retryStrategy: unknown; maxAttempts: unknown };
+    expect(() => {
+      config.retryStrategy = async () => strategy;
+    }).toThrow(TypeError);
+    expect(() => {
+      config.maxAttempts = async () => 3;
+    }).toThrow(TypeError);
+    expect(() => Object.defineProperty(config, "retryStrategy", { value: async () => strategy })).toThrow(TypeError);
+  }
 
-  it("1 回目の commit が送られた後に config の戦略を差し替えると、2 回目は送る前に投げる", async () => {
+  it("createRdsDataClient で作った後は config の戦略と回数を差し替えられず、commit は 1 回だけ送る", async () => {
     const h = unavailableHandler();
     const client = createRdsDataClient({ ...base, requestHandler: h });
+    replaceRetry(client);
     const sql = createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN });
-    // 1 回目は検査を通って送られる（503 で投げる）
     await expect(sql.commit("tx-1")).rejects.toThrow();
     expect(h.count()).toBe(1);
-    const strategy = retryingStrategy();
-    (client.config as { retryStrategy: unknown }).retryStrategy = async () => strategy;
-    await expect(sql.commit("tx-2")).rejects.toThrow(/差し替えられた/);
-    await expect(sql.execute("SELECT 1", undefined, { database: ADMIN_DATABASE })).rejects.toThrow(/差し替えられた/);
+  });
+
+  it("送っている commit の途中で戦略を差し替えようとしても、その commit は打ち直されない", async () => {
+    const h = unavailableHandler();
+    const client = createRdsDataClient({ ...base, requestHandler: h });
+    const sql = createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN });
+    const pending = sql.commit("tx-1");
+    replaceRetry(client);
+    await expect(pending).rejects.toThrow();
+    expect(h.count()).toBe(1);
+  });
+
+  it("差し替えを試みた後も rollback は送れ、1 回だけ送る", async () => {
+    const h = unavailableHandler();
+    const client = createRdsDataClient({ ...base, requestHandler: h });
+    const sql = createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN });
+    replaceRetry(client);
+    // 送りの層まで届き（503 で投げる）、検査では投げない
+    await expect(sql.rollback("tx-1")).rejects.toThrow(/unavailable/);
     expect(h.count()).toBe(1);
   });
 });
