@@ -545,6 +545,83 @@ describe("terminateRoleConnections（作り物の SqlExecutor）", () => {
   });
 });
 
+// 期限の計算と、起動の途中の pid の追跡の振る舞い（I-009 の前に固定する）
+describe("terminateRoleConnections の期限と起動の途中の追跡（作り物の SqlExecutor）", () => {
+  const current = { recorded: 3, cutoff_recorded: true };
+
+  it("deadlineMs と pollMs を渡せば、その期限と間隔で待つ", async () => {
+    const fake = fakeDb({ recorded: current, remaining: [1] });
+    const clock = fakeClock();
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options({ deadlineMs: 3_000, pollMs: 1_000 }))).toEqual({ kind: "done", remaining: 1 });
+    expect(clock.sleeps).toEqual([1_000, 1_000, 1_000]);
+    expect(clock.now()).toBe(3_000);
+  });
+
+  it("startingWaitCapMs が期限より短くても、期限までは待つ（延ばす所は期限を縮めない）", async () => {
+    const fake = fakeDb({ recorded: current, holders: ["101"], stillStarting: (given) => given, authTimeoutS: 60 });
+    const clock = fakeClock();
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options({ startingWaitCapMs: 5_000 }))).toEqual({ kind: "done", remaining: 1 });
+    expect(clock.now()).toBe(15_000);
+  });
+
+  it("延ばす所は切り始めの時刻から数え、最初の切りに掛かった時間を足さない", async () => {
+    const clock = fakeClock();
+    let first = true;
+    const fake = fakeDb({
+      recorded: current,
+      holders: ["101"],
+      stillStarting: (given) => given,
+      authTimeoutS: 30,
+      onSignal: () => {
+        if (first) clock.set(5_000);
+        first = false;
+      },
+    });
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options())).toEqual({ kind: "done", remaining: 1 });
+    expect(clock.now()).toBe(32_000);
+  });
+
+  it("追う対象がすべて外れた後は、延ばした所でなく、その時から余裕の 2 秒で返す", async () => {
+    // 101 は 20 秒で載らずに終わる。載った古い接続 1 本は切れずに残る
+    const clock = fakeClock();
+    const fake = fakeDb({ recorded: current, remaining: [1], holders: ["101"], authTimeoutS: 30, stillStarting: (given) => (clock.now() < 20_000 ? given : []) });
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options())).toEqual({ kind: "done", remaining: 1 });
+    expect(clock.now()).toBe(22_000);
+  });
+
+  it("追う対象が減った後の余裕も startingWaitCapMs で切り詰める", async () => {
+    const clock = fakeClock();
+    const fake = fakeDb({ recorded: current, remaining: [1], holders: ["101"], authTimeoutS: 30, stillStarting: (given) => (clock.now() < 20_000 ? given : []) });
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options({ startingWaitCapMs: 21_000 }))).toEqual({ kind: "done", remaining: 1 });
+    expect(clock.now()).toBe(21_000);
+  });
+
+  it("一度外れた pid が後の読みで鎖を持っていても、追う対象へ戻さない", async () => {
+    const fake = fakeDb({ recorded: current, remaining: [1, 1, 0], holders: ["101", "", "101"], stillStarting: (given) => given });
+    const clock = fakeClock();
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options({ pollMs: 500 }))).toEqual({ kind: "done", remaining: 0 });
+    const reads = executes(fake)
+      .filter((c) => c.sql.includes("AS remaining"))
+      .map((c) => c.params?.find((p) => p.name === "starting")?.value);
+    expect(reads).toEqual(["101", "", ""]);
+    expect(clock.sleeps).toEqual([500, 500]);
+  });
+
+  it("認証の時間切れは、追う対象が最初に残った読みの後に 1 回だけ読み、待ちの後の切りは写しを捨ててから打つ", async () => {
+    // 101 は 0 秒と 0.5 秒の読みで起動の途中、1 秒の読みで終わっている
+    const clock = fakeClock();
+    const fake = fakeDb({ recorded: current, remaining: [0], holders: ["101"], stillStarting: (given) => (clock.now() < 1_000 ? given : []) });
+    expect(await terminateRoleConnections(fake, PROJECT.role, 3, clock.options())).toEqual({ kind: "done", remaining: 0 });
+    const s = fake.statements();
+    const auth = s.flatMap((x, i) => (x.includes("AS auth_timeout_s") ? [i] : []));
+    expect(auth).toHaveLength(1);
+    expect(s[auth[0]! - 1]).toContain("AS remaining");
+    const signals = s.flatMap((x, i) => (x.includes("AS signalled") ? [i] : []));
+    expect(signals).toHaveLength(3);
+    for (const i of signals) expect(s[i - 1]).toContain("pg_stat_clear_snapshot()");
+  });
+});
+
 describe("rotateRole のトランザクションの境（作り物の SqlExecutor）", () => {
   for (const state of [{}, { tablePresent: false }, { recorded: { recorded: 1, cutoff_recorded: true } }]) {
     describe(JSON.stringify(state), () => {
