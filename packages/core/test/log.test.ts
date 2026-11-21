@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createLogger } from "../src/log.ts";
 import { leakedSecrets, SECRET_SAMPLES } from "./fixtures/secrets.ts";
 
@@ -132,6 +132,23 @@ describe("createLogger", () => {
     expect(first).not.toHaveProperty("[redacted]#2");
     expect(second).toMatchObject({ "[redacted]": "first", "[redacted]#2": "second" });
     expect(third).toMatchObject({ "[redacted]": "child", "[redacted]#2": "call" });
+  });
+
+  it("伏せる鍵の識別子はロガーごとに引く秘密の鍵で作る（固定の種のハッシュにしない）", () => {
+    const draw = vi.spyOn(globalThis.crypto, "getRandomValues");
+    try {
+      const out = capture();
+      const same = SECRET_SAMPLES["github_personal_token"] ?? "";
+      createLogger(context, out.sink).child({ [same]: "a1" }).info("1 つ目", { [same]: "a2" });
+      createLogger(context, out.sink).child({ [same]: "b1" }).info("2 つ目", { [same]: "b2" });
+      expect(draw).toHaveBeenCalledTimes(2);
+      const [first, second] = out.records();
+      expect(first).toMatchObject({ "[redacted]": "a2" });
+      expect(second).toMatchObject({ "[redacted]": "b2" });
+      expect(first).not.toHaveProperty("[redacted]#2");
+    } finally {
+      draw.mockRestore();
+    }
   });
 
   it("child の項目を読めなくても、親のロガーで続ける", () => {

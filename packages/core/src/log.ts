@@ -55,31 +55,90 @@ const RESERVED_PREFIX = "field.";
 // 伏せた項目の 1 つ。id は上書きを決める元の鍵の識別子、key は伏せた鍵、value は伏せた値
 type Entry = readonly [id: string, key: string, value: unknown];
 
-// 元の鍵から秘密の原文を残さずに同一性を判定する識別子を作る（cyrb53 を 2 つの種で回し、約 106 ビットにする）。
-// 画面でも動くよう node:crypto を使わない。伏せない鍵は名前そのものを識別子にする（頭の "k:" と "h:" で 2 つを分ける）
-function hash53(text: string, seed: number): string {
-  let h1 = 0xdeadbeef ^ seed;
-  let h2 = 0x41c6ce57 ^ seed;
-  for (let i = 0; i < text.length; i += 1) {
-    const c = text.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 2654435761);
-    h2 = Math.imul(h2 ^ c, 1597334677);
+// 元の鍵から秘密の原文を残さずに同一性を判定する識別子を作る。ロガーごとに作る秘密の鍵で HMAC-SHA-256 を取り、
+// 識別子だけからは鍵の候補を照らせないようにする（固定の種のハッシュでは、URL の利用者名と宿が分かれば合言葉の候補を照らせる）。
+// 画面でも動くよう node:crypto を使わず、同期で要るため Web Crypto の subtle（非同期）も使わない。
+// 伏せない鍵は名前そのものを識別子にする（頭の "k:" と "h:" で 2 つを分ける）
+const SHA256_K = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
+  0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+  0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+  0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
+  0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+  0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]);
+
+const rotr = (x: number, n: number): number => (x >>> n) | (x << (32 - n));
+
+function sha256(data: Uint8Array): Uint8Array {
+  const bitLength = data.length * 8;
+  const padded = new Uint8Array(Math.ceil((data.length + 9) / 64) * 64);
+  padded.set(data);
+  padded[data.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(padded.length - 8, Math.floor(bitLength / 4294967296));
+  view.setUint32(padded.length - 4, bitLength >>> 0);
+  const h = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+  const w = new Uint32Array(64);
+  for (let offset = 0; offset < padded.length; offset += 64) {
+    for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4);
+    for (let i = 16; i < 64; i += 1) {
+      const a = w[i - 15] ?? 0;
+      const b = w[i - 2] ?? 0;
+      const s0 = rotr(a, 7) ^ rotr(a, 18) ^ (a >>> 3);
+      const s1 = rotr(b, 17) ^ rotr(b, 19) ^ (b >>> 10);
+      w[i] = (w[i - 16] ?? 0) + s0 + (w[i - 7] ?? 0) + s1;
+    }
+    // v は作業の 8 語（a〜h）。1 周ごとに 1 つずらし、頭に新しい a、5 つ目（e）に d + t1 を置く
+    const v = Array.from(h);
+    for (let i = 0; i < 64; i += 1) {
+      const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g = 0, hh = 0] = v;
+      const t1 = (hh + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + (SHA256_K[i] ?? 0) + (w[i] ?? 0)) >>> 0;
+      const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+      v.splice(0, 8, (t1 + t2) >>> 0, a, b, c, (d + t1) >>> 0, e, f, g);
+    }
+    for (let i = 0; i < 8; i += 1) h[i] = ((h[i] ?? 0) + (v[i] ?? 0)) >>> 0;
   }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  const out = new Uint8Array(32);
+  const outView = new DataView(out.buffer);
+  for (let i = 0; i < 8; i += 1) outView.setUint32(i * 4, h[i] ?? 0);
+  return out;
 }
 
-function keyId(original: string, safeKey: string): string {
-  return safeKey === original ? `k:${original}` : `h:${hash53(original, 1)}.${hash53(original, 2)}`;
+function hmacSha256(key: Uint8Array, message: Uint8Array): Uint8Array {
+  const block = new Uint8Array(64);
+  block.set(key.length > 64 ? sha256(key) : key);
+  const inner = new Uint8Array(64 + message.length);
+  const outer = new Uint8Array(64 + 32);
+  for (let i = 0; i < 64; i += 1) {
+    inner[i] = (block[i] ?? 0) ^ 0x36;
+    outer[i] = (block[i] ?? 0) ^ 0x5c;
+  }
+  inner.set(message, 64);
+  outer.set(sha256(inner), 64);
+  return sha256(outer);
+}
+
+// ロガー（createLogger の 1 回）ごとの秘密の鍵。child は親の鍵を受け継ぎ、同じ鍵の上書きの判定を保つ
+function newKeyIdSecret(): Uint8Array {
+  return globalThis.crypto.getRandomValues(new Uint8Array(32));
+}
+
+const encoder = new TextEncoder();
+
+function keyId(secret: Uint8Array, original: string, safeKey: string): string {
+  if (safeKey === original) return `k:${original}`;
+  const digest = hmacSha256(secret, encoder.encode(original));
+  return `h:${Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
 // 項目を伏せた組の並びにする。鍵の名前で伏せる値（token など）も伏せるよう、鍵と値の組で redact に通す。
 // 秘密の形の鍵は "[redacted]" になり、元の鍵は識別子でだけ残す（長く生きる child に原文を持たせない）
-function entries(fields: LogFields): Entry[] {
+function entries(secret: Uint8Array, fields: LogFields): Entry[] {
   return Object.entries(fields).map(([key, value]) => {
     const [safeKey, safe] = Object.entries(loggable({ [key]: value }))[0] ?? [key, undefined];
-    return [keyId(key, safeKey), safeKey, safe] as const;
+    return [keyId(secret, key, safeKey), safeKey, safe] as const;
   });
 }
 
@@ -113,8 +172,8 @@ function reserved(layers: readonly (readonly Entry[])[]): LogFields {
   return out;
 }
 
-function wrap(base: PinoLogger, bound: readonly (readonly Entry[])[]): Logger {
-  const line = (fields: LogFields | undefined): LogFields => reserved([...bound, entries(fields ?? {})]);
+function wrap(base: PinoLogger, secret: Uint8Array, bound: readonly (readonly Entry[])[]): Logger {
+  const line = (fields: LogFields | undefined): LogFields => reserved([...bound, entries(secret, fields ?? {})]);
   return {
     info: (msg, fields) => quietly(() => base.info(line(fields), msg)),
     warn: (msg, fields) => quietly(() => base.warn(line(fields), msg)),
@@ -122,9 +181,9 @@ function wrap(base: PinoLogger, bound: readonly (readonly Entry[])[]): Logger {
     // 子の項目はこの時に鍵と値を伏せた写しを取って持つ。扱えない（読むと投げる getter など）ときは、親のロガーのまま続ける
     child: (fields) => {
       try {
-        return wrap(base, [...bound, entries(fields)]);
+        return wrap(base, secret, [...bound, entries(secret, fields)]);
       } catch {
-        return wrap(base, bound);
+        return wrap(base, secret, bound);
       }
     },
   };
@@ -168,5 +227,5 @@ export function createLogger(context: LogContext, sink?: (line: string) => void)
     },
   };
   const root = sink === undefined ? pino(options) : pino(options, { write: (line: string) => emit(withoutNewline(line)) });
-  return wrap(root.child(loggable(context)), []);
+  return wrap(root.child(loggable(context)), newKeyIdSecret(), []);
 }
