@@ -155,7 +155,7 @@ infra/
 | `operationByRoute` | `operations/index.ts` | 新設 | `(path: string) => OperationDef \| undefined` | `/v1/...` の経路で引く（`readHttpCall` が使う） |
 
 - `defineOperation`
-  - 事前条件: `name` は `^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$`。受け口が `user` でない操作の名前は `runner.<entity>.<verb>` の形を取らず、経路の表の path から `<受け口>.<entity>.<verb>`（例 `runner.events.create`）にする
+  - 事前条件: 受け口が `user` の操作の名前は `<entity>.<verb>`（`^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$`）。ほかの受け口の操作の名前は、経路の path の `/v1/` の後ろを `.` でつないだ `<受け口>.<entity>.<verb>`（例 `runner.events.create`。頭は受け口の値と同じ）
   - 事後条件: `route` は受け口 `user` なら `/v1/<entity>/<verb>`、ほかは `/v1/<受け口>/<entity>/<verb>`。次のどれかに当たれば例外を投げる（モジュールの読み込みで落ち、`check` の型検査とテストが先に落とす）
     - `access` が `read` で `idempotencyKey` が真
     - `allOrNothing` があって `access` が `read`
@@ -465,7 +465,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | --- | --- | --- |
 | 利用者（`db-users` / `USER`） | `user_id`・`display_name`（0〜32 字）・`language?`（`languageTag`）・`time_zone?`（`timeZone`）・`created_at` | 上書き |
 | ログインの組（`db-users` / `LOGIN#<IdP>#<主体>`） | `user_id`・`idp`・`subject`・`linked_at` | 作ると消すだけ（`version` を持たない） |
-| IdP の主体の一意の行 | 全体の設計のまま（`user_id`） | 作ると消すだけ |
+| IdP の主体の一意の行（全体の設計が列を決めた行で、19 の行に数えない） | 全体の設計のまま（`user_id`） | 作ると消すだけ |
 | 委任（`db-users` / `DELEGATION#<委任>`） | `delegation_id`・`user_id`・`client_name`（1〜64 字）・`scope_project_ids`（`prj` の ID の配列、1 以上）・`scope_kind`（`read`・`run`・`manage`）・`secret_sha256`（64 桁）・`expires_at`・`created_at`・`last_used_at?`・`revoked_at?` | 上書き（状態は `expires_at`・`revoked_at` から導き、列に持たない） |
 | チーム（`db-teams` / `TEAM`） | `team_id`・`name`（1〜100 字）・`plan`（料金プランの行の名前）・`currency`（`currencyCode`）・`monthly_cap?`（`money`）・`default_place`（`hosted`・`machine`）・`default_inference`（`managed`・`byok`）・`created_at` | 上書き |
 | 席（`db-teams` / `SEAT#<利用者>`） | `team_id`・`user_id`・`role`・`added_at`・`us_pk`・`us_sk`（索引の鍵） | 上書き |

@@ -127,7 +127,7 @@ graph TB
 | --- | --- | --- |
 | `name`・`entity`・`verb` | 文字列（`<entity>.<verb>`） | 操作の一覧の名前 |
 | `endpoint` | `user`・`runner`・`machine`・`db_prep` | 足した印。受け口（detail.md の `authenticate` の受け口と同じ集まり） |
-| `features` | `F1`〜`F23` の配列 | 足した印。操作の一覧の「機能」の列（I14 の機能の対応の検査が読む） |
+| `features` | `F1`〜`F20` の配列（F21〜F23 は操作を持たない） | 足した印。操作の一覧の「機能」の列（I14 の機能の対応の検査が読む） |
 | `access` | `read`・`write` | 「読む / 書く」の列 |
 | `humanOnly` | `always`・`per_item`・`never` | 「人だけか」の列 |
 | `mcpRead` | 操作の名前か `null` | 足した印。「MCP の道具か」の「依頼と材料の読み出しだけ」の括弧の操作 |
@@ -194,6 +194,11 @@ sequenceDiagram
   E-->>G: writeHttpResponse（200 と配列 / problem）
   Note over D: ハンドラーの無い操作は要求全体の 503 unavailable とログの error
 ```
+
+### 骨組みの関数と CDK の部品
+
+- 骨組みの `PUT /v1/users` は今の関数（`users-handler.ts`）のまま受け、中で `createClock`・`createLogger`・`awsClient`・`createDb`・`putIfAbsent`・`writeAtomically` を通す。上の振り分けの図は通らない（決定 11）
+- CDK の部品は要求を受けない。合成のときに `ServiceTable` が `tables.ts` を、`ApiRoutes` が `generated/routes.json` を読み、表と経路を作る（決定 8）
 
 ### 生成
 
@@ -369,7 +374,7 @@ flowchart LR
 - **当たるモード**: standard
 - **同じファイルを触る別の変更**:
   - #13 は `packages/contracts/src/db-prep-api.ts`（新設）に DB の用意のタスクの 2 つの HTTP の経路の形を書く。この課題の操作の表は、その 2 行の `item`・`result` を `db-prep-api.ts` の定義で置き換える（先にマージした方が後の方で行をつなぐ）。`packages/contracts/package.json` の `exports` と `settings.ts` は両方が触る
-  - #1 は `tools/checks/` で生成物を読む。読む生成物の形（`routes.json`・`mcp-tools.json`・`operations.schema.json`）は詳細設計の「生成物」の表が正本で、#1 へ渡す欠けとして書く
+  - #1 は `tools/checks/` で生成物を読む。読む生成物の形（`routes.json`・`mcp-tools.json`・`operations.schema.json`）は詳細設計の「形の正本: 生成」の「内部のデータと定数」の表が正本で、#1 へ渡す欠けとして書く
   - #13 は `infra/lib/app-stack.ts` を直す。この課題は `app-stack.ts` を触らない
 - **壊れうる箇所**:
   - 骨組みの `PUT /v1/users` の振る舞い。今のテスト（`apps/api/test/users-handler.test.ts`・`user-store.test.ts`）で縛る。テストは依存の注入の形（時計・ログ・表のクライアント）だけを直し、確かめる振る舞い（経路・応答の形・ログの項目）を変えずに通す
