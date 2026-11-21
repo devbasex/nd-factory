@@ -286,7 +286,7 @@ describe("理由のコード", () => {
     ]);
   });
 
-  it("要求全体の理由は 12 で、状態が決まっている", () => {
+  it("要求全体の理由は 13 で、状態が決まっている", () => {
     expect(REQUEST_REASONS.map((r) => [r.code, r.status])).toEqual([
       ["body_not_json", 400],
       ["body_not_array", 400],
@@ -295,6 +295,7 @@ describe("理由のコード", () => {
       ["duplicate_item", 400],
       ["cursor_invalid", 400],
       ["unauthorized", 401],
+      ["session_ended", 401],
       ["human_only", 403],
       ["scope_insufficient", 403],
       ["unavailable", 503],

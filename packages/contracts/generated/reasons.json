@@ -29,6 +29,10 @@
       "status": 401
     },
     {
+      "code": "session_ended",
+      "status": 401
+    },
+    {
       "code": "human_only",
       "status": 403
     },

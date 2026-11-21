@@ -3321,6 +3321,7 @@
               "duplicate_item",
               "cursor_invalid",
               "unauthorized",
+              "session_ended",
               "human_only",
               "scope_insufficient",
               "unavailable",
