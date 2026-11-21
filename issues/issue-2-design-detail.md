@@ -221,7 +221,7 @@ infra/
 | `ResultShapeOf<Op>` | 型 | `operation.ts` | `Exclude<Op["result"], PendingShape>`。`OperationDef` の `result` は zod か `PendingShape` を許すため、`resultSchemaOf` の和の成功の選択肢はこの型で zod だけに絞る。形の未定の操作では `never` になり、その操作の `ResultOf` は失敗の側だけになる（`resultSchemaOf` は投げるため値は作られない） |
 | `ReasonsOf<Op>` | 型 | `operation.ts` | `readonly [ReasonDef, ...ReasonDef[]]`。`ITEM_REASONS` の `item_invalid`・`not_found`・`role_insufficient` は `when` が `always` でどの操作にも入るため、空にならない。型の上では要素を `ReasonDef` に広げるため、`ResultOf<Op>` の失敗の側は `{ ok: false; status: ReasonDef["status"]; reason: string; fields?: string[] }` になる。理由ごとの `status` と `reason` の組は、`itemFailure` が実行の時に作る zod の和が縛る |
 | 結果の和の組み方 | 決まり | `operation.ts` | 成功と失敗を合わせる外側の和は `ok` を判別の鍵にし、失敗の側には `itemFailure` の和（`reason` が判別の鍵）をそのまま 1 つの要素として入れる（zod 4 の `discriminatedUnion` は、要素の和の各分岐が外側の鍵を `z.literal` で持てば入れ子にできる）。失敗の分岐はどれも `ok: false` を持つが、外側の和から見ると失敗の側は 1 つの要素のため、鍵の値は重ならない。理由ごとの分岐を外側の和へ平らに並べない（`ok: false` が重なって組めない） |
-| 全部か無かの上限 | 操作の定義の値 | `projects.ts` | `projects.create` は 20（要素 1 つでプロジェクト・主リポジトリ・割り当ての 3 件と記録の行・冪等の済みの行の 5 件 → 100 ÷ 5）、`repositories.add` は 25（リポジトリの行・プロジェクトの行の照らし・記録の行・冪等の済みの行の 4 件） |
+| 全部か無かの上限 | 操作の定義の値 | `projects.ts` | `projects.create` は 19（要素 1 つでプロジェクト・主リポジトリ・割り当ての 3 件と記録の行・冪等の済みの行の 5 件。人だけの書く操作のため、トランザクションに 1 回入る要求元の照らしの 2 件（[データの文書の人の書き込みの要求元の照らし](../docs/design/data.md#人の書き込みの要求元の照らし)）を残す → (100 − 2) ÷ 5 の切り捨て）、`repositories.add` は 25（リポジトリの行・プロジェクトの行の照らし・記録の行・冪等の済みの行の 4 件） |
 
 `allOrNothing.maxItems` の値は、受け持つ子（#5）が要素 1 つの書き込みの件の数を決めたときに直す。この課題は全体の設計の行（プロジェクト・主リポジトリ・割り当て）と、新しいものを作る操作が持つ冪等の鍵（[冪等の鍵](../docs/design/api.md#冪等の鍵)）から見積もった値を置く。
 
@@ -464,11 +464,11 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | `TransactItem` | `conditional-write.ts` | `table`・`op`（`put`・`update`・`delete`・`check`）・`key`・`item?`・`update?`・`condition`・`onConflict` |
 | `WriteOutcome` | `conditional-write.ts` | `{ ok: true }` か `{ ok: false; failed: { index; onConflict }[] }` |
 | `Db` | `db.ts` | `get(table, key, consistent)`・`query(table, keyCond, opts)`・`queryIndex(table, index, keyCond, opts)`・`scan(table, opts)`（足す。[表の移し](#表の移し)）・`transactWrite(items)`・`update(table, key, update, condition)` |
-| `Principal` | `auth/authenticate.ts` | 判別の鍵 `kind` を先頭に。`{kind: "human", userId}`・`{kind: "delegation", userId, delegationId, scope: {projectIds, operations}, clientName}`・`{kind: "runner", laneId, projectId, generation}`・`{kind: "machine", teamId, machineId}`・`{kind: "github"}`・`{kind: "db_prep", projectId, prepId}`・`{kind: "patrol"}` |
+| `Principal` | `auth/authenticate.ts` | 判別の鍵 `kind` を先頭に。`{kind: "human", userId, cognitoSub, sessionId, bindingEpoch}`（`sessionId` は署名を検証した token の空でない `origin_jti`）・`{kind: "newcomer", login: CognitoLogin}`（`sessions.create` だけに渡る）・`{kind: "delegation", userId, delegationId, scope: {projectIds, operations}, clientName}`・`{kind: "runner", laneId, projectId, generation}`・`{kind: "machine", teamId, machineId}`・`{kind: "github"}`・`{kind: "db_prep", projectId, prepId}`・`{kind: "patrol"}` |
 | `AuthResult` | `auth/authenticate.ts` | `{ ok: true; principal }`・`{ ok: false; reason: "unauthorized" \| "unavailable" }` |
 | `ScopeReader` | `authorize.ts` | `seatsOf`・`projectsOfTeams`・`projectOfTarget`・`laneOf`・`transferTargetOf`・`isHumanOnlyItem` |
 | `ItemAuthz` | `authorize.ts` | `{decision: "allow", projectId, role}`・`{decision: "deny", status: 404 \| 403, reason}` |
-| `AuditEntry` | `audit.ts` | `auditId`・`requestId`・`at`・`actor`・`channel`・`operation`・`targetIds`・`projectId`・`result`・`itemIndex` |
+| `AuditEntry` | `audit.ts` | `auditId`・`requestId`・`at`・`actor`・`channel`・`operation`・`targetIds`・`projectId`・`result`・`itemIndex`。`actor` は主体の種類と当たる ID だけを持つ記録の主体で、`Principal` から作る。`newcomer` は `{kind: "newcomer"}`（ID も `CognitoLogin` の値も持たない）にし、`sessions.create` の初回で利用者を作った要素と要約は `{kind: "human", userId: <作った利用者の ID>}` に入れ替える（[detail.md の `auditItem`](../docs/design/detail.md#関数の仕様)） |
 | `OperationCall` | `dispatch/types.ts` | `endpoint`・`channel`・`operation`・`token`・`principal?`・`items`・`requestId`・`mcpClientName?`・`remainingMs` |
 | `DispatchDeps` | `dispatch/types.ts` | `operations`・`handlers`・`scope`・`auth`・`db`・`clock`・`log` |
 | `Handler` | `dispatch/types.ts` | `(item, ctx: { principal; authz: ItemAuthz; clock; db }) => Promise<{ result; writes: TransactItem[] }>` |
