@@ -4,7 +4,8 @@ import {
   CommitTransactionCommand,
   DatabaseResumingException,
   ExecuteStatementCommand,
-  type RDSDataClient,
+  type Field,
+  RDSDataClient,
   RollbackTransactionCommand,
 } from "@aws-sdk/client-rds-data";
 import pRetry from "p-retry";
@@ -16,6 +17,7 @@ import {
   DataApiUnavailableError,
   RESUME_WAIT_ERRORS,
   createDataApiExecutor,
+  createRdsDataClient,
   toRow,
 } from "../../src/db-prep/sql-executor.ts";
 import { FakeSqlExecutor } from "./fake-sql-executor.ts";
@@ -33,6 +35,16 @@ const SECRET_ARN = "arn:aws:secretsmanager:us-west-2:123456789012:secret:acme/te
 // 2 つの実装が同じ行を同じ値で返すことを照らす文と行
 const SAME_ROW_SQL = "SELECT 7::int AS n, 'acme'::text AS s, true AS b, NULL::text AS z";
 const SAME_ROW = { n: 7, s: "acme", b: true, z: null };
+// SAME_ROW_SQL への Data API の応答（includeResultMetadata の records と columnMetadata）
+const SAME_ROW_OUTPUT = {
+  columnMetadata: [{ label: "n" }, { label: "s" }, { label: "b" }, { label: "z" }],
+  records: [[{ longValue: 7 }, { stringValue: "acme" }, { booleanValue: true }, { isNull: true }]],
+};
+
+// 1 列の Data API の応答
+function oneColumn(label: string, values: Field[]): { columnMetadata: { label: string }[]; records: Field[][] } {
+  return { columnMetadata: [{ label }], records: values.map((v) => [v]) };
+}
 
 type Command = ExecuteStatementCommand | BeginTransactionCommand | CommitTransactionCommand | RollbackTransactionCommand;
 
@@ -41,9 +53,14 @@ class FakeRdsData {
   calls: Command[] = [];
   sentAt: number[] = [];
   handle: (cmd: Command, n: number) => unknown = () => ({});
+  // クライアントの SDK の再試行の回数（createRdsDataClient は 1）
+  maxAttempts = 1;
 
   asClient(): RDSDataClient {
-    return { send: (cmd: Command) => this.send(cmd) } as unknown as RDSDataClient;
+    return {
+      config: { maxAttempts: async () => this.maxAttempts },
+      send: (cmd: Command) => this.send(cmd),
+    } as unknown as RDSDataClient;
   }
 
   async send(cmd: Command): Promise<unknown> {
@@ -80,7 +97,7 @@ describe("createDataApiExecutor", () => {
     vi.useRealTimers();
   });
 
-  it("execute は database と transactionId をそのまま渡し、JSON の形と打ち切りの無効を明示する", async () => {
+  it("execute は database と transactionId をそのまま渡し、列の名前を求め、打ち切りの無効を明示する", async () => {
     const fake = new FakeRdsData();
     const sql = executor(fake);
     await sql.execute("SELECT 1", undefined, { database: "acme_db", transactionId: "tx-1" });
@@ -92,7 +109,7 @@ describe("createDataApiExecutor", () => {
       database: "acme_db",
       sql: "SELECT 1",
       transactionId: "tx-1",
-      formatRecordsAs: "JSON",
+      includeResultMetadata: true,
       continueAfterTimeout: false,
     });
   });
@@ -127,18 +144,53 @@ describe("createDataApiExecutor", () => {
     ]);
   });
 
-  it("JSON の行を Row にして返し、行の無い文は空を返す", async () => {
+  it("records と列の名前から Row を組んで返し、行の無い文は空を返す", async () => {
     const fake = new FakeRdsData();
-    fake.handle = (_cmd, n) => (n === 1 ? { formattedRecords: JSON.stringify([SAME_ROW]) } : {});
+    fake.handle = (_cmd, n) => (n === 1 ? SAME_ROW_OUTPUT : {});
     const sql = executor(fake);
     expect(await sql.execute(SAME_ROW_SQL, undefined, { database: ADMIN_DATABASE })).toEqual([SAME_ROW]);
     expect(await sql.execute("CREATE SCHEMA x", undefined, { database: ADMIN_DATABASE })).toEqual([]);
   });
 
-  it("型の決まらない列（入れ子の値）を受けない", async () => {
+  it("型の決まらない列（配列・バイト列）と、列の名前の無い行を受けない", async () => {
     const fake = new FakeRdsData();
-    fake.handle = () => ({ formattedRecords: JSON.stringify([{ a: [1, 2] }]) });
-    await expect(executor(fake).execute("SELECT", undefined, { database: ADMIN_DATABASE })).rejects.toThrow();
+    const sql = executor(fake);
+    fake.handle = () => oneColumn("a", [{ arrayValue: { longValues: [1, 2] } }]);
+    await expect(sql.execute("SELECT", undefined, { database: ADMIN_DATABASE })).rejects.toThrow();
+    fake.handle = () => oneColumn("a", [{ blobValue: new Uint8Array([1]) }]);
+    await expect(sql.execute("SELECT", undefined, { database: ADMIN_DATABASE })).rejects.toThrow();
+    fake.handle = () => ({ records: [[{ longValue: 1 }]] });
+    await expect(sql.execute("SELECT", undefined, { database: ADMIN_DATABASE })).rejects.toThrow();
+  });
+
+  it("claimPrepRun は Data API の応答の形で、挿入の行があれば first、無ければ duplicate", async () => {
+    // INSERT … RETURNING の行は records にだけ載り、formattedRecords は SELECT にしか返らない
+    for (const [inserted, expected] of [
+      [true, "first"],
+      [false, "duplicate"],
+    ] as const) {
+      const fake = new FakeRdsData();
+      fake.handle = (cmd) => {
+        if (cmd instanceof BeginTransactionCommand) return { transactionId: "tx-1" };
+        if (!(cmd instanceof ExecuteStatementCommand)) return {};
+        const text = cmd.input.sql ?? "";
+        if (text.includes("to_regclass")) return oneColumn("present", [{ booleanValue: true }]);
+        if (text.includes("RETURNING")) return oneColumn("prep_id", inserted ? [{ stringValue: "prep-1" }] : []);
+        return { numberOfRecordsUpdated: 0 };
+      };
+      expect(await claimPrepRun(executor(fake), "prep-1")).toBe(expected);
+      expect(fake.calls.at(-1)).toBeInstanceOf(CommitTransactionCommand);
+    }
+  });
+
+  it("SDK の再試行を止めていないクライアントでは、何も送らずに投げる", async () => {
+    const fake = new FakeRdsData();
+    fake.maxAttempts = 3;
+    const sql = executor(fake);
+    await expect(sql.execute("SELECT 1", undefined, { database: ADMIN_DATABASE })).rejects.toThrow(/maxAttempts/);
+    await expect(sql.begin({ database: ADMIN_DATABASE })).rejects.toThrow(/maxAttempts/);
+    await expect(sql.commit("tx-1")).rejects.toThrow(/maxAttempts/);
+    expect(fake.calls).toHaveLength(0);
   });
 
   it("begin の返す ID を commit と rollback へ渡す", async () => {
@@ -192,7 +244,7 @@ describe("createDataApiExecutor", () => {
     const fake = new FakeRdsData();
     fake.handle = (_cmd, n) => {
       if (n === 1) throw resuming();
-      return { formattedRecords: JSON.stringify([{ n: 1 }]) };
+      return oneColumn("n", [{ longValue: 1 }]);
     };
     const out = await settle(executor(fake).execute("SELECT 1 AS n", undefined, { database: ADMIN_DATABASE }));
     expect(out).toEqual({ ok: [{ n: 1 }] });
@@ -291,6 +343,61 @@ describe("createDataApiExecutor", () => {
 
   it("試す回数が 1 未満の設定を受けない", () => {
     expect(() => executor(new FakeRdsData(), { attempts: 0, delayMs: 5000, deadlineMs: 60_000, now: () => 0 })).toThrow();
+  });
+});
+
+// SDK の送りの層（requestHandler）を差し替え、SDK の再試行を通す
+describe("createRdsDataClient（SDK の再試行）", () => {
+  // 一時的な障害（503）を返す送りの層。受けた回数を数える
+  function unavailableHandler(): { handle: (req: unknown) => Promise<{ response: unknown }>; count: () => number } {
+    let n = 0;
+    return {
+      handle: async () => {
+        n += 1;
+        return {
+          response: {
+            statusCode: 503,
+            headers: { "content-type": "application/json", "x-amzn-errortype": "ServiceUnavailableError" },
+            body: new TextEncoder().encode(JSON.stringify({ message: "unavailable" })),
+          },
+        };
+      },
+      count: () => n,
+    };
+  }
+  const base = {
+    region: "us-west-2",
+    credentials: { accessKeyId: "AKIDEXAMPLE", secretAccessKey: "secret" },
+  };
+
+  it("既定のクライアントは 503 を打ち直す（この差し替えが SDK の再試行を通ることの確かめ）", async () => {
+    const h = unavailableHandler();
+    const client = new RDSDataClient({ ...base, requestHandler: h });
+    await expect(client.send(new CommitTransactionCommand({ resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN, transactionId: "tx-1" }))).rejects.toThrow();
+    expect(h.count()).toBeGreaterThan(1);
+  });
+
+  it("createRdsDataClient のクライアントでは、commit も文も 1 回だけ送って投げる", async () => {
+    const h = unavailableHandler();
+    const sql = createDataApiExecutor({
+      client: createRdsDataClient({ ...base, requestHandler: h }),
+      resourceArn: RESOURCE_ARN,
+      secretArn: SECRET_ARN,
+    });
+    await expect(sql.commit("tx-1")).rejects.toThrow();
+    expect(h.count()).toBe(1);
+    await expect(sql.execute("SELECT 1", undefined, { database: ADMIN_DATABASE, transactionId: "tx-1" })).rejects.toThrow();
+    expect(h.count()).toBe(2);
+    // トランザクションの外の文も、再開の待ち（DatabaseResumingException）でなければ打ち直さない
+    await expect(sql.execute("SELECT 1", undefined, { database: ADMIN_DATABASE })).rejects.toThrow();
+    expect(h.count()).toBe(3);
+  });
+
+  it("既定の RDSDataClient を渡すと送る前に投げる", async () => {
+    const h = unavailableHandler();
+    const sql = createDataApiExecutor({ client: new RDSDataClient({ ...base, requestHandler: h }), resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN });
+    await expect(sql.execute("SELECT 1", undefined, { database: ADMIN_DATABASE })).rejects.toThrow(/maxAttempts/);
+    expect(h.count()).toBe(0);
   });
 });
 

@@ -1,9 +1,11 @@
 import {
   BeginTransactionCommand,
+  type ColumnMetadata,
   CommitTransactionCommand,
   ExecuteStatementCommand,
   type Field,
-  type RDSDataClient,
+  RDSDataClient,
+  type RDSDataClientConfig,
   RollbackTransactionCommand,
   type SqlParameter,
 } from "@aws-sdk/client-rds-data";
@@ -29,6 +31,11 @@ export type SqlExecutor = {
 export const ADMIN_DATABASE = "postgres";
 
 // 再開の待ちとして繰り返す例外の名前。ほかの例外は 1 回で投げる
+// 繰り返してよい前提: DatabaseResumingException は、一時停止した DB へ文を届ける前に Data API が要求を取り消したことを示す
+// （「A request was cancelled because the Aurora Serverless v2 DB instance was paused」。文は打たれていない）。
+// そのため CREATE DATABASE・CREATE ROLE のような繰り返せない文でも、打ち直して 2 回打たれることは無い。
+// 届いた後の失敗（通信の切れ・時間切れ・5xx）は打たれたかが分からないため、ここへ足さない。SDK の側の再試行も止める（createRdsDataClient）
+// https://docs.aws.amazon.com/rdsdataservice/latest/APIReference/API_ExecuteStatement.html#API_ExecuteStatement_Errors
 export const RESUME_WAIT_ERRORS: readonly string[] = ["DatabaseResumingException"];
 
 export const DATA_API_RETRY_DEFAULTS = { attempts: 12, delayMs: 5_000, deadlineMs: 60_000 } as const;
@@ -75,11 +82,34 @@ function toParameters(params: SqlParam[]): SqlParameter[] {
   return params.map((p) => ({ name: p.name, value: toField(p.value) }));
 }
 
-function parseRecords(formatted: string | undefined): Row[] {
-  if (formatted === undefined) return [];
-  const parsed: unknown = JSON.parse(formatted);
-  if (!Array.isArray(parsed)) throw new Error("Data API の行が配列でない");
-  return parsed.map((r: unknown) => toRow(r));
+function fromField(field: Field, column: string): SqlValue {
+  if (field.isNull === true) return null;
+  if (field.stringValue !== undefined) return field.stringValue;
+  if (field.longValue !== undefined) return field.longValue;
+  if (field.booleanValue !== undefined) return field.booleanValue;
+  if (field.doubleValue !== undefined) return field.doubleValue;
+  throw new Error(`列 ${column} の型が決まっていない（SQL の側で ::int・::text・::boolean にする）`);
+}
+
+// 行は records と列の名前（columnMetadata）から組む。formatRecordsAs の JSON は SELECT にだけ効き、
+// INSERT … RETURNING の行を返さないため使わない
+function parseRecords(records: Field[][] | undefined, columns: ColumnMetadata[] | undefined): Row[] {
+  if (records === undefined || records.length === 0) return [];
+  if (columns === undefined) throw new Error("Data API が列の名前を返さなかった");
+  const names = columns.map((c, i) => {
+    const name = c.label ?? c.name;
+    if (!name) throw new Error(`${i} 番目の列に名前が無い`);
+    return name;
+  });
+  return records.map((record) => {
+    if (record.length !== names.length) throw new Error("Data API の行と列の数が合わない");
+    const row: Row = {};
+    record.forEach((field, i) => {
+      const name = names[i]!;
+      row[name] = fromField(field, name);
+    });
+    return row;
+  });
 }
 
 function resolveRetry(retry: Partial<DataApiRetry> | undefined): DataApiRetry {
@@ -135,6 +165,19 @@ async function withResumeWait<T>(op: () => Promise<T>, retry: DataApiRetry): Pro
   }
 }
 
+// Data API のクライアント。SDK の自動の再試行を止める（maxAttempts: 1）。SDK は通信の障害や絞りで文や commit を
+// 打ち直し、初回が確定して応答だけが失われると、打ち直しの失敗が返って確定したかが分からなくなる。再試行は再開の待ちだけを
+// この実装が受け持つ
+export function createRdsDataClient(config: Omit<RDSDataClientConfig, "maxAttempts" | "retryStrategy" | "retryMode"> = {}): RDSDataClient {
+  return new RDSDataClient({ ...config, maxAttempts: 1 });
+}
+
+// 渡されたクライアントが SDK の再試行を止めているかを、最初の要求の前に確かめる
+async function assertSingleAttempt(client: RDSDataClient): Promise<void> {
+  const max = await client.config.maxAttempts();
+  if (max !== 1) throw new Error(`Data API のクライアントは SDK の再試行を止める（maxAttempts が ${max}。createRdsDataClient で作る）`);
+}
+
 // SqlExecutor の RDS Data API の実装。45 秒で終わらない文は Data API が取り消す（continueAfterTimeout を偽にする）
 export function createDataApiExecutor(opts: {
   client: RDSDataClient;
@@ -144,6 +187,12 @@ export function createDataApiExecutor(opts: {
 }): SqlExecutor {
   const { client, resourceArn, secretArn } = opts;
   const retry = resolveRetry(opts.retry);
+  let checked: Promise<void> | undefined;
+  const send: RDSDataClient["send"] = async (command: Parameters<RDSDataClient["send"]>[0]) => {
+    checked ??= assertSingleAttempt(client);
+    await checked;
+    return client.send(command);
+  };
 
   return {
     async execute(sql, params, o) {
@@ -154,18 +203,18 @@ export function createDataApiExecutor(opts: {
         sql,
         ...(params && params.length > 0 ? { parameters: toParameters(params) } : {}),
         ...(o.transactionId === undefined ? {} : { transactionId: o.transactionId }),
-        formatRecordsAs: "JSON",
+        includeResultMetadata: true,
         continueAfterTimeout: false,
       });
+      // トランザクションの外の文は再開の待ちだけを打ち直す（文は打たれていない。RESUME_WAIT_ERRORS の前提）。
       // トランザクションの中の文は繰り返さない。呼ぶ側が rollback して失敗にする
-      const out =
-        o.transactionId === undefined ? await withResumeWait(() => client.send(command), retry) : await client.send(command);
-      return parseRecords(out.formattedRecords);
+      const out = o.transactionId === undefined ? await withResumeWait(() => send(command), retry) : await send(command);
+      return parseRecords(out.records, out.columnMetadata);
     },
 
     async begin(o) {
       const out = await withResumeWait(
-        () => client.send(new BeginTransactionCommand({ resourceArn, secretArn, database: o.database })),
+        () => send(new BeginTransactionCommand({ resourceArn, secretArn, database: o.database })),
         retry,
       );
       if (!out.transactionId) throw new Error("BeginTransaction が transactionId を返さなかった");
@@ -173,11 +222,11 @@ export function createDataApiExecutor(opts: {
     },
 
     async commit(transactionId) {
-      await client.send(new CommitTransactionCommand({ resourceArn, secretArn, transactionId }));
+      await send(new CommitTransactionCommand({ resourceArn, secretArn, transactionId }));
     },
 
     async rollback(transactionId) {
-      await client.send(new RollbackTransactionCommand({ resourceArn, secretArn, transactionId }));
+      await send(new RollbackTransactionCommand({ resourceArn, secretArn, transactionId }));
     },
   };
 }
