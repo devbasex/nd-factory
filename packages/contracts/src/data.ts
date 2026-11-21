@@ -50,7 +50,7 @@ const httpPolicy = z
   .refine((p) => p.timeout_ms <= p.total_timeout_ms, { message: "timeout_ms は total_timeout_ms 以下", path: ["timeout_ms"] });
 // aws-jwt-verify の取り手へ渡す
 const jwksPolicy = z.strictObject({ kind: z.literal("jwks"), response_timeout_ms: positiveMs });
-// p-retry へ渡す（トランザクションの衝突だけ）。待ちの下限は上限を超えない
+// p-retry へ渡す（一時の失敗によるトランザクションの取り消しだけ。衝突と書き込みの呼びすぎ）。待ちの下限は上限を超えない
 const transactionPolicy = z
   .strictObject({ kind: z.literal("transaction"), retries: z.int().min(0), min_ms: z.int().min(0), max_ms: z.int().min(0) })
   .refine((p) => p.min_ms <= p.max_ms, { message: "min_ms は max_ms 以下", path: ["min_ms"] });

@@ -494,7 +494,7 @@ flowchart LR
 | LIB-A14 | `ky` | 2.2.0・MIT・週 1,075 万・依存 0 | `fetch` の上の再試行（全幅のゆらぎ・`maxRetryAfter`）・`timeout`・`totalTimeout`・`fetch` の差し替え | 採る（決定 17）。待ちの差し込みは外した要件で、テストは偽のタイマーで行う |
 | LIB-A15 | `ofetch` | 1.5.1・MIT・週 2,901 万・最終 2025-11-01 | `fetch` の上の再試行と時間切れ | 一部。全体の期限と `Retry-After` が無い |
 | LIB-A16 | `cockatiel` | 4.0.0・MIT・週 293 万・依存 0 | 全幅のゆらぎ（`fullJitterGenerator`）・`DelegateBackoff`・`handleWhen`・時間切れ | 採らない。利用が狭く、AWS SDK と `ky` が持つ再試行と二重になる（決定 17） |
-| LIB-A17 | `p-retry` | 9.0.0・MIT・週 7,634 万 | 指数の待ちの再試行（回数・待ちの下限と上限・`shouldRetry`） | 採る。HTTP と AWS SDK に当たらないトランザクションの衝突だけ（決定 17） |
+| LIB-A17 | `p-retry` | 9.0.0・MIT・週 7,634 万 | 指数の待ちの再試行（回数・待ちの下限と上限・`shouldRetry`） | 採る。HTTP と AWS SDK に当たらない、一時の失敗によるトランザクションの取り消し（衝突と書き込みの呼びすぎ）だけ（決定 17） |
 | LIB-A18 | `exponential-backoff` | 3.1.3・Apache-2.0・週 5,948 万 | 全幅のゆらぎの再試行 | 一部。`Retry-After`・期限が無い |
 | LIB-A19 | `pino` | 10.4.0・MIT・週 8,186 万 | 構造化ログ（ブラウザー版あり）・鍵のパスでの伏せ字 | 採る（決定 17）。値の形での伏せ字は自前の `redact` を通す |
 | LIB-A20 | `@tanstack/react-query` | 5.108.2・MIT・週 9,180 万 | React の取得・控え・更新の状態の層 | 採るかは画面の基盤（#12）が決める（決定 16） |
