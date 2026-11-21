@@ -87,7 +87,9 @@ export type NdfContractUse = {
   env: readonly { entrypoint: string; site: "hosted" | "local"; names: readonly string[] }[];
   /**
    * 渡す名前のうち `env.json` の `set_by` が `service` でない名前と、その名前の契約の `set_by` の値（照らすこと 3）。
-   * ランナーが利用者に代わって取得して渡す資格情報（`GH_TOKEN` は `user`）を載せる。載せない名前は `service` でなければ食い違い
+   * ランナーが利用者に代わって取得して渡す資格情報（`GH_TOKEN` は `user`）と、ランナーが利用者に代わって
+   * レーンの作業場所の下を指す状態の保存先の根（`NDF_STATE_HOME` は `user`）を載せる。
+   * 載せた名前は契約の `set_by` が同じ値でなければ、載せない名前は `service` でなければ食い違い
    */
   envSetBy: Readonly<Record<string, string>>;
   /** 読むファイル（`ndf-files.json` の id）と、翻訳が読む項目（照らすこと 4） */
@@ -266,8 +268,9 @@ function checkVersion(files: ContractFiles, use: NdfContractUse, findings: Contr
 }
 
 /**
- * 3: 口と実行の場の組ごとの渡す環境変数の名前が、その口の `env` 列にあり、`env.json` の行の `set_by` が `service` である。
- * `service` でない名前は、使い方の `envSetBy` がその名前と同じ `set_by` を載せるときだけ通す（`GH_TOKEN` の `user` など）
+ * 3: 口と実行の場の組ごとの渡す環境変数の名前が、その口の `env` 列にあり、`env.json` の行にある。
+ * 使い方の `envSetBy` に載せた名前は `set_by` がその値と同じで（`GH_TOKEN`・`NDF_STATE_HOME` の `user`）、
+ * 載せない名前は `set_by` が `service` である
  */
 function checkEnv(files: ContractFiles, use: NdfContractUse, findings: ContractFinding[]): void {
   const entrypoints = read(files, "domains/entrypoints.json", 3, findings);
@@ -294,9 +297,15 @@ function checkEnv(files: ContractFiles, use: NdfContractUse, findings: ContractF
     const otherSetter: string[] = [];
     for (const name of pair.names) {
       const actual = setBy.get(name);
-      if (actual === undefined) notKnown.push(name);
-      else if (actual !== "service" && use.envSetBy[name] !== actual) {
-        const declared = use.envSetBy[name];
+      if (actual === undefined) {
+        notKnown.push(name);
+        continue;
+      }
+      // envSetBy に載せた名前は契約の値との一致を先に照らす（user から service へ変わっても見逃さない）。
+      // 載せない名前だけに service を求める
+      const declared = Object.hasOwn(use.envSetBy, name) ? use.envSetBy[name] : undefined;
+      const expected = declared ?? "service";
+      if (actual !== expected) {
         otherSetter.push(`${name}（set_by: ${actual}${declared === undefined ? "" : `。使い方は ${declared}`}）`);
       }
     }
@@ -308,7 +317,7 @@ function checkEnv(files: ContractFiles, use: NdfContractUse, findings: ContractF
         check: 3,
         path: `${CONTRACT_DIR}/domains/env.json`,
         id,
-        detail: `サービスが入れる名前でなく、使い方の envSetBy にも同じ set_by で無い名前: ${list(otherSetter)}`,
+        detail: `set_by が使い方の envSetBy の値（載せない名前は service）と違う名前: ${list(otherSetter)}`,
       });
     }
   }
@@ -448,21 +457,24 @@ export function reportShapeDiff(fixed: ContractFiles, tip: ContractFiles): strin
   setDiff("shape.values", Object.keys(a.values), Object.keys(b.values));
   setDiff("shape.items", a.items, b.items);
   setDiff("shape.required", Object.keys(a.required), Object.keys(b.required));
-  for (const [value, now] of Object.entries(b.required)) {
-    const old = a.required[value];
-    if (old === undefined) continue;
+  // 足された・消えた値と条件も、片側を空として always と条件ごとの need の差分を出す
+  type Rule = (typeof a.required)[string];
+  const empty: Rule = { always: [], when: [] };
+  const needs = (rules: Rule["when"]) => {
+    const byKey = new Map<string, string[]>();
+    for (const rule of rules) byKey.set(conditionKey(rule), [...(byKey.get(conditionKey(rule)) ?? []), ...rule.need]);
+    return byKey;
+  };
+  const valueNames = [...new Set([...Object.keys(a.required), ...Object.keys(b.required)])];
+  for (const value of valueNames) {
+    const old = (Object.hasOwn(a.required, value) ? a.required[value] : undefined) ?? empty;
+    const now = (Object.hasOwn(b.required, value) ? b.required[value] : undefined) ?? empty;
     setDiff(`shape.required.${value}.always`, old.always, now.always);
-    const needs = (rules: typeof now.when) => {
-      const byKey = new Map<string, string[]>();
-      for (const rule of rules) byKey.set(conditionKey(rule), [...(byKey.get(conditionKey(rule)) ?? []), ...rule.need]);
-      return byKey;
-    };
     const oldWhen = needs(old.when);
     const nowWhen = needs(now.when);
     setDiff(`shape.required.${value}.when の条件`, [...oldWhen.keys()], [...nowWhen.keys()]);
-    for (const [key, need] of nowWhen) {
-      const before = oldWhen.get(key);
-      if (before !== undefined) setDiff(`shape.required.${value}.when の条件 ${key} の need`, before, need);
+    for (const key of new Set([...oldWhen.keys(), ...nowWhen.keys()])) {
+      setDiff(`shape.required.${value}.when の条件 ${key} の need`, oldWhen.get(key) ?? [], nowWhen.get(key) ?? []);
     }
   }
   setDiff("shape.material", Object.keys(a.material), Object.keys(b.material));
@@ -522,16 +534,56 @@ function isContractUse(value: unknown): value is NdfContractUse {
   );
 }
 
+/** 書き出しのパッケージの名前（`@nd-factory/contracts`） */
+const CONTRACT_USE_PACKAGE = CONTRACT_USE_EXPORT.split("/").slice(0, 2).join("/");
+
+function isInside(realRoot: string, path: string): boolean {
+  const inside = relative(realRoot, path);
+  return !(inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside));
+}
+
 /**
  * 作業の木（`--root`）から使い方の書き出しを解決して読む。固定の点と同じ作業の木の書き出しを照らすため、
- * このスクリプトの置き場からは解決しない。解決した先が作業の木の外なら例外
+ * このスクリプトの置き場からは解決しない。
+ * 先にパッケージ本体を Node と同じ探し方（`node_modules` を上へ辿る）で引き、作業の木の内側にあることを確かめる。
+ * 引けない・作業の木の外なら例外。そのパッケージ自身が書き出しを持たないときだけ null を返す
+ * （書き出しの読み込みの中から出た例外はそのまま投げ、書き出しが無い扱いにしない）
  */
 export function contractUseLoaderFrom(root: string): () => Promise<unknown> {
   return async () => {
     const realRoot = await realpath(root);
-    const resolved = await realpath(createRequire(join(realRoot, "package.json")).resolve(CONTRACT_USE_EXPORT));
-    const inside = relative(realRoot, resolved);
-    if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
+    const require = createRequire(join(realRoot, "package.json"));
+    let packageDir: string | undefined;
+    for (const dir of require.resolve.paths(CONTRACT_USE_PACKAGE) ?? []) {
+      try {
+        packageDir = await realpath(join(dir, CONTRACT_USE_PACKAGE));
+        break;
+      } catch {
+        // この node_modules には無い。上へ辿る
+      }
+    }
+    if (packageDir === undefined) {
+      throw new Error(`作業の木 ${realRoot} から ${CONTRACT_USE_PACKAGE} を引けない`);
+    }
+    if (!isInside(realRoot, packageDir)) {
+      throw new Error(`${CONTRACT_USE_PACKAGE} が作業の木 ${realRoot} の外へ解決された: ${packageDir}`);
+    }
+    const manifest: unknown = JSON.parse(await readFile(join(packageDir, "package.json"), "utf8"));
+    const name = (manifest as { name?: unknown } | null)?.name;
+    if (name !== CONTRACT_USE_PACKAGE) {
+      throw new Error(`${packageDir} の package.json の name が ${CONTRACT_USE_PACKAGE} でない: ${String(name)}`);
+    }
+    // 本体の package.json から自分の名前で引き（自己参照）、上で確かめたパッケージの書き出しだけを解決する。
+    // 解決はコードを動かさないため、ここで出る ERR_PACKAGE_PATH_NOT_EXPORTED はこのパッケージ自身に書き出しが無いことを指す
+    let target: string;
+    try {
+      target = createRequire(join(packageDir, "package.json")).resolve(CONTRACT_USE_EXPORT);
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code === "ERR_PACKAGE_PATH_NOT_EXPORTED") return null;
+      throw error;
+    }
+    const resolved = await realpath(target);
+    if (!isInside(realRoot, resolved)) {
       throw new Error(`${CONTRACT_USE_EXPORT} が作業の木 ${realRoot} の外へ解決された: ${resolved}`);
     }
     return import(pathToFileURL(resolved).href);
@@ -539,16 +591,12 @@ export function contractUseLoaderFrom(root: string): () => Promise<unknown> {
 }
 
 /**
- * NDF の契約の使い方の書き出しを読む。パッケージに書き出しが無ければ null、パッケージ自体を引けない・形が違えば例外
+ * NDF の契約の使い方の書き出しを読む。`load` が null を返せば（パッケージに書き出しが無い）null、
+ * パッケージ自体を引けない・読み込みが失敗する・形が違えば例外
  */
 export async function loadContractUse(load: () => Promise<unknown>): Promise<NdfContractUse | null> {
-  let mod: unknown;
-  try {
-    mod = await load();
-  } catch (error) {
-    if ((error as { code?: unknown } | null)?.code === "ERR_PACKAGE_PATH_NOT_EXPORTED") return null;
-    throw error;
-  }
+  const mod = await load();
+  if (mod === null) return null;
   const use = (mod as { ndfContractUse?: unknown } | null)?.ndfContractUse;
   if (!isContractUse(use)) {
     throw new Error(`${CONTRACT_USE_EXPORT} の ndfContractUse が NDF の契約の使い方の形でない`);

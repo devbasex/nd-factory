@@ -178,16 +178,29 @@ function pinnedContract(): Record<string, Json> {
   return contract;
 }
 
-/** 固定の点の skill-workflow の env 列のうち、サービスの実行ジョブ（ランナー）が渡す名前 */
-const PINNED_RUNNER_NAMES = [
+/** 実行の設計（docs/design/execution.md の「渡す環境変数」）でランナーが手元のマシンへ渡す名前 */
+const RUNNER_LOCAL_NAMES = [
   "NDF_FACTORY_RUN",
   READ_WORD,
-  "NDF_LOOP_EXCLUDE",
-  "NDF_ISSUE_REQUEST_FILE",
+  "NDF_STATE_HOME",
   "NDF_MVV_STATE_DIR",
-  "NDF_PROGRESS_DB",
+  "NDF_ISSUE_REQUEST_FILE",
   "GH_TOKEN",
 ];
+/** 同じくホステッドへ渡す名前（手元のマシンの名前と NDF_PROGRESS_DB） */
+const RUNNER_HOSTED_NAMES = [...RUNNER_LOCAL_NAMES, "NDF_PROGRESS_DB"];
+
+/** 固定の点のデータで照らす使い方。実行の設計どおりのホステッド・手元のマシンの一覧と、user の 2 つの名前の envSetBy */
+function pinnedUse(envSetBy: Record<string, string> = { GH_TOKEN: "user", NDF_STATE_HOME: "user" }): NdfContractUse {
+  return {
+    ...fakeUse(),
+    env: [
+      { entrypoint: "skill-workflow", site: "hosted", names: RUNNER_HOSTED_NAMES },
+      { entrypoint: "skill-workflow", site: "local", names: RUNNER_LOCAL_NAMES },
+    ],
+    envSetBy,
+  };
+}
 
 const roots: string[] = [];
 
@@ -333,30 +346,39 @@ describe("compareContract", () => {
     expect(findings.map((f) => f.id)).toEqual(["skill-workflow/hosted"]);
   });
 
-  it("3: 固定の点の env.json と口の表で、GH_TOKEN（set_by: user）を envSetBy に載せたランナーの名前が通る", () => {
-    const use = { ...fakeUse(), env: [{ entrypoint: "skill-workflow", site: "hosted" as const, names: PINNED_RUNNER_NAMES }] };
-    expect(compareContract(asFiles(pinnedContract()), use)).toEqual([]);
+  it("3: 固定の点の env.json と口の表で、実行の設計どおりのホステッド・手元のマシンの名前が通る（GH_TOKEN・NDF_STATE_HOME は envSetBy の user）", () => {
+    expect(compareContract(asFiles(pinnedContract()), pinnedUse())).toEqual([]);
   });
 
   it("3: 固定の点のデータで、GH_TOKEN を envSetBy に載せないと 3 の食い違い", () => {
-    const use = {
-      ...fakeUse(),
-      env: [{ entrypoint: "skill-workflow", site: "hosted" as const, names: PINNED_RUNNER_NAMES }],
-      envSetBy: {},
-    };
-    const findings = compareContract(asFiles(pinnedContract()), use);
+    const findings = compareContract(asFiles(pinnedContract()), pinnedUse({ NDF_STATE_HOME: "user" }));
     expect(checksOf(findings)).toEqual([3]);
-    expect(findings).toHaveLength(1);
+    expect(findings.map((f) => f.id)).toEqual(["skill-workflow/hosted", "skill-workflow/local"]);
     expect(findings[0]?.detail).toContain("GH_TOKEN（set_by: user）");
+  });
+
+  it("3: 固定の点のデータで、NDF_STATE_HOME を envSetBy に載せないと 3 の食い違い", () => {
+    const findings = compareContract(asFiles(pinnedContract()), pinnedUse({ GH_TOKEN: "user" }));
+    expect(checksOf(findings)).toEqual([3]);
+    expect(findings).toHaveLength(2);
+    expect(findings[0]?.detail).toContain("NDF_STATE_HOME（set_by: user）");
   });
 
   it("3: サービスが入れる名前の set_by が user へ移ると 3 の食い違い", () => {
     const contract = pinnedContract();
     rowById(contract, "domains/env.json", "NDF_PROGRESS_DB").set_by = "user";
-    const use = { ...fakeUse(), env: [{ entrypoint: "skill-workflow", site: "hosted" as const, names: PINNED_RUNNER_NAMES }] };
-    const findings = compareContract(asFiles(contract), use);
+    const findings = compareContract(asFiles(contract), pinnedUse());
     expect(checksOf(findings)).toEqual([3]);
+    expect(findings.map((f) => f.id)).toEqual(["skill-workflow/hosted"]);
     expect(findings[0]?.detail).toContain("NDF_PROGRESS_DB（set_by: user）");
+  });
+
+  it("3: envSetBy に user で載せた名前の契約の set_by が service へ変わると 3 の食い違い", () => {
+    const contract = pinnedContract();
+    rowById(contract, "domains/env.json", "GH_TOKEN").set_by = "service";
+    const findings = compareContract(asFiles(contract), pinnedUse());
+    expect(checksOf(findings)).toEqual([3]);
+    expect(findings[0]?.detail).toContain("GH_TOKEN（set_by: service。使い方は user）");
   });
 
   it("3: envSetBy に載せた名前の set_by が別の値へ変わると 3 の食い違い", () => {
@@ -475,6 +497,31 @@ describe("reportShapeDiff", () => {
     expect(lines[0]).toContain("期限");
   });
 
+  it("条件と need が一緒に変わると、消えた条件と足された条件のそれぞれの need の差分を出す", () => {
+    const tip = fakeContract();
+    const rule = reportShape(tip).required.判断が要る?.when[1];
+    if (rule === undefined) throw new Error("条件の行が無い");
+    rule.equals = "実装 Pull Request のマージ";
+    rule.need = ["Pull Request", "検証"];
+    const lines = reportShapeDiff(asFiles(fakeContract()), asFiles(tip));
+    const needLines = lines.filter((line) => line.includes("の need"));
+    expect(needLines.some((l) => l.includes("設計 Pull Request のマージ") && l.includes("消えた: Pull Request"))).toBe(true);
+    expect(needLines.some((l) => l.includes("実装 Pull Request のマージ") && l.includes("足された: Pull Request, 検証"))).toBe(
+      true,
+    );
+  });
+
+  it("値が足される・消えると、その値の always と条件ごとの need を片側を空として出す", () => {
+    const tip = fakeContract();
+    const required = reportShape(tip).required;
+    delete required.できなかった;
+    required.保留 = { always: ["理由"], when: [{ item: "区分", prefix: "ndf-ask:", need: ["質問"] }] };
+    const lines = reportShapeDiff(asFiles(fakeContract()), asFiles(tip));
+    expect(lines).toContain("diff: shape.required.できなかった.always から消えた: 理由");
+    expect(lines).toContain("diff: shape.required.保留.always に足された: 理由");
+    expect(lines.some((l) => l.startsWith("diff: shape.required.保留.when の条件 ") && l.includes("足された: 質問"))).toBe(true);
+  });
+
   it("形が同じなら差分を出さない", () => {
     expect(reportShapeDiff(asFiles(fakeContract()), asFiles(fakeContract()))).toEqual([]);
   });
@@ -567,12 +614,37 @@ describe("contractUseLoaderFrom", () => {
     writeFileSync(join(root, "package.json"), "{}\n");
     await expect(loadContractUse(contractUseLoaderFrom(root))).rejects.toThrow();
   });
+
+  it("作業の木に無く、上位の node_modules の書き出しを持たない同名パッケージを引くと例外（skip にしない）", async () => {
+    const outer = rootWithExport("outer", false);
+    const root = join(outer, "work");
+    mkdirSync(root);
+    writeFileSync(join(root, "package.json"), "{}\n");
+    await expect(loadContractUse(contractUseLoaderFrom(root))).rejects.toThrow("作業の木");
+  });
+
+  it("書き出しの依存が ERR_PACKAGE_PATH_NOT_EXPORTED を投げても、書き出しが無い扱いにせず例外", async () => {
+    const root = rootWithExport("a");
+    const dep = join(root, "node_modules", "dep");
+    mkdirSync(dep, { recursive: true });
+    writeFileSync(join(dep, "package.json"), `${JSON.stringify({ name: "dep", type: "module", exports: { ".": "./i.mjs" } })}\n`);
+    writeFileSync(join(dep, "i.mjs"), "export const x = 1;\n");
+    writeFileSync(
+      join(root, "node_modules", "@nd-factory", "contracts", "use.mjs"),
+      'import "dep/hidden";\nexport const ndfContractUse = null;\n',
+    );
+    await expect(loadContractUse(contractUseLoaderFrom(root))).rejects.toMatchObject({ code: "ERR_PACKAGE_PATH_NOT_EXPORTED" });
+  });
 });
 
 describe("loadContractUse", () => {
-  it("書き出しが無ければ null", async () => {
+  it("読み手が書き出しが無い（null）と返せば null", async () => {
+    expect(await loadContractUse(() => Promise.resolve(null))).toBeNull();
+  });
+
+  it("読み手が ERR_PACKAGE_PATH_NOT_EXPORTED で失敗したら例外のまま投げる（書き出しが無い扱いにしない）", async () => {
     const missing = Object.assign(new Error("missing"), { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" });
-    expect(await loadContractUse(() => Promise.reject(missing))).toBeNull();
+    await expect(loadContractUse(() => Promise.reject(missing))).rejects.toThrow("missing");
   });
 
   it("書き出しの読み込みがほかの理由で失敗したら例外を投げる", async () => {
