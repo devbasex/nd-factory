@@ -212,7 +212,7 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 - `mainNdfContractCheck`
   - 引数: `[--root <作業の木>] [--summary <要約のファイル>]`。スクリプト `npm run ndf-contract`
   - 事後条件: どの起動でも、作業の木の `ndf-pin.json` の固定の点と、既定の枝の先端の両方を照らす（設計文書の決定 6）。固定の点の食い違いで終了コード 1、先端の食い違いは要約に並べて 0
-  - 出力の行（標準出力と要約の両方）: `checked: fixed <固定の点のコミット> 1-6`・`checked: tip <先端のコミット> 1-6`・`skip: no-contract-use <固定の点のコミット>`（使い方の書き出しが無く、1〜6 を照らさなかった）。先端を取れなければ `checked: tip` を出さず、要約に先端を照らさなかったと出す
+  - 出力の行（標準出力と要約の両方）: `checked: fixed <固定の点のコミット> 1-6`・`checked: tip <先端のコミット> 1-6`・`skip: no-contract-use <固定の点のコミット>`（使い方の書き出しが無く、1〜6 を照らさなかった。定数 `CONTRACT_USE_REQUIRED` が偽のときだけ）・`fail: no-contract-use <固定の点のコミット>`（`CONTRACT_USE_REQUIRED` が真なのに書き出しが無い）。先端を取れなければ `checked: tip` を出さず、要約に先端を照らさなかったと出す
   - 副作用: 一時のディレクトリへの取得、要約のファイルへの追記（ワークフローは `GITHUB_STEP_SUMMARY` を渡す）
 - 固定の点のコミットは `ndf-pin.json` から読む。キーの名前は参照の検査の書き方に倣って定数に置き、キーを読む行に大小の比べの記号と矢印の関数を置かない（参照の検査の版の比べに当たるため）
 
@@ -239,6 +239,7 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | 契約の置き場 | 定数（同上） | 同上 | `plugins/ndf/contracts` |
 | `ContractFinding` | 型 `{ check: 1〜6; path: string; id?: string; detail: string }`。`id` は見本の id か配列の位置 | 同上 | — |
 | `NdfContractUse` | 型（#2 の書き出しから写す） | 同上 | 書き出しが無ければ `null` |
+| `CONTRACT_USE_REQUIRED` | 定数（真偽）。NDF の契約の使い方の書き出しを必須にするか | 同上 | 偽。#2 の書き出しを置く Pull Request が同じ変更で真にする（K2-6）。真にした後に偽へ戻す変更は、照合を外す変更としてレビューで見る（1 行の差分に出る） |
 
 ### 異常系の処理
 
@@ -246,7 +247,8 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | --- | --- | --- | --- | --- | --- |
 | `fetchContract`（固定の点） | 取れない・契約のファイルが無い・JSON でない | ネットワーク・固定の点の誤り・置き場の移動 | 止める | 標準エラーに理由、終了コード 2 | 打ち直せる。置き場の移動なら固定の点を変える Pull Request で直す |
 | `fetchContract`（先端） | 同上 | 同上 | 既定値で続ける | 要約に先端を照らさなかったと出し、固定の点の結果で終わる | 次の実行で照らす |
-| `compareContract` | NDF の契約の使い方の書き出しが無い | #2 がまだ置いていない | 既定値で続ける（1〜6 を照らさず、契約のファイルが読めることだけを確かめる） | `skip: no-contract-use` の行。`checked:` の行を出さない | #2 の Pull Request の CI で `checked: fixed` が出ることを確かめる |
+| `compareContract` | NDF の契約の使い方の書き出しが無く、`CONTRACT_USE_REQUIRED` が偽 | #2 がまだ置いていない | 既定値で続ける（1〜6 を照らさず、契約のファイルが読めることだけを確かめる） | `skip: no-contract-use` の行。`checked:` の行を出さない。終了コード 0 | #2 の Pull Request の CI で `checked: fixed` が出ることを確かめる |
+| `compareContract` | NDF の契約の使い方の書き出しが無く、`CONTRACT_USE_REQUIRED` が真 | #2 の後に書き出しを消した・名前を変えた | 止める | `fail: no-contract-use` の行、終了コード 1 | 書き出しを戻す |
 | `mainNdfContractCheck` | 固定の点で食い違う | 固定の点か形の正本を変えた | 呼び出し元へ返す | 要約の表と食い違いの行、終了コード 1 | 直すか固定の点を戻す |
 | `mainNdfContractCheck` | 先端だけで食い違う | 上流の未配布の変更 | 既定値で続ける | 要約の表に見本の id と契約のファイルのパス、終了コード 0 | 次の固定の点を変える Pull Request で扱う |
 
@@ -255,7 +257,7 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `compareContract` | 作り物の契約と使い方で 0 件 | 使い方が `null` で照らさない。`ask-journal` に `fields` を足した契約で知らせが出て、食い違いにならない | 1〜6 のそれぞれ 1 つを壊した契約で、その番号の食い違いが出る |
-| `mainNdfContractCheck` | 固定の点だけの食い違いで 1、先端だけで 0 と要約の行。どちらも `checked: fixed` が出る | 使い方の書き出しが無いと `skip: no-contract-use` と 0 | 固定の点の取得の失敗で 2 |
+| `mainNdfContractCheck` | 固定の点だけの食い違いで 1、先端だけで 0 と要約の行。どちらも `checked: fixed` が出る | `CONTRACT_USE_REQUIRED` が偽で使い方の書き出しが無いと `skip: no-contract-use` と 0 | `CONTRACT_USE_REQUIRED` が真で書き出しが無いと `fail: no-contract-use` と 1（定数をテストの引数で差し替える）。固定の点の取得の失敗で 2 |
 
 `fetchContract` はテストでネットワークを使わず、テストの中で作った git のリポジトリを NDF のリポジトリの代わりに渡す（URL を引数で差し替える）。
 
