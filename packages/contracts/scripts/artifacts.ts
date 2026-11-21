@@ -425,7 +425,17 @@ function leaves(value: unknown, out: Array<string | number> = []): Array<string 
 
 const SECRET_PATTERNS = SECRET_SHAPES.valuePatterns.map((p) => ({ name: p.name, re: new RegExp(p.pattern, "u") }));
 const TWELVE_DIGITS = /(?<!\d)\d{12}(?!\d)/g;
-const MAIL = /[^\s@]*@([^\s@]*)/g;
+// UUID の形（ID の接頭辞の後ろも含む）。最終の組の 16 進 12 桁がすべて数字になることがあり、12 桁の数と見なさないよう照らす前に除く
+const UUID_SHAPE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+// メールらしい形だけを照らす（ローカル部があり、域名が `.` で区切られ英字の最上位を持つ）。
+// `@acme/factory`・`pkg@1.2.3` は当たらず、末尾の句読点は域名に含めない
+const MAIL = /[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})(?![A-Za-z0-9-])/g;
+
+// 作り物の域名か、その下位の域名
+function isFakeMailDomain(domain: string): boolean {
+  const d = domain.toLowerCase();
+  return d === FAKE_MAIL_DOMAIN || d.endsWith(`.${FAKE_MAIL_DOMAIN}`);
+}
 
 // 診断は違反の種類だけを返し、当たった値を含めない（本物のアカウント ID やメールが CI のログに残らないようにする）
 function leafProblems(leaf: string | number): string[] {
@@ -434,10 +444,10 @@ function leafProblems(leaf: string | number): string[] {
   if (typeof leaf === "string") {
     for (const p of SECRET_PATTERNS) if (p.re.test(text)) out.push(`秘密の形 ${p.name} に当たる値がある`);
     for (const m of text.matchAll(MAIL)) {
-      if ((m[1] ?? "").toLowerCase() !== FAKE_MAIL_DOMAIN) out.push(`メールの域名が ${FAKE_MAIL_DOMAIN} でない`);
+      if (!isFakeMailDomain(m[1] ?? "")) out.push(`メールの域名が ${FAKE_MAIL_DOMAIN} でない`);
     }
   }
-  for (const m of text.matchAll(TWELVE_DIGITS)) {
+  for (const m of text.replace(UUID_SHAPE, " ").matchAll(TWELVE_DIGITS)) {
     if (m[0] !== FAKE_ACCOUNT_ID) out.push(`12 桁の数が ${FAKE_ACCOUNT_ID} でない`);
   }
   return out;
