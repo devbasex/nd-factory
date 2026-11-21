@@ -175,9 +175,24 @@ const SINGLE_ATTEMPT_CLIENTS = new WeakSet<RDSDataClient>();
 // extensions（configure から setRetryStrategy を呼べる）のように再試行の戦略を差し替える経路を漏らしうるため、渡す項目を数える
 export type RdsDataClientOptions = Pick<RDSDataClientConfig, "region" | "credentials" | "endpoint" | "requestHandler">;
 
-// Data API のクライアント。SDK の自動の再試行を止める（maxAttempts: 1・SDK の既定の再試行の戦略）。SDK は通信の障害や
+// SDK の再試行の層は、戦略の refreshRetryTokenForRetry がトークンを返す限り maxAttempts に関わらず打ち直す
+// （@smithy/core の retryMiddleware）。打ち直さない戦略を持ち、その項目を Object.freeze で書き換えられなくする。
+// SDK の既定の戦略（StandardRetryStrategy）は凍っておらず、config.retryStrategy() で取り出して refreshRetryTokenForRetry を
+// 差し替えると打ち直せるため使わない。トークンも凍らせ、状態を持たないため、どのクライアントも同じものを使う
+const NO_RETRY_TOKEN = Object.freeze({ getRetryCount: () => 0, getRetryDelay: () => 0 });
+const NO_RETRY_STRATEGY = Object.freeze({
+  mode: "standard",
+  acquireInitialRetryToken: async (_scope: string) => NO_RETRY_TOKEN,
+  // 投げると SDK の再試行の層は打ち直さず、初回の失敗を投げる
+  refreshRetryTokenForRetry: async (_token: unknown, _info: unknown): Promise<never> => {
+    throw new Error("SDK の再試行は止めている");
+  },
+  recordSuccess: (_token: unknown) => undefined,
+});
+
+// Data API のクライアント。SDK の自動の再試行を止める（maxAttempts: 1・打ち直さない凍った戦略）。SDK は通信の障害や
 // 絞りで文や commit を打ち直し、初回が確定して応答だけが失われると、打ち直しの失敗が返って確定したかが分からなくなる。
-// 再試行は再開の待ちだけをこの実装が受け持つ。retryStrategy・retryMode・maxAttempts・extensions などは SDK へ渡さない
+// 再試行は再開の待ちだけをこの実装が受け持つ。retryStrategy・retryMode・maxAttempts・extensions などは呼ぶ側から受けない
 export function createRdsDataClient(options: RdsDataClientOptions = {}): RDSDataClient {
   const { region, credentials, endpoint, requestHandler } = options;
   const client = new RDSDataClient({
@@ -186,13 +201,18 @@ export function createRdsDataClient(options: RdsDataClientOptions = {}): RDSData
     ...(endpoint === undefined ? {} : { endpoint }),
     ...(requestHandler === undefined ? {} : { requestHandler }),
     maxAttempts: 1,
+    retryStrategy: NO_RETRY_STRATEGY,
   });
   // SDK の再試行の層は要求のたびに、送る途中で config から戦略と回数を読む（@smithy/core の retryMiddleware）。
   // 送る前に照らしても、照らした後・読む前に差し替えれば打ち直せるため、作った時の値で書き換えられない項目にする。
+  // client.config の項目そのものも固める。SDK の send は送るたびに this.config を読んでミドルウェアを組むため、
+  // config をオブジェクトごと差し替えると、固めた 2 項目を通らずに戦略を変えられる。client.config を Object.freeze しないのは、
+  // SDK が応答のたびに config.systemClockOffset へ書き込み（@aws-sdk/core の署名の層）、凍らせると送りが投げるため。
   // 差し替えは厳格モードでは TypeError で投げ、Object.defineProperty も投げる
   for (const key of ["retryStrategy", "maxAttempts"] as const) {
     Object.defineProperty(client.config, key, { value: client.config[key], writable: false, configurable: false });
   }
+  Object.defineProperty(client, "config", { value: client.config, writable: false, configurable: false });
   SINGLE_ATTEMPT_CLIENTS.add(client);
   return client;
 }

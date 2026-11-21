@@ -468,7 +468,36 @@ describe("createRdsDataClient（SDK の再試行）", () => {
       config.maxAttempts = async () => 3;
     }).toThrow(TypeError);
     expect(() => Object.defineProperty(config, "retryStrategy", { value: async () => strategy })).toThrow(TypeError);
+    // config をオブジェクトごと差し替えて、固めた 2 項目を通らずに戦略を変える
+    const holder = client as { config: unknown };
+    expect(() => {
+      holder.config = { ...client.config, retryStrategy: async () => strategy };
+    }).toThrow(TypeError);
+    expect(() => Object.defineProperty(client, "config", { value: { ...client.config, retryStrategy: async () => strategy } })).toThrow(TypeError);
   }
+
+  // 戦略のインスタンスを取り出し、refreshRetryTokenForRetry を打ち直すトークンを返すものへ差し替える
+  async function replaceStrategyMethod(client: RDSDataClient): Promise<void> {
+    const instance = (await client.config.retryStrategy()) as { refreshRetryTokenForRetry: unknown };
+    instance.refreshRetryTokenForRetry = (retryingStrategy() as { refreshRetryTokenForRetry: unknown }).refreshRetryTokenForRetry;
+  }
+
+  it("createRdsDataClient の戦略のインスタンスは変えられず、変えようとした後も commit は 1 回だけ送る", async () => {
+    // SDK の既定の戦略は maxAttempts: 1 でも、インスタンスの refreshRetryTokenForRetry を差し替えると打ち直すことの確かめ
+    const probe = unavailableHandler();
+    const raw = new RDSDataClient({ ...base, maxAttempts: 1, requestHandler: probe });
+    await replaceStrategyMethod(raw);
+    await expect(raw.send(new CommitTransactionCommand({ resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN, transactionId: "tx-1" }))).rejects.toThrow();
+    expect(probe.count()).toBeGreaterThan(1);
+
+    const h = unavailableHandler();
+    const client = createRdsDataClient({ ...base, requestHandler: h });
+    await expect(replaceStrategyMethod(client)).rejects.toThrow(TypeError);
+    expect(Object.isFrozen(await client.config.retryStrategy())).toBe(true);
+    const sql = createDataApiExecutor({ client, resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN });
+    await expect(sql.commit("tx-1")).rejects.toThrow(/unavailable/);
+    expect(h.count()).toBe(1);
+  });
 
   it("createRdsDataClient で作った後は config の戦略と回数を差し替えられず、commit は 1 回だけ送る", async () => {
     const h = unavailableHandler();
