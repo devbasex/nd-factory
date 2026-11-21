@@ -160,6 +160,8 @@ export async function callHttp(req: OutboundRequest, policyName: HttpPolicyName,
     },
   };
   let result: OutboundResult;
+  // 最後の失敗を方針が繰り返す対象としていたか。冪等でない要求は 429 を繰り返した後の 503 のように、回数が残っていても対象の外で止まる
+  let lastRetriable = false;
   try {
     const pending = ky(req.url, options);
     const response = await pending;
@@ -168,10 +170,11 @@ export async function callHttp(req: OutboundRequest, policyName: HttpPolicyName,
     result = { status: response.status, headers: pickHeaders(response.headers), body: parseBody(response, text), class: "ok" };
   } catch (error) {
     result = failureResult(error);
+    lastRetriable = req.idempotent || (error instanceof Error && retryWhenNotDelivered({ error }));
   }
   if (result.class === "ok") deps.log.info("外への呼び出しが済んだ", summary(result.status, result.class));
-  // 冪等でない要求の 408・5xx・時間切れは繰り返さずに retryable で返る。使い切ったと書かない
-  else if (result.class === "retryable" && retries > 0) deps.log.error("外への呼び出しが再試行を使い切った", summary(result.status, result.class));
+  // 繰り返した回数が正でも、最後の失敗が繰り返す対象の外（冪等でない要求の 408・5xx・時間切れ）なら使い切ったと書かない
+  else if (result.class === "retryable" && retries > 0 && lastRetriable) deps.log.error("外への呼び出しが再試行を使い切った", summary(result.status, result.class));
   else if (result.class === "retryable") deps.log.error("外への呼び出しが一時の失敗で、繰り返さずに返した", summary(result.status, result.class));
   else deps.log.warn("外への呼び出しを相手が断った", summary(result.status, result.class));
   return result;

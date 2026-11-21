@@ -211,6 +211,22 @@ describe("callHttp", () => {
     expect(records()).toMatchObject([{ level: "error", msg: "外への呼び出しが一時の失敗で、繰り返さずに返した", retries: 0 }]);
   });
 
+  it("冪等でない POST が 429 を繰り返した後の 503 は、回数が残っていても使い切ったと書かない", async () => {
+    const { calls, fetch } = fakeFetch([json(429, {}, { "retry-after": "1" }), json(503, {})]);
+    const { log, records } = logs();
+    const result = await settle(callHttp(post(), "http-github", { log, clock: createClock(), fetch }));
+    expect(calls).toHaveLength(2);
+    expect(result).toMatchObject({ status: 503, class: "retryable" });
+    expect(records().at(-1)).toMatchObject({ level: "error", msg: "外への呼び出しが一時の失敗で、繰り返さずに返した", status: 503, retries: 1 });
+  });
+
+  it("冪等でない POST の 429 を使い切ると、使い切ったと書く", async () => {
+    const { fetch } = fakeFetch(json(429, {}, { "retry-after": "1" }));
+    const { log, records } = logs();
+    await settle(callHttp(post(), "http-github", { log, clock: createClock(), fetch }));
+    expect(records().at(-1)).toMatchObject({ level: "error", msg: "外への呼び出しが再試行を使い切った", status: 429, retries: 3 });
+  });
+
   it.each([
     ["冪等な要求", get()],
     ["冪等でない要求", post()],
