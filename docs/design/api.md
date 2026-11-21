@@ -452,13 +452,13 @@ AI のエージェントが、画面と同じ操作を MCP の道具として呼
 
 | 項目 | 決まり |
 | --- | --- |
-| HTTP の経路 | `POST /mcp`。API と同じ Lambda で受ける。MCP の 2026-07-28 版の streamable HTTP に倣い、セッションを持たず、要求ごとに JSON の 1 応答で返す（SSE の流れを開かない）。`GET`・`DELETE` は 405 |
+| HTTP の経路 | `POST /mcp`。API と同じ Lambda で受ける。MCP の 2026-07-28 版の streamable HTTP に倣い、セッションを持たず、要求ごとに JSON の 1 応答で返す（SSE の流れを開かない）。2026-07-28 版だけを受け、旧い版の `initialize`・版の名乗りの無い要求・バッチは JSON-RPC の誤りで断つ（呼び手は `server/discover` → `tools/list` → `tools/call` で呼ぶ）。`GET`・`DELETE` は 405 |
 | 受ける token | 委任の token だけ。Cognito の token は 401 |
 | `Origin` | 頭書きがあり、画面のオリジンでなければ 403（STD40 の DNS の付け替えへの守り） |
 | 道具の作り方 | 操作の表から生成する。手で書いた道具を持たない |
 | 道具の名前 | 操作の名前（`sprints.create`）。仕様が許す字（英字・数字・`_`・`-`・`.`）の範囲 |
 | 入力の形 | `{"items": [...]}`。`items` は HTTP の本文と同じ要素の配列（MCP の入力はオブジェクトでなければならないため、配列を 1 つの項目に包む） |
-| 出力の形 | `structuredContent` に HTTP の応答と同じ要素の結果の配列、`content` に同じ値の JSON の文字列を 1 つ。要求全体の誤りは `isError: true` と problem の JSON |
+| 出力の形 | `structuredContent` に HTTP の応答と同じ要素の結果の配列、`content` に同じ値の JSON の文字列を 1 つ。誤りは受理の前と後で返し方が分かれる。道具の呼び出しを受理する前の拒否（JSON-RPC と版の誤り、`tools/call` の `params` の形の誤り、知らない道具、`items` が無い・配列でない・空・その操作の上限を越える）は、道具の結果を返さず JSON-RPC の `error`（知らない道具と `items` の外側の誤りは `-32602`）で返す。振り分けに入った後の要求全体の誤り（`human_only`・`scope_insufficient`・`unavailable`・`audit_unavailable` など）は `result.isError: true` と problem の JSON で返す。要素の誤り（`item_invalid` など）は `isError` にせず、要素の結果の配列に入れる |
 | 道具の注記 | 読む操作は `readOnlyHint`、`delete`・`cancel`・`remove`・`revoke` は `destructiveHint`、冪等の鍵を持つ操作は `idempotentHint` |
 | 道具の一覧の並び | 操作の表の順で毎回同じ。委任の種類で呼べない道具も一覧に出す（一覧を主体ごとに変えると、呼べない理由をエージェントが読めないため） |
 | 資源（resources） | 使わない。読むものはすべて読む操作の道具で出す。資源の変化の知らせは長く開いた流れを要し、Lambda で受けない |
