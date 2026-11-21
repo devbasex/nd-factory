@@ -16,12 +16,12 @@ nd-factory/
 ├── package.json                           スクリプト deps-check・knip・ndf-contract・test:integration、開発の依存
 ├── vitest.config.ts                       結合のテストを分ける
 ├── .ndf/project.json                      必須のチェックに 4 つ足す
-├── AGENTS.md                              LEAK_CHECK_PATTERN の行
+├── AGENTS.md                              LEAK_CHECK_PATTERN の行・REF_CHECK_TERMS の読み手
 ├── .github/
 │   ├── zizmor.yml                       * zizmor の設定
 │   └── workflows/
-│       ├── ci.yml                         check に手順を足し、leak-check・workflow-audit を足す
-│       ├── leak-real-value.yml          * 実際の値の照らし（信頼する定義と包みで、Pull Request の内容をデータとして探す）
+│       ├── ci.yml                         check に手順を足し、leak-check・workflow-audit を足す。ref-check を秘密なしの --scope static にする（2 つ目の Pull Request）
+│       ├── leak-real-value.yml          * 実際の値と照合の語の照らし（信頼する定義・包み・ref-check で、Pull Request の内容をデータとして探す）
 │       └── ndf-contract.yml             * NDF の契約の照合
 ├── apps/api/src/users-handler.ts          除外の注釈（#2）
 ├── apps/api/src/user-store.ts             除外の注釈（#2）
@@ -34,6 +34,7 @@ nd-factory/
     ├── tsconfig.json                      checks/src を含める
     ├── checks/src/ndf-contract-check.ts * NDF の契約の照合（CLI）
     ├── checks/src/leak-check.ts         * gitleaks の包み（設定を組み、報告を絞って伏せる）
+    ├── ref-check/src/ref-check.ts         --scope static|terms を足す
     └── test/
         ├── ndf-contract-check.test.ts   *
         ├── contracts-round-trip.test.ts *  形の正本の往復と I14 の表の照らし
@@ -44,7 +45,7 @@ nd-factory/
         ├── leak-scan.integration.test.ts * gitleaks の設定と包みが落とすこと（leak-check のジョブ）
         ├── workflow-audit.integration.test.ts * zizmor の設定が落とすこと（workflow-audit のジョブ）
         ├── ci-definition.test.ts          すべてのワークフローを yaml で読む
-        └── ref-check.test.ts              ワークフローの版の比べのテストを足す
+        └── ref-check.test.ts              --scope の分けとワークフローの版の比べのテストを足す
 ```
 
 依存の向き: `tools/checks` と `tools/test` は `packages/contracts` だけを import し（`leak-check.ts` は何も import しない）、ほかの置き場は文字として読む。ツールの設定のファイルはどの置き場のコードも import しない（`eslint.config.js` が料金プランの名前を `@nd-factory/contracts` から読むのを除く）。
@@ -53,6 +54,7 @@ nd-factory/
 | --- | --- | --- | --- | --- |
 | `tools/checks/src/ndf-contract-check.ts` | 新設 | 固定の点と既定の枝の先端の NDF の契約を、形の正本の判定とデータで照らす | `@nd-factory/contracts`（NDF の契約の使い方） | `fetchContract`・`compareContract`・`renderSummary`・`mainNdfContractCheck`（新設） |
 | `tools/checks/src/leak-check.ts` | 新設 | gitleaks を規則の設定か実際の値の設定で起こし、黙らせる仕組みを効かせず、報告の値とパスを伏せて当たりを出す | Node の組み込みの部品・gitleaks の実行ファイル | `buildConfigs`・`runGitleaks`・`maskPath`・`mainLeakCheck`（新設） |
+| `tools/ref-check/src/ref-check.ts` | 変更 | 照らしを `--scope` で、秘密を読まない `static`（固定の値・版の比べ）と照合の語の `terms` に分ける | Node の組み込みの部品・`git` | `mainRefCheck`（変更） |
 | `tools/test/contracts-round-trip.test.ts` | 新設 | 見本と変形を 4 つの形で検証して比べ、I14・I12・I15 の表の照らしを行う | `@nd-factory/contracts`・ajv・ajv-formats | `mutate`・`representationsOf`（新設。テストの中の関数） |
 | `tools/test/ci-definition.test.ts` | 変更 | すべてのワークフローを `yaml` で読んで照らす | `yaml` | `loadWorkflows`・`triggersPullRequest`・`permissionBlocks`（新設）、`jobNames`（変更）、`credentialWords`（変えない） |
 
@@ -175,9 +177,10 @@ gitleaks の標準出力と標準エラーをそのまま CI の記録へ流さ�
 1. `actions/checkout`（`path: trusted`・`persist-credentials: false`。ref を指定せず、`pull_request_target` では既定の枝、`push` では押したコミットを取る）
 2. `actions/checkout`（`path: target`・`ref` は `github.event.pull_request.head.sha` か、`push` では `github.sha`・`fetch-depth: 0`・`persist-credentials: false`）と `actions/setup-node`
 3. `leak-check` の手順 2 と同じに gitleaks を置く（版と要約値はこの定義、つまり既定の枝の値）
-4. `node trusted/tools/checks/src/leak-check.ts --scope real-value --root target --config-root trusted`（Pull Request では `--base`・`--head`、変数 `LEAK_CHECK_REQUIRE_PATTERN` が `1` なら `--require-pattern` を足す）。`LEAK_CHECK_PATTERN` はこの手順の環境変数でだけ渡す。ほかの手順を置かない（`npm ci` も `target/` のファイルの実行もしない）
+4. `node trusted/tools/checks/src/leak-check.ts --scope real-value --root target --config-root trusted`（Pull Request では `--base`・`--head`、変数 `LEAK_CHECK_REQUIRE_PATTERN` が `1` なら `--require-pattern` を足す）。`LEAK_CHECK_PATTERN` はこの手順の環境変数でだけ渡す
+5. `node trusted/tools/ref-check/src/ref-check.ts --scope terms --root target`。環境変数 `REF_CHECK_TERMS` を秘密から、`REF_CHECK_REQUIRE_TERMS` を変数 `REF_CHECK_REQUIRE_TERMS` が `1` のとき `1` にして、この手順でだけ渡す。手順 4 が当たりで落ちても走らせる（`if: ${{ !cancelled() }}`）。ほかの手順を置かない（`npm ci` も `target/` のファイルの実行もしない）
 
-`.github/zizmor.yml` には、`leak-real-value.yml` の `pull_request_target` に当たる点検（`dangerous-triggers`）の `ignore` の行を、「信頼する定義と包みで Pull Request の内容をデータとして探し、Pull Request のコードを動かさない（#1）」の注で置く。`ci-definition.test.ts` がこの形を縛る（下の「zizmor の設定と CI の定義のテスト」）。
+`.github/zizmor.yml` には、`leak-real-value.yml` の `pull_request_target` に当たる点検（`dangerous-triggers`）の `ignore` の行を、「信頼する定義と包みと参照の検査で Pull Request の内容をデータとして探し、Pull Request のコードを動かさない（#1）」の注で置く。`ci-definition.test.ts` がこの形を縛る（下の「zizmor の設定と CI の定義のテスト」）。
 
 ### 今の木の当たり
 
@@ -190,6 +193,24 @@ gitleaks の標準出力と標準エラーをそのまま CI の記録へ流さ�
 | `buildConfigs`・`maskPath`（`tools/test/leak-check.test.ts`。gitleaks を起こさない） | `pattern` ありで `realValue` が `nd-real-value` の規則 1 つだけを持ち、許可を持たない。`own` は `.gitleaks.toml` のまま | `pattern` が `null` なら `realValue` が `null`。1 文字の語・語 1 つの `pattern` は通る。パスの大小違いの語も伏せる | `'''`・空白・正規表現の記号を含む `pattern`、空の選択肢を持つ `a\|\|b`・`\|a`・`a\|`・`\|` で例外になり、例外の文言に値が出ない |
 | `mainLeakCheck` の引数と必須の条件（`leak-check.test.ts`。gitleaks を起こす関数を差し替える） | `real-value` で `pattern` ありなら `realValue` で探す。`rules` は環境に `LEAK_CHECK_PATTERN` があっても読まず、`own` と `defaults` の両方で探す | `real-value` で `pattern` が無く `--require-pattern` も無いと `skip: no-pattern` と 0 で、gitleaks を起こさない | `real-value` で `pattern` が無く `--require-pattern` があると 2。`rules` に `--require-pattern` を渡すと 2。`--scope` の欠け・`--base` だけの指定で 2 |
 | `leak-scan.integration.test.ts`（gitleaks の実行ファイルを起こす。`leak-check` のジョブで打つ） | 作り物の値だけの一時の木で当たり 0 件 | 作り物の UUID・置き場所の記号・13 桁の数・`arn:aws:iam::aws:policy/…` で当たらない。既知の当たりの許可のパスに置いた許可の値は当たらない | 実行の時に組み立てた作り物でない 12 桁・ARN（アカウントの欄の無い S3 のバケットの ARN を含む）・端点・token を `docs/` の下に置くと `rules` で、作り物の語を `docs/` の下に置くと `real-value` で当たり、標準出力と標準エラーに値が現れない。同じ値を `package-lock.json` と `*.png` の名前のファイルに置いても自前の規則と `nd-real-value` が当たる。語を含む行に `EXAMPLE` と `gitleaks:allow` を足しても当たる。`.gitleaksignore` を追跡すると終了コード 2。語を含むファイルの名前で `nd-real-path` が当たり、出力のパスが伏せられる。途中のコミットで足して消した値が `git` の探しで当たる。マージの解決で足し、head より前のコミットで消した値が `git` の探しで当たる（`--diff-merges=first-parent` を外すと落ちる回帰）。既知の当たりの許可の値を別のパスに置く・許可のパスに別の 12 桁を置くとどちらも当たる。`.gitleaks.toml` を読み、`paths` か `regexes` を持つ `[[allowlists]]` が `condition = "AND"` を持たないとテストが落ちる（同じ設定から `condition` を消した写しで、別のパスの許可の値が当たらなくなることも示す）。`.gitleaks.toml` に全体の許可を足すとテストが落ちる |
+
+### 参照の検査の照合の語（`tools/ref-check` の `--scope`）
+
+満たす決定: 設計の決定 3、受け入れ条件 8
+
+照合の語の秘密 `REF_CHECK_TERMS` を、Pull Request の中のコードを動かす `ci.yml` の `ref-check` から、信頼するコードで動く `leak-real-value` へ移す。`tools/ref-check/src/ref-check.ts` は Node の組み込みの部品だけを使い、`--root` の木を `git grep` で読むので、既定の枝の取得（`trusted/`）から起こして `target/` をデータとして読める。
+
+- 引数: `[--scope static|terms] [--root <作業の木>]`。`--scope` を省くと今と同じに両方を照らす（手元で語を渡して打つ用）
+  - `static`: NDF の固定の値の置き方（`findNdfPins`）と版の比べ（`findVersionCompare`）だけを照らす。`REF_CHECK_TERMS` と `REF_CHECK_REQUIRE_TERMS` を読まない（環境にあっても使わない）。`ci.yml` の `ref-check` が使う
+  - `terms`: 照合の語の当たり（`findOldRefs`）だけを照らす。語が無ければ、`REF_CHECK_REQUIRE_TERMS` が `1` なら終了コード 2、そうでなければ `skip:` の行を出して 0。`leak-real-value` の手順 5 が使う
+- 出力と終了コードは今と同じ（当たった語そのものを出さない。当たりで 1、語の形の誤り・必須の語の欠け・木を読めない・`--scope` の誤りで 2）
+- `ci.yml` の `ref-check` の手順は、2 つ目の実装の Pull Request で `env` を消して `npm run ref-check -- --scope static` にする。1 つ目の Pull Request では今の手順（秘密を受けて両方を照らす）のまま残す（設計文書の「秘密を読む手順の移し方」）。`--scope` を省いた今の振る舞いは変えないので、1 つ目の Pull Request の `ref-check` は今と同じに通る
+
+#### 単体テストの観点（`tools/test/ref-check.test.ts` に足す）
+
+| 対象 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `mainRefCheck` の `--scope` | `terms --root <別の木>` で、作り物の語を置いた別の木の当たりが 1 で出る（今のディレクトリの木を読まない）。`static` で固定の値の重なりと版の比べが当たる | `static` は `REF_CHECK_TERMS` に当たる語を渡しても語の当たりを出さず、`REF_CHECK_REQUIRE_TERMS=1` で語が無くても 0。`terms` は固定の値の重なりを出さない。省くと今と同じに両方を照らす | 知らない `--scope` の値で 2。`terms` で `REF_CHECK_REQUIRE_TERMS=1` かつ語が無いと 2 |
 
 ## knip の設定
 
@@ -223,7 +244,7 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | `permissionBlocks` | 同上 | 新設 | `(doc: Workflow) => { scope: string; value: unknown }[]` | 最上位と各ジョブの `permissions` を、場所と値の組で返す |
 | `credentialWords` | 同上 | 変えない | `(yaml: string) => string[]` | 元の文字列で AWS の資格情報の語を探す |
 
-テストが照らすこと: Pull Request で起動するワークフローのジョブの名前の和集合が必須のチェックの宣言と等しい・ジョブの名前がワークフローの間で重ならない・どのワークフローにも AWS の資格情報の語が無い・最上位の `permissions` が `{ contents: read }` だけで、ジョブの `permissions` は持たないか同じ・どのワークフローの文字列にも `zizmor: ignore` が無い・`.github/zizmor.yml` が `disable` を持たず、`ignore` の行がどれも課題の番号の注を持つ。秘密の扱い: `secrets.` を読むのは `leak-real-value.yml` だけで、読む手順は `leak-check.ts --scope real-value` の 1 つだけ。`pull_request_target` を持つのは `leak-real-value.yml` だけで、その手順は 2 つの取得・`setup-node`・gitleaks の設置・`trusted/` の包みの実行だけ（`npm`・`target/` の中のパスの実行・head を `path` なしで取る取得を持たない）。参照の検査（`tools/ref-check`）は追跡しているファイルをすべて読むので変えず、ワークフローの文字列に NDF の版を読む式と比べを同じ行に置くと当たるテストを `tools/test/ref-check.test.ts` に足す。
+テストが照らすこと: Pull Request で起動するワークフローのジョブの名前の和集合が必須のチェックの宣言と等しい・ジョブの名前がワークフローの間で重ならない・どのワークフローにも AWS の資格情報の語が無い・最上位の `permissions` が `{ contents: read }` だけで、ジョブの `permissions` は持たないか同じ・どのワークフローの文字列にも `zizmor: ignore` が無い・`.github/zizmor.yml` が `disable` を持たず、`ignore` の行がどれも課題の番号の注を持つ。秘密の扱い（2 つ目の実装の Pull Request で足す。設計文書の「秘密を読む手順の移し方」）: `secrets.` を読むのは `leak-real-value.yml` だけで、読む手順は `trusted/tools/checks/src/leak-check.ts --scope real-value`（`secrets.LEAK_CHECK_PATTERN`）と `trusted/tools/ref-check/src/ref-check.ts --scope terms`（`secrets.REF_CHECK_TERMS`）の 2 つだけで、それぞれほかの秘密を読まない。`ci.yml` の `ref-check` は `--scope static` を打ち、環境変数に `REF_CHECK_TERMS` を持たない。`pull_request_target` を持つのは `leak-real-value.yml` だけで、その手順は 2 つの取得・`setup-node`・gitleaks の設置・`trusted/` の包みと `trusted/` の `ref-check` の実行だけ（`npm`・`target/` の中のパスの実行・head を `path` なしで取る取得を持たない）。参照の検査（`tools/ref-check`）は追跡しているファイルをすべて読むので、ワークフローもそのまま読む。ワークフローの文字列に NDF の版を読む式と比べを同じ行に置くと当たるテストを `tools/test/ref-check.test.ts` に足す。
 
 ### 単体テストの観点
 
@@ -232,7 +253,7 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | `loadWorkflows`・`triggersPullRequest`・`jobNames` | 2 つのワークフローを読み、Pull Request で起動するものを選ぶ | `on: pull_request`・`on: [pull_request]`・`on:` の下の鍵の 3 つの書き方 | 解けない YAML で失敗する。片方のワークフローにだけ資格情報の語・`id-token: write` を足すと当たる |
 | `permissionBlocks` | 今のワークフローで違反 0 件 | ジョブの `permissions: { contents: read }` は通る | ジョブに `pull-requests: write`・`write-all` を足すと場所つきで当たる |
 | `zizmor` の注釈と設定（`ci-definition.test.ts`） | 今のワークフローと `.github/zizmor.yml` で 0 件 | 注のある `ignore` の行は通る | ワークフローに `# zizmor: ignore[...]` を足す・`disable: true` を足す・注の無い `ignore` の行を足すと当たる |
-| 秘密の扱い（`ci-definition.test.ts`） | 今のワークフローで 0 件 | `leak-real-value.yml` の包みの手順の `env` の `secrets.LEAK_CHECK_PATTERN` は通る | `ci.yml` のどれかの手順に `secrets.` を足す・`leak-real-value.yml` に `npm ci` か `node target/…` の手順を足す・head の取得から `path: target` を外す・包みを `target/` から起こす・`pull_request_target` をほかのワークフローに足すと当たる |
+| 秘密の扱い（`ci-definition.test.ts`。2 つ目の実装の Pull Request から） | その Pull Request のワークフローで 0 件 | `leak-real-value.yml` の包みの手順の `env` の `secrets.LEAK_CHECK_PATTERN` と、`ref-check --scope terms` の手順の `env` の `secrets.REF_CHECK_TERMS` は通る | `ci.yml` のどれかの手順に `secrets.` を足す（`ref-check` に `secrets.REF_CHECK_TERMS` を戻すことを含む）・`ci.yml` の `ref-check` の `--scope static` を外す・2 つの手順の秘密を入れ替えるか足す・`leak-real-value.yml` に `npm ci` か `node target/…` の手順を足す・head の取得から `path: target` を外す・包みか `ref-check` を `target/` から起こす・`pull_request_target` をほかのワークフローに足すと当たる |
 | `workflow-audit.integration.test.ts`（zizmor の実行ファイルだけを起こす。`workflow-audit` のジョブで `npm run test:integration -- workflow-audit` として打つ） | 今のワークフローを写した木で当たり 0 件 | — | 書き込みの権限・`persist-credentials` を外した取得・枝の名前で参照した動作を置いた一時の木で当たる。`--config` に渡した設定の外の `.github/zizmor.yml` を一時の木に置いても、渡した設定だけが効く |
 
 ## 形の正本の往復のテスト
@@ -358,12 +379,12 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 
 | ファイル | 変える中身 |
 | --- | --- |
-| `.github/workflows/ci.yml` | ジョブ `check` の `npm run check` の後に `npm run deps-check` と `npm run knip` の手順を足す。ジョブ `leak-check`（上の「gitleaks の設定と `leak-check` のジョブ」の手順。gitleaks の実行ファイルを置き、結合のテストは `leak-scan` だけを打つ）とジョブ `workflow-audit`（上の「zizmor の設定と CI の定義のテスト」の手順。zizmor の実行ファイルを置き、結合のテストは `workflow-audit` だけを打つ）を足す。動作の版はコミットの SHA で固定する（今の `ci.yml` と同じ） |
+| `.github/workflows/ci.yml` | ジョブ `check` の `npm run check` の後に `npm run deps-check` と `npm run knip` の手順を足す。ジョブ `ref-check` は 2 つ目の実装の Pull Request で、手順の `env`（`REF_CHECK_TERMS`・`REF_CHECK_REQUIRE_TERMS`）を消して `npm run ref-check -- --scope static` にする（上の「参照の検査の照合の語」）。ジョブ `leak-check`（上の「gitleaks の設定と `leak-check` のジョブ」の手順。gitleaks の実行ファイルを置き、結合のテストは `leak-scan` だけを打つ）とジョブ `workflow-audit`（上の「zizmor の設定と CI の定義のテスト」の手順。zizmor の実行ファイルを置き、結合のテストは `workflow-audit` だけを打つ）を足す。動作の版はコミットの SHA で固定する（今の `ci.yml` と同じ） |
 | `.github/workflows/ndf-contract.yml`（新設） | `on` は `pull_request`・`push`（main）・`schedule`（毎日 1 回）・`workflow_dispatch`。`permissions: contents: read`。ジョブ `ndf-contract` は `npm ci` の後に `npm run ndf-contract -- --summary "$GITHUB_STEP_SUMMARY"` を打つ |
-| `.github/workflows/leak-real-value.yml`（新設） | `on` は `pull_request_target`・`push`（main）。`permissions: contents: read`。ジョブ `leak-real-value` は上の「gitleaks の設定と `leak-check` のジョブ」の手順 |
+| `.github/workflows/leak-real-value.yml`（新設。1 つ目の実装の Pull Request） | `on` は `pull_request_target`・`push`（main）。`permissions: contents: read`。ジョブ `leak-real-value` は上の「gitleaks の設定と `leak-check` のジョブ」の手順（手順 5 の照合の語を含む） |
 | `.ndf/project.json` | `ci.required_checks` に `leak-check`・`leak-real-value`・`workflow-audit`・`ndf-contract` を足す。`ci.workflows` に `leak-real-value.yml`・`ndf-contract.yml` の行を足す |
 | `package.json` | スクリプト `deps-check`・`knip`・`ndf-contract`・`leak-check`・`test:integration`（引数のファイル名の絞りで、ジョブごとに 1 つの結合のテストだけを打つ）。開発の依存 `dependency-cruiser`・`knip` |
 | `vitest.config.ts` | 結合のテスト（`*.integration.test.ts`）を `tools` の単体のテストから外し、`test:integration` でだけ打つ |
 | `tools/package.json` | 依存 `@nd-factory/contracts`・`ajv`・`ajv-formats`・`yaml` |
 | `tools/tsconfig.json` | `checks/src` を含める |
-| `AGENTS.md` | 「秘密とインフラの値を置かない」に、実際の値の語は CI の秘密 `LEAK_CHECK_PATTERN`（語を `\|` でつなぐ）から受ける行と、`gitleaks:allow`・`.gitleaksignore`・`zizmor: ignore` を使わず、除外は設定のファイルに課題の番号を添えて置く行を足す |
+| `AGENTS.md` | 照合の語の行（「CI の秘密 `REF_CHECK_TERMS` から受ける」）に、読むのは `leak-real-value` の既定の枝の `ref-check` だけである旨を足す（2 つ目の実装の Pull Request）。「秘密とインフラの値を置かない」に、実際の値の語は CI の秘密 `LEAK_CHECK_PATTERN`（語を `\|` でつなぐ）から受ける行と、`gitleaks:allow`・`.gitleaksignore`・`zizmor: ignore` を使わず、除外は設定のファイルに課題の番号を添えて置く行を足す |
