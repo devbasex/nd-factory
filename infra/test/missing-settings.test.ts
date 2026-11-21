@@ -8,6 +8,7 @@ import {
   type MissingItem,
   collectMissingSettings,
   printMissingSettings,
+  shellArg,
 } from "../setup/missing-settings.ts";
 
 const TARGET: Target = { profile: "acme-test", account: "123456789012", region: "us-west-2" };
@@ -91,18 +92,18 @@ describe("collectMissingSettings", () => {
       expect(text).toContain("有効にできなければ設定のファイルの budget.scope を account にする（アカウントの全体を数える）");
     });
 
-    it("一覧に無いタグ（Missing）も有効でないと数え、資源を作って最大 24 時間待ってから有効にすると示す", async () => {
+    it("一覧に無いタグ（Missing）も有効でないと数え、資源が無ければ deploy し、あれば一覧への反映を待つと示す", async () => {
       const text = only(await collect({ tags: { "app-prefix": "Missing", "app-env": "Missing" } }), "cost_allocation_tags");
       expect(text).toMatch(/^コスト配分タグ app-prefix・app-env が有効でない。/);
       expect(text).toContain(
-        "app-prefix・app-env はタグの付いた資源がまだ無く、請求の画面のコスト配分タグの一覧に出ていないため、まだ有効にできない。deploy でタグの付いた資源を作り、一覧にキーが出るまで最大 24 時間待ってから有効にする。有効にする先: ",
+        "app-prefix・app-env は請求の画面のコスト配分タグの一覧にまだ出ていないため、まだ有効にできない。タグの付いた資源がまだ無ければ deploy で作り、すでにあれば一覧への反映を待つ（資源ができてから最大 24 時間）。一覧にキーが出てから有効にする。有効にする先: ",
       );
     });
 
     it("Inactive と Missing が混ざれば、待ちの文は Missing のキーだけを挙げる", async () => {
       const text = only(await collect({ tags: { "app-prefix": "Inactive", "app-env": "Missing" } }), "cost_allocation_tags");
       expect(text).toMatch(/^コスト配分タグ app-prefix・app-env が有効でない。/);
-      expect(text).toContain("。app-env はタグの付いた資源がまだ無く");
+      expect(text).toContain("。app-env は請求の画面のコスト配分タグの一覧にまだ出ていない");
     });
 
     it("Inactive だけなら待ちの文を出さない", async () => {
@@ -175,6 +176,20 @@ describe("collectMissingSettings", () => {
     );
   });
 
+  it("空白や引用符を含む profile は、表示するコマンドでシェルの 1 つの引数になる", async () => {
+    const c = ctx({ azs: 1 });
+    c.target = { ...c.target, profile: "my prof's" };
+    const text = only(await collectMissingSettings(c, MISSING_CHECKS), "get_azs");
+    expect(text).toContain("--profile 'my prof'\\''s' --region us-west-2 ");
+  });
+
+  it("shellArg は安全な文字だけならそのまま、ほかは単一引用符で囲む", () => {
+    expect(shellArg("acme-test")).toBe("acme-test");
+    expect(shellArg("a b")).toBe("'a b'");
+    expect(shellArg("it's")).toBe("'it'\\''s'");
+    expect(shellArg("$(rm -rf ~)")).toBe("'$(rm -rf ~)'");
+  });
+
   it("AZ の数を読めなければ、要る許しを示す", async () => {
     expect(only(await collect({ azs: "throw" }), "get_azs")).toBe(
       "Fn::GetAZs が返す AZ の数を確かめられない（ec2:DescribeSubnets・ec2:DescribeAvailabilityZones を許した profile で読む）",
@@ -202,7 +217,7 @@ describe("collectMissingSettings", () => {
     expect(items).toEqual([
       {
         key: "check_failed",
-        text: "壊れた照らし を確かめられない（TypeError: 壊れた）。AWS の読みが思わぬ形で失敗した。profile の認証と通信を確かめて diff を打ち直す",
+        text: "壊れた照らし を確かめられない（TypeError: 壊れた）。括弧の中の例外で原因を確かめる。AWS の読みの失敗なら profile の認証と通信を直し、権限が足りなければ docs/operations/setup.md の「足りない設定」の許しを足して diff を打ち直す",
       },
       { key: "after", text: "後の照らし" },
     ]);
@@ -217,7 +232,7 @@ describe("collectMissingSettings", () => {
     expect(items).toEqual([
       {
         key: "check_failed",
-        text: "コスト配分タグ を確かめられない（Error: 壊れた）。AWS の読みが思わぬ形で失敗した。profile の認証と通信を確かめて diff を打ち直す",
+        text: "コスト配分タグ を確かめられない（Error: 壊れた）。括弧の中の例外で原因を確かめる。AWS の読みの失敗なら profile の認証と通信を直し、権限が足りなければ docs/operations/setup.md の「足りない設定」の許しを足して diff を打ち直す",
       },
     ]);
   });

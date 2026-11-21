@@ -75,11 +75,12 @@ export async function checkCostAllocationTags(ctx: MissingContext): Promise<Miss
   }
   const notActive = keys.filter((k) => statuses[k] !== "Active");
   if (notActive.length === 0) return [];
-  // Missing のキーは請求の画面の一覧に無く、すぐには有効にできない。タグの付いた資源ができてから最大 24 時間で一覧に出る
+  // Missing は請求の画面のコスト配分タグの一覧にキーが無いことだけを示す。タグの付いた資源がまだ無いときのほか、
+  // 資源はあるが一覧への反映を待っているとき（資源ができてから最大 24 時間）も Missing になるため、両方の次の操作を示す
   const missing = notActive.filter((k) => statuses[k] === "Missing");
   const wait =
     missing.length > 0
-      ? `${missing.join("・")} はタグの付いた資源がまだ無く、請求の画面のコスト配分タグの一覧に出ていないため、まだ有効にできない。deploy でタグの付いた資源を作り、一覧にキーが出るまで最大 24 時間待ってから有効にする。`
+      ? `${missing.join("・")} は請求の画面のコスト配分タグの一覧にまだ出ていないため、まだ有効にできない。タグの付いた資源がまだ無ければ deploy で作り、すでにあれば一覧への反映を待つ（資源ができてから最大 24 時間）。一覧にキーが出てから有効にする。`
       : "";
   const org = await ctx.readOrganizationManager(ctx.target);
   return [
@@ -103,6 +104,12 @@ export async function checkOpsNotifyEmails(ctx: MissingContext): Promise<Missing
 // AZ は Fn::GetAZs から 2 つ選ぶため、返す AZ が 2 つ未満だと反映がネットワークを作れずに止まる
 export const MIN_GET_AZS = 2;
 
+// 値をシェルの 1 つの引数にする。安全な文字だけならそのまま、ほかは単一引用符で囲み、中の ' は '\'' にする
+export function shellArg(value: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
 export async function checkGetAzs(ctx: MissingContext): Promise<MissingItem[]> {
   let count: number;
   try {
@@ -119,7 +126,7 @@ export async function checkGetAzs(ctx: MissingContext): Promise<MissingItem[]> {
   return [
     {
       key: "get_azs",
-      text: `Fn::GetAZs が返す AZ が ${count} つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（aws ec2 create-default-subnet --profile ${ctx.target.profile} --region ${ctx.target.region} --availability-zone <AZ>）か、既定のサブネットをすべて消す`,
+      text: `Fn::GetAZs が返す AZ が ${count} つで、反映がネットワークを作れずに止まる。既定の VPC の別の AZ に既定のサブネットを作る（aws ec2 create-default-subnet --profile ${shellArg(ctx.target.profile)} --region ${shellArg(ctx.target.region)} --availability-zone <AZ>）か、既定のサブネットをすべて消す`,
     },
   ];
 }
@@ -144,7 +151,7 @@ export async function collectMissingSettings(ctx: MissingContext, checks: readon
     } catch (e) {
       items.push({
         key: "check_failed",
-        text: `${check.label} を確かめられない（${errorText(e)}）。AWS の読みが思わぬ形で失敗した。profile の認証と通信を確かめて diff を打ち直す`,
+        text: `${check.label} を確かめられない（${errorText(e)}）。括弧の中の例外で原因を確かめる。AWS の読みの失敗なら profile の認証と通信を直し、権限が足りなければ docs/operations/setup.md の「足りない設定」の許しを足して diff を打ち直す`,
       });
     }
   }
