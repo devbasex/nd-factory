@@ -238,12 +238,20 @@ describe("writeAtomically", () => {
   it.each([
     ["要求の形を断った例外", Object.assign(new Error("bad"), { name: "SerializationException", $metadata: { httpStatusCode: 400 } })],
     ["取り消しの理由が行の形の誤り", Object.assign(new Error("bad"), { name: "TransactionCanceledException", $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: "None" }, { Code: "ValidationError" }] })],
-  ])("%s は記録の行を含んでも WriteUnavailableError に包まず、元の例外のまま投げる", async (_why, thrown) => {
+    ["取り消しの理由に行の形の誤りと書き込みの呼びすぎが並ぶ", Object.assign(new Error("bad"), { name: "TransactionCanceledException", $metadata: { httpStatusCode: 400 }, CancellationReasons: [{ Code: "ValidationError" }, { Code: "ThrottlingError" }] })],
+  ])("%s は記録の行を含んでも WriteUnavailableError に包まず、繰り返さずに元の例外のまま投げる", async (_why, thrown) => {
     const { log, records } = logs();
-    const db = { transactWrite: async () => Promise.reject(thrown) } as unknown as Parameters<typeof writeAtomically>[0];
+    let calls = 0;
+    const db = {
+      transactWrite: async () => {
+        calls += 1;
+        return Promise.reject(thrown);
+      },
+    } as unknown as Parameters<typeof writeAtomically>[0];
     const audit = putIfAbsent({ table: "audit", item: { pk: "AUDIT#1", sk: "AUDIT", schema_version: 1 }, onConflict: "fail" });
     const error = await writeAtomically(db, [audit], log).catch((e: unknown) => e);
     expect(error).toBe(thrown);
+    expect(calls).toBe(1);
     expect(records().at(-1)).toMatchObject({ level: "error", msg: "書き込みを表が断った", result: "rejected", class: "rejected" });
   });
 

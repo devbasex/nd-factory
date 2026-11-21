@@ -95,12 +95,15 @@ describe("classifyFailure", () => {
     }
     expect(isRetryableCancellation(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ConditionalCheckFailed" }] }))).toBe(false);
     expect(isRetryableCancellation(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ValidationError" }] }))).toBe(false);
+    expect(isRetryableCancellation(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ValidationError" }, { Code: "ThrottlingError" }] }))).toBe(false);
+    expect(isRetryableCancellation(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "TransactionConflict" }, { Code: "ItemCollectionSizeLimitExceeded" }] }))).toBe(false);
     expect(isRetryableCancellation(awsError("ThrottlingException"))).toBe(false);
     expect(isRetryableCancellation(null)).toBe(false);
   });
 
-  it("取り消しの理由に一時の失敗と断った理由が並ぶときは retryable", () => {
-    expect(classifyFailure(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ValidationError" }, { Code: "TransactionConflict" }] }))).toBe("retryable");
+  it("取り消しの理由に一時の失敗と断った理由が並ぶときは rejected", () => {
+    expect(classifyFailure(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ValidationError" }, { Code: "TransactionConflict" }] }))).toBe("rejected");
+    expect(classifyFailure(awsError("TransactionCanceledException", { CancellationReasons: [{ Code: "ThrottlingError" }, { Code: "ValidationError" }] }))).toBe("rejected");
   });
 
   it.each([
