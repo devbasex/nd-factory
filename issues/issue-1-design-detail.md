@@ -167,8 +167,10 @@ CI の定義のテスト（`tools/test/ci-definition.test.ts`）は今のテス�
 | --- | --- | --- | --- |
 | `loadWorkflows`・`triggersPullRequest`・`jobNames` | 2 つのワークフローを読み、Pull Request で起動するものを選ぶ | `on: pull_request`・`on: [pull_request]`・`on:` の下の鍵の 3 つの書き方 | 解けない YAML で失敗する。片方のワークフローにだけ資格情報の語・`id-token: write` を足すと当たる |
 | `permissionBlocks` | 今のワークフローで違反 0 件 | ジョブの `permissions: { contents: read }` は通る | ジョブに `pull-requests: write`・`write-all` を足すと場所つきで当たる |
-| `leak-scan.integration.test.ts`（gitleaks を起こす。`leak-check` のジョブで打つ） | 作り物の値だけの一時の木で当たり 0 件 | 作り物の UUID・置き場所の記号・13 桁の数で当たらない。`package-lock.json` の名前のファイルに置いた作り物でない 12 桁も当たる（既定の全体の許可が効かない） | 実行の時に組み立てた作り物でない 12 桁・ARN・S3 の ARN・端点・token と、重ねた規則の語を `docs/` の下に置くと当たり、報告に値が現れない。途中のコミットで足して消した値が `git` の探しで当たる |
+| `leak-scan.integration.test.ts`（gitleaks を起こす。`leak-check` のジョブで打つ） | 作り物の値だけの一時の木で当たり 0 件 | 作り物の UUID・置き場所の記号・13 桁の数で当たらない。`package-lock.json` の名前のファイルに置いた許可の値に合わない 12 桁も当たる（既定の全体の許可が効かない） | 実行の時に生成した架空の値（許可の値に合わず検出の規則に合う 12 桁・ARN・S3 の ARN・端点・token）と、重ねた規則の語を `docs/` の下に置くと当たり、報告に値が現れない。途中のコミットで足して消した値が `git` の探しで当たる |
 | `workflow-audit.integration.test.ts`（zizmor を起こす。`workflow-audit` のジョブで打つ） | 今のワークフローを写した木で当たり 0 件 | — | 書き込みの権限・`persist-credentials` を外した取得・枝の名前で参照した動作で当たる |
+
+`leak-scan.integration.test.ts` が当てる値は、すべて実行の時に生成した架空の値にする（乱数の 12 桁・架空の ARN と端点・形だけ合わせた token・重ねた規則の語）。生成した値が許可の値（`123456789012` など）に合わず、検出の規則に合うことをテストの中で確かめてから木に置く。実在のアカウント・資源・端点の値と有効な token は使わず、値をリポジトリにも置かない（ソースには組み立ての手順だけを書く）。
 
 ## 形の正本の往復のテスト
 

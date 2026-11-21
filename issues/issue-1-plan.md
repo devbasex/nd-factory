@@ -54,7 +54,7 @@
 - **対象ファイル:** `.gitleaks.toml`・`.github/workflows/ci.yml`（`leak-check`）・`tools/test/leak-scan.integration.test.ts`・`.ndf/project.json`（必須のチェック）・`AGENTS.md`（`LEAK_CHECK_PATTERN` の行）・`issues/issue-1-design.md`・`issues/issue-1-design-detail.md`（承認で足したこと 1）
 - **変更内容:** 詳細設計書の「gitleaks の設定と `leak-check` のジョブ」。どの実行にも `--ignore-gitleaks-allow` と、除外のファイルを読まない指定を渡す
 - **満たす受け入れ条件:** 1・2・3
-- **進め方:** 作り物でない値を組み立てた一時の木で当たり、報告に値が出ないことを確かめる結合のテスト → 設定とジョブ
+- **進め方:** 許可の値に合わず検出の規則に合う値を置いた一時の木で当たり、報告に値が出ないことを確かめる結合のテスト → 設定とジョブ。その値は実行のときに生成した架空の値に限る（乱数の 12 桁・架空の ARN と端点・形だけ合わせた token）。実在のアカウント・資源・端点の値と有効な token は使わず、リポジトリにも置かない
 
 ### Task 6: zizmor の `workflow-audit` のジョブ
 
