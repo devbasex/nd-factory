@@ -133,6 +133,16 @@ function scan(
   return { status: result.status, output: `${result.stdout}${result.stderr}`, reportText, findings };
 }
 
+/** 利用者に見える全部（出力と報告を繋いだもの） */
+function shownText(result: ScanResult): string {
+  return `${result.output}${result.reportText ?? ""}`;
+}
+
+/** 報告の当たりが持つ項目の名前（重ねず並べたもの） */
+function reportKeys(result: ScanResult): string[] {
+  return [...new Set(result.findings.flatMap((f) => Object.keys(f)))].sort();
+}
+
 /** ファイルごとの当てた規則の id */
 function rulesByFile(findings: Finding[]): Record<string, string[]> {
   const byFile: Record<string, string[]> = {};
@@ -209,10 +219,10 @@ describe("nd-factory の規則（.gitleaks.toml）", () => {
     const root = makeTree(files);
     const result = scan(root, ["dir", overlayConfig(realWord)]);
     expect(result.findings.length).toBeGreaterThan(0);
-    const shown = `${result.output}${result.reportText ?? ""}`;
+    const shown = shownText(result);
     expect(values.filter((value) => shown.includes(value))).toEqual([]);
     expect(result.output).toContain("leak-scan: 当たり nd-aws-arn docs/arn.md:1");
-    expect([...new Set(result.findings.flatMap((f) => Object.keys(f)))].sort()).toEqual(REPORT_KEYS);
+    expect(reportKeys(result)).toEqual(REPORT_KEYS);
   }, TIMEOUT);
 
   it("--paths を渡さなければ、ファイルの名前に入った秘密の値を記録と報告に出さず、名前の順の番号に替える", () => {
@@ -223,7 +233,7 @@ describe("nd-factory の規則（.gitleaks.toml）", () => {
     });
     const result = scan(root, ["dir", overlayConfig(realWord)], { paths: false });
     expect(result.status).toBe(1);
-    const shown = `${result.output}${result.reportText ?? ""}`;
+    const shown = shownText(result);
     expect(shown).not.toContain(realWord);
     expect(shown).not.toContain("docs/");
     expect(result.findings.map((f) => [f.RuleID, f.File, f.StartLine]).sort()).toEqual([
@@ -232,7 +242,7 @@ describe("nd-factory の規則（.gitleaks.toml）", () => {
     ]);
     expect(result.output).toContain("leak-scan: 当たり nd-real-value file-2:1");
     expect(result.output).toContain("--paths");
-    expect([...new Set(result.findings.flatMap((f) => Object.keys(f)))].sort()).toEqual(REPORT_KEYS);
+    expect(reportKeys(result)).toEqual(REPORT_KEYS);
   }, TIMEOUT);
 
   it("1 つの行に別の規則の値が並んでも、どの当たりの出力にも行の残りが現れない", () => {
@@ -250,7 +260,7 @@ describe("nd-factory の規則（.gitleaks.toml）", () => {
       ["nd-aws-resource-id", "docs/line.md", 1],
       ["nd-real-value", "docs/line.md", 1],
     ]);
-    const shown = `${result.output}${result.reportText ?? ""}`;
+    const shown = shownText(result);
     expect(values.filter((value) => shown.includes(value))).toEqual([]);
     expect(shown).not.toContain("role/");
   }, TIMEOUT);
@@ -378,7 +388,7 @@ describe("履歴の探し", () => {
     const result = scan(root, ["git", ND_CONFIG]);
     expect(result.status).toBe(1);
     expect(result.findings.map((f) => f.RuleID)).toEqual(["nd-aws-account-id"]);
-    expect(`${result.output}${result.reportText ?? ""}`).not.toContain(subject);
+    expect(shownText(result)).not.toContain(subject);
   }, TIMEOUT);
 
   it("マージのコミットの競合の解消でだけ足して後で消した値が、マージのコミットの当たりとして報告される", () => {
