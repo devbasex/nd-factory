@@ -216,7 +216,7 @@ graph TD
 | Cognito | 利用者プール。自分の登録を止め、Google（と GitHub）の IdP からだけ入る | Value 9（だれが入れるかをサーバーの側で決める） |
 | CloudFront と画面の S3 | 置き場は公開せず、配信は OAC で読む（LIB83）。価格の区分は 100 | Value 3（HTTPS の配信で Service Worker が動く）・Value 6 |
 | 状態の S3 | 公開を止め、暗号化し、TLS だけ。NDF のファイルは 14 日で消す規則 | Value 7・Value 6 |
-| ECR | ランナーと DB の用意のイメージ。ライフサイクルの規則で古い版を消す（LIB85） | Value 6（保管の費用を抑える） |
+| ECR | 自前のリポジトリを作らない。ランナーと DB の用意のイメージは CDK の資産として bootstrap の資産のリポジトリに置かれ、どのスタックからも使われなくなった資産を、設置のコマンドが戻しの猶予（既定 30 日）の後に消す（決定 141・LIB90） | Value 6（保管の費用を抑える）。資産のイメージは bootstrap の資産のリポジトリにしか置けない（決定 87） |
 | Secrets Manager | 器は CDK が作り、値は人か API が入れる。名前は `<prefix>/<environment>/<用途>`（決定 90） | Value 7 |
 | HTTP API | 利用者の JWT（利用者プール）と、委任・レーン・マシン・DB の用意の token を受ける。token は API の関数の中の 1 か所で確かめ、HTTP API の JWT の前段を利用者向けの HTTP の経路に置かない（[API と MCP](api.md#認証と主体)）。CORS は配信の元だけ | Value 4・Value 9 |
 | 予算 | AWS Budgets の月の予算と知らせ（[費用](#費用)） | Value 6 |
@@ -289,7 +289,7 @@ Security Hub の ECS.2 は、ECS のサービス（`AWS::ECS::Service`）で公�
 | DynamoDB | 保存の量だけ | 要求の数の課金（LIB81） |
 | Cognito | 0 | 月の利用者 10,000 までは無料（下の単価の出典） |
 | CloudFront | ほぼ 0 | 量の課金 |
-| 掛かり続けるもの | 秘密の器の数・Aurora のストレージ・ECR の保管・ログの保管・S3 の保管 | 量に比例する。秘密の器が最も大きい（1 つ月 0.40 ドル） |
+| 掛かり続けるもの | 秘密の器の数・Aurora のストレージ・ECR の保管（使われなくなった資産は設置のコマンドが猶予の後に消す。決定 141）・ログの保管・S3 の保管 | 量に比例する。秘密の器が最も大きい（1 つ月 0.40 ドル） |
 
 ### 見込み
 
@@ -309,7 +309,7 @@ Security Hub の ECS.2 は、ECS のサービス（`AWS::ECS::Service`）で公�
 | Aurora の計算 | 0.12 ドル/ACU 時 | 0 | 1.56 | 6.00 |
 | Aurora のストレージ（1〜3 GB） | 0.10 ドル/GB 月 | 0.10 | 0.10 | 0.30 |
 | 秘密の器（サービスの 5 つ ＋ プロジェクト ＋ 通知先） | 0.40 ドル/月 | 2.00 | 2.40 | 3.60 |
-| ECR の保管（2 GB） | 0.10 ドル/GB 月 | 0.20 | 0.20 | 0.20 |
+| ECR の保管（bootstrap の資産のリポジトリ。今の版と戻しの猶予の間の古い版で 2 GB） | 0.10 ドル/GB 月 | 0.20 | 0.20 | 0.20 |
 | HTTP API（0・5 万・50 万回） | 1.00 ドル/百万回 | 0 | 0.05 | 0.50 |
 | DynamoDB（書き 0・10 万・100 万、読み 0・50 万・500 万） | 書き 0.625・読み 0.125 ドル/百万 | 0 | 0.13 | 1.25 |
 | ログ（0・1・8 GB。月 5 GB まで無料） | 0.50 ドル/GB | 0 | 0 | 1.50 |
@@ -350,7 +350,7 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 
 ### 2 つの反映の道筋
 
-反映は設置のコマンドと反映のパイプラインの 2 つの道筋で行う。VPC・Aurora・ECS・ECR・表・予算は、縦の切れ端のスタック（`app`）へ入れ、同じ確認の値と要約値で縛る（決定 89）。手順の正本は [setup.md](../operations/setup.md)・[pipeline-approval.md](../operations/pipeline-approval.md)・[settings.md](../operations/settings.md) である。
+反映は設置のコマンドと反映のパイプラインの 2 つの道筋で行う。VPC・Aurora・ECS・表・予算は、縦の切れ端のスタック（`app`）へ入れ、同じ確認の値と要約値で縛る（決定 89）。手順の正本は [setup.md](../operations/setup.md)・[pipeline-approval.md](../operations/pipeline-approval.md)・[settings.md](../operations/settings.md) である。
 
 | 環境 | 反映の道筋 | 人の承認 |
 | --- | --- | --- |
@@ -372,6 +372,7 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 | 反映 | 保存した合成の結果だけを、確認の値が同じときだけ反映する（7・8）。イメージの資産はこのときに作って ECR へ置く | 合成の結果が書き換わった・アカウントかリージョンが違う | 外で打つ反映は当たる。このコマンドと反映のパイプラインの中なら当たらない |
 | 秘密の待ち | 器だけができる。値が入るまで、画面は「ログインの設定を待っています」、リポジトリの登録は App の作り方、通知先の Web Push は「設定の待ち」を示す | — | — |
 | 足りない設定の一覧 | `diff` の出力に、値の入っていない器と、無いと止まる機能（GitHub の App が無ければリポジトリを登録できない、Bedrock を使えないリージョンなら `managed` を切る、など）を並べる（F21） | — | — |
+| 古い資産の片付け | `gc` のサブコマンドが、どのスタックからも引かれなくなった資産の数を示して止まり、確認の値を付けて打ち直したときだけ、戻しの猶予を過ぎた資産を消す（決定 141） | 確認の値が違う・反映と同じ時に打った | 当たらない（設置のコマンドの中で、消す数を示した後に消す） |
 | 初めの反映の後 | 運用する環境では、接続を有効にし、承認を拒む方針を AI の主体へ付けて確かめるまで push しない（[pipeline-approval.md](../operations/pipeline-approval.md)） | — | — |
 
 ### 設置と反映の前提
@@ -504,11 +505,12 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | LIB82 | ECS Fargate のタスク（網・`RunTask`・`StopTask`・`DescribeTasks`・`ListTasks`・タスクのメタデータの端点） | プラットフォームの版 1.4.0 | AWS のサービス | — | 無し | 満たす。イメージを取るには外への道筋が要り、公開のサブネットで公開 IP を付けるか、NAT か、ECR の Interface 型のエンドポイント。1.4.0 からは ECR・ログ・秘密の取得もタスクの網を通る。`StopTask` は SIGTERM を送り、既定 30 秒の後に SIGKILL で止める。`DescribeTasks` はタスクの `lastStatus` を返す。`RunTask` の `startedBy` に付けた値で `ListTasks` を絞れるが、ほかの絞り（`desiredStatus` を含む）と併せられず、`desiredStatus` の既定は `RUNNING` のため止まりかけ・止まったタスクは返らない。`clientToken` は起動の要求の冪等の鍵（64 字まで）。ECS の API は結果整合で、起動の直後は一覧に出ないことがある。タスクはメタデータの端点（`ECS_CONTAINER_METADATA_URI_V4` の `/task`）から自分の `TaskARN` を読める | https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-task-networking.html （2026-11-17）・ https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_StopTask.html ・ 同 API_DescribeTasks.html ・ 同 API_RunTask.html ・ 同 API_ListTasks.html ・ https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-metadata-endpoint-v4-fargate.html （2026-11-18） |
 | LIB83 | CloudFront の OAC | — | AWS のサービス | — | 無し | 満たす。OAI より OAC を推す（全リージョンの S3・SSE-KMS）。定額の Free プランは配信ごとに月 100 万回・100 GB | https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html ・ https://aws.amazon.com/cloudfront/pricing/ （2026-11-17） |
 | LIB84 | AWS Budgets と Amazon SNS（運用の知らせ） | — | AWS のサービス | — | 無し | 満たす。予算の監視と知らせは無料。動作つきの予算は 2 つまで無料。SNS は時間の課金を持たず、月 100 万回の要求とメールの 1,000 通までは無料の枠 | https://aws.amazon.com/aws-cost-management/aws-budgets/pricing/ （2026-11-17）・ https://aws.amazon.com/sns/pricing/ （2026-11-18） |
-| LIB85 | ECR のライフサイクルの規則 | — | AWS のサービス | — | 無し | 満たす。押した数（`imageCountMoreThan`）か日数で古いイメージを 24 時間のうちに消す | https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html （2026-11-17） |
+| LIB85 | ECR のライフサイクルの規則 | — | AWS のサービス | — | 無し | 満たさない（#13 で見直した）。押した数（`imageCountMoreThan`）か日数で古いイメージを 24 時間のうちに消すが、規則を掛けられるのは自前のリポジトリだけで、CDK の資産のイメージは bootstrap の資産のリポジトリにしか置けない（bootstrap の `image-publishing` の役割はそのリポジトリへの書き込みだけを許す）。bootstrap の規則はタグの無いイメージを 365 日で消すだけで、タグの付く資産のイメージは残り続ける | https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html （2026-11-17） |
 | LIB86 | `vite` | 8.3.8 | MIT | 2026-11-11 | 無し | 満たす。素の TypeScript の画面を束ね、開発のサーバーを持つ。開発の依存だけで、配る画面に実行の時の依存を足さない。今の `apps/web` が使っている | https://registry.npmjs.org/vite （2026-11-18） |
 | LIB87 | `react`・`react-dom` | 19.3.1 | MIT | 2026-10-14 | 無し | 満たす。ただし実行の時の依存が 2 つ増え（`react-dom` の展開後 約 7.7 MiB）、部品を JSX で書くと Node の型の剥がしで打てない（STD84） | https://registry.npmjs.org/react ・ https://registry.npmjs.org/react-dom （2026-11-18） |
 | LIB88 | `preact` | 11.2.0 | MIT | 2026-11-06 | 無し | 満たす。小さいが、実行の時の依存が 1 つ増え、JSX は LIB87 と同じく型の剥がしで打てない | https://registry.npmjs.org/preact （2026-11-18） |
 | LIB89 | `lit` | 3.3.3 | BSD-3-Clause | 2026-05-14 | 無し | 満たす。Web Components の上で JSX を使わずに書ける。実行の時の依存が 1 つ増え、宣言の書き方の多くがデコレーターに寄る | https://registry.npmjs.org/lit （2026-11-18） |
+| LIB90 | CDK の CLI の資産の片付け（`cdk gc`） | `aws-cdk` 2.1148.1 | Apache-2.0 | — | 無し。ただし安定でない機能で、`--unstable=gc` を付けたときだけ動く（範囲と引数が変わりうる） | 満たす。bootstrap のバケットと資産のリポジトリの資産のうち、どのスタックの CloudFormation のテンプレートからも引かれないものに日付のタグを付け、タグから戻しの猶予（`--rollback-buffer-days`）を過ぎたものを消す。作ってから日の浅い資産は `--created-buffer-days` で外す。`--action=print` は数えて示すだけで書かない。反映と同時に打つと、反映の途中の資産を消しうる（作った日の猶予で避け、消えたら反映し直せば資産を置き直す） | `node_modules/aws-cdk/README.md` の「`cdk gc`」・`npx cdk gc --help`（2026-11-21）・ `node_modules/aws-cdk/lib/api/bootstrap/bootstrap-template.yaml` の `ContainerAssetsRepository` と `ImagePublishingRoleDefaultPolicy`（2026-11-21） |
 
 ### 確かめられなかったこと
 
@@ -522,7 +524,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | `ALTER ROLE … PASSWORD` を advisory lock と同じトランザクションの中で打てること | 試していない | PostgreSQL の `ALTER ROLE` の頁を取得していない。[未確認のまま残ること](#未確認のまま残ること)へ移した |
 | AWS のクォータ（Lambda の同時実行・Fargate の vCPU）の既定の値 | 試していない | 値はアカウントとリージョンで違い、設置する人が Service Quotas で読む |
 
-調べた量: 候補 9 件・取得の試み 24 回（2026-11-17）。#32 で候補 8 件・取得の試み 13 回を足し、同じサービスの行（LIB81・LIB82・LIB84）は 1 行に畳んだ（2026-11-18）。
+調べた量: 候補 9 件・取得の試み 24 回（2026-11-17）。#32 で候補 8 件・取得の試み 13 回を足し、同じサービスの行（LIB81・LIB82・LIB84）は 1 行に畳んだ（2026-11-18）。#13 で候補 1 件（LIB90）・取得の試み 3 回を足し、LIB85 を見直した（2026-11-21）。
 
 ## 決定の記録
 
@@ -613,7 +615,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 ### 決定 87: 人が承認したものだけを反映するため、ランナーのイメージを CDK の資産として合成の結果に含め、確認の値で縛る
 
-結論: ランナーと DB の用意のイメージは、Dockerfile とその入力を CDK の資産にし、合成の結果の要約値（確認の値）に含める。ベースのイメージは要約値で固定し、NDF は `ndf-pin.json` の固定の値で取る。イメージは反映のときに作って自前の ECR へ置く。CPU の種類は x86_64 にする。
+結論: ランナーと DB の用意のイメージは、Dockerfile とその入力を CDK の資産にし、合成の結果の要約値（確認の値）に含める。ベースのイメージは要約値で固定し、NDF は `ndf-pin.json` の固定の値で取る。イメージは反映のときに作り、bootstrap の資産のリポジトリ（設置する人の AWS のアカウントの ECR）へ置く。古い版は決定 141 のとおり消す。CPU の種類は x86_64 にする。
 
 理由: Value 8 は差分を見て承認した範囲だけを反映することを求める。イメージの入力が合成の結果に入ると、承認した要約値と違う中身は反映されない。x86_64 にすると、反映のアクション（x86 の CodeBuild）と多くの設置する人の端末で、まねをせずにイメージを作れる。ARM との差は 5 人のチームの見込みで月 1 ドルに満たない（[見込み](#見込み)）。
 
@@ -636,7 +638,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 ### 決定 89: 承認する人が 1 つの差分と確認の値で反映を承認できるよう、資源を縦の切れ端のスタックへまとめる
 
-結論: VPC・Aurora・ECS・ECR・サービスの表・状態の S3・予算は `app` のスタックに入れ、スタックの種類（`app`・`pipeline`）を増やさない。状態を持つ資源（表・バケット・クラスタ）は、スタックから消しても残る設定にする。
+結論: VPC・Aurora・ECS・サービスの表・状態の S3・予算は `app` のスタックに入れ（イメージの置き場は bootstrap の資産のリポジトリで、スタックに ECR を作らない。決定 141）、スタックの種類（`app`・`pipeline`）を増やさない。状態を持つ資源（表・バケット・クラスタ）は、スタックから消しても残る設定にする。
 
 理由: Value 8 は差分を見て承認した範囲だけを反映することを求める。反映のパイプラインは `app` だけを反映し、パイプライン自身は設置のコマンドで反映する（[pipeline-approval.md](../operations/pipeline-approval.md)）。スタックを増やすと、確認の値・反映のアクション・承認の資料がスタックごとに分かれ、承認する人が読む差分も分かれる。消しても残す設定で、1 つのスタックに状態を持つ資源を置いても、差分の誤りで消えない。
 
@@ -777,6 +779,19 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 根拠: Value 2 / Value 6（MVV 版 1）
 
+### 決定 141: 使わない間の保管の費用を抑えるため、自前の ECR を作らず、使われなくなった資産を設置のコマンドが戻しの猶予の後に消す
+
+結論: スタックに ECR のリポジトリを作らない。ランナーと DB の用意のイメージは、CDK の資産として bootstrap の資産のリポジトリに置かれる（決定 87）。設置のコマンドに古い資産を消すサブコマンド（`gc`）を置き、固定の版の CDK の CLI の `cdk gc --unstable=gc` で、どのスタックからも引かれなくなった資産（イメージと、バケットのファイルの資産）を、戻しの猶予（既定 30 日）の後に消す。サブコマンドはまず消す数を示して止まり、確認の値を付けて打ち直したときだけ消す。`cdk gc` が安定でない機能であることは、CLI の版を `package.json` で固定し、サブコマンドが使う引数を CI のテストで照らして受ける（CLI の版を上げる PR で引数が変われば落ちる）。運用する環境では、運用する人がリリースの後に設置のコマンドで打つ。反映のパイプラインと CI は消す権限を持たない。
+
+理由: Value 6 は使わない間の費用を 0 に近づけることを求める。CDK の資産のイメージは bootstrap の資産のリポジトリにしか置けず（bootstrap の `image-publishing` の役割の書き込み先がそのリポジトリだけ）、bootstrap の規則はタグの付く資産を消さない（LIB85・LIB90）。自前のリポジトリにライフサイクルの規則を掛けても、bootstrap の側の古い版は残り続ける。`cdk gc` はアカウントのどのスタックのテンプレートからも引かれないことを確かめてから消すため、同じ bootstrap を使うほかのアプリの資産を消さない。戻しの猶予を置くと、前の版へ戻すときに資産を作り直さずに済む。30 日は、月に 1 回の片付けで前の版を少なくとも 1 か月は残せる長さである。
+
+採らなかった案: 自前の ECR を `app` のスタックに作り、資産のイメージを写してライフサイクルの規則で消す形（写す部品の依存が増え、bootstrap の側の古い版は残るため、保管の費用が下がらない）。bootstrap の資産のリポジトリに規則を足す形（bootstrap のテンプレートを変えることは P1 に当たり、同じ bootstrap を使うほかのアプリの資産も消しうる）。`cdk gc` を反映のパイプラインで毎回打つ形（パイプラインの役割に消す権限を足すことになり、反映の途中の資産を消す競合も増える）。
+
+- 作り方: ライブラリやサービスを使う
+- 比べた候補: LIB85 / LIB90
+
+根拠: Value 6 / Value 8（MVV 版 1）
+
 ## 未確認のまま残ること
 
 | 項目 | 内容 | いつ・何で分かるか |
@@ -789,7 +804,8 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | ルートのファイルシステムを読むだけにできるか（ECS.5） | NDF の作業場所の書き込みをボリュームへ寄せられるか | ランナーのイメージで確かめる |
 | GitHub の IdP | GitHub のログインを Cognito の IdP として直に受けられるか（外部の調査で試していない） | GitHub と Cognito の文書で確かめる |
 | `us-west-2` などの単価 | 見込みは `us-east-1` の単価で出した | 設置する人がリージョンの単価の頁で読む |
-| `ALTER ROLE` と advisory lock の同じトランザクション | パスワードの変更と差し替えの番号の書き込みを 1 つのトランザクションで確定できること（決定 95） | 反映した環境の Aurora で実測（#13 の用意の手順の試験） |
-| `StopTask` から `STOPPED` までの時間 | 見回りの 1 回の起動の中で停止を読めるか。読めなければ次の見回りで読む（決定 96） | 反映した環境で測る（#13） |
-| `ListTasks` に起動したタスクが出るまでの時間 | 片付けで拾い漏らす割合。止めの正しさには効かない（決定 96） | 反映した環境で測る（#13） |
+| `ALTER ROLE` と advisory lock の同じトランザクション | パスワードの変更と差し替えの番号の書き込みを 1 つのトランザクションで確定できること（決定 95） | 反映した環境の Aurora で実測（#44。#13 から分けた） |
+| `StopTask` から `STOPPED` までの時間 | 見回りの 1 回の起動の中で停止を読めるか。読めなければ次の見回りで読む（決定 96） | 反映した環境で測る（#44） |
+| `ListTasks` に起動したタスクが出るまでの時間 | 片付けで拾い漏らす割合。止めの正しさには効かない（決定 96） | 反映した環境で測る（#44） |
+| 使われなくなった資産の片付け | `cdk gc` の戻しの猶予が、反映した環境で前の版の資産を残し、猶予を過ぎた資産だけを消すこと | 反映した環境で `gc` を 2 回打ち、示された数と消えた資産を読む（#13） |
 | AWS のクォータの値 | Lambda の同時実行と Fargate の vCPU の既定の値は、アカウントとリージョンで違う | 設置する人が Service Quotas で読む（#14 の設置の予行） |

@@ -198,6 +198,12 @@
       "context": "platform",
       "meaning": "進行表の DB の役割のパスワードを新しい値へ替え、古い値での接続を断つこと。プロジェクトの差し替えの番号で順を決める",
       "source": "docs/design/data.md"
+    },
+    {
+      "term": "戻しの猶予",
+      "context": "platform",
+      "meaning": "どのスタックからも使われなくなった資産を、設置のコマンドが消すまで残しておく日数。前の版へ戻すときに資産を作り直さずに済むよう置く。既定 30 日",
+      "source": "docs/design/platform.md"
     }
   ]
 }
