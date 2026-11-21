@@ -70,7 +70,8 @@ const encoder = new TextEncoder();
 
 function keyId(secret: Uint8Array, original: string, safeKey: string): string {
   if (safeKey === original) return `k:${original}`;
-  const digest = hmac(sha256, secret, encoder.encode(original));
+  // UTF-8 にすると孤立サロゲートが U+FFFD にそろい別の鍵が同じ入力になるため、JSON.stringify で \uXXXX の形に保ってから符号にする
+  const digest = hmac(sha256, secret, encoder.encode(JSON.stringify(original)));
   return `h:${Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 

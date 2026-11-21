@@ -134,6 +134,16 @@ describe("createLogger", () => {
     expect(third).toMatchObject({ "[redacted]": "child", "[redacted]#2": "call" });
   });
 
+  it("孤立サロゲートだけが違う伏せる鍵を、別の鍵として残す", () => {
+    const out = capture();
+    const a = "https://user:p\uD800ss@example.com/";
+    const b = "https://user:p\uD801ss@example.com/";
+    createLogger(context, out.sink).child({ [a]: "child" }).info("サロゲート", { [b]: "call" });
+    const [first] = out.records();
+    expect(out.lines[0]).not.toContain("user:p");
+    expect(first).toMatchObject({ "[redacted]": "child", "[redacted]#2": "call" });
+  });
+
   it("伏せる鍵の識別子はロガーごとに引く秘密の鍵で作る（固定の種のハッシュにしない）", () => {
     const draw = vi.spyOn(globalThis.crypto, "getRandomValues");
     try {
