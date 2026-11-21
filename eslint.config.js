@@ -67,7 +67,7 @@ const isDefaultValueWrite = (ref) =>
 
 /**
  * `node` の評価の値がそのまま評価の値になる親の式（条件の式の分岐・論理の式の両辺・並びの式の最後・
- * 代入の式の右辺と論理の代入の左辺）。ほかは null
+ * 代入の式の右辺と論理の代入の左辺）。`node` はモジュールか約束の値なので、常に真の値として判定する。ほかは null
  */
 function passThroughParent(node) {
   const parent = node.parent;
@@ -75,12 +75,13 @@ function passThroughParent(node) {
     case "ConditionalExpression":
       return parent.consequent === node || parent.alternate === node ? parent : null;
     case "LogicalExpression":
-      return parent;
+      // モジュールと約束は常に真なので、`&&` の左辺の値は評価の値にならない
+      return parent.right === node || parent.operator !== "&&" ? parent : null;
     case "SequenceExpression":
       return parent.expressions.at(-1) === node ? parent : null;
     case "AssignmentExpression":
       if (parent.right === node) return parent.operator === "=" || LOGICAL_ASSIGN.has(parent.operator) ? parent : null;
-      return parent.left === node && LOGICAL_ASSIGN.has(parent.operator) ? parent : null;
+      return parent.left === node && LOGICAL_ASSIGN.has(parent.operator) && parent.operator !== "&&=" ? parent : null;
   }
   return null;
 }
@@ -257,14 +258,19 @@ const noCryptoIdRule = {
       }
     }
 
-    /** 値を受ける束縛の形（識別子・分割代入・既定の値つき）。`initial` は関数の引数のとき真 */
-    function checkTarget(target, kind, initial = false) {
+    /**
+     * 値を受ける束縛の形（識別子・分割代入・既定の値つき）。`initial` は関数の引数のとき真。
+     * `defaultValue` は値が既定の値つきの束縛の既定の値 `x`（`c = x`）のときの、その式
+     */
+    function checkTarget(target, kind, initial = false, defaultValue = null) {
       if (target.type === "AssignmentPattern") return checkTarget(target.left, kind, initial);
       if (target.type === "Identifier") {
         const variable = findVariable(target, target.name);
         if (variable === null) return;
-        // 既定の値つきの分割代入は既定の値からの書き込みの参照も持つので、分割元からの書き込みを選ぶ
-        const write = initial
+        // 既定の値つきの分割代入は既定の値からの書き込みの参照も持つので、値の出所に合う書き込みを選ぶ
+        const write = defaultValue !== null
+          ? variable.references.find((ref) => ref.identifier === target && ref.writeExpr === defaultValue)
+          : initial
           ? INITIAL
           : variable.references.find((ref) => ref.identifier === target && !isDefaultValueWrite(ref));
         return trackWrite(variable, write ?? INITIAL, kind);
@@ -312,6 +318,9 @@ const noCryptoIdRule = {
         case "AssignmentExpression":
           if (parent.right === node && passThroughParent(node) !== null) checkTarget(parent.left, "module");
           return;
+        case "AssignmentPattern":
+          if (parent.right === node) checkTarget(parent.left, "module", false, node);
+          return;
         case "ExportDefaultDeclaration":
           return report(parent);
       }
@@ -335,6 +344,9 @@ const noCryptoIdRule = {
           return;
         case "AssignmentExpression":
           if (parent.right === node && passThroughParent(node) !== null) checkTarget(parent.left, "promise");
+          return;
+        case "AssignmentPattern":
+          if (parent.right === node) checkTarget(parent.left, "promise", false, node);
           return;
         case "ExportDefaultDeclaration":
           return report(parent);

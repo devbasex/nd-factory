@@ -302,6 +302,21 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
         code: `declare const other: { randomUUID(): string };\nlet c: typeof other = other;\nconst load = async () => {\n  c = await import("${source}");\n};\nawait load();\nexport const id = c.randomUUID();\n`,
         ruleId: CRYPTO_RULE,
       },
+      {
+        name: `${source} の既定の import を既定の値に置いた分割代入からの randomUUID の参照`,
+        code: `import provider from "${source}";\nconst { selected = provider } = {} as { selected?: { randomUUID(): string } };\nexport const id = selected.randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の既定の import を関数の引数の既定の値に置いた randomUUID の参照`,
+        code: `import provider from "${source}";\nexport function make(p: { randomUUID(): string } = provider) {\n  return p.randomUUID();\n}\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import の約束を既定の値に置いた分割代入からの randomUUID の参照`,
+        code: `const { p = import("${source}") } = {} as { p?: Promise<{ randomUUID(): string }> };\nexport const id = (await p).randomUUID();\n`,
+        ruleId: CRYPTO_RULE,
+      },
     ]),
     { name: "uuid の動的な import", code: 'export const m = await import("uuid");\n', ruleId: "no-restricted-syntax" },
     { name: "node:console の動的な import", code: 'export const m = await import("node:console");\n', ruleId: "no-restricted-syntax" },
@@ -361,6 +376,12 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
       "c = otherProvider;",
       "c ??= otherProvider;",
       "export const id2 = c.randomUUID();",
+      // モジュールは常に真なので、`&&` と `&&=` の評価の値は右辺になる
+      'import provider from "node:crypto";',
+      'const fallback = { randomUUID: () => "local" };',
+      "export const id3 = (provider && fallback).randomUUID();",
+      "let d: typeof fallback = provider;",
+      "export const id4 = (d &&= fallback).randomUUID() + String(d);",
       "",
     ].join("\n");
     for (const path of APP_PATHS) {
