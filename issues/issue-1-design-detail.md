@@ -9,13 +9,14 @@
 ```text
 nd-factory/
 ├── eslint.config.js                       規則の組を読み込む
-├── package.json                           スクリプト leak-check・ndf-contract・route-check・test:integration
+├── package.json                           スクリプト leak-check・ndf-contract・route-check・test:integration・knip、開発の依存 knip
+├── knip.json                            * knip の入口と控え
 ├── vitest.config.ts                       tools の組から *.integration.test.ts を外す
 ├── vitest.integration.config.ts         * 実物の gitleaks を起こす結合のテストだけを読む
 ├── .ndf/project.json                      必須のチェックに 2 つ足す
 ├── AGENTS.md                              LEAK_CHECK_TERMS の行
 ├── .github/workflows/
-│   ├── ci.yml                             ジョブ leak-check を足す。synth に経路の照らしを足す
+│   ├── ci.yml                             ジョブ leak-check・workflow-audit を足す。synth に経路の照らし、check に knip を足す
 │   └── ndf-contract.yml                 * ジョブ ndf-contract
 ├── apps/api/test/
 │   └── dispatch-routes.test.ts          * Lambda の振り分けの経路と操作の表の照らし
@@ -381,9 +382,9 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 - `mainNdfContractCheck`
   - 引数: `[--root <作業の木>] [--base <基点のコミット>] [--head <head のコミット>] [--summary <要約のファイル>]`。スクリプト `npm run ndf-contract`
   - 事前条件: `--base` と `--head` は Pull Request のときだけ、両方そろえて渡す（片方だけなら終了コード 2）
-  - 事後条件: `--base` があり `pinChanged` が偽なら、取得も照らしもせずに `skip: pin-unchanged` の 1 行を出して 0 で終わる。それ以外は、作業の木（`--root`）の `ndf-pin.json` と形の正本で、固定の点と先端の両方を照らす
+  - 事後条件: どの起動でも、作業の木（`--root`）の `ndf-pin.json` の固定の点と形の正本で照らす。先端は、`--base` が無い起動（push・毎日・手動）と、`--base` があり `pinChanged` が真の Pull Request でだけ照らす。`--base` があり `pinChanged` が偽なら、先端を取らずに `skip: tip-pin-unchanged` の 1 行を出す（設計文書の決定 6）
   - 出力の行（標準出力と要約の両方に出す。どの行が出たかで、照らしたかどうかと理由を見分ける）:
-    - `skip: pin-unchanged` — Pull Request で固定の点を変えていないので照らさなかった
+    - `skip: tip-pin-unchanged` — Pull Request で固定の点を変えていないので、先端を照らさなかった（固定の点は照らした）
     - `skip: no-contract-use <固定の点のコミット>` — NDF の契約の使い方の書き出しが無いので 1〜6 を照らさなかった（契約のファイルを読めることだけを確かめた）
     - `checked: fixed <固定の点のコミット> 1-6` — 固定の点に対して照らすこと 1〜6 をすべて実行した。食い違いの有無に関わらず、1〜6 を実行したときだけ出す
     - `checked: tip <先端のコミット> 1-6` — 先端に対して同じく実行した（先端を取れなければ出さず、要約に先端を照らさなかったと出す）
@@ -392,8 +393,8 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 
 | 起動 | 差分の判定に使うコミット | 契約の照合に使う作業の木 |
 | --- | --- | --- |
-| `pull_request` | `github.event.pull_request.base.sha` と `github.event.pull_request.head.sha` の分岐点と、`head.sha` | `actions/checkout` の既定の取得（マージした結果のコミット `refs/pull/<番号>/merge`）。マージされる姿で照らす |
-| `schedule` | 判定しない | 既定の枝の先端（`schedule` の取得） |
+| `pull_request` | `github.event.pull_request.base.sha` と `github.event.pull_request.head.sha` の分岐点と、`head.sha`（先端を照らすかだけを決める） | `actions/checkout` の既定の取得（マージした結果のコミット `refs/pull/<番号>/merge`）。マージされる姿で照らす |
+| `push`（main）・`schedule`・`workflow_dispatch` | 判定しない（先端も照らす） | その起動の取得（main の先端か、手動で選んだ枝） |
   - 副作用: 作業のディレクトリ（一時のディレクトリ）への取得、要約のファイルへの追記（ワークフローは `GITHUB_STEP_SUMMARY` を渡す）
 - 固定の点のコミットは `ndf-pin.json` から読む。キーの名前は参照の検査の書き方に倣って定数に置き、キーを読む行に大小の比べの記号と矢印の関数を置かない（参照の検査の版の比べに当たるため）
 
@@ -436,7 +437,7 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 | --- | --- | --- | --- |
 | `pinChanged` | 分岐点と head が同じ中身で偽、違えば真 | 空白だけの違いも真（中身の比べ）。分岐の後に基点の枝だけで `ndf-pin.json` を変えたリポジトリで偽。作業の木だけを変えても結果が変わらない | 基点か head を読めないと例外 |
 | `compareContract` | 作り物の契約と使い方で 0 件 | 使い方が `null` で照らさない。`ask-journal` に `fields` を足した契約で知らせが出て、食い違いにならない | 1〜6 のそれぞれ 1 つを壊した契約で、その番号の食い違いが出る |
-| `mainNdfContractCheck` | 固定の点だけの食い違いで 1、先端だけで 0 と要約の行。どちらも `checked: fixed <固定の点> 1-6` の行が出る | `--base` と `--head` の分岐点が同じ中身で `skip: pin-unchanged` と 0、`checked:` の行が出ない。使い方の書き出しが無いと `skip: no-contract-use` と 0、`checked:` の行が出ない | 固定の点の取得の失敗で 2。`--base` だけを渡すと 2 |
+| `mainNdfContractCheck` | 固定の点だけの食い違いで 1、先端だけで 0 と要約の行。どちらも `checked: fixed <固定の点> 1-6` の行が出る | `--base` と `--head` の分岐点が同じ中身で `skip: tip-pin-unchanged` と `checked: fixed` の行が出て、`checked: tip` の行が出ない。使い方の書き出しが無いと `skip: no-contract-use` と 0、`checked:` の行が出ない | 固定の点の取得の失敗で 2。`--base` だけを渡すと 2 |
 
 `fetchContract` はテストでネットワークを使わず、テストの中で作った git のリポジトリを NDF のリポジトリの代わりに渡す（URL を引数で差し替える）。
 
@@ -446,10 +447,11 @@ gitleaks の報告は、`--redact=100` を掛けても `File`・`Message`・`Aut
 
 | ファイル | 変える中身 |
 | --- | --- |
-| `.github/workflows/ci.yml` | ジョブ `synth` の「作り物の値で合成する」の後に、`npm run route-check -- --cdk-out infra/cdk.out`（API Gateway の合成の結果の経路の照らし）の手順を足す。ジョブ `leak-check` を足す。取得は履歴をすべて取り（`fetch-depth: 0`。分岐点からのコミットを探すため）、Node の用意と `npm ci` の後に、`GITLEAKS_VERSION` の版の配布の資産 `gitleaks_<版>_linux_x64.tar.gz` だけを取り、その `sha256sum` を環境変数 `GITLEAKS_SHA256` に固定した値と直接比べ（`echo "$GITLEAKS_SHA256  <資産>" \| sha256sum -c -`）、一致したときだけ展開して `PATH` へ置く。配布のチェックサムのファイルは取らない（同じ配布元から取った値と比べても、配布元を信じることにしかならず、固定にならないため）。続けて `npm run test:integration`（実物の gitleaks を起こす結合のテスト）を打ち、最後に `npm run leak-check` を打つ（Pull Request では `-- --base "$BASE_SHA" --head "$HEAD_SHA"`。手順の環境変数 `BASE_SHA` と `HEAD_SHA` に `github.event.pull_request.base.sha` と `github.event.pull_request.head.sha` を入れる。履歴の範囲の終点を `head.sha` に固定し、既定の取得の `HEAD`（マージした結果のコミット）を使わない）。gitleaks の版と要約値はこのジョブの環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の 1 か所にだけ書く。環境変数 `LEAK_CHECK_TERMS`（秘密）と `LEAK_CHECK_REQUIRE_TERMS`（`ref-check` と同じ式で変数 `LEAK_CHECK_REQUIRE_TERMS` から作る）を渡す |
-| `.github/workflows/ndf-contract.yml`（新設） | `on` は `pull_request` と `schedule`（毎日 1 回）だけ（全体の設計の「いつ」。`push` と `workflow_dispatch` は置かない。設計文書の決定 6）。`permissions: contents: read`。ジョブ `ndf-contract` は Pull Request のとき、既定の取得（マージした結果のコミット）に加えて `base.sha` と `head.sha` を分岐点が求まる深さまで取り（`fetch-depth: 0`）、`npm run ndf-contract -- --base <base.sha> --head <head.sha> --summary "$GITHUB_STEP_SUMMARY"` を打つ。`schedule` では `--base` と `--head` を渡さない。動作の版はコミットの SHA で固定する（`ci.yml` と同じ） |
-| `.ndf/project.json` | `ci.required_checks` に `leak-check`・`ndf-contract` を足す。`ci.workflows` に `ndf-contract.yml` の行を足す |
-| `package.json` | スクリプト `leak-check`・`ndf-contract`・`route-check`・`test:integration`（`vitest run -c vitest.integration.config.ts`） |
+| `.github/workflows/ci.yml` | ジョブ `check` の `npm run check` の後に `npm run knip` の手順を足す。ジョブ `workflow-audit` を足す（`persist-credentials: false` で取得し、`ZIZMOR_VERSION` の版の linux の実行ファイルの資産を取り、その `sha256sum` を環境変数 `ZIZMOR_SHA256` に固定した値と直接比べ、一致したときだけ置いて `zizmor --offline --format plain .github/workflows` を打つ。当たりがあれば失敗。版と要約値はこのジョブの環境変数の 1 か所だけ）。ジョブ `synth` の「作り物の値で合成する」の後に、`npm run route-check -- --cdk-out infra/cdk.out`（API Gateway の合成の結果の経路の照らし）の手順を足す。ジョブ `leak-check` を足す。取得は履歴をすべて取り（`fetch-depth: 0`。分岐点からのコミットを探すため）、Node の用意と `npm ci` の後に、`GITLEAKS_VERSION` の版の配布の資産 `gitleaks_<版>_linux_x64.tar.gz` だけを取り、その `sha256sum` を環境変数 `GITLEAKS_SHA256` に固定した値と直接比べ（`echo "$GITLEAKS_SHA256  <資産>" \| sha256sum -c -`）、一致したときだけ展開して `PATH` へ置く。配布のチェックサムのファイルは取らない（同じ配布元から取った値と比べても、配布元を信じることにしかならず、固定にならないため）。続けて `npm run test:integration`（実物の gitleaks を起こす結合のテスト）を打ち、最後に `npm run leak-check` を打つ（Pull Request では `-- --base "$BASE_SHA" --head "$HEAD_SHA"`。手順の環境変数 `BASE_SHA` と `HEAD_SHA` に `github.event.pull_request.base.sha` と `github.event.pull_request.head.sha` を入れる。履歴の範囲の終点を `head.sha` に固定し、既定の取得の `HEAD`（マージした結果のコミット）を使わない）。gitleaks の版と要約値はこのジョブの環境変数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` の 1 か所にだけ書く。環境変数 `LEAK_CHECK_TERMS`（秘密）と `LEAK_CHECK_REQUIRE_TERMS`（`ref-check` と同じ式で変数 `LEAK_CHECK_REQUIRE_TERMS` から作る）を渡す |
+| `.github/workflows/ndf-contract.yml`（新設） | `on` は `pull_request`・`push`（main）・`schedule`（毎日 1 回）・`workflow_dispatch`（設計文書の決定 6）。`permissions: contents: read`。ジョブ `ndf-contract` は Pull Request のとき、既定の取得（マージした結果のコミット）に加えて `base.sha` と `head.sha` を分岐点が求まる深さまで取り（`fetch-depth: 0`）、`npm run ndf-contract -- --base <base.sha> --head <head.sha> --summary "$GITHUB_STEP_SUMMARY"` を打つ。ほかの起動では `--base` と `--head` を渡さない。動作の版はコミットの SHA で固定する（`ci.yml` と同じ） |
+| `.ndf/project.json` | `ci.required_checks` に `leak-check`・`ndf-contract`・`workflow-audit` を足す。`ci.workflows` に `ndf-contract.yml` の行を足す |
+| `package.json` | スクリプト `leak-check`・`ndf-contract`・`route-check`・`test:integration`（`vitest run -c vitest.integration.config.ts`）・`knip`（`knip --no-progress`）。開発の依存 `knip` |
+| `knip.json`（新設） | ワークスペース（`packages/*`・`apps/*`・`infra`・`tools`）ごとの入口（Lambda の起点・画面の起点・設置のコマンド・検査の CLI・テスト）と、今の当たりの控え（`ignore` の行。受け持つ課題の番号を注に書く）。控えは直した後に残さない（knip が使われているものを控えに置いたと知らせる設定 `treatConfigHintsAsErrors` を有効にする） |
 | `vitest.config.ts` | `tools` の組に `exclude: ["tools/test/**/*.integration.test.ts"]` を足す。`npm run check` の `npm run test` は gitleaks を起こさないテストだけを走らせる |
 | `vitest.integration.config.ts`（新設） | `tools/test/**/*.integration.test.ts` だけを読む。ジョブ `leak-check` と、gitleaks を入れた手元で打つ |
 | `tools/package.json` | 依存 `@nd-factory/contracts`・`ajv`・`ajv-formats`・`yaml` |
