@@ -20,7 +20,7 @@
     "generate:check": "node packages/contracts/scripts/generate.ts check",
     "check": "npm run lint && npm run typecheck && npm run generate:check && npm run test",
     "deps-check": "depcruise --config .dependency-cruiser.cjs --output-type err packages apps infra tools",
-    "knip": "knip --no-progress",
+    "knip": "knip --no-progress && knip --no-progress --production --workspace apps/web",
     "build:web": "npm run build -w apps/web",
     "synth": "npm run synth -w infra",
     "e2e": "npm run e2e -w apps/web",

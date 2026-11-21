@@ -329,6 +329,34 @@ describe("受け入れ条件 1・5: 画面・apps/api・infra/lib での HTTP �
   });
 });
 
+describe("受け入れ条件 1・5: 生成した画面の呼び出しは経路を形の正本の経路の登録から読む（K2-2・K2-3）", () => {
+  // 生成先（K2-2）。画面の src の規則がそのまま掛かる
+  const GENERATED_PATH = "apps/web/src/generated/calls.ts";
+  const generatedCall = (path: string) =>
+    [
+      'import { httpRoutes } from "@nd-factory/contracts/routes";',
+      "",
+      "/** 自分の利用者を読む */",
+      "export async function usersSelf(apiUrl: string, token: string, body: unknown, fetchFn: typeof fetch): Promise<Response> {",
+      '  const route = httpRoutes["users.self"];',
+      `  return fetchFn(\`\${apiUrl.replace(/\\/+$/, "")}${path}\`, {`,
+      "    method: route.method,",
+      '    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },',
+      "    body: JSON.stringify(body),",
+      "  });",
+      "}",
+      "",
+    ].join("\n");
+
+  it("経路の登録の書き出しから経路を読む生成の見本は、lint の誤りが 0 件", async () => {
+    expect(await lint(generatedCall("${route.path}"), GENERATED_PATH)).toEqual([]);
+  });
+
+  it("操作の定義の経路を文字のまま書き出す生成は、経路の直書きとして落ちる", async () => {
+    expect(await ruleHits(generatedCall("/v1/users/self"), GENERATED_PATH, "no-restricted-syntax")).toBe(1);
+  });
+});
+
 describe("受け入れ条件 1・4: 画面での料金プランの名前の文字列（I8）", () => {
   it("料金プランの名前と同じ文字列・テンプレートの文字列を画面で落とす", async () => {
     for (const path of ["apps/web/src/sample.ts", "apps/web/src/sample.tsx"]) {

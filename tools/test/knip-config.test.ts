@@ -93,9 +93,9 @@ type KnipIssue = { file: string; dependencies?: { name: string }[]; devDependenc
 type KnipRun = { status: number | null; files: string[]; issues: KnipIssue[]; output: string };
 
 /** 木で knip を打ち、終了コードと当たりを返す。当たりは JSON の報告のファイルで、設定の手掛かりは標準の出力で読む */
-function runKnip(root: string): KnipRun {
+function runKnip(root: string, args: string[] = ["--no-progress"]): KnipRun {
   const reportPath = join(root, ".knip-report.json");
-  const run = spawnSync(process.execPath, [KNIP_BIN, "--no-progress", "--reporter", "symbols", "--reporter", "json", "--output-file", `json=${reportPath}`], {
+  const run = spawnSync(process.execPath, [KNIP_BIN, ...args, "--reporter", "symbols", "--reporter", "json", "--output-file", `json=${reportPath}`], {
     cwd: root,
     encoding: "utf8",
   });
@@ -103,6 +103,29 @@ function runKnip(root: string): KnipRun {
   const report = JSON.parse(readFileSync(reportPath, "utf8")) as { issues: (KnipIssue & { files?: { name: string }[] })[] };
   const files = report.issues.filter((i) => (i.files ?? []).length > 0).map((i) => i.file);
   return { status: run.status, files, issues: report.issues, output };
+}
+
+/** ルートの package.json のスクリプト `knip` が打つ knip の実行ごとの引数（`&&` でつないだ順） */
+function knipScriptRuns(): string[][] {
+  const manifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> };
+  const script = manifest.scripts.knip;
+  if (script === undefined) throw new Error("ルートの package.json にスクリプト knip が無い");
+  return script.split("&&").map((command) => {
+    const [bin, ...args] = command.trim().split(/\s+/);
+    if (bin !== "knip") throw new Error(`スクリプト knip が knip の外を打つ: ${command}`);
+    return args;
+  });
+}
+
+/** スクリプト `knip` のとおりに打ち、どれかが落ちた最初の実行を返す（すべて通れば最後の実行） */
+function runKnipScript(root: string, runs = knipScriptRuns()): KnipRun {
+  let last: KnipRun | undefined;
+  for (const args of runs) {
+    last = runKnip(root, args);
+    if (last.status !== 0) return last;
+  }
+  if (last === undefined) throw new Error("スクリプト knip に実行が無い");
+  return last;
 }
 
 const exportsOf = (run: KnipRun) => run.issues.flatMap((i) => (i.exports ?? []).map((e) => `${i.file}:${e.name}`));
@@ -148,6 +171,48 @@ describe("受け入れ条件 1・5・12: knip.jsonc の使っていないもの�
       const without = { ...config, workspaces: { ...config.workspaces, "apps/web": web } };
       const run = runKnip(buildTree({ config: without, manifest: exposeGenerated, files: unusedCall }));
       expect(exportsOf(run)).toEqual([]);
+    },
+    KNIP_TIMEOUT,
+  );
+
+  // テストが生成した呼び出しを import していても、画面の入口から呼ばなければ使われない操作として落とす（K2-2）
+  const testOf = (call: string) => `import { expect, it } from "vitest";\nimport { ${call} } from "../src/generated/calls.ts";\nit("calls", () => expect(${call}).toBeDefined());\n`;
+  const testOnlyCall = {
+    ...unusedCall,
+    "apps/web/test/calls.test.ts": testOf("unusedCall"),
+  };
+  const withVitest = (dir: string, m: Record<string, unknown>) =>
+    dir === "apps/web" ? { ...m, devDependencies: { ...(m.devDependencies as object), vitest: "0.0.0" } } : m;
+
+  it(
+    "スクリプト knip は、テストだけが呼ぶ生成した呼び出しを、画面の入口から使われないものとして落とす",
+    () => {
+      const run = runKnipScript(buildTree({ config, manifest: withVitest, files: testOnlyCall }));
+      expect(run.status).toBe(1);
+      expect(exportsOf(run)).toEqual([`${GENERATED}:unusedCall`]);
+    },
+    KNIP_TIMEOUT,
+  );
+
+  it(
+    "通常のモードだけでは、テストだけが呼ぶ生成した呼び出しが当たらない（production の実行が要る）",
+    () => {
+      const tree = buildTree({ config, manifest: withVitest, files: testOnlyCall });
+      const run = runKnip(tree);
+      expect({ status: run.status, exports: exportsOf(run) }).toEqual({ status: 0, exports: [] });
+      const production = knipScriptRuns().filter((args) => args.includes("--production"));
+      expect(production).toEqual([["--no-progress", "--production", "--workspace", "apps/web"]]);
+    },
+    KNIP_TIMEOUT,
+  );
+
+  it(
+    "スクリプト knip は、揃った木とテストを足した木で当たりが 0 件",
+    () => {
+      const tree = buildTree({ config, manifest: withVitest, files: { "apps/web/test/calls.test.ts": testOf("usedCall") } });
+      const run = runKnipScript(tree);
+      expect(run.output).not.toMatch(/Configuration hints/);
+      expect({ status: run.status, files: run.files, exports: exportsOf(run), deps: depsOf(run) }).toEqual({ status: 0, files: [], exports: [], deps: [] });
     },
     KNIP_TIMEOUT,
   );
