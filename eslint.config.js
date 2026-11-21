@@ -160,24 +160,39 @@ const noCryptoIdRule = {
       return null;
     }
 
+    // 分割代入の束縛の書き込みの地点 → その分割元の式（分割元は束縛より先に評価するが、節を読む順では後に来る）
+    const patternSources = new Map();
+
     /**
      * 書き込みの参照の評価が終わる地点（代入の式・宣言の終わり。論理の代入は右辺を評価した道筋の右辺の終わり。
-     * ほかは識別子そのもの）
+     * 分割代入と引数の束縛は、その束縛を囲む一番外の既定の値つきの束縛の終わりか、無ければ識別子そのもの。
+     * 後の束縛の既定の値は、先の束縛の書き込みを読める）
      */
     function writePosition(identifier) {
+      let key = identifier;
       for (let node = identifier; node.parent; node = node.parent) {
         const parent = node.parent;
-        if (parent.type === "VariableDeclarator") return parent.id === node ? parent : identifier;
+        if (parent.type === "VariableDeclarator") {
+          if (parent.id !== node) return identifier;
+          if (node === identifier) return parent;
+          if (parent.init) patternSources.set(key, parent.init);
+          return key;
+        }
         if (parent.type === "AssignmentExpression") {
           if (parent.left !== node) return identifier;
-          return LOGICAL_ASSIGN.has(parent.operator) ? logicalWriteKey(parent) : parent;
+          if (node === identifier) return LOGICAL_ASSIGN.has(parent.operator) ? logicalWriteKey(parent) : parent;
+          patternSources.set(key, parent.right);
+          return key;
         }
         if (!["ObjectPattern", "ArrayPattern", "Property", "AssignmentPattern", "RestElement"].includes(parent.type)) {
-          return identifier;
+          return key;
         }
+        if (parent.type === "AssignmentPattern" && parent.left === node) key = parent;
       }
-      return identifier;
+      return key;
     }
+
+    const contains = (outer, inner) => outer.range[0] <= inner.range[0] && inner.range[1] <= outer.range[1];
 
     const functionOf = (ref) => ref.from.variableScope.block;
     const reachCache = new Map();
@@ -200,7 +215,17 @@ const noCryptoIdRule = {
         }
         // 既定の値つきの分割代入は、同じ識別子に分割元と既定の値の書き込みの参照が同じ地点で並ぶ
         const key = writePosition(ref.identifier);
+        // 分割元の中の読み出しは、その分割代入の書き込みより先に評価する
+        const source = patternSources.get(key);
+        if (source !== undefined && contains(source, readRef.identifier)) continue;
         writesAt.set(key, [...(writesAt.get(key) ?? []), ref]);
+      }
+      // 既定の値つきの引数は、呼び出し元が渡した値（INITIAL）も既定の値と同じ地点で書き込む
+      for (const [key, writes] of writesAt) {
+        const inParams = (def) => def.type === "Parameter" && def.node.params.some((param) => contains(param, key));
+        if (key.type === "AssignmentPattern" && variable.defs.some(inParams)) {
+          writes.push(INITIAL);
+        }
       }
       const addOuter = () => outerWrites.forEach((ref) => result.add(ref));
       const home = variable.scope.variableScope.block;
@@ -263,7 +288,7 @@ const noCryptoIdRule = {
      * `defaultValue` は値が既定の値つきの束縛の既定の値 `x`（`c = x`）のときの、その式
      */
     function checkTarget(target, kind, initial = false, defaultValue = null) {
-      if (target.type === "AssignmentPattern") return checkTarget(target.left, kind, initial);
+      if (target.type === "AssignmentPattern") return checkTarget(target.left, kind, initial, defaultValue);
       if (target.type === "Identifier") {
         const variable = findVariable(target, target.name);
         if (variable === null) return;
@@ -275,18 +300,19 @@ const noCryptoIdRule = {
           : variable.references.find((ref) => ref.identifier === target && !isDefaultValueWrite(ref));
         return trackWrite(variable, write ?? INITIAL, kind);
       }
-      if (kind === "module" && target.type === "ObjectPattern") return checkPattern(target, initial);
+      if (kind === "module" && target.type === "ObjectPattern") return checkPattern(target, initial, defaultValue);
     }
 
-    function checkPattern(pattern, initial) {
+    /** `defaultValue` は分割する値が既定の値（`{ default: c } = x`）のときの、その式。中の束縛まで渡す */
+    function checkPattern(pattern, initial, defaultValue) {
       for (const prop of pattern.properties) {
         if (prop.type === "RestElement") {
-          checkTarget(prop.argument, "module", initial);
+          checkTarget(prop.argument, "module", initial, defaultValue);
           continue;
         }
         const name = keyName(prop.key, prop.computed);
         if (CRYPTO_ID_FUNCTIONS.has(name)) report(prop);
-        else if (name === "default") checkTarget(prop.value, "module", initial);
+        else if (name === "default") checkTarget(prop.value, "module", initial, defaultValue);
       }
     }
 
@@ -382,6 +408,7 @@ const noCryptoIdRule = {
       Identifier: record,
       "VariableDeclarator:exit": record,
       "AssignmentExpression:exit": record,
+      "AssignmentPattern:exit": record,
       // ほかのコードが走り得る地点（ほかの関数の中の書き込みが届き得る）
       ...Object.fromEntries([...RUNS_OTHER_CODE].map((type) => [`${type}:exit`, record])),
       "*:exit"(node) {

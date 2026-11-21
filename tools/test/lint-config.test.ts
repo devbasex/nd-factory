@@ -317,6 +317,21 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
         code: `const { p = import("${source}") } = {} as { p?: Promise<{ randomUUID(): string }> };\nexport const id = (await p).randomUUID();\n`,
         ruleId: CRYPTO_RULE,
       },
+      {
+        name: `${source} の既定の import を既定の値に置いた束縛を、同じ分割代入の後の束縛の既定の値で読む randomUUID の参照`,
+        code: `import provider from "${source}";\nconst { a = provider, b = a.randomUUID() } = {} as { a?: typeof provider; b?: string };\nexport const id = b;\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import を関数の引数の分割代入の既定の値に置いた default からの randomUUID の参照`,
+        code: `const ns = await import("${source}");\nexport function make({ default: c } = ns) {\n  return c.randomUUID();\n}\n`,
+        ruleId: CRYPTO_RULE,
+      },
+      {
+        name: `${source} の動的な import の then の既定の値つきの引数からの randomUUID の参照`,
+        code: `export const id = import("${source}").then((m = {} as never) => m.randomUUID());\n`,
+        ruleId: CRYPTO_RULE,
+      },
     ]),
     { name: "uuid の動的な import", code: 'export const m = await import("uuid");\n', ruleId: "no-restricted-syntax" },
     { name: "node:console の動的な import", code: 'export const m = await import("node:console");\n', ruleId: "no-restricted-syntax" },
