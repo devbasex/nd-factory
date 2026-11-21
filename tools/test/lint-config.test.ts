@@ -8,7 +8,6 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /** eslint.config.js の書き出しのうち、このテストが使うもの */
 type LintConfigModule = {
-  PLAN_EXPORT_REQUIRED: boolean;
   buildConfig: (options: { planNames: readonly string[] | null }) => Linter.Config[];
   loadPlanNames: (load: () => Promise<unknown>, required: boolean) => Promise<readonly string[] | null>;
 };
@@ -119,7 +118,40 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
       name: "uuid",
       code: 'import { v4 } from "uuid";\nexport const id = v4();\n',
       ruleId: "@typescript-eslint/no-restricted-imports",
+    },    {
+      name: "globalThis から分割代入した console",
+      code: 'const { console: c } = globalThis;\nc.log("x");\n',
+      ruleId: "no-restricted-syntax",
     },
+    {
+      name: "globalThis から分割代入した fetch（代入の式）",
+      code: 'let f;\n({ fetch: f } = globalThis);\nexport const g = f;\n',
+      ruleId: "no-restricted-syntax",
+    },
+    {
+      name: "node:console の import",
+      code: 'import { log } from "node:console";\nlog("x");\n',
+      ruleId: "@typescript-eslint/no-restricted-imports",
+    },
+    {
+      name: "console の import",
+      code: 'import { log } from "console";\nlog("x");\n',
+      ruleId: "@typescript-eslint/no-restricted-imports",
+    },
+    {
+      name: "@aws-sdk/* の動的な import",
+      code: 'export const m = await import("@aws-sdk/client-dynamodb");\n',
+      ruleId: "no-restricted-syntax",
+    },
+    {
+      name: "@aws-sdk/* のテンプレートの文字列での動的な import",
+      code: "export const m = await import(`@aws-sdk/client-dynamodb`);\n",
+      ruleId: "no-restricted-syntax",
+    },
+    { name: "node:https の動的な import", code: 'export const m = await import("node:https");\n', ruleId: "no-restricted-syntax" },
+    { name: "node:http の動的な import", code: 'export const m = await import("node:http");\n', ruleId: "no-restricted-syntax" },
+    { name: "uuid の動的な import", code: 'export const m = await import("uuid");\n', ruleId: "no-restricted-syntax" },
+    { name: "node:console の動的な import", code: 'export const m = await import("node:console");\n', ruleId: "no-restricted-syntax" },
   ];
 
   for (const c of cases) {
@@ -144,13 +176,28 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
     }
   });
 
-  it("型だけの @aws-sdk/* の import と new Date(0) と node:crypto の他の名前は落とさない", async () => {
+  it("Node.js の apps/* の src で global.console・global.fetch を落とす（globalObjects）", async () => {
+    for (const path of APP_PATHS.filter((p) => !p.startsWith("apps/web/"))) {
+      for (const code of ['global.console.log("x");\n', 'export const p = global.fetch("https://example.com");\n']) {
+        expect(await ruleHits(code, path, "no-restricted-globals"), `${path}: ${code}`).toBe(1);
+      }
+    }
+  });
+
+  it("大域のオブジェクトからのほかの名前の分割代入は落とさない", async () => {
+    for (const path of APP_PATHS) {
+      expect(await lint("const { Promise: P } = globalThis;\nexport const p = P;\n", path), path).toEqual([]);
+    }
+  });
+
+  it("型だけの @aws-sdk/* の import と new Date(0) と node:crypto の他の名前と、ほかの指定子の動的な import は落とさない", async () => {
     const code = [
       'import type { DynamoDBClient } from "@aws-sdk/client-dynamodb";',
       'import { createHash } from "node:crypto";',
       "export type C = DynamoDBClient;",
       "export const d = new Date(0);",
       'export const h = createHash("sha256");',
+      'export const z = await import("zod");',
       "",
     ].join("\n");
     for (const path of APP_PATHS) {
@@ -209,15 +256,29 @@ describe("受け入れ条件 1・4: 画面での料金プランの名前の文�
     expect(await ruleHits(code, "apps/web/src/sample.ts", "no-restricted-syntax", planLinter())).toBe(3);
   });
 
-  it("名前の書き出しが無い間（PLAN_EXPORT_REQUIRED が偽）は名前の選び方を作らず、真なら読めないと失敗する", async () => {
-    expect(configModule.PLAN_EXPORT_REQUIRED).toBe(false);
+  it("全角の記号を含む名前も、文字列と JSX の本文で落とす（UTF-16 の符号単位ごとに逃がす）", async () => {
+    const eslint = new ESLint({
+      cwd: ROOT,
+      overrideConfigFile: true,
+      overrideConfig: configModule.buildConfig({ planNames: ["Acme（Pro）", "Acme/Team+", "Acme 🚀 Plus"] }),
+    });
+    const path = "apps/web/src/sample.tsx";
+    for (const name of ["Acme（Pro）", "Acme/Team+", "Acme 🚀 Plus"]) {
+      expect(await ruleHits(`export const p = "${name}";\n`, path, "no-restricted-syntax", eslint), name).toBe(1);
+      expect(await ruleHits(`export const v = <span> ${name} </span>;\n`, path, "no-restricted-syntax", eslint), name).toBe(1);
+    }
+    expect(await ruleHits("export const v = <span> Acme（Pro）2 </span>;\n", path, "no-restricted-syntax", eslint)).toBe(0);
+  });
+
+  it("名前の書き出しが無い（planNames が null）なら名前の選び方を作らず、required が真なら読めないと失敗する", async () => {
     const missing = () => Promise.reject(new Error("書き出しが無い"));
     await expect(configModule.loadPlanNames(missing, false)).resolves.toBeNull();
     await expect(configModule.loadPlanNames(missing, true)).rejects.toThrow();
     await expect(configModule.loadPlanNames(() => Promise.resolve({ planNames: FAKE_PLAN_NAMES }), true)).resolves.toEqual(FAKE_PLAN_NAMES);
     await expect(configModule.loadPlanNames(() => Promise.resolve({ planNames: [1] }), true)).rejects.toThrow();
-    // 名前が無ければ、画面で名前に似た文字列を書いても選び方が無いので落ちない
-    expect(await ruleHits('export const p = "Acme Pro";\n', "apps/web/src/sample.ts", "no-restricted-syntax")).toBe(0);
+    // 名前が無ければ、画面で名前と同じ文字列を書いても選び方が無いので落ちない
+    const noPlanLint = new ESLint({ cwd: ROOT, overrideConfigFile: true, overrideConfig: configModule.buildConfig({ planNames: null }) });
+    expect(await ruleHits('export const p = "Acme Pro";\n', "apps/web/src/sample.ts", "no-restricted-syntax", noPlanLint)).toBe(0);
   });
 });
 

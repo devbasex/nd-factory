@@ -60,6 +60,8 @@ const boundaryRules = {
         { name: "fetch", message: `外部の呼び出し${BOUNDARY}` },
       ],
       checkGlobalObject: true,
+      // Node.js の大域のオブジェクト `global` からの参照も落とす（既定は globalThis・self・window）
+      globalObjects: ["global"],
     },
   ],
   "@typescript-eslint/no-restricted-imports": [
@@ -75,6 +77,8 @@ const boundaryRules = {
           allowTypeImports: true,
         },
         { name: "uuid", message: `ID と冪等の鍵の生成${BOUNDARY}`, allowTypeImports: true },
+        { name: "node:console", message: `ログと伏せ字${BOUNDARY}`, allowTypeImports: true },
+        { name: "console", message: `ログと伏せ字${BOUNDARY}`, allowTypeImports: true },
       ],
       patterns: [
         {
@@ -87,8 +91,36 @@ const boundaryRules = {
   ],
 };
 
-/** `apps/*` の src で、時計と条件つきの書き込みを落とす `no-restricted-syntax` の選び方 */
+/**
+ * 動的な import（`import("…")`）で丸ごと落とす指定子。静的な import は `no-restricted-imports` が落とすが、
+ * 動的な import には掛からないので `no-restricted-syntax` で同じ対象を落とす
+ */
+const DYNAMIC_IMPORT_BANS = [
+  { source: "^@aws-sdk\\x2F", message: `外部の呼び出し・条件つきの書き込み・操作の記録の書き手${BOUNDARY}` },
+  { source: "^(node:)?https?$", message: `外部の呼び出し${BOUNDARY}` },
+  { source: "^uuid$", message: `ID と冪等の鍵の生成${BOUNDARY}` },
+  { source: "^(node:)?console$", message: `ログと伏せ字${BOUNDARY}` },
+];
+const dynamicImportSyntax = DYNAMIC_IMPORT_BANS.flatMap(({ source, message }) => [
+  { selector: `ImportExpression[source.value=/${source}/]`, message },
+  { selector: `ImportExpression > TemplateLiteral > TemplateElement[value.cooked=/${source}/]`, message },
+]);
+
+/**
+ * 大域のオブジェクトからの分割代入（`const { console } = globalThis`）。`no-restricted-globals` の
+ * `checkGlobalObject` は性質の参照だけを見るので、分割代入は `no-restricted-syntax` で落とす
+ */
+const GLOBAL_OBJECT_NAME = "/^(globalThis|global|window|self)$/";
+const RESTRICTED_GLOBAL_KEY = ":matches([key.name=/^(console|fetch)$/], [key.value=/^(console|fetch)$/])";
+const globalDestructureSyntax = [
+  `VariableDeclarator[init.name=${GLOBAL_OBJECT_NAME}] > ObjectPattern > Property${RESTRICTED_GLOBAL_KEY}`,
+  `AssignmentExpression[right.name=${GLOBAL_OBJECT_NAME}] > ObjectPattern > Property${RESTRICTED_GLOBAL_KEY}`,
+].map((selector) => ({ selector, message: `ログと伏せ字・外部の呼び出し${BOUNDARY}` }));
+
+/** `apps/*` の src で、時計と条件つきの書き込みと動的な import と大域のオブジェクトからの分割代入を落とす `no-restricted-syntax` の選び方 */
 const boundarySyntax = [
+  ...dynamicImportSyntax,
+  ...globalDestructureSyntax,
   { selector: "NewExpression[callee.name='Date'][arguments.length=0]", message: `時計${BOUNDARY}` },
   { selector: "Property[key.name='ConditionExpression']", message: `条件つきの書き込み${BOUNDARY}` },
   { selector: "Property[key.value='ConditionExpression']", message: `条件つきの書き込み${BOUNDARY}` },
@@ -106,9 +138,14 @@ function selectorString(value) {
   return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
-/** 正規表現に置けるよう、記号を `\x` の形に逃がす（`/` を含めて選び方の区切りに当たらないようにする） */
+/**
+ * 正規表現に置けるよう、記号を UTF-16 の符号単位ごとに `\uXXXX` の形に逃がす（`/` を含めて選び方の区切りに
+ * 当たらないようにする。`\x` は 2 桁しか読まないので全角の記号に使えない）
+ */
 function regexpLiteral(value) {
-  return value.replace(/[^\p{L}\p{N} _-]/gu, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
+  return value.replace(/[^\p{L}\p{N} _-]/gu, (c) =>
+    Array.from({ length: c.length }, (_, i) => `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`).join(""),
+  );
 }
 
 /** 画面で料金プランの名前と同じ文字列を落とす選び方（I8）。JSX の属性の値は Literal、本文は JSXText */
@@ -157,6 +194,8 @@ export function buildConfig({ planNames }) {
     { files: [...WEB_SRC, ...API_SRC, ...OTHER_APP_SRC], rules: boundaryRules },
     // 画面の大域のオブジェクトを知らせ、`window.fetch` と `self.fetch` も `checkGlobalObject` で落とす
     { files: WEB_SRC, languageOptions: { globals: { window: "readonly", self: "readonly" } } },
+    // Node.js の大域のオブジェクトを知らせ、`global.console` と `global.fetch` も `checkGlobalObject` で落とす
+    { files: [...API_SRC, ...OTHER_APP_SRC], languageOptions: { globals: { global: "readonly" } } },
     // 画面: 横断の部品・料金プランの名前・経路
     { files: WEB_SRC, rules: syntax(boundarySyntax, plan, routeSyntax) },
     // apps/api: 横断の部品・経路（*.tsx は画面の外の TSX も）
