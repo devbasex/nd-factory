@@ -122,7 +122,7 @@ graph TD
 | #6・#13 | 決定 4 のランナーの引き換えと DB の用意の確定の条件（各経路のハンドラー。[API の文書の受け持ち](../docs/design/api.md)） |
 
 - **同じファイルを触る別の変更**:
-  - #79（U5a2 行の版の読み手と書き手）は `packages/contracts/src/rows/users.ts`・`src/tables.ts`・`test/rows.test.ts` を触る。#78 も同じファイルに対応の行とつなぐ流れの行の形を足す。先にマージした方の後で、もう一方が行の形と版の読み手をつなぐ
+  - #79（U5a2 行の版の読み手と書き手）は `packages/contracts/src/rows/users.ts`・`src/tables.ts`・`test/rows.test.ts` を触る。#78 も同じファイルに対応の行・つなぐ流れの行・セッションの取り消しの行・失効の予定の行の形を足し、同じ変更で `TABLES` の `users` の TTL を有効にし（`ttlAttribute` を `expire_at`。`rows.test.ts` の TTL を持つ表と行の期待もそろえる）、秒の `expire_at` を作る `expireAtSeconds` を足す（つなぐ流れとセッションの取り消しの行の書き手 #4 はこれで書く）。先にマージした方の後で、もう一方が行の形と版の読み手をつなぐ
   - #4 は同じ全体の設計の節（データの文書の Cognito の主体の対応の行・詳細設計の `verifyLoginToLink`）を実装で読み、手順を変えるときはこの設計を直す
 - **壊れうる箇所**:
   - 対応の行が無い・結んでいない主体の扱いを誤ると、人の要求がすべて 401 になるか、外したログインで人として通る。認証の単体テストで、`auth_time` が `bound_auth_time` の前と同じ時刻・失効の待ちの間・`revoked_before` の前後を縛る（[詳細設計のテスト](../docs/design/detail.md)）
