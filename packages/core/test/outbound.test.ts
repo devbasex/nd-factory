@@ -227,24 +227,45 @@ describe("callHttp", () => {
     expect(records().at(-1)).toMatchObject({ level: "error", msg: "外への呼び出しが再試行を使い切った", status: 429, retries: 3 });
   });
 
+  // 頭書きと最初の一片だけを返し、本文を閉じない応答
+  function stalled(): Response {
+    const body = new ReadableStream<Uint8Array>({ start: (c) => c.enqueue(new TextEncoder().encode('{"a":')) });
+    return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+  }
+
   it.each([
-    ["冪等な要求", get()],
-    ["冪等でない要求", post()],
-  ])("2xx の頭書きの後に本文が止まると、%sも方針の期限で状態 0 の retryable を返す", async (_why, req) => {
+    // http-github は要求ごとに 10 秒・全体で 30 秒のため、回数（3 回の繰り返し）が残っていても全体の期限で 3 回目の試行が最後になる
+    ["冪等な要求は残りの回数を使って繰り返し", get(), 3, "外への呼び出しが再試行を使い切った"],
+    ["冪等でない要求は繰り返さず（2xx を受けたため届いている）", post(), 1, "外への呼び出しが一時の失敗で、繰り返さずに返した"],
+  ])("2xx の頭書きの後に本文が止まると、%s、方針の期限で状態 0 の retryable を返す", async (_why, req, attempts, msg) => {
     let count = 0;
     const fetch = () => {
       count += 1;
-      // 頭書きと最初の一片だけを返し、本文を閉じない
-      const body = new ReadableStream<Uint8Array>({ start: (c) => c.enqueue(new TextEncoder().encode('{"a":')) });
-      return Promise.resolve(new Response(body, { status: 200, headers: { "content-type": "application/json" } }));
+      return Promise.resolve(stalled());
     };
     const { log, records } = logs();
     const started = Date.now();
-    const result = await settle(callHttp(req, "http-github", { log, clock: createClock(), fetch }));
+    // settle は残ったタイマーまで時計を進めるため、時間は結果が決まった時点で測る
+    let settledAt = 0;
+    const result = await settle(callHttp(req, "http-github", { log, clock: createClock(), fetch }).finally(() => (settledAt = Date.now())));
     expect(result).toEqual({ status: 0, headers: {}, body: null, class: "retryable" });
-    expect(Date.now() - started).toBeLessThanOrEqual(RETRY_POLICIES["http-github"].total_timeout_ms);
-    expect(count).toBe(1);
-    expect(records().at(-1)).toMatchObject({ level: "error", status: 0, class: "retryable" });
+    expect(settledAt - started).toBeLessThanOrEqual(RETRY_POLICIES["http-github"].total_timeout_ms);
+    expect(count).toBe(attempts);
+    expect(records().at(-1)).toMatchObject({ level: "error", msg, status: 0, class: "retryable" });
+    for (const r of records().slice(0, -1)) expect(r).toMatchObject({ level: "warn", class: "retryable", error: "TimeoutError" });
+  });
+
+  it("冪等な要求は、本文が止まった後の試行で本文が届けばその本文を返す", async () => {
+    const { calls, fetch } = fakeFetch([stalled, json(200, { ok: true })]);
+    const result = await settle(callHttp(get(), "http-github", { log: logs().log, clock: createClock(), fetch }));
+    expect(calls).toHaveLength(2);
+    expect(result).toMatchObject({ status: 200, body: { ok: true }, class: "ok" });
+  });
+
+  it("204 の空の本文は null で返す", async () => {
+    const { fetch } = fakeFetch(() => new Response(null, { status: 204 }));
+    const result = await settle(callHttp(get(), "http-github", { log: logs().log, clock: createClock(), fetch }));
+    expect(result).toEqual({ status: 204, headers: {}, body: null, class: "ok" });
   });
 
   it("転送に自動で従わず、307 は Location を付けた結果で返す（http: の転送先へ本文を送り直さない）", async () => {

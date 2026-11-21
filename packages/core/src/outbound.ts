@@ -1,7 +1,7 @@
 import { RETRY_POLICIES, type AwsRetryPolicy, type HttpRetryPolicy, type RetryPolicyName, type RetryPolicyOf } from "@nd-factory/contracts/data";
 import { Readable } from "node:stream";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
-import ky, { HTTPError, isHTTPError, isNetworkError, isTimeoutError, type Options } from "ky";
+import ky, { type AfterResponseHook, HTTPError, isForceRetryError, isHTTPError, isNetworkError, isTimeoutError, NetworkError, type Options, TimeoutError } from "ky";
 import type { Clock } from "./clock.ts";
 import type { Logger } from "./log.ts";
 import { classifyFailure, type FailureClass } from "./retry.ts";
@@ -125,6 +125,66 @@ function parseBody(response: Response, text: string): unknown {
   }
 }
 
+// 本文の読み取りの期限切れの印
+const BODY_TIMED_OUT = Symbol("body timed out");
+
+// 本文を期限の中で読み切る。期限を過ぎたら読み手を取り消して流れを止め、印を返す。読み取りの誤り（接続の切断など）はそのまま投げる
+async function readBodyWithin(response: Response, ms: number): Promise<string | typeof BODY_TIMED_OUT> {
+  if (response.body === null) return "";
+  const reader = response.body.getReader();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<typeof BODY_TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(BODY_TIMED_OUT), ms);
+    // 全体の期限で ky が先に切った後もこの待ちは残るため、プロセスの終わりを引き止めない
+    timer.unref?.();
+  });
+  const decoder = new TextDecoder();
+  const read = (async () => {
+    let text = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return text + decoder.decode();
+      text += decoder.decode(value, { stream: true });
+    }
+  })();
+  try {
+    const out = await Promise.race([read, expired]);
+    if (out === BODY_TIMED_OUT) {
+      read.catch(() => undefined);
+      // 写し（clone）の取り消しは、元の流れも取り消されるまで決着しないため待たない。元の流れは ky が取り消す
+      reader.cancel().catch(() => undefined);
+    }
+    return out;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// detail.md の callHttp の手順 (3)。2xx の本文を ky の再試行の中（afterResponse）で、要求ごとの期限（方針の timeout_ms。全体の期限は ky が掛ける）の中で読み切る。
+// 本文の時間切れと読み取りの誤りは、冪等な要求なら ky.retry で残りの回数を使って繰り返し、冪等でない要求なら（2xx を受けたため届いている）繰り返さずに TimeoutError・NetworkError で返す
+function readBodyInRetry(req: OutboundRequest, policy: HttpRetryPolicy): AfterResponseHook {
+  return async ({ request, response }) => {
+    if (!response.ok) return undefined;
+    let failure: Error;
+    try {
+      const text = await readBodyWithin(response, policy.timeout_ms);
+      if (text !== BODY_TIMED_OUT) {
+        return new Response(text === "" ? null : text, { status: response.status, statusText: response.statusText, headers: response.headers });
+      }
+      failure = new TimeoutError(request);
+    } catch (error) {
+      failure = new NetworkError(request, { cause: error instanceof Error ? error : undefined });
+    }
+    if (req.idempotent) return ky.retry({ code: "BODY_READ", cause: failure });
+    throw failure;
+  };
+}
+
+// ky.retry で繰り返した失敗は ForceRetryError に包まれて届く。分類とログは包みの中の失敗で見る
+function unwrapForced(error: unknown): unknown {
+  return isForceRetryError(error) && error.cause !== undefined ? error.cause : error;
+}
+
 function bodyOptions(body: unknown): Options {
   if (body === undefined) return {};
   return typeof body === "string" ? { body } : { json: body };
@@ -151,10 +211,13 @@ export async function callHttp(req: OutboundRequest, policyName: HttpPolicyName,
     ...bodyOptions(req.body),
     ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
     hooks: {
+      afterResponse: [readBodyInRetry(req, policy)],
       beforeRetry: [
         ({ error, retryCount }) => {
           retries = retryCount;
-          deps.log.warn("外への呼び出しを繰り返す", { policy: policyName, peer: req.peer, attempt: retryCount, class: classifyFailure(error), error: error.name });
+          const cause = unwrapForced(error);
+          const name = cause instanceof Error ? cause.name : error.name;
+          deps.log.warn("外への呼び出しを繰り返す", { policy: policyName, peer: req.peer, attempt: retryCount, class: classifyFailure(cause), error: name });
         },
       ],
     },
@@ -165,10 +228,11 @@ export async function callHttp(req: OutboundRequest, policyName: HttpPolicyName,
   try {
     const pending = ky(req.url, options);
     const response = await pending;
-    // 本文は ky の読み口から読み、timeout と totalTimeout の残りを本文の読み取りにも掛ける（頭書きの後に本文が止まる相手で待ち続けない）
+    // 2xx の本文は afterResponse で読み切った写しのため、ここでは待たない
     const text = await pending.text();
     result = { status: response.status, headers: pickHeaders(response.headers), body: parseBody(response, text), class: "ok" };
-  } catch (error) {
+  } catch (thrown) {
+    const error = unwrapForced(thrown);
     result = failureResult(error);
     lastRetriable = req.idempotent || (error instanceof Error && retryWhenNotDelivered({ error }));
   }
