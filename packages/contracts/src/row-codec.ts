@@ -96,10 +96,26 @@ function issuePaths(error: z.ZodError): string {
   return error.issues.map((i) => i.path.join(".")).join(", ");
 }
 
-// 値が undefined の列は無い列と同じに見る（writeRow は undefined の列を書かない）
+// 値が undefined の列は無い列と同じに見る（writeRow は undefined の列を書かない）。
+// DynamoDB の集合（文字列・数・バイナリの集合）は Set で表すため、Set は要素まで比べる（Object.entries は Set の中身を並べない）
 function sameValue(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (a instanceof Set || b instanceof Set) {
+    if (!(a instanceof Set) || !(b instanceof Set) || a.size !== b.size) return false;
+    const covers = (x: Set<unknown>, y: Set<unknown>) => [...x].every((v) => y.has(v) || [...y].some((w) => sameValue(v, w)));
+    return covers(a, b) && covers(b, a);
+  }
+  if (a instanceof Map || b instanceof Map) {
+    if (!(a instanceof Map) || !(b instanceof Map) || a.size !== b.size) return false;
+    return [...a].every(([k, v]) => b.has(k) && sameValue(v, b.get(k)));
+  }
+  if (ArrayBuffer.isView(a) || ArrayBuffer.isView(b)) {
+    if (!ArrayBuffer.isView(a) || !ArrayBuffer.isView(b) || a.byteLength !== b.byteLength) return false;
+    const ba = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
+    const bb = new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
+    return ba.every((v, i) => v === bb[i]);
+  }
   if (Array.isArray(a) || Array.isArray(b)) {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
     return a.every((v, i) => sameValue(v, b[i]));
@@ -134,6 +150,23 @@ function assertLosslessDowngrade<L>(codec: RowCodec<L>, previous: PreviousVersio
   }
   const restored = back as { success?: boolean; data?: unknown } | null;
   if (restored?.success !== true || !sameValue(restored.data, latestRow)) throw new RowCodecError(`版 ${previous.version} へ下げると版 ${codec.latest.version} の値が失われる`);
+}
+
+// 書き手を前の版へ戻せる間（downgradable）は、読んだ前の版の行を上げて下げ直すと元の行に戻ることを確かめ、戻らなければ投げる。
+// upgrade で失う値（latest の版で消した、downgrade が latest の値から作り直せない列）は、移し（次の版で書く）では remove で消え、
+// 通常の書き換え（前の版で書く）では downgrade の作り直した値で上書きされ、書き手を戻しても元へ戻らない。
+// そうした列の削除は downgradable を false にする反映（版を上げる子の手順の 4）まで延ばす
+function assertLosslessUpgrade<L>(codec: RowCodec<L>, previous: PreviousVersion<L>, raw: Readonly<Record<string, unknown>>): void {
+  const old = previous.schema.safeParse(raw);
+  if (!old.success) throw new RowCodecError(`読んだ行が版 ${previous.version} の形を通らない: ${issuePaths(old.error)}`);
+  let back: unknown = null;
+  try {
+    const upgraded = codec.latest.schema.safeParse(previous.upgrade(copyOf(old.data)));
+    if (upgraded.success) back = downgradeOf(previous, upgraded.data);
+  } catch {
+    back = null;
+  }
+  if (back === null || !sameValue(back, old.data)) throw new RowCodecError(`版 ${previous.version} の行を版 ${codec.latest.version} へ上げると値が失われる`);
 }
 
 // latest の版はそのまま、previous の版は upgrade で latest の形へそろえて返し、ほかの版を拒む。writeVersion によらず同じ結果を返す。
@@ -180,9 +213,12 @@ export function writeRow<L>(codec: RowCodec<L>, row: L): Record<string, unknown>
 // 読んだ行（raw）を row へ書き換える更新の set と remove を作る。set は writeRow の戻り値から pk・sk・version を外したもの（schema_version を含む）。
 // remove は raw の列のうち writeRow の戻り値に無く、pk・sk・version でもない列（別の版で消した列と、undefined にした任意の列。索引の鍵なら書き込みで索引から外れる）。
 // 列の有無は自身の列だけで見る（constructor などの継承した名前を列と取り違えない）
+// downgradable の間に読んだ行が前の版なら、その行を上げて下げ直すと元の行に戻らなければ投げる（移しと通常の書き換えのどちらでも、upgrade で失う値を消さない）。
 // 書き換え後の鍵（keyOf）が読んだ行の鍵と違えば投げる。鍵は書き込みの key に読んだ行のものを使うため、違う鍵の列から組んだ中身を古い鍵の行へ書かない
 // （たとえば席の user_id を変えると、旧利用者の SEAT#… に新利用者の user_id が載り、主キーと索引で引く所属が食い違う）
 export function rowUpdateOf<L>(codec: RowCodec<L>, raw: Readonly<Record<string, unknown>>, row: L): RowUpdate {
+  const previous = codec.previous;
+  if (previous !== null && codec.downgradable && raw["schema_version"] === previous.version) assertLosslessUpgrade(codec, previous, raw);
   const written = writeRow(codec, row);
   const rawSk = Object.hasOwn(raw, "sk") ? raw["sk"] : undefined;
   // 鍵の値はログインの組の IdP の主体や利用者の ID を含むため、例外には違った列の名前だけを載せる

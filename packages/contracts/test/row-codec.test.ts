@@ -167,6 +167,36 @@ describe("readRow と writeRow（受け入れ条件 9 の読み手）", () => {
     expect(readRow(renaming, written)).toEqual({ ok: true, row: asV2, from: 1 });
   });
 
+  it("集合（Set）は要素まで比べ、下げると集合の要素を失う行を書かずに投げる", () => {
+    const meta = z.looseObject({}).optional();
+    const s1 = v1.extend({ meta });
+    const s2 = v2.extend({ meta });
+    type S1 = z.infer<typeof s1>;
+    type S2 = z.infer<typeof s2>;
+    const dropping = (writeVersion: number) =>
+      rowCodec({
+        latest: { version: 2, schema: s2 },
+        previous: {
+          version: 1,
+          schema: s1,
+          upgrade: (r: S1): S2 => ({ ...upgrade(r), ...(r.meta === undefined ? {} : { meta: r.meta }) }),
+          downgrade: (r: S2): S1 => {
+            const labels = r.meta?.["labels"];
+            const kept = labels instanceof Set ? new Set([...labels].slice(0, 1)) : labels;
+            return { ...downgrade(r), ...(r.meta === undefined ? {} : { meta: { ...r.meta, labels: kept } }) };
+          },
+        },
+        writeVersion,
+        keyOf,
+      });
+    const two = { ...asV2, meta: { labels: new Set(["a", "b"]) } };
+    expect(() => writeRow(dropping(2), two)).toThrow(/値が失われる/);
+    expect(() => writeRow(dropping(1), two)).toThrow(/値が失われる/);
+    const one = { ...asV2, meta: { labels: new Set(["a"]) } };
+    expect(writeRow(dropping(2), one)["meta"]).toEqual({ labels: new Set(["a"]) });
+    expect(writeRow(dropping(1), one)["meta"]).toEqual({ labels: new Set(["a"]) });
+  });
+
   it("upgrade が投げた前の版の行は、投げずに shape_invalid を返す", () => {
     const throwing = rowCodec({
       latest: { version: 2, schema: v2 },
@@ -259,6 +289,31 @@ describe("rowUpdateOf", () => {
   it("constructor・toString などの継承した名前の列も、新しい行に無ければ remove に並べる", () => {
     const raw = { ...rowV2, constructor: "x", toString: "y", hasOwnProperty: "z" };
     expect(rowUpdateOf(stage2, raw, asV2).remove).toEqual(["constructor", "toString", "hasOwnProperty"]);
+  });
+
+  // upgrade が前の版の列（memo）を捨て、downgrade がその列を固定値で補う組。upgrade(downgrade(次の版の行)) は戻るが、前の版の行の memo は失われる
+  const m1 = v1.extend({ memo: z.string() });
+  type M1 = z.infer<typeof m1>;
+  const droppingMemo = (writeVersion: number, downgradable?: boolean) =>
+    rowCodec({
+      latest: { version: 2, schema: v2 },
+      previous: { version: 1, schema: m1, upgrade: (r: M1): V2 => upgrade(r), downgrade: (r: V2): M1 => ({ ...downgrade(r), memo: "" }) },
+      writeVersion,
+      ...(downgradable === undefined ? {} : { downgradable }),
+      keyOf,
+    });
+  const rowM1 = { ...rowV1, memo: "keep" };
+
+  it("downgradable の間、upgrade で失う値を持つ前の版の行は、移し（次の版で書く）でも通常の書き換え（前の版で書く）でも書き換えずに投げる", () => {
+    expect(writeRow(droppingMemo(2), asV2)).toEqual(rowV2);
+    expect(() => rowUpdateOf(droppingMemo(2), rowM1, asV2)).toThrow(/上げると値が失われる/);
+    expect(() => rowUpdateOf(droppingMemo(1), rowM1, { ...asV2, version: 4 })).toThrow(/上げると値が失われる/);
+    expect(rowUpdateOf(droppingMemo(1), { ...rowM1, memo: "" }, { ...asV2, version: 4 })).toEqual({ set: { schema_version: 1, item_id: "a", nick: "acme", memo: "" }, remove: [] });
+    expect(rowUpdateOf(droppingMemo(2, false), rowM1, asV2)).toEqual({ set: { schema_version: 2, item_id: "a", display_name: "acme" }, remove: ["nick", "memo"] });
+  });
+
+  it("downgradable の間、読んだ前の版の行が前の版の形を通らなければ投げる", () => {
+    expect(() => rowUpdateOf(stage2, { ...rowV1, nick: 1 }, asV2)).toThrow(/読んだ行が版 1 の形を通らない/);
   });
 
   it("消した列が無ければ remove が空", () => {
