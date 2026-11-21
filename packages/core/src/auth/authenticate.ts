@@ -30,13 +30,15 @@ export { createCognitoCheck, DB_PREP_AUDIENCE, RUNNER_AUDIENCE, type CognitoChec
 // 検証した Cognito の主体と、それに当たる IdP の主体。IdP の主体は要求の本文から採らず、検証した token の username で
 // 利用者プールを引いてサーバーの側で得る（AuthReaders.cognitoIdentity）。authTime は IdP でサインインした時刻（エポックの秒）。
 // username は検証した token の username（Cognito の利用者の名前）で、結ぶハンドラーが対応の行の cognito_username に書く
-// （外した後の AdminUserGlobalSignOut の対象）。
+// （外した後の AdminUserGlobalSignOut の対象）。sessionId は検証した token の origin_jti で、利用者を作った要素の記録を
+// 作った利用者の人の主体で書くときに使う（audit の actorOfCreatedUser）。
 // bindingEpoch と rowVersion は読んだ Cognito の主体の対応の行のもの（行が無ければ 0 と null）。結ぶハンドラーは、
 // rowVersion が null なら対応の行を無いときだけ書き（putIfAbsent）、そうでなければその版と「state が unlinked で revoked_before が
 // token の auth_time より前」を条件に書き換える（認証の読みの後に外し直された・失効が済んでいない行へ結ばない）
 export type CognitoLogin = {
   readonly cognitoSub: string;
   readonly username: string;
+  readonly sessionId: string;
   readonly idp: "google" | "github";
   readonly subject: string;
   readonly authTime: number;
@@ -189,7 +191,7 @@ async function loginOf(claims: CognitoClaims, binding: CognitoBinding | null, de
   if (identity === null || identity.cognitoSub !== claims.sub) return unauthorized("unknown_principal");
   return {
     ok: true,
-    value: { cognitoSub: claims.sub, username: claims.username, idp: identity.idp, subject: identity.subject, authTime: claims.authTime, bindingEpoch: binding?.epoch ?? 0, rowVersion: binding?.version ?? null },
+    value: { cognitoSub: claims.sub, username: claims.username, sessionId: claims.originJti, idp: identity.idp, subject: identity.subject, authTime: claims.authTime, bindingEpoch: binding?.epoch ?? 0, rowVersion: binding?.version ?? null },
   };
 }
 

@@ -228,7 +228,7 @@ describe("authenticate: 人（Cognito の access token）", () => {
     // IdP の主体は本文から採らず、検証した username で利用者プールを引いて得る
     await expect(authenticate(req("user", token, "sessions.create"), deps)).resolves.toEqual({
       ok: true,
-      principal: { kind: "newcomer", login: { cognitoSub: "cognito-sub-new", username: "google_cognito-sub-new", idp: "google", subject: "g-cognito-sub-new", authTime: NOW_SEC - 60, bindingEpoch: 0, rowVersion: null } },
+      principal: { kind: "newcomer", login: { cognitoSub: "cognito-sub-new", username: "google_cognito-sub-new", sessionId: "session-cognito-sub-new", idp: "google", subject: "g-cognito-sub-new", authTime: NOW_SEC - 60, bindingEpoch: 0, rowVersion: null } },
     });
     await expect(authenticate(req("user", token, "users.get"), deps)).resolves.toEqual(UNAUTHORIZED);
     // 結んだ主体は sessions.create でも人
@@ -265,7 +265,7 @@ describe("authenticate: 人（Cognito の access token）", () => {
     await expect(authenticate(req("user", cognitoToken({ sub: "cognito-sub-out", auth_time: NOW_SEC - 30 }), "sessions.create"), deps)).resolves.toEqual(UNAUTHORIZED);
     await expect(authenticate(req("user", cognitoToken({ sub: "cognito-sub-out", auth_time: NOW_SEC - 29 }), "sessions.create"), deps)).resolves.toEqual({
       ok: true,
-      principal: { kind: "newcomer", login: { cognitoSub: "cognito-sub-out", username: "google_cognito-sub-out", idp: "google", subject: "g-cognito-sub-out", authTime: NOW_SEC - 29, bindingEpoch: 1, rowVersion: 3 } },
+      principal: { kind: "newcomer", login: { cognitoSub: "cognito-sub-out", username: "google_cognito-sub-out", sessionId: "session-cognito-sub-out", idp: "google", subject: "g-cognito-sub-out", authTime: NOW_SEC - 29, bindingEpoch: 1, rowVersion: 3 } },
     });
     // 外した主体はほかの操作を通らない
     await expect(authenticate(req("user", cognitoToken({ sub: "cognito-sub-out", auth_time: NOW_SEC - 29 })), deps)).resolves.toEqual(UNAUTHORIZED);
@@ -274,7 +274,7 @@ describe("authenticate: 人（Cognito の access token）", () => {
   });
 
   it("sessions.create の冪等の鍵は、対応の行を作る前と後で同じで、外すと変わる", () => {
-    const login = { cognitoSub: "cognito-sub-new", username: "google_cognito-sub-new", idp: "google", subject: "g-1", authTime: NOW_SEC, bindingEpoch: 0, rowVersion: null } as const;
+    const login = { cognitoSub: "cognito-sub-new", username: "google_cognito-sub-new", sessionId: "s-1", idp: "google", subject: "g-1", authTime: NOW_SEC, bindingEpoch: 0, rowVersion: null } as const;
     const before = idempotencyPrincipalKey({ kind: "newcomer", login }, "sessions.create");
     const after = idempotencyPrincipalKey({ kind: "human", userId: USER, cognitoSub: "cognito-sub-new", sessionId: "s-1", bindingEpoch: 0 }, "sessions.create");
     expect(after).toBe(before);
