@@ -159,12 +159,24 @@ function checkResult(name: string, verb: string, endpoint: Endpoint, result: Res
 
 const ONCE_ONLY_PATH = new RegExp(`^${SEGMENT}(?:\\.${SEGMENT})*$`);
 
-// 場所の値を受ける形（オブジェクトの和は、その鍵を持つ選択肢のすべて）。配列は要素の形へ下りる
+// 場所の値を受ける形（オブジェクトの和は、その鍵を持つ選択肢のすべて）。
+// 末尾の場所は settleIdempotency が値ごと null に替えるので、配列や包み（optional・nullable・default など）を含めたその場所の形そのものを返す。
+// 場所の途中では包みを外し、配列は要素の形へ下りる（settleIdempotency も要素ごとに同じ場所を替え、null の途中の値はそのまま残す）
 function schemasAt(schema: z.ZodType, segments: readonly string[]): z.ZodType[] {
-  if (schema instanceof z.ZodArray) return schemasAt(schema.element as z.ZodType, segments);
-  if (schema instanceof z.ZodUnion) return (schema.options as z.ZodType[]).flatMap((o) => schemasAt(o, segments));
   const [head, ...rest] = segments;
   if (head === undefined) return [schema];
+  if (
+    schema instanceof z.ZodOptional ||
+    schema instanceof z.ZodNullable ||
+    schema instanceof z.ZodDefault ||
+    schema instanceof z.ZodPrefault ||
+    schema instanceof z.ZodReadonly ||
+    schema instanceof z.ZodCatch
+  ) {
+    return schemasAt(schema.def.innerType as z.ZodType, segments);
+  }
+  if (schema instanceof z.ZodArray) return schemasAt(schema.element as z.ZodType, segments);
+  if (schema instanceof z.ZodUnion) return (schema.options as z.ZodType[]).flatMap((o) => schemasAt(o, segments));
   if (!(schema instanceof z.ZodObject)) return [];
   const field: unknown = (schema.shape as Record<string, unknown>)[head];
   return field instanceof z.ZodType ? schemasAt(field, rest) : [];

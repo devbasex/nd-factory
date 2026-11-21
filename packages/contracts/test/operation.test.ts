@@ -111,13 +111,36 @@ describe("defineOperation", () => {
     expect(op.delegationKind).toBeNull();
   });
 
+  const ONCE_WRITE = { name: "delegations.create", access: "write", delegationKind: "manage", idempotencyKey: true } as const;
+
   it("1 回だけ返す値の場所は冪等の鍵を持つ操作が、null を受ける形の場所に置ける", () => {
     const issued = okItem(z.strictObject({ delegation_id: idOf("dlg"), token: z.string().nullable(), token_expires_at: z.string() }));
     const op = defineOperation(base({ name: "delegations.create", access: "write", delegationKind: "manage", idempotencyKey: true, result: issued, onceOnly: ["item.token"] }));
     expect(op.onceOnly).toEqual(["item.token"]);
   });
 
-  const ONCE_WRITE = { name: "delegations.create", access: "write", delegationKind: "manage", idempotencyKey: true } as const;
+  it("1 回だけ返す値の場所は、途中の包み（nullable・optional・default）を外して下りる", () => {
+    // item は封筒の検査でオブジェクトに限るので、包みはその下の場所に置く
+    const inner = z.strictObject({ token: z.string().nullable() });
+    for (const issued of [inner.nullable(), inner.optional(), inner.default({ token: null })]) {
+      const result = okItem(z.strictObject({ delegation_id: idOf("dlg"), issued }));
+      const op = defineOperation(base({ ...ONCE_WRITE, result, onceOnly: ["item.issued.token"] }));
+      expect(op.onceOnly).toEqual(["item.issued.token"]);
+    }
+  });
+
+  it("1 回だけ返す値の場所が配列なら、配列そのものの形が null を受ける", () => {
+    const nullableTokens = okItem(z.strictObject({ tokens: z.array(z.string()).nullable() }));
+    expect(defineOperation(base({ ...ONCE_WRITE, result: nullableTokens, onceOnly: ["item.tokens"] })).onceOnly).toEqual(["item.tokens"]);
+    const elementsOnly = okItem(z.strictObject({ tokens: z.array(z.string().nullable()) }));
+    expect(() => defineOperation(base({ ...ONCE_WRITE, result: elementsOnly, onceOnly: ["item.tokens"] }))).toThrow(/null を受ける/);
+  });
+
+  it("1 回だけ返す値の場所の途中の配列は要素の形へ下りる", () => {
+    const listed = okItem(z.strictObject({ keys: z.array(z.strictObject({ token: z.string().nullable() })) }));
+    expect(defineOperation(base({ ...ONCE_WRITE, result: listed, onceOnly: ["item.keys.token"] })).onceOnly).toEqual(["item.keys.token"]);
+  });
+
   const ONCE_RESULT = okItem(z.strictObject({ delegation_id: idOf("dlg"), token: z.string().nullable(), token_expires_at: z.string() }));
 
   it.each<[string, Partial<OperationInput<string, Shape, ResultShape>>]>([
