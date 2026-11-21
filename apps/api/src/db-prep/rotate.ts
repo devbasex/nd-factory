@@ -77,17 +77,14 @@ const SIGNAL_OLD = `SELECT count(*) FILTER (WHERE pg_terminate_backend(s.pid, 0)
 // 交換の始めに検証子を読むため、確定の前に読み始めた接続は、確定の後に古いパスワードで認証を終えうる。
 // 起動の処理は認証の前に取引を始めて自分の仮想の取引番号の鎖を取り、pg_stat_activity に載った後に確定して放す。
 // そのため確定の後のある時点で鎖を持つ pid の集まりは、その時点で古い検証子を持って起動の途中にある接続をすべて含む。
-// 認証を終えた接続は、繋ぐデータベースの鎖（pg_database の行の object の鎖）を取るか待ち、その後に CONNECT を照らす
-// （CheckMyDatabase）。この鎖を待つ間は認証の時間切れが外れ、待ちに上限が無い。対象の役割が CONNECT を持たない
-// データベース（接続を許さないものを含む）の鎖を持つか待つ接続は、対象の役割なら照らしで落ち、古いパスワードの接続に
-// ならないため、対象外と確かめられたものとして外す。それ以外（鎖をまだ持たないもの・対象の役割が繋げるデータベースの鎖のもの）は
-// 対象か判別できないものとして追う
+// 認証を終えた接続は、繋ぐデータベースの鎖（pg_database の行の object の鎖）を取るか待ち、その後に CONNECT を照らし
+// （CheckMyDatabase）、照らしを通った後も載るまで鎖を持つ。照らしの結果はカタログに残らず、観測の時点の datallowconn と
+// CONNECT からは決められない（照らしを通った後に CONNECT が取り消されても接続は残り、鎖を待つ間に CONNECT が与えられれば
+// 照らしを通る）。そのため今の接続の権限で外さず、鎖を持つ pid をすべて、載るか終わるまで追う（役割の分からない接続は
+// 対象か判別できないものとして扱う）
 const VXID_HOLDERS =
   "SELECT coalesce(string_agg(DISTINCT l.pid::text, ','), '')::text AS holders FROM pg_catalog.pg_locks l" +
-  " WHERE l.locktype = 'virtualxid' AND l.granted AND l.pid IS NOT NULL AND l.pid <> pg_backend_pid()" +
-  " AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_locks o JOIN pg_catalog.pg_database d ON d.oid = o.objid" +
-  " WHERE o.pid = l.pid AND o.locktype = 'object' AND o.classid = 'pg_catalog.pg_database'::regclass" +
-  " AND NOT (d.datallowconn AND has_database_privilege(CAST(:role_name AS text), d.oid, 'CONNECT')))";
+  " WHERE l.locktype = 'virtualxid' AND l.granted AND l.pid IS NOT NULL AND l.pid <> pg_backend_pid()";
 // 境の時刻より前に始まって載っている接続の数と、起動の途中と見た pid（:starting。コンマ区切り）のうちまだ載っていないもの。
 // 2 つは同じ文で同じ写しを読む。鎖の読みはこの文より前に打つ（鎖を放す前に必ず載るため、後で読む写しに載るか終わっている）
 const REMAINING_OLD =
@@ -181,12 +178,11 @@ export async function rotateRole(sql: SqlExecutor, project: ProjectIdent & { pas
 // rotateRole の確定の後に、別のトランザクションで同じ鎖を取り、境の時刻より前に始まった役割の接続を切る。
 // 記した番号が n より大きければ何も切らない。境の時刻が空なら記す。切りと読み直しは切り始めから 1 つの期限を共にし、
 // 期限を過ぎても読み直しを 1 回打ってから、その数を返す（1 以上なら呼ぶ側が connections_remain にする）。
-// 確定の前に古い検証子を読んで起動の途中にありうる接続（役割が分からない）は、載るか終わるか対象外と確かめられるまで 0 を
-// 返さない（0 を返した後に古いパスワードの接続が成り立たないように）。それが残る間だけ期限を認証の時間切れまで延ばし、
+// 確定の前に古い検証子を読んで起動の途中にありうる接続（役割が分からない）は、載るか終わるまで 0 を返さない
+// （0 を返した後に古いパスワードの接続が成り立たないように）。それが残る間だけ期限を認証の時間切れまで延ばし、
 // そこでも残るものを数に入れる。認証の時間切れは認証の交換の間だけ効き、認証の後のデータベースの鎖の待ちには効かない。
-// ほかのプロジェクトの接続は、認証の途中なら時間切れでサーバーに切られ、認証の後に自分のデータベースの鎖を待つなら
-// 対象外と確かめられて外れるため、どちらでも対象の役割の差し替えは残り 0 で終わる。対象の役割が繋げるデータベースの鎖を
-// 待つ接続は判別できず、延ばした所でも残れば数に入れる（保留を残して呼び直しに任せる側へ倒す）
+// ほかのプロジェクトの接続は、認証の途中なら時間切れでサーバーに切られて外れる。認証の後にデータベースの鎖を待ち続ける
+// 接続は、役割も照らしの結果も決められないため、延ばした所でも残れば数に入れる（保留を残して呼び直しに任せる側へ倒す）
 export async function terminateRoleConnections(
   sql: SqlExecutor,
   role: string,
@@ -224,9 +220,9 @@ export async function terminateRoleConnections(
     for (;;) {
       const before = starting?.length;
       // 期限を過ぎていても、読み直しを 1 回打ってから決める
-      const [held] = await sql.execute(VXID_HOLDERS, roleParam, opts);
+      const [held] = await sql.execute(VXID_HOLDERS, undefined, opts);
       const holders = pidList(held?.holders, "起動の途中の接続");
-      // 読みに無い pid は、鎖を放した（載ったか終わった）か、対象外と確かめられたもの。載ったものは境の時刻と比べる側で数える
+      // 読みに無い pid は、鎖を放した（載ったか終わった）もの。載ったものは境の時刻と比べる側で数える
       starting = starting === undefined ? holders : starting.filter((pid) => holders.includes(pid));
       await sql.execute(CLEAR_SNAPSHOT, undefined, opts);
       const [row] = await sql.execute(REMAINING_OLD, [...roleParam, { name: "starting", value: starting.join(",") }], opts);
@@ -234,7 +230,7 @@ export async function terminateRoleConnections(
       if (typeof visible !== "number") throw new Error("残りの接続の数を読めなかった");
       starting = pidList(row?.starting, "起動の途中の接続");
       // 対象か判別できない起動の途中の接続は役割が分からない（ほかのプロジェクトの接続でもありうる）ため、0 を返さずに、
-      // 載るか終わるか対象外と確かめられるまで待つ。認証の途中で止まった接続はサーバーが時間切れで切るため、その所まで期限を
+      // 載るか終わるまで待つ。認証の途中で止まった接続はサーバーが時間切れで切るため、その所まで期限を
       // 延ばせば、ほかの役割の認証が止まっていても終わる。延ばした所でもまだ残るものだけを、古い検証子を持ちうるものとして
       // 残りに数える。成功は、載った古い接続と追う接続の両方が 0 のときだけ
       const remaining = visible + starting.length;
