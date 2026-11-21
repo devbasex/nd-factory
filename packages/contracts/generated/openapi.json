@@ -894,7 +894,7 @@
             "application/json": {
               "schema": {
                 "minItems": 1,
-                "maxItems": 20,
+                "maxItems": 19,
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/projects.create.item"
@@ -1124,7 +1124,7 @@
             "application/json": {
               "schema": {
                 "minItems": 1,
-                "maxItems": 25,
+                "maxItems": 24,
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/repositories.add.item"

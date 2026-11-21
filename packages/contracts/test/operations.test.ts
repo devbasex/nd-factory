@@ -154,11 +154,11 @@ describe("OPERATIONS", () => {
     }
   });
 
-  it("全部か無かは projects.create（20）と repositories.add（25）だけ", () => {
+  it("全部か無かは projects.create（19）と repositories.add（24）だけ", () => {
     const marked = OPERATIONS.filter((op) => op.allOrNothing !== null).map((op) => [op.name, op.allOrNothing?.maxItems]);
     expect(marked).toEqual([
-      ["projects.create", 20],
-      ["repositories.add", 25],
+      ["projects.create", 19],
+      ["repositories.add", 24],
     ]);
   });
 
