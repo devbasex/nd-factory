@@ -208,7 +208,8 @@ describe("受け入れ条件 1・6: apps/* の横断の部品の外での直の�
 });
 
 describe("受け入れ条件 1・6: apps/* の node:crypto（crypto）の ID と冪等の鍵の生成（決定 1）", () => {
-  // 名前空間・既定の import と動的な import と再書き出しは丸ごと、名前つきの import は randomUUID・randomBytes だけを落とす
+  // 名前空間・既定の import と動的な import と export *（export * as）は丸ごと、名前つきの import と名前つきの再書き出しは
+  // randomUUID・randomBytes・getRandomValues・webcrypto だけを落とす
   const CRYPTO_PATHS = ["apps/api/src/sample.ts", "apps/web/src/sample.ts"];
   const IMPORTS_RULE = "@typescript-eslint/no-restricted-imports";
   const banned: { name: string; code: string; ruleId: string }[] = [
@@ -216,6 +217,12 @@ describe("受け入れ条件 1・6: apps/* の node:crypto（crypto）の ID と
     { name: "既定の import", code: 'import c from "node:crypto";\nexport const h = c.createHash("sha256");\n', ruleId: IMPORTS_RULE },
     { name: "動的な import", code: 'export const h = (await import("node:crypto")).createHash("sha256");\n', ruleId: "no-restricted-syntax" },
     { name: "名前つきの再書き出し", code: 'export { randomUUID } from "node:crypto";\n', ruleId: IMPORTS_RULE },
+    { name: "webcrypto の名前つきの import", code: 'import { webcrypto } from "node:crypto";\nexport const id = webcrypto.randomUUID();\n', ruleId: IMPORTS_RULE },
+    { name: "getRandomValues の名前つきの import", code: 'import { getRandomValues } from "node:crypto";\nexport const b = getRandomValues(new Uint8Array(4));\n', ruleId: IMPORTS_RULE },
+    { name: "node: を付けない crypto の webcrypto の名前つきの import", code: 'import { webcrypto } from "crypto";\nexport const id = webcrypto.randomUUID();\n', ruleId: IMPORTS_RULE },
+    { name: "node: を付けない crypto の getRandomValues の名前つきの import", code: 'import { getRandomValues } from "crypto";\nexport const b = getRandomValues(new Uint8Array(4));\n', ruleId: IMPORTS_RULE },
+    { name: "webcrypto の名前つきの再書き出し", code: 'export { webcrypto } from "node:crypto";\n', ruleId: IMPORTS_RULE },
+    { name: "getRandomValues の名前つきの再書き出し", code: 'export { getRandomValues } from "crypto";\n', ruleId: IMPORTS_RULE },
     { name: "export * の再書き出し", code: 'export * from "node:crypto";\n', ruleId: IMPORTS_RULE },
     { name: "export * as の再書き出し", code: 'export * as c from "node:crypto";\n', ruleId: IMPORTS_RULE },
     { name: "node: を付けない crypto の名前空間の import", code: 'import * as c from "crypto";\nexport const h = c.createHash("sha256");\n', ruleId: IMPORTS_RULE },
@@ -239,6 +246,13 @@ describe("受け入れ条件 1・6: apps/* の node:crypto（crypto）の ID と
   it("名前つきの createHash の import は落とさない", async () => {
     for (const path of CRYPTO_PATHS) {
       expect(await lint('import { createHash } from "node:crypto";\nexport const h = createHash("sha256");\n', path), path).toEqual([]);
+    }
+  });
+
+  it("名前つきの createHash の再書き出しは落とさない", async () => {
+    for (const path of CRYPTO_PATHS) {
+      expect(await lint('export { createHash } from "node:crypto";\n', path), path).toEqual([]);
+      expect(await lint('export { createHash } from "crypto";\n', path), path).toEqual([]);
     }
   });
 
