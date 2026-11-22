@@ -43,7 +43,7 @@ packages/contracts/
 │   │   ├── audit.ts            *   操作の記録（全体の設計の列）
 │   │   └── idempotency.ts      *   冪等の鍵
 │   ├── tables.ts               *   10 の表の仕様（名前の末尾・鍵・索引・TTL・行の種類）
-│   ├── row-codec.ts            *   行の版の読み手と書き手（RowCodec・readRow・writeRow・rowUpdateOf）
+│   ├── row-codec.ts            *   行の版の読み手と書き手（RowCodec・readRow・writeRow・rowReplaceOf）
 │   ├── ndf.ts                  *   受ける NDF の契約の組の形・答えの語
 │   ├── data.ts                 *   data/*.json の読みと検証
 │   └── client.ts               *   画面とテストが操作を呼ぶ口・ダミーの送り手（決定 16）
@@ -93,7 +93,7 @@ infra/
 | `packages/contracts/src/operations/*.ts` | 新設 | 操作の表の全行 | operation・ids・values | operations | `OPERATIONS`・`operationByName`・`operationByRoute` |
 | `packages/contracts/src/rows/*.ts` | 新設 | 表の行の形 | values・ids | rows | 行ごとの `<行>Row` の zod と `ROW_CODECS` |
 | `packages/contracts/src/tables.ts` | 新設 | 10 の表の仕様 | rows | tables | `TABLES`・`TableSpec` |
-| `packages/contracts/src/row-codec.ts` | 新設 | 行の版の読み手と書き手 | rows | row-codec | `rowCodec`・`readRow`・`writeRow`・`rowUpdateOf` |
+| `packages/contracts/src/row-codec.ts` | 新設 | 行の版の読み手と書き手 | rows | row-codec | `rowCodec`・`readRow`・`writeRow`・`rowReplaceOf` |
 | `packages/contracts/src/ndf.ts` | 新設 | NDF の契約の値 | zod | ndf | `ndfContractSet`・`ndfAnswerWord` |
 | `packages/contracts/src/data.ts` | 新設 | データのファイルを形で検証して出す | ndf・values | data | `RETRY_POLICIES`・`SECRET_SHAPES`・`NDF_CONTRACTS`・`PLANS` |
 | `packages/contracts/src/client.ts` | 新設 | 操作の名前で型を引く呼び出しの口と、生成したダミーを返す送り手 | operations | client | `createOperationClient`・`createDummyTransport` |
@@ -409,7 +409,7 @@ infra/
 | retry | `src/retry.ts` | `./retry` | `classifyFailure`（共通の再試行の関数は持たない。全体の設計の detail.md の「既存の部品の再利用」の再試行の行） |
 | outbound | `src/outbound.ts` | `./outbound` | `callHttp`・`awsClient` |
 | db | `src/db.ts` | `./db` | `createDb`（新設） |
-| conditional-write | `src/conditional-write.ts` | `./conditional-write` | `putIfAbsent`・`updateIfVersion`・`writeAtomically`・`updateIfSchemaVersion`（新設。[表の移し](#表の移し)） |
+| conditional-write | `src/conditional-write.ts` | `./conditional-write` | `putIfAbsent`・`replaceIfVersion`・`deleteIfVersion`・`writeAtomically`・`replaceIfUnchanged`（新設。[表の移し](#表の移し)。`updateIfVersion` は置かない） |
 | auth | `src/auth/authenticate.ts`・`tokens.ts` | `./auth` | `authenticate`（公開鍵の控えは `aws-jwt-verify` の組み込み。全体の設計の決定 48） |
 | authorize | `src/authorize.ts` | `./authorize` | `visibleProjectIds`・`authorize` |
 | usage-limit | `src/usage-limit.ts` | `./usage-limit` | `judgeUsage`・`usageAddItem` |
@@ -435,12 +435,17 @@ infra/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `createDb` | `src/db.ts` | 新設 | `(client: DynamoDBDocumentClient, names: TableNames) => Db` | detail.md の `Db` のポートと、この課題が足す `scan` を DynamoDB の文書のクライアントで満たす |
-| `updateIfVersion` | `src/conditional-write.ts` | 新設（detail.md のとおり。`remove` を足す） | `(spec: { table: TableName; key: RowKey; version: number; set: Record<string, unknown>; remove?: readonly string[]; extra?: Condition; onConflict: ConflictRule }) => TransactItem` | detail.md のとおり。`remove` が空でなければ、更新の式は `SET <set の列>, version = version + 1` に `REMOVE <remove の列>` を続けた 1 つの式で、同じ条件の下で一緒に効くか一緒に外れる。`remove` は `set` の鍵と重ならず、`pk`・`sk`・`version`・`schema_version` を含まない。書き手は `rowUpdateOf` の戻り値を渡す（[表の移し](#表の移し) の書き手の決まり） |
-| `updateIfSchemaVersion` | `src/conditional-write.ts` | 新設 | [表の移し](#表の移し) のとおり | 行の形の版を条件にした書き換えを組む（`version` を持たない行にも使う） |
+| `replaceIfVersion`・`deleteIfVersion` | `src/conditional-write.ts` | 新設（detail.md の `updateIfVersion` を置き換える。[行の書き手の設計](./issue-2-design-row-writers.md) の決定 1・2） | [表の移し](#表の移し) のとおり | 読んだ `version` を条件に、行全体を置き換えて `version` を 1 上げる・行を消す書き込みを組む。書き手は `rowReplaceOf` の戻り値を渡す（[表の移し](#表の移し) の書き手の決まり） |
+| `ConflictRule` | `src/conditional-write.ts` | 変更（`rebuild` を足す） | `"version_mismatch" \| "state_mismatch" \| "return_existing" \| "rebuild" \| "fail"` | `rebuild` は、サーバーが読んだ行から作る書き換え（月の使った量の加算）が外れたとき、`dispatch` がハンドラーを呼び直して組み直す扱い。`writeAtomically` は扱いを訳さずに外れた件と一緒に返す（今のとおり） |
+| `replaceIfUnchanged` | `src/conditional-write.ts` | 新設 | [表の移し](#表の移し) のとおり | 読んだ時から行が変わっていないときだけ置き換える書き込みを組む（表の移しだけが使う） |
+| `claimIdempotency`・`settleIdempotency` | `src/idempotency.ts` | 変更（detail.md のとおり。[行の書き手の設計](./issue-2-design-row-writers.md) の決定 7） | detail.md のとおり | 冪等の鍵の行は `version` を持つ。`claimIdempotency` は `fresh` のときに借りの行（書いた行）を返し、取り直しは読んだ `version` を条件に新しい借りの行全体を `replaceIfVersion` で書く。`settleIdempotency` は借りの行から済みの行全体を組み、借りの行の `version` を条件にする。指紋の照らしは借りの期限の照らしより先に行い、中身の違う送り直しは借りの状態と期限によらず `reused`（24 時間を過ぎて表の期限の消しを待つ行だけは、無い行と同じに取り直す） |
+| `usageAddItem` | `src/usage-limit.ts` | 変更（detail.md のとおり。[行の書き手の設計](./issue-2-design-row-writers.md) の決定 5） | detail.md のとおり | 強い整合で読んだ月の使った量の行（無ければ `null`）に費用を足した行全体を組む。行が無ければ `putIfAbsent`、あれば `replaceIfVersion`（読んだ `version`）で、どちらも `onConflict: "rebuild"`。通貨が違えば書き込みを組まずに `state_mismatch` を返す |
 | `dispatch` | `src/dispatch/dispatch.ts` | 新設（detail.md のとおり。下の 2 つの分岐を足す） | `(call: OperationCall, deps: DispatchDeps) => Promise<DispatchResult>` | detail.md のとおり |
 | `visibleProjectIds`・`authorize` | `src/authorize.ts` | 新設（detail.md のとおり。読み手の確かめ方を足す） | detail.md のとおり | detail.md のとおり |
 
 - `dispatch` に足す分岐（[detail.md の処理の手順](../docs/design/detail.md#処理の手順) に無いもの）
+  - 組み直し（[行の書き手の設計](./issue-2-design-row-writers.md) の決定 6）: 確定が `{ ok: false }` で、外れた件がどれも `onConflict: "rebuild"` のハンドラーの書き込み（要求元の照らし・記録の行・冪等の鍵の済みの行が外れていない）なら、その件を返した要素のハンドラーを、借りた冪等の鍵をそのままに呼び直し、書き込みを組み直して確定し直す（全部か無かでは外れていない要素の書き込みはそのまま使う）。1 つのトランザクションの組み直しは `DISPATCH_REBUILD_LIMIT`（3）回までで、各回の前に残り時間を照らす（`DISPATCH_RESERVE_MS`）。使い切ったら `warn` を出し（操作の名前と回数だけ）、要求全体の 503 `unavailable`。表が断った理由の優先は `writeAtomically` の今のとおり（断った理由があれば `ok: false` を返さずに投げる）で、組み直しはその後の分岐である
+  - 冪等の鍵の済みの行は `settleIdempotency` に `claimIdempotency` が返した借りの行を渡して組み、全部か無かで確定しなかったときの手放しは借りの行の `version` を条件にした `deleteIfVersion` で消す
   - 操作が形の未定（`isPending`）か、ハンドラーの表に無い: 要求全体の 503 `unavailable` とログの error（操作の名前だけ）。記録の要約の行を 1 件書く
   - 受け口が `user` でない操作を受け口 `user` の経路で引いた（またはその逆）: `readHttpCall` が経路の表で受け口ごとに引くため起きず、起きたら 405
 - `ScopeReader`（決定 14）。中身は表の持ち主の子が `apps/api/src/modules/` に書き、次を満たす。`seatsOf` は #4、`laneOf` は #6、`isHumanOnlyItem` は #8 が書く。`projectsOfTeams`・`projectOfTarget`・`transferTargetOf` は #5 が書く。この課題は偽の読み手で `authorize` の側の約束を確かめる
@@ -484,7 +489,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | `dispatch`（I12・受け入れ条件 5） | — | — | `{"a": 1}` の本文で 400 `body_not_array`。400 以外が返ると落ちる |
 | `dispatch`（形の未定） | — | — | 形の未定の操作で 503 `unavailable` |
 | `createDb` | 偽のクライアントへ渡る命令の形 | — | — |
-| `updateIfVersion`（`remove`） | `remove` の列が `REMOVE` 句に並び、`SET` と同じ 1 つの更新の式に入る | `remove` が空か無い（`REMOVE` 句を持たない。detail.md の形と同じ） | `remove` が `set` の鍵か `pk`・`sk`・`version`・`schema_version` を含むと投げる |
+| `dispatch`（組み直し） | 外れた件がどれも `rebuild` の件のとき、そのハンドラーを借りた冪等の鍵のまま呼び直し（ハンドラーは行を読み直す）、組み直したトランザクションが確定する | 3 回目の組み直しで確定する。4 回目は打たずに要求全体の 503 `unavailable` | `version_mismatch` の件か要求元の照らし・記録の行・済みの行が一緒に外れると組み直さない。`ValidationError` と条件の外れが同じ取り消しに並ぶと、組み直さずに元の例外のまま 503 になる |
 
 ## API の起点と骨組みの移し
 
@@ -557,30 +562,30 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | 行（表 / 並びの鍵） | 列（型、空を許すものに `?`） | 上書きか追記か |
 | --- | --- | --- |
 | 利用者（`db-users` / `USER`） | `user_id`・`login_count`（結んだログインの数、1 以上。結ぶ・外すトランザクションがこの行の版を条件に足し引きし、外すときは 2 以上を条件にする）・`display_name`（0〜32 字）・`language?`（`languageTag`）・`time_zone?`（`timeZone`）・`created_at` | 上書き |
-| ログインの組（`db-users` / `LOGIN#<IdP>#<主体>`） | `user_id`・`idp`・`subject`・`cognito_sub`（外すときに Cognito の主体の対応の行の鍵を組む）・`bound_auth_time`（結んだ時のサインインの時刻。対応の行の `bound_auth_time` を写した値で、外して結び直すかログインを付け替えると変わる。`users.get` がログインごとに返し（あわせて、`cognito_sub` が要求の主体の `sub` と同じかを `is_current` で返す。画面は今のセッションのログインを外した後にサインアウトの手順へ移る）、`logins.delete` の要素が読んだ値として持って、ログインの組の行で照らす。違えば要素の 409 `version_mismatch`）・`linked_at` | 作ると消すだけ（`version` を持たない） |
-| IdP の主体の一意の行（全体の設計が列を決めた行で、19 の行に数えない） | 全体の設計の `user_id` に、鍵を組む `idp`・`subject` と、Cognito の主体の対応の行の鍵を組む `cognito_sub` と、結んだ時のサインインの時刻 `bound_auth_time` を足す | 作ると消すだけ（ログインの付け替えのときだけ `cognito_sub` と `bound_auth_time` を書き換える） |
+| ログインの組（`db-users` / `LOGIN#<IdP>#<主体>`） | `user_id`・`idp`・`subject`・`cognito_sub`（外すときに Cognito の主体の対応の行の鍵を組む）・`bound_auth_time`（結んだ時のサインインの時刻。対応の行の `bound_auth_time` を写した値で、外して結び直すかログインを付け替えると変わる。`users.get` がログインごとに返し（あわせて、`cognito_sub` が要求の主体の `sub` と同じかを `is_current` で返す。画面は今のセッションのログインを外した後にサインアウトの手順へ移る）、`logins.delete` の要素が読んだ値として持って、ログインの組の行で照らす。違えば要素の 409 `version_mismatch`）・`linked_at` | 上書き（作ると消すのほかは、ログインの付け替えで `cognito_sub` と `bound_auth_time` を書き換える）（[行の書き手の設計](./issue-2-design-row-writers.md) の決定 2 で `version` を持つ） |
+| IdP の主体の一意の行（全体の設計が列を決めた行で、19 の行に数えない） | 全体の設計の `user_id` に、鍵を組む `idp`・`subject` と、Cognito の主体の対応の行の鍵を組む `cognito_sub` と、結んだ時のサインインの時刻 `bound_auth_time` を足す | 上書き（作ると消すのほかは、ログインの付け替えのときだけ `cognito_sub` と `bound_auth_time` を書き換える）（[行の書き手の設計](./issue-2-design-row-writers.md) の決定 2 で `version` を持つ） |
 | Cognito の主体の対応の行（`db-users` / `COGNITO`。認証が Cognito の `sub` から利用者を引くために足した行で、19 の行に数えない） | `cognito_sub`・`cognito_username`（結ぶのに使った token の `username`。ログインを外すときの `AdminGetUser`・`AdminUserGlobalSignOut`・`AdminDeleteUser` に渡す）・`idp`・`subject`・`user_id`・`bound_auth_time`（結ぶのに使った token の `auth_time`。これより前にサインインした token を断つ）。状態を持たず、行があることが結んでいることである | 作ると消すだけ（`sessions.create` と `logins.create` が無いときだけ書き、`logins.delete` が消す。`version` を持つが書き換えない。[Cognito の主体の対応の行](../docs/design/data.md#cognito-の主体の対応の行)） |
-| ログインをつなぐ流れ（`db-users` / `LINK#<流れの ID>`。`logins.create` を今の利用者とセッションに結ぶために足した行で、19 の行に数えない） | `link_id`（UUID。認可の要求の `state`）・`state`（`open`・`verified`・`used`）・`created_at`・`user_id`・`session_sub`（流れを始めた要求の Cognito の `sub`）・`session_id`（その token の `origin_jti`）・`session_bound_auth_time`（開始元の対応の行の `bound_auth_time`）・`idp`・`code_verifier?`（PKCE。サーバーだけが持つ。`open` の間だけ）・`candidate_sub?`・`candidate_username?`・`candidate_idp?`・`candidate_subject?`・`candidate_auth_time?`（`verified` の間。確定で消す）・`exchange_idempotency_key?`・`exchange_fingerprint?`・`account_label?`（`verified` と `used` の間。確定でも消さず、冪等の行が先に消えた後の交換の送り直しへ、鍵と指紋が合えば初回と同じ確かめ待ちの結果を返す）・`used_idempotency_key?`・`linked_idp?`・`linked_subject?`（`used` の間）・`expires_at`・`expire_at`（TTL） | 作って 2 回だけ書き換える（`login_links.create` が `open` で作り、`logins.create` の交換の要素が `verified` へ、確定の要素がログインを結ぶのと同じトランザクションで `used` へ書き換える。`version` を持たず、`state` を条件にする） |
+| ログインをつなぐ流れ（`db-users` / `LINK#<流れの ID>`。`logins.create` を今の利用者とセッションに結ぶために足した行で、19 の行に数えない） | `link_id`（UUID。認可の要求の `state`）・`state`（`open`・`verified`・`used`）・`created_at`・`user_id`・`session_sub`（流れを始めた要求の Cognito の `sub`）・`session_id`（その token の `origin_jti`）・`session_bound_auth_time`（開始元の対応の行の `bound_auth_time`）・`idp`・`code_verifier?`（PKCE。サーバーだけが持つ。`open` の間だけ）・`candidate_sub?`・`candidate_username?`・`candidate_idp?`・`candidate_subject?`・`candidate_auth_time?`（`verified` の間。確定で消す）・`exchange_idempotency_key?`・`exchange_fingerprint?`・`account_label?`（`verified` と `used` の間。確定でも消さず、冪等の行が先に消えた後の交換の送り直しへ、鍵と指紋が合えば初回と同じ確かめ待ちの結果を返す）・`used_idempotency_key?`・`linked_idp?`・`linked_subject?`（`used` の間）・`expires_at`・`expire_at`（TTL） | 上書き（`open` で無いときだけ作り、`verified`・`used` へ書き換える）（[行の書き手の設計](./issue-2-design-row-writers.md) の決定 2 で `version` を持つ） |
 | セッションの取り消し（`db-users` / 区切り `COGNITO#<Cognito の sub>`・並び `REVOKED#<origin_jti>`。サインアウトしたセッションを API の側で断つために足した行で、19 の行に数えない） | `cognito_sub`・`session_id`（取り消したセッションの `origin_jti`）・`revoked_at`・`expire_at`（TTL） | 作るだけ（`sessions.delete` が無いときだけ書き、TTL で消える。`version` を持たない。[データの文書のセッションの取り消しの行](../docs/design/data.md#セッションの取り消しの行)） |
 | 委任（`db-users` / `DELEGATION#<委任>`） | `delegation_id`・`user_id`・`client_name`（1〜64 字）・`scope_project_ids`（`prj` の ID の配列、1 以上）・`scope_kind`（`read`・`run`・`manage`）・`secret_sha256`（64 桁）・`expires_at`・`created_at`・`last_used_at?`・`revoked_at?` | 上書き（状態は `expires_at`・`revoked_at` から導き、列に持たない） |
 | チーム（`db-teams` / `TEAM`） | `team_id`・`name`（1〜100 字）・`plan`（料金プランの行の名前）・`currency`（`currencyCode`）・`monthly_cap?`（`money`）・`default_place`（`hosted`・`machine`）・`default_inference`（`managed`・`byok`）・`created_at` | 上書き |
 | 席（`db-teams` / `SEAT#<利用者>`） | `team_id`・`user_id`・`role`・`added_at` | 上書き |
 | 招待（`db-teams` / `INVITE#<招待>`） | `invitation_id`・`team_id`・`role`・`created_by`・`created_at`・`expires_at`・`accepted_by?`・`accepted_at?`・`withdrawn_at?` | 上書き（状態は `accepted_at`・`withdrawn_at`・`expires_at` から導き、列に持たない。期限の値と招く相手の指定の仕方は #4 が決め、列を足す） |
 | 手元のマシン（`db-teams` / `MACHINE#<マシン>`） | `machine_id`・`team_id`・`name`（1〜64 字）・`token_sha256`・`token_expires_at`・`last_heartbeat_at?`・`lane_capacity?`（1〜16）・`created_at`・`revoked_at?` | 上書き（状態は導く。`last_heartbeat_at` が無ければ `pending`、600 秒以内なら `online`、それより前なら `offline`。見回りが `offline` で行う止め方は #7） |
-| 月の使った量（`db-teams` / `USAGE#<UTC の年月>`） | `team_id`・`month`（`YYYY-MM`）・`used_amount_minor`（最小単位の整数）・`used_currency`（`currencyCode`）。金額の地図の 1 列にしないのは、DynamoDB の 1 つの更新の式が親の地図の無い入れ子の道（`used.amount_minor`）へ書けず、行の無いときの作成と加算を 1 つの式にできないためで、2 列はどちらも必ず持たせて I15 を守る | 上書き（`usageAddItem` が加算） |
+| 月の使った量（`db-teams` / `USAGE#<UTC の年月>`） | `team_id`・`month`（`YYYY-MM`）・`used_amount_minor`（最小単位の整数）・`used_currency`（`currencyCode`）。金額の地図の 1 列にしないのは、DynamoDB の 1 つの更新の式が親の地図の無い入れ子の道（`used.amount_minor`）へ書けず、行の無いときの作成と加算を 1 つの式にできないためで、2 列はどちらも必ず持たせて I15 を守る | 上書き（`usageAddItem` が読んだ行に足した行全体を書く。[行の書き手の設計](./issue-2-design-row-writers.md) の決定 5） |
 | リポジトリ（`db-projects` / `REPO#<リポジトリ>`） | `repo_id`・`project_id`・`github_repo`（`githubRepo`）・`installation_id`（GitHub の整数）・`primary`（真偽）・`added_at` | 上書き |
 | 渡した GitHub の token の記録（`db-projects` / `GHTOKEN#<期限>#<レーン>#<連番>`） | `project_id`・`lane_id`・`generation`・`expires_at`・`expire_at`（TTL）。token の値と識別は #33 の答えで足す | 追記だけ |
 | スプリント（`db-sprints` / `SPRINT#<スプリント>`） | `sprint_id`・`project_id`・`title`（1〜200 字）・`issues`（`githubIssueRef` の配列、1〜20）・`place`・`inference`・`state`・`started_by`（利用者の ID。委任なら委任した人）・`started_at`・`ended_at?`・`end_reason?`（理由のコード） | 上書き |
 | 区間（`db-sprints` / `…#LANE#<レーン>#SEG#<連番>`） | `project_id`・`sprint_id`・`lane_id`・`seq`・`started_at`・`ended_at?`・`result?`・`category?`（区分の文字列）・`failure_reason?`（`result_line_missing`・`result_value_unknown`・`segment_crashed`・`segment_timeout`） | 上書き（閉じるときに結果を書く） |
 | 進捗の事象（`db-events` / `SEQ#<連番>`） | `project_id`・`lane_id`・`seq`・`generation`・`kind`（形の正本の事象の種類。値の集合は #6）・`occurred_at`・`body`（種類ごとの形。`redact` を通す） | 追記だけ |
 | 問い（`db-decisions` / `QUESTION#<問い>`） | `question_id`・`project_id`・`sprint_id`・`lane_id`・`category`・`human_only`（真偽）・`state`・`body`・`options?`（`{key, label, description}` の配列）・`recommended?`（選択肢の鍵）・`ndf_gate_id?`・`machine_id?`（どちらも契約の `fields` の答えを待つ。#6）・`answer_id?`・`delivery?`・`waiting_since?` | 上書き |
-| 答え（`db-decisions` / `APPROVAL#<依頼>#ANSWER#<答え>`・`QUESTION#<問い>#ANSWER#<答え>`） | `answer_id`・`project_id`・`parent_id`（依頼か問いの ID）・`word`（承認は `ndfAnswerWord`、問いは選択肢の鍵）・`reason?`（0〜2,000 字）・`notes?`（差し戻しの指摘、0〜10,000 字）・`drop_issues?`（整数の配列）・`material_digest?`・`head_sha?`・`answered_by`（`{kind, user_id, delegation_id?}`）・`answered_at`・`claimed_generation?`・`ndf_event_seqs?`（全体の設計のとおり） | 追記だけ（`claimed_generation` と `ndf_event_seqs` は空のときに 1 回だけ書く） |
+| 答え（`db-decisions` / `APPROVAL#<依頼>#ANSWER#<答え>`・`QUESTION#<問い>#ANSWER#<答え>`） | `answer_id`・`project_id`・`parent_id`（依頼か問いの ID）・`word`（承認は `ndfAnswerWord`、問いは選択肢の鍵）・`reason?`（0〜2,000 字）・`notes?`（差し戻しの指摘、0〜10,000 字）・`drop_issues?`（整数の配列）・`material_digest?`・`head_sha?`・`answered_by`（`{kind, user_id, delegation_id?}`）・`answered_at`・`claimed_generation?`・`ndf_event_seqs?`（全体の設計のとおり） | 上書き（作った後は `claimed_generation` と `ndf_event_seqs` を空のときに 1 回だけ書き足し、確定した列を書き換えない。I5）（[行の書き手の設計](./issue-2-design-row-writers.md) の決定 2 で `version` を持つ） |
 | 知らせ（`db-notices` / `NOTICE#<時刻>#<ID>`） | `notice_id`・`user_id`・`project_id`・`kind`・`target_id`（依頼・問い・スプリントの ID）・`occurred_at`・`read_at?`・`deliveries`（通知先の ID から `{state: pending・sent・failed・skipped, attempts}` への地図） | 上書き（既読は画面、送達は送り手。どちらも `updateIfVersion` で書き、外れたら読み直して 1 回やり直す） |
 | 通知先（`db-notices` / `DEST#<通知先>`） | `destination_id`・`user_id`・`kind`・`team_id?`（`slack` だけ）・`secret_name`（秘密の器の名前）・`fingerprint`（宛先の値の SHA-256 の 64 桁）・`last4`・`state`（`active`・`invalid`・`failed`）・`created_at` | 上書き |
 | 費用の記録（`db-usage` / `COST#<時刻>#<区間の ID>`） | `project_id`・`sprint_id`・`lane_id`・`segment_id`・`kind`・`quantity`（`{unit: seconds・tokens_in・tokens_out・tokens_cache, value}` の配列）・`amount`（`money`。量だけのものは 0）・`occurred_at` | 追記だけ |
-| 冪等の鍵（`db-idempotency`） | `principal_key`・`operation`・`key`・`fingerprint`・`state`（`leased`・`settled`）・`owner_request_id`・`lease_until`・`result?`・`expire_at` | 借りから済みへ 1 回だけ書き換える（`version` を持たない） |
+| 冪等の鍵（`db-idempotency`） | `principal_key`・`operation`・`key`・`fingerprint`・`state`（`leased`・`settled`）・`owner_request_id`・`lease_until`・`result?`・`expire_at` | 上書き（借りから済みへの書き換えと、借りの取り直し）（[行の書き手の設計](./issue-2-design-row-writers.md) の決定 2 で `version` を持つ） |
 
-全体の設計の版の列の一覧（[共通の列](../docs/design/data.md#共通の列)）に載らない行のうち、招待と区間は上書きするため `version` を持ち、ログインの組は作ると消すだけのため持たない。持ち込みのキー（`model_keys.*`）と GitHub App の導入（`github_installations.*`）の行は 19 の行に入っていない。置き場と列は、それぞれ #6 と #5 の詳細設計が決める。
+全体の設計の版の列の一覧（[共通の列](../docs/design/data.md#共通の列)）に載らない行のうち、招待・区間・ログインの組・ログインをつなぐ流れは書き換えるため `version` を持つ（作った後に書き換える行の種類はどれも `version` を持つ。[行の書き手の設計](./issue-2-design-row-writers.md) の決定 2）。持ち込みのキー（`model_keys.*`）と GitHub App の導入（`github_installations.*`）の行は 19 の行に入っていない。置き場と列は、それぞれ #6 と #5 の詳細設計が決める。
 
 ### 索引
 
@@ -615,57 +620,83 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 
 ## 表の移し
 
-満たす決定: 決定 9、受け入れ条件 9
+満たす決定: 決定 9、受け入れ条件 9。書き手の決まりは [行の書き手の設計](./issue-2-design-row-writers.md)（#109）の決定 1〜7 による
 
 行の種類ごとの `RowCodec` は、読み手が受ける版（`latest` と `previous` の 2 つ）と、書き手が出す版（`writeVersion`）を分けて持つ。読み手はどちらの版も `latest` の形へそろえて返し、書き手は `writeVersion` の形で書く。こうすると、次の版を読めるが前の版だけを書く 1 段目と、2 段目の後に書き手だけを戻した状態が、同じ `RowCodec` の値（`writeVersion` が前の版）で表せる。
+
+書き手の決まり（どの行の書き込みもこれに従う）:
+
+| 書き込み | 組み方 | 条件 | `version` |
+| --- | --- | --- | --- |
+| 行を作る | `writeRow` の戻り値から行を作り、`putIfAbsent` | 行が無い | 上書きの行は 1 |
+| 行を書き換える | 読んだ行を `readRow` で今の形にし、書き換えた行を `rowReplaceOf` で書き手の版の行全体にし、`replaceIfVersion`（`Put`） | 読んだ `version`（と操作ごとの `extra`） | 読んだ値に 1 足す |
+| 行を消す | `deleteIfVersion` | 読んだ `version`（と `extra`） | — |
+| 表の移しが書き直す | `rowReplaceOf` で読み手が見る形を書き手の版の行全体にし、`replaceIfUnchanged`（`Put`） | 行がある・読んだ `schema_version`・行が持てば読んだ `version` | 保つ |
+
+- 行の列の一部だけを書き換える書き込み（`SET`・`REMOVE`・`ADD` の更新）は作らない。書いた行が書き手の版の zod を通ることを、行全体を `writeRow` で作ることで保証する。移しが先に確定した行でも、書き手の行に無い列は `Put` で消える
+- 作った後に書き換える行の種類は、どれも `version` を持つ（`overwriteRow`）。`version` を持たないのは、作った後に書き換えない行（追記だけの行・作ると消すだけの行・期限で消える行）だけで、それを書き換えるのは表の移しだけである
+- 状態の遷移の条件（`state = open` など）と持ち主の条件は、ハンドラーが読んだ行で照らす。読んだ後に別の書き換えが確定すれば `version` が変わるため、確定の条件は読んだ `version` で足りる
+- サーバーが読んだ行から作る書き換え（月の使った量の加算）は `onConflict: "rebuild"` を付け、外れたら `dispatch` が組み直す（[横断の部品](#関数の仕様この課題で足すもの) の `dispatch` の組み直し）。利用者が読んだ版を持って送る書き換えは `version_mismatch` のまま
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `rowCodec` | `packages/contracts/src/row-codec.ts` | 新設 | `<L, P>(spec: { latest: { version: number; schema: ZodType<L> }; previous?: { version: number; schema: ZodType<P>; upgrade: (row: P) => L; downgrade: (row: L) => P }; writeVersion: number; downgradable?: boolean; keyOf: (row: L) => { pk: string; sk: string \| null } }) => RowCodec<L>` | 行の種類の、読み手が受ける 2 つの版と書き手が出す版をまとめる |
-| `readRow` | 同上 | 新設 | `<L>(codec: RowCodec<L>, raw: unknown) => ReadRowResult<L>` | `latest` の版はそのまま、`previous` の版は `upgrade` で `latest` の形へそろえて返し、ほかは拒む |
-| `writeRow` | 同上 | 新設 | `<L>(codec: RowCodec<L>, row: L) => Record<string, unknown>` | `writeVersion` の形の行（`schema_version` を含む）を返す。`writeVersion` が `previous.version` なら `downgrade` を通す。`downgradable` なら `writeVersion` によらず、下げた行を `upgrade` で上げ直して元の行（`latest` の形）に戻らなければ投げる（書き手を前の版へ戻せる間に、前の版で表せない値を書かない） |
-| `rowUpdateOf` | 同上 | 新設 | `<L>(codec: RowCodec<L>, raw: Record<string, unknown>, row: L) => { set: Record<string, unknown>; remove: string[] }` | 読んだ行（`raw`）を `row` へ書き換える更新の `set` と `remove` を作る。`set` は `writeRow(codec, row)` の戻り値から `pk`・`sk`・`version` を外したもの。`remove` は `raw` の列のうち `writeRow` の戻り値に無く、`pk`・`sk`・`version` でもない列の名前。`downgradable` の間に `raw` が `previous` の版なら、`raw` を `previous.schema` に通した行が `downgrade(upgrade(その行))` で元に戻らなければ（`previous.schema` を通らなければ）投げる（移しと通常の書き換えのどちらでも、`upgrade` で失う前の版の値を書き換えで消さない）。`writeRow` の戻り値の `pk`・`sk`（`keyOf` が書き換え後の列から組む鍵）が `raw` の `pk`・`sk` と違えば投げる。例外には違った列の名前（`pk`・`sk`）だけを載せ、鍵の値を載せない（ログインの組の鍵は IdP の主体の識別子を、ほかの行の鍵は利用者の ID を含み、処理されない例外はログに残るため）（鍵の列を書き換えると、読んだ行の鍵の行へ別の鍵の中身を書き、主キーで読む行と索引で引く行が食い違うため。鍵を変えるのは古い行を消して新しい行を作る書き込みで行う） |
-| `migrateTable` | `apps/api/src/entries/migrate.ts` | 新設 | `(input: { purpose: TablePurpose; cursor: RowKey \| null }, deps: MigrateDeps) => Promise<{ done: boolean; cursor: RowKey \| null; rewritten: number; skipped: number; refused: number }>` | `previous` の版の行を `latest` の版へ書き換える |
-| `createMigrateHandler` | 同上 | 新設 | `(deps: MigrateDeps) => (event: MigrateEvent, context: Context) => Promise<void>` | `migrateTable` を呼び、終わっていなければ続きの位置と、ここまでの `refused` の合計を持って自分を非同期で起こし直す。`MigrateEvent` は `{ purpose: TablePurpose; cursor: RowKey \| null; refused: number }`（運用者が起こすときは `cursor: null`・`refused: 0`）。呼ぶごとに `migrate_page`（`purpose`・`rewritten`・`skipped`・`refused`）を、終わったら `migrate_done`（`purpose` と `refused` の合計）をログへ出す。`refused` の合計が 1 以上なら `migrate_done` を `error` の水準で出す（運用者はこれで、移せずに前の版のまま残った行があると気づく） |
+| `rowCodec` | `packages/contracts/src/row-codec.ts` | 新設 | `<L, P>(spec: { latest: { version: number; schema: ZodType<L> }; previous?: { version: number; schema: ZodType<P>; upgrade: (row: P) => L; downgrade: (row: L) => P }; writeVersion: number; downgradable?: boolean; repair?: (raw: Readonly<Record<string, unknown>>) => Record<string, unknown> \| null; narrow?: (row: L) => L; keyOf: (row: L) => { pk: string; sk: string \| null } }) => RowCodec<L>` | 行の種類の、読み手が受ける 2 つの版と書き手が出す版と、読み手の直し（`repair`・`narrow`）をまとめる |
+| `readRow` | 同上 | 新設 | `<L>(codec: RowCodec<L>, raw: unknown) => ReadRowResult<L>` | `latest` の版はそのまま、`previous` の版は `upgrade` で `latest` の形へそろえ、`repair` と `narrow` を通して返し、ほかは拒む |
+| `writeRow` | 同上 | 新設 | `<L>(codec: RowCodec<L>, row: L) => Record<string, unknown>` | `writeVersion` の形の行（`pk`・`sk`・`schema_version` を含む）を返す。`writeVersion` が `previous.version` なら `downgrade` を通す。`downgradable` なら `writeVersion` によらず、下げた行を `upgrade` で上げ直して元の行（`latest` の形）に戻らなければ投げる（書き手を前の版へ戻せる間に、前の版で表せない値を書かない） |
+| `rowReplaceOf` | 同上 | 新設（`rowUpdateOf` を置き換える） | `<L>(codec: RowCodec<L>, raw: Record<string, unknown>, row: L) => Record<string, unknown>` | 読んだ行（`raw`）を `row` へ書き換える行全体を作る。戻り値は `writeRow(codec, row)` の戻り値から `version` を外したもの（`version` は条件つきの書き込みの部品が入れる）。`writeRow` の戻り値の `pk`・`sk`（`keyOf` が書き換え後の列から組む鍵）が `raw` の `pk`・`sk` と違えば投げる（`key_mismatch`。例外には違った列の名前だけを載せ、鍵の値を載せない）。`downgradable` の間に `raw` の読み手の見る前の版の行（`raw` が前の版の形を通ればその行、通らず `repair` が直せば直した行）が `downgrade(upgrade(その行))` で元に戻らなければ投げる（`value_lost`。移しと通常の書き換えのどちらでも、`upgrade` で失う前の版の値を書き換えで消さない）。前の版の形を通らず `repair` でも直らない `raw` で投げる（`previous_shape_invalid`） |
+| `migrateTable` | `apps/api/src/entries/migrate.ts` | 新設 | `(input: { purpose: TablePurpose; cursor: RowKey \| null }, deps: MigrateDeps) => Promise<{ done: boolean; cursor: RowKey \| null; rewritten: number; skipped: number; refused: number }>` | 保存の形が読み手の見る形と違う行を、書き手の版の行へ書き直す |
+| `createMigrateHandler` | 同上 | 新設 | `(deps: MigrateDeps) => (event: MigrateEvent, context: Context) => Promise<void>` | `migrateTable` を呼び、終わっていなければ続きの位置と、ここまでの `refused` の合計を持って自分を非同期で起こし直す。`MigrateEvent` は `{ purpose: TablePurpose; cursor: RowKey \| null; refused: number }`（運用者が起こすときは `cursor: null`・`refused: 0`）。呼ぶごとに `migrate_page`（`purpose`・`rewritten`・`skipped`・`refused`）を、終わったら `migrate_done`（`purpose` と `refused` の合計）をログへ出す。`refused` の合計が 1 以上なら `migrate_done` を `error` の水準で出す（運用者はこれで、読み手の見る形で保存できずに残った行があると気づく） |
 
 - `rowCodec`
-  - 事前条件: `previous` があれば `previous.version = latest.version - 1`。`writeVersion` は `latest.version` か `previous.version`。`downgradable: false` なら `writeVersion` は `latest.version`
-  - `downgradable`: 書き手を前の版へ戻せる間（版を上げる子の手順の 1 から 4 の前まで）を表す。`previous` があれば既定は `true`、無ければ `false`。`false` にするのは手順の 4 の反映だけ
+  - 事前条件: `previous` があれば `previous.version = latest.version - 1`。`writeVersion` は `latest.version` か `previous.version`。`downgradable: false` なら `writeVersion` は `latest.version`。`narrow` があれば `downgradable` は `true` で `writeVersion` は `latest.version`（`narrow` は前の版へ戻す前の手順の 4a から使い、狭めた値が前の版で表せることを `writeRow` に確かめさせる）
+  - `downgradable`: 書き手を前の版へ戻せる間（版を上げる子の手順の 1 から 4 の前までと、4a の後）を表す。`previous` があれば既定は `true`、無ければ `false`。`false` にするのは手順の 4 の反映だけ
+  - `repair`: 保存の形がその版の形を通らない行を、通る行へ直す関数（版を上げる子の手順の 2c で足す）。直せない行は `null` を返す。直した行は `schema_version` を持ち、その版の形で読む。形を通る行には当てない
+  - `narrow`: 次の版だけの値を、前の版で表せる値へ狭める関数（手順の 4a で足す）。`latest` の形を受けて `latest` の形を返す
   - 事後条件: 事前条件を外れれば例外を投げる（モジュールの読み込みで落ちる）
 - `readRow`
-  - 事後条件: 戻り値は `{ ok: true; row: L; from: number }`（`from` は読んだ行の `schema_version`）か `{ ok: false; reason: "version_unsupported" \| "shape_invalid" }`。`latest.version` より新しい版と、`previous.version`（無ければ `latest.version`）より古い版は `version_unsupported`。`writeVersion` によらず同じ結果を返す
+  - 処理の順: (1) `raw` の `schema_version` の版の形で読む。(2) 通らず `repair` があれば、`repair` に写しを渡し、戻った行を (1) と同じく読む。(3) 前の版なら `upgrade` で今の形にする。(4) `narrow` があれば通し、`latest.schema` で照らす
+  - 事後条件: 戻り値は `{ ok: true; row: L; from: number }`（`from` は読んだ行（`repair` で直したときは直した行）の `schema_version`）か `{ ok: false; reason: "version_unsupported" \| "shape_invalid" }`。`latest.version` より新しい版と、`previous.version`（無ければ `latest.version`）より古い版は `version_unsupported`。`writeVersion` によらず同じ結果を返す
 - `writeRow`
   - 事後条件: 戻り値は `writeVersion` の版の zod を通る。通らなければ例外を投げる（書き手の誤りで、テストが先に落とす）。`downgradable` なら、`writeVersion` が次の版でも、`upgrade(downgrade(行))` が元の行に戻らない行を書かずに投げる
-  - 元の行に戻るかの比べは、列を中身まで比べる。DynamoDB の集合（文字列・数・バイナリの集合）を表す `Set` は要素まで、バイナリ（型付きの配列・`DataView` と `ArrayBuffer` 本体。DynamoDB SDK はどちらもバイナリとして書く）は中身のバイトまで比べる（`Object.entries` は `Set` の中身を並べず、中身の違う集合を等しいと見るため）
-  - `downgrade` と `upgrade` には、渡す値の独立した写し（`structuredClone`）を渡す。`readRow` が前の版の行を上げるときも同じ（`z.looseObject` の下の `Set` などは読んだ行と同じ物を指すため、写さないと `upgrade` のその場の変更が、呼び出し元が `rowUpdateOf` へ渡す読んだ行まで変え、値の損失を見逃す）。変換が引数をその場で書き換えても、比べる元の行（`latest` の形）と書く前の版の行は変わらない。`SharedArrayBuffer`（それを裏に持つ型付きの配列・`DataView` を含む）を持つ値は `structuredClone` の後も元とバイトを共有し写しが独立しないため、写さずに `RowCodecError` を投げる（`readRow` は `shape_invalid` を返し、`writeRow` と `rowUpdateOf` は投げる。DynamoDB の SDK は共有バッファを返さず、表の行に現れない）
-  - `RowCodecError` は固定の理由の符号 `code`（`codec_invalid`: `rowCodec` の引数の誤り・`shared_buffer`・`row_invalid`: `writeRow` の行が `latest` の形を通らない・`downgrade_invalid`: `downgrade` の結果が前の版の形を通らない・`previous_shape_invalid`: `rowUpdateOf` が読んだ前の版の行が前の版の形を通らない・`value_lost`: 版の変換で値が失われる・`key_mismatch`: 書き換え後の鍵が読んだ行の鍵と違う）を持つ。`message` は Zod の `issue.path`（`z.record` の検証に外れた鍵の値を含みうる）を載せるため、ログへは `message` でなく `code` を載せる
-  - 書き手の決まり: 行を作る書き込み（`putIfAbsent`）は、行の列を `writeRow` の戻り値から作り、`schema_version` を必ず書く。書き換える書き込み（`updateIfVersion`・`updateIfSchemaVersion`）は、読んだ行と書き換えた後の形から `rowUpdateOf` で `set` と `remove` を作り、その 2 つを同じ書き込みに渡す（`set` は `schema_version` を含む）。これで、どの書き換えも `schema_version` を書き手の版にし、移しの条件（下）が同時の書き込みを見つけられる。また、2 段目の書き手が前の版の行を先に書き換えて `schema_version` を最新にしても、`latest` の版で消した列は同じ書き込みの `REMOVE` で消える。`migrateTable` は `schema_version` が最新の行を飛ばすため、書き手が消さなければ、消した列が索引（GSI）の鍵のときその行は移しの後も索引に残る。書き手を前の版へ戻した状態では、`rowUpdateOf` の `remove` が次の版だけの列を消す（行の zod は知らない列を落とすため読みでも捨てられるが、索引に残さないよう書き込みで消す）。消しても値を失わないよう、書き手を前の版へ戻せる間（版を上げる子の手順の 2 から 4 の前まで）は、次の版の行に前の版で表せる値（`upgrade(downgrade(行))` が元の行に戻る値）だけを書く。`writeRow` は `downgradable` の間、前の版で書くときも次の版で書くときも（2 段目）これを確かめ、戻らない行を書かずに投げる
+  - 元の行に戻るかの比べは、列を中身まで比べる。DynamoDB の集合（文字列・数・バイナリの集合）を表す `Set` は要素まで、バイナリ（型付きの配列・`DataView` と `ArrayBuffer` 本体。DynamoDB SDK はどちらもバイナリとして書く）は中身のバイトまで比べる（`Object.entries` は `Set` の中身を並べず、中身の違う集合を等しいと見るため）。表の移しが保存の行と比べるときも同じ比べを使う
+  - `downgrade`・`upgrade`・`repair`・`narrow` には、渡す値の独立した写し（`structuredClone`）を渡す（`z.looseObject` の下の `Set` などは読んだ行と同じ物を指すため、写さないと変換のその場の変更が、呼び出し元が `rowReplaceOf` へ渡す読んだ行まで変え、値の損失を見逃す）。`SharedArrayBuffer`（それを裏に持つ型付きの配列・`DataView` を含む）を持つ値は `structuredClone` の後も元とバイトを共有し写しが独立しないため、写さずに `RowCodecError` を投げる（`readRow` は `shape_invalid` を返し、`writeRow` と `rowReplaceOf` は投げる。DynamoDB の SDK は共有バッファを返さず、表の行に現れない）
+  - `RowCodecError` は固定の理由の符号 `code`（`codec_invalid`: `rowCodec` の引数の誤り・`shared_buffer`・`row_invalid`: `writeRow` の行が `latest` の形を通らない・`downgrade_invalid`: `downgrade` の結果が前の版の形を通らない・`previous_shape_invalid`: `rowReplaceOf` が読んだ前の版の行が前の版の形を通らず `repair` でも直らない・`value_lost`: 版の変換で値が失われる・`key_mismatch`: 書き換え後の鍵が読んだ行の鍵と違う）を持つ。`message` は Zod の `issue.path`（`z.record` の検証に外れた鍵の値を含みうる）を載せるため、ログへは `message` でなく `code` を載せる
+  - 2 段目のコードも、1 段目と同じく前の版で表せない値（次の版だけの列を使う機能）を書かない。この保証は書き込みの前に `writeRow` が持ち（`downgradable` の間）、2 段目のコードはこの例外を書き手の誤りとして扱い、テスト（`row-codec.test.ts` の 2 段目で次の版だけの値を拒む観点と、その行の種類を書く経路のテスト）で先に落とす
 - `migrateTable`
   - 事前条件: `deps` は `Db`・時計・ログ・残り時間の読み手・`TABLES`。`cursor` は前の呼び出しが返した値か `null`
   - 処理の手順:
     1. `db.scan(table, { limit: MIGRATE_PAGE_SIZE, startKey: cursor, consistent: true })` で 1 ページ読む
     2. ページの行を順に、行ごとに次を行う。行に取りかかる前に残り時間が `MIGRATE_RESERVE_MS` 以下なら、そこで止めて `{ done: false, cursor: <最後に処理を終えた行の鍵> }` を返す（このページでまだ 1 行も終えていなければ、受け取った `cursor` をそのまま返す）
-       - `TableSpec.rows` の `skPattern` で行の種類を決める。どれにも当たらない行と、`schema_version` が `previous.version` でない行と、`writeVersion` が `latest.version` でない行の種類（1 段目か、書き手を戻した状態）の行は、書かずに処理を終えたものとする
-       - `readRow` で `latest` の形にし、`rowUpdateOf(codec, 読んだ行, その形)` で `set` と `remove` を作る。`set` は `writeRow` が返す行全体から鍵（`pk`・`sk`）と `version` を外したもので、`updateIfSchemaVersion` の事前条件（`set` に `pk`・`sk`・`version` を含まない）を満たす。鍵は `key` に、読んだ `version` は条件に回し、`set` で書き換えない。`remove` は読んだ行にあって `writeRow` の戻り値に無い列（`latest` の版で消した列）。`updateIfSchemaVersion`（`key` は読んだ行の `pk`・`sk`、`set` と `remove` は `rowUpdateOf` の戻り値、`from` は `previous.version`、`version` は読んだ行の `version` か `null`）を `writeAtomically` で 1 件だけ確定する。条件が外れたら飛ばして `skipped` を 1 足す（同時に書き手が `latest` で書いたか、行が消えた）。`unavailable` は投げる（起こし直しの前の `cursor` から再び走る）
-       - `readRow` が `ok: false` を返した行と、`rowUpdateOf` が `RowCodecError` を投げた行（`downgradable` の間に、`upgrade` で値を失う前の版の行。鍵の不一致も含む）は、書かずに処理を終えたものとして続ける（例外を Lambda の外へ出さない。出すと `MaximumRetryAttempts` 0 のため起こし直しも知らせも無く、後ろの行が移されない）。`refused` を 1 足し、行の種類の名前と固定の理由の符号（`readRow` が返した `reason` の `shape_invalid`・`version_unsupported` か、`rowUpdateOf` が投げた `RowCodecError` の `code`。`previous_shape_invalid`・`value_lost`・`key_mismatch`・`shared_buffer` など）だけを `migrate_refused` として `error` の水準でログへ出す。例外の文（`RowCodecError` の `message`）はログに載せない（Zod の `issue.path` を含み、`deliveries` などの `z.record` で検証に外れた鍵の値がそのまま入るため）。鍵の値もログに載せない（IdP の主体や利用者の ID を含むため）。`skipped` には数えない（`skipped` は書き手と競った正常な飛ばし）。`RowCodecError` でない例外は投げる
+       - `TableSpec.rows` の `skPattern` で行の種類を決める。どれにも当たらない行と、`writeVersion` が `latest.version` でない行の種類（1 段目か、書き手を戻した状態）の行は、書かずに処理を終えたものとする
+       - `readRow` で読み手の見る形にし、`rowReplaceOf(codec, 読んだ行, その形)` で書き手の版の行全体を作る。作った行に読んだ `version`（行が持てば）を足した行が、読んだ行と列の中身まで同じなら書かずに処理を終えたものとする（前の版の行・`repair` で直る行・`narrow` で狭まる行・書き手の版で消した列の残る行は違うため書く）
+       - 違えば `replaceIfUnchanged`（`item` は作った行、`from` は読んだ行の `schema_version`、`version` は読んだ行の `version` か `null`）を `writeAtomically` で 1 件だけ確定し、`rewritten` を 1 足す
+       - 条件が外れたら、`db.get(table, 鍵, true)` で読み直す。行が無ければ飛ばして `skipped` を 1 足す。あれば読み直した行で同じ手順をやり直す。1 行の書き込みが `MIGRATE_ROW_ATTEMPTS` 回外れたら、書かずに拒んだ行（理由の符号 `contended`）として下の拒みの扱いにする。`unavailable` は投げる（起こし直しの前の `cursor` から再び走る）
+       - `readRow` が `ok: false` を返した行と、`rowReplaceOf` が `RowCodecError` を投げた行（`downgradable` の間に、`upgrade` で値を失う前の版の行。鍵の不一致も含む）は、書かずに処理を終えたものとして続ける（例外を Lambda の外へ出さない。出すと `MaximumRetryAttempts` 0 のため起こし直しも知らせも無く、後ろの行が移されない）。`refused` を 1 足し、行の種類の名前と固定の理由の符号（`readRow` が返した `reason`、`rowReplaceOf` が投げた `RowCodecError` の `code`、`contended`）だけを `migrate_refused` として `error` の水準でログへ出す。例外の文（`RowCodecError` の `message`）と鍵の値はログに載せない（Zod の `issue.path` と、IdP の主体や利用者の ID を含むため）。`RowCodecError` でない例外は投げる
        - 処理を終えた行の鍵を「最後に処理を終えた行」として覚える
     3. ページの行を終えたら、`lastKey` が `null` なら `{ done: true, cursor: null }` を返す。でなければ `cursor` を `lastKey` にして 1 へ戻る
-  - 事後条件: 返した `cursor` より前（走査の順）の行は、どれも `previous` の版でないか、書き手が同時に書いた行か、拒んだ行（`refused` に数えた、前の版のまま残した行）である。戻り値の `refused` は、止まって返す（`done: false`）ときも走査を終えて返す（`done: true`）ときも、その呼び出しで拒んだ行の数（受け取った `cursor` の後から返す `cursor` までの分。前の呼び出しの分を含めない）で、呼び出しをまたぐ合計は `createMigrateHandler` が `MigrateEvent` の `refused` に足して持ち回る。返した `cursor` より後の行は 1 行も飛ばしていない。`cursor` を次の呼び出しへ渡すと、その鍵の次の行から読む（DynamoDB の `Scan` の `ExclusiveStartKey` は、返された `LastEvaluatedKey` でなく既にある行の鍵でもその次から読む。偽の `Db` も同じ順と同じ再開をする）
-  - 副作用: 表の走査と、行ごとの条件つきの更新
+  - 事後条件: 返した `cursor` より前（走査の順）の行は、どれも処理を終えた時点で読み手の見る形を書き手の版で保存しているか、消えたか、拒んだ行（`refused` に数えた、そのまま残した行）である。戻り値の `refused` は、止まって返す（`done: false`）ときも走査を終えて返す（`done: true`）ときも、その呼び出しで拒んだ行の数（受け取った `cursor` の後から返す `cursor` までの分）で、呼び出しをまたぐ合計は `createMigrateHandler` が `MigrateEvent` の `refused` に足して持ち回る。返した `cursor` より後の行は 1 行も飛ばしていない。`cursor` を次の呼び出しへ渡すと、その鍵の次の行から読む（DynamoDB の `Scan` の `ExclusiveStartKey` は、返された `LastEvaluatedKey` でなく既にある行の鍵でもその次から読む。偽の `Db` も同じ順と同じ再開をする）
+  - 副作用: 表の走査と、行ごとの条件つきの置き換え
 
-`Db` に足すポートと、`version` を持たない行にも使える条件つきの更新（`packages/core`。[横断の部品の関数の仕様](#関数の仕様この課題で足すもの) にも並べる）:
+`Db` に足すポートと、条件つきの書き込み（`packages/core`。[横断の部品の関数の仕様](#関数の仕様この課題で足すもの) にも並べる）:
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `Db.scan` | `packages/core/src/db.ts` | 新設（`Db` に足す） | `(table: TableName, opts: { limit: number; startKey: RowKey \| null; consistent: boolean }) => Promise<{ items: Row[]; lastKey: RowKey \| null }>` | 表を走査の順に 1 ページ読む。`createDb` は `ScanCommand` の `Limit`・`ExclusiveStartKey`・`ConsistentRead` へ渡す。使うのは表の移しだけで、API の要求の処理は使わない |
-| `updateIfSchemaVersion` | `packages/core/src/conditional-write.ts` | 新設 | `(spec: { table: TableName; key: RowKey; from: number; set: Record<string, unknown>; remove: readonly string[]; version: number \| null; onConflict: ConflictRule }) => TransactItem` | 行の形の版が `from` のときだけ、行の列を `set` で書き換え、`remove` の列を消す書き込みを組む |
+| `replaceIfVersion` | `packages/core/src/conditional-write.ts` | 新設（`updateIfVersion` を置き換える） | `(spec: { table: TableName; item: Row; version: number; extra?: Condition; onConflict: ConflictRule }) => TransactItem` | 読んだ `version` のときだけ、行を `item` で置き換え、`version` を 1 上げる書き込みを組む |
+| `deleteIfVersion` | 同上 | 新設 | `(spec: { table: TableName; key: RowKey; version: number; extra?: Condition; onConflict: ConflictRule }) => TransactItem` | 読んだ `version` のときだけ行を消す書き込みを組む |
+| `replaceIfUnchanged` | 同上 | 新設（`updateIfSchemaVersion` を置き換える） | `(spec: { table: TableName; item: Row; from: number \| null; version: number \| null; onConflict: ConflictRule }) => TransactItem` | 読んだ時から行が変わっていないときだけ、行を `item` で置き換える書き込みを組む（表の移しだけが使う） |
 
-- `updateIfSchemaVersion`
-  - 事前条件: `set` は `schema_version` を含み、その値は `from` より大きい。`set` と `remove` に `pk`・`sk`・`version` を含まない。`remove` は `set` の鍵と重ならず、`schema_version` を含まない
-  - 事後条件: 更新の式は `SET <set の列>` に、`remove` が空でなければ `REMOVE <remove の列>` を続けた 1 つの式で、`SET` と `REMOVE` は同じ条件の下で一緒に効くか一緒に外れる。消した列が索引（GSI）の鍵なら、DynamoDB はその行を索引から外す（`readRow` が列を捨てるだけでは索引に残る）。戻り値は `attribute_exists(pk) AND schema_version = :from`（`version` が `null` でなければ `AND version = :version` も）を条件にした 1 件。`version` を上げない（中身の意味を変えない書き換えのため。同時に読んだ書き手の `updateIfVersion` を外さない）。行が消えていれば条件が外れ、行を作り直さない
-  - `version` を持たない行（ログインの組・IdP の主体の一意の行・冪等の鍵・追記だけの行）は `version: null` で使う。追記だけの行は書き手が書き換えず、冪等の鍵の借りから済みへの書き換えは上の書き手の決まりで `schema_version` を書くため、`schema_version` の条件だけで同時の書き込みを見つけられる
+- `replaceIfVersion`
+  - 事前条件: `item` は `rowReplaceOf` の戻り値で、`pk`・`schema_version`（1 以上の整数）を持ち、`version` を持たない。`version` は 1 以上の整数
+  - 事後条件: 戻り値は `op: "put"` の 1 件で、行は `item` に `version: version + 1` を足したもの、条件は `version = :version`（と `extra`）。行に `item` に無い列があれば、置き換えで消える（消した列が索引（GSI）の鍵なら、DynamoDB はその行を索引から外す）。記録の表を指せば `checkAuditAppendOnly` が投げる
+- `deleteIfVersion`
+  - 事前条件: `version` は 1 以上の整数
+  - 事後条件: 戻り値は `op: "delete"` の 1 件で、条件は `version = :version`（と `extra`）
+- `replaceIfUnchanged`
+  - 事前条件: `item` は `rowReplaceOf` の戻り値（`version` を持たない）。`from` は読んだ行の `schema_version` の値（列が無かった行は `null`）。`version` は読んだ行の `version`（持たない行は `null`）
+  - 事後条件: 戻り値は `op: "put"` の 1 件で、行は `item`（`version` が `null` でなければ `version` を足す。上げない）、条件は `attribute_exists(pk)` と、`from` が数なら `schema_version = :from`・`null` なら `attribute_not_exists(schema_version)` と、`version` が `null` でなければ `version = :version`。`version` を上げないのは、読み手の見る中身を変えない書き換えのため、並んで読んだ書き手の `replaceIfVersion` を外さないためである。行が消えていれば条件が外れ、行を作り直さない
 
 ### 内部のデータと定数
 
@@ -673,27 +704,60 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | --- | --- | --- | --- |
 | `MIGRATE_RESERVE_MS` | 定数 | `migrate.ts` | 10000 |
 | `MIGRATE_PAGE_SIZE` | 定数 | `migrate.ts` | 100 |
-| `RowCodec<L>` | 型 | `row-codec.ts` | `{ latest; previous: … \| null; writeVersion; downgradable; keyOf }`（`rowCodec` の引数のまま。`downgradable` は既定を埋めた値。`writeRow` は `keyOf` の戻り値を `pk`・`sk` に入れる） |
-| 版を上げる子の手順 | 手順 | この節 | 1. 次の版の zod を `latest` に、今の版を `previous` に移し、`upgrade` と `downgrade` を足す。`downgrade` は、前の版で表せる次の版の値を失わずに下げる（`upgrade(downgrade(行))` が元の行に戻る）。`upgrade` は、既にある前の版の行の値を失わずに上げる（`downgrade(upgrade(前の版の行))` が元の行に戻る）。`downgrade` が次の版の値から作り直せない前の版の列（固定値で補うしかない列）は、`downgradable` が `true` の間は次の版の形から消さず、消すのは手順の 4 の後の版上げまで延ばす（消すと、移しの `remove` でその値が消え、書き手を戻しても戻らない。前の版で書く通常の書き換えでも `downgrade` の補った値で上書きされる）。`rowUpdateOf` は `downgradable` の間、読んだ前の版の行でこれを確かめ、戻らない行の書き換えを投げる。`writeVersion` は今の版のまま（1 段目の反映。読み手は両方の版を読み、書き手は前の版だけを書く。1 段目のコードは次の版だけの列を使う機能を出さない）2. `writeVersion` を次の版へ上げ、`migrate` の Lambda（`createMigrateHandler`、権限はその表の読みと更新だけ。非同期の起動の設定は `MaximumEventAgeInSeconds` 60・`MaximumRetryAttempts` 0）を足す（2 段目の反映）。移しを起こすのは、この反映が終わってから API の Lambda の時間切れ（今の `app-stack.ts` で 10 秒）より長く待った後で、反映とは別の手順で 1 回起こす（前の版で書く古い書き手が走り終えてから読む）。移しが終わったら `migrate_done` の `refused` が 0 であることを確かめる。1 以上なら、次の 2a から 2d で直し、`refused` が 0 になるまで手順の 4 へ進まない（`downgradable` を `false` にすると `rowUpdateOf` がその行を拒まず、移しが `upgrade` で失う値を消す）。2a. 元の値の保全: 何も書き換える前に、表のオンデマンドのバックアップを取る（拒んだ行は前の版のまま残っているが、2c の書き換えの前に元の値を戻せる形で持つ。バックアップは表と同じ権限の下に置き、利用者のデータとして扱う）。2b. 拒んだ行の特定: `migrate_refused` の行の種類ごとに、表を走査して `schema_version` が `previous.version` の行を `readRow` と `rowUpdateOf` に通し、拒まれた行とその理由の符号を運用者の手元で確かめる（鍵の値をログへ出さない）。2c. 理由の符号ごとの直し: (i) 形の不正（`shape_invalid`・`previous_shape_invalid`）は、行の値が前の版の決まりとして正しいのに `previous.schema` か `upgrade` が表せないなら、`previous.schema`・`upgrade`・`downgrade` を直す反映を出す。行の値そのものが誤り（前の版の書き手の誤りで形を外れた値）なら、その行の種類の書き手の決まりのとおり、前の版の形へ直す書き換えを `updateIfVersion`（`version` を持たない行の種類は、4b と同じく書き換える経路を止めたうえで `schema_version` の条件）で書く。(ii) 鍵の不一致（`key_mismatch`）は、`upgrade` が鍵に使う列を変えた誤りのため、`upgrade` を鍵の列を保つよう直す反映を出す（行は書き換えない）。(iii) 値の損失（`value_lost`）は、`upgrade` と `downgrade` を、前の版の行の値を失わないよう直す反映を出す。直せない列（`downgrade` が次の版の値から作り直せない列）は手順の 1 のとおり次の版の形に残す。(iv) `shared_buffer` は表の行に現れないため、出たら書き手の誤りとして調べ、移しを進めない。2d. 再走査での確認: 直しの反映の後に移しを `cursor` `null` から起こし直し（書き換え済みの行は `previous` の版でないため飛ばされる）、`migrate_done` の `refused` が 0 になったことを確かめる。0 でなければ 2b へ戻る。2 段目のコードも、1 段目と同じく前の版で表せない値（次の版だけの列を使う機能）を書かない（書き手を前の版へ戻した後に、`downgrade` が持たない値が `remove` で消えるか、その行の書き換えを `writeRow` が拒むため）。この保証は書き込みの前に `writeRow` が持つ: `downgradable` が `true`（既定）の間、`writeVersion` が次の版でも `upgrade(downgrade(行))` が元の行に戻らない行を書かずに投げる。2 段目のコードはこの例外を書き手の誤りとして扱い、テスト（`row-codec.test.ts` の 2 段目で次の版だけの値を拒む観点と、その行の種類を書く経路のテスト）で先に落とす3. 2 段目を戻すときは、[並行と排他](#並行と排他) の「表の移しと、前の版で書く書き手」の行のとおり、次の 2 回の反映で戻す。3a. 移しの止め: `migrate` の Lambda の予約の同時実行を 0 にする反映を出す（新しい起動も、自分を起こし直す非同期の起動も走らない。止められた非同期の起動は 60 秒で捨てられる）。続けて `migrate` の Lambda の時間切れと 60 秒の長いほうを待ち、その Lambda の同時実行の数が 0 であることを CloudWatch の `ConcurrentExecutions` で確かめる 3b. 書き手の戻し: `writeVersion` だけを前の版へ戻す反映を出す。読み手は両方を読むため、書き換えた行は次の版のまま読め、書き手が次に書き換えるときに `downgrade` で前の版になる。戻した状態では `migrateTable` は何も書き換えず、予約の同時実行は 0 のまま置く。3a と 3b を 1 回の反映にまとめない 4. 戻さないと決めたら、次の版だけの列を使う機能を、その行の種類の `downgradable` を `false` にして出す反映を出す（`false` の前は `writeRow` がその値を拒む）。この反映より後は `writeVersion` を前の版へ戻さない（戻すと、前の版で表せない値を持つ行の書き換えを `writeRow` が拒む）。戻す必要が出たら、次の順で戻す。4a. 次の版だけの値を新たに作る経路（その機能）を止める反映を、`downgradable: false` のまま出す（ここで `true` にすると、次の版だけの値を持つ既存の行は、利用者がほかの列だけを書き換えても `writeRow` が行全体を拒む）。続けて API の Lambda の時間切れより長く待ち、止める前のコードの実行が終わるのを待つ 4b. `downgradable: false` のまま、既存の行の次の版だけの値を前の版で表せる値へ書き換える（その行の種類の書き手の決まりのとおり `rowUpdateOf` で書く）。4a の後も利用者のほかの列の書き換えは続き、`rowUpdateOf` の `set` は行全体を含むため、読んだ後に確定した書き換えを上書きしないよう次の条件で書く。`version` を持つ行の種類は、`updateIfVersion` で読んだ `version` を条件に書き、条件が外れたらその行を読み直して書き換えをやり直す（`version` を 1 上げる。中身を変える書き換えのため）。`version` を持たない行の種類（ログインの組・IdP の主体の一意の行・冪等の鍵）は `schema_version` の条件では同じ版で確定した書き換えを見つけられないため、4a の反映でその行の種類を書き換える経路も止め、4a の待ちの後に 4b を行い、止めた経路は 4d の反映で戻す（[並行と排他](#並行と排他) の「表の移しと、前の版で書く書き手」の行と同じく、書き込みのときに見つける条件は採らない）4c. 表を走査し、その行の種類のどの行も前の版で表せる（`upgrade(downgrade(行))` が元の行に戻る）ことを確かめる。戻らない行が残れば 4b へ戻る 4d. `downgradable` を `true` に戻す反映を出し、その後に 3 を行う |
+| `MIGRATE_ROW_ATTEMPTS` | 定数 | `migrate.ts` | 3（1 行の書き込みが外れて読み直す回数の上限。外れは並んだ書き手の確定だけで起き、3 回続けば書き手が書き続けている行として次の全走査に回す） |
+| `RowCodec<L>` | 型 | `row-codec.ts` | `{ latest; previous: … \| null; writeVersion; downgradable; repair: … \| null; narrow: … \| null; keyOf }`（`rowCodec` の引数のまま。`downgradable` は既定を埋めた値。`writeRow` は `keyOf` の戻り値を `pk`・`sk` に入れる） |
+| 移しの拒みの理由の符号 | 閉じた語 | `migrate.ts` | `readRow` の `reason`（`version_unsupported`・`shape_invalid`）・`RowCodecError` の `code`・`contended` |
+
+### 版を上げる子の手順
+
+1. 次の版の zod を `latest` に、今の版を `previous` に移し、`upgrade` と `downgrade` を足す。`downgrade` は、前の版で表せる次の版の値を失わずに下げる（`upgrade(downgrade(行))` が元の行に戻る）。`upgrade` は、既にある前の版の行の値を失わずに上げる（`downgrade(upgrade(前の版の行))` が元の行に戻る）。`downgrade` が次の版の値から作り直せない前の版の列（固定値で補うしかない列）は、`downgradable` が `true` の間は次の版の形から消さず、消すのは手順の 4 の後の版上げまで延ばす。`writeVersion` は今の版のまま（1 段目の反映。読み手は両方の版を読み、書き手は前の版だけを書く。1 段目のコードは次の版だけの列を使う機能を出さない）。前の版上げの手順 2d を終えていない表の行の種類では始めない（前の版より古い行が残ると `version_unsupported` になる）
+2. `writeVersion` を次の版へ上げ、`migrate` の Lambda（`createMigrateHandler`、権限はその表の読みと書きだけ。非同期の起動の設定は `MaximumEventAgeInSeconds` 60・`MaximumRetryAttempts` 0）を足す（2 段目の反映）。移しを起こすのは、この反映が終わってから API の Lambda の時間切れ（今の `app-stack.ts` で 10 秒）より長く待った後で、反映とは別の手順で 1 回起こす（前の版で書く古い書き手が走り終えてから読む。書き手は読んだ `version` を条件に行全体を置き換えるため、待たなくても値は失わないが、古い書き手が移しの後に前の版で書いた行を走査が取りこぼす）。移しが終わったら `migrate_done` の `refused` が 0 であることを確かめる。1 以上なら次の 2a から 2d で直し、`refused` が 0 になるまで手順の 4 へ進まない
+   - 2a. 元の値の保全: 直しを反映する前に、表のオンデマンドのバックアップを取る（拒んだ行は保存の形のまま残っているが、`repair` が書き直す前の値を戻せる形で持つ。バックアップは表と同じ権限の下に置き、利用者のデータとして扱う）
+   - 2b. 拒んだ行の特定: `migrate_refused` の行の種類と理由の符号から当たる行の種類を決め、運用者の手元で表をその種類の鍵の形で強い整合で読み、`readRow` と `rowReplaceOf` に通して拒まれた行の形を確かめる（鍵の値をログへ出さない）
+   - 2c. 理由の符号ごとの直し（どれも行を手で書き換えず、コードの反映で出す）:
+
+     | 理由の符号 | 原因 | 直し |
+     | --- | --- | --- |
+     | `shape_invalid`・`previous_shape_invalid` | 行の値が前の版の決まりとして正しいのに `previous.schema` か `upgrade` が表せない | `previous.schema`・`upgrade`・`downgrade` を直す |
+     | 同上 | 行の値そのものが誤り（前の書き手の誤りで形を外れた値） | その行の種類の `rowCodec` に `repair` を足し、誤った値を正しい値へ直す（直した値は `readRow` を通るすべての読み手と書き手が見る）。テストで、直す行が直り、形を通る行に当たらないことを確かめる |
+     | `version_unsupported` | 前の版より古い行（前の版上げの 2d の取りこぼし）か、次の版より新しい行（新しいコードの書き手が並んで走った） | 古い行は `repair` でその行を今の版の形へ直す。新しい行は反映の食い違いのため移しを進めず、反映を確かめる |
+     | `row_invalid` | `upgrade`（か `repair`）の結果が `latest` の形を通らない | `upgrade`（か `repair`）を直す |
+     | `downgrade_invalid` | `downgrade` の結果が前の版の形を通らない | `downgrade` を直す（`previous.schema` が狭すぎるならそれも） |
+     | `value_lost` | `upgrade` と `downgrade` の往復で前の版の値を失う | `upgrade` と `downgrade` を値を失わないよう直す。作り直せない列は手順の 1 のとおり次の版の形に残す |
+     | `key_mismatch` | `upgrade` が鍵に使う列を変えた | `upgrade` を鍵の列を保つよう直す |
+     | `shared_buffer` | 表の行に現れない値（`Db` の誤り） | 書き手と `Db` の誤りとして調べ、移しを進めない |
+     | `contended` | 書き手が書き続けて 3 回外れた | 直しは要らない。2d で走査し直す |
+
+     直しを反映したら、API の Lambda の時間切れより長く待つ（直す前の読み手のコードが走り終える）
+   - 2d. 再走査での確認: 移しを `cursor` `null` から起こし直し、`migrate_done` の `refused` が 0 になったことを確かめる。移しは読み手の見る形と違う行をすべて書くため、`repair` で直る行も、前の走査で `contended` になった行も、この走査で書く。0 でなければ 2b へ戻る
+3. 2 段目を戻すときは、[並行と排他](#並行と排他) の「表の移しと、前の版で書く書き手」の行のとおり、次の 2 回の反映で戻す
+   - 3a. 移しの止め: `migrate` の Lambda の予約の同時実行を 0 にする反映を出す（新しい起動も、自分を起こし直す非同期の起動も走らない。止められた非同期の起動は 60 秒で捨てられる）。続けて `migrate` の Lambda の時間切れと 60 秒の長いほうを待ち、その Lambda の同時実行の数が 0 であることを CloudWatch の `ConcurrentExecutions` で確かめる
+   - 3b. 書き手の戻し: `writeVersion` だけを前の版へ戻す反映を出す。読み手は両方を読むため、書き換えた行は次の版のまま読め、書き手が次に書き換えるときに `downgrade` で前の版になる。戻した状態では `migrateTable` は何も書き換えず、予約の同時実行は 0 のまま置く。3a と 3b を 1 回の反映にまとめない
+4. 戻さないと決めたら、次の版だけの列を使う機能を、その行の種類の `downgradable` を `false` にして出す反映を出す（`false` の前は `writeRow` がその値を拒む）。この反映より後は、次の 4a から 4c を通さずに `writeVersion` を前の版へ戻さない。戻す必要が出たら、次の順で戻す
+   - 4a. 狭めの反映: 次の版だけの値を新たに作る経路（その機能）を止め、その行の種類の `rowCodec` に `narrow` を足し、`downgradable` を `true` に戻す反映を 1 回で出す。読み手はどれも狭めた値を見るため、ほかの列を書き換える書き手も狭めた値から行全体を書き、`writeRow` は前の版で表せない値を拒む。続けて API の Lambda の時間切れより長く待ち、止める前のコードの実行が終わるのを待つ
+   - 4b. 移しで書き直す: 移しを `cursor` `null` から起こす。移しは `narrow` で狭まる行を書き直す（並んだ書き手とは読んだ `version` で外れ、読み直してやり直す）
+   - 4c. 確かめ: `migrate_done` の `refused` が 0 であることを確かめる。`value_lost` が残れば `narrow` が狭めきれていないため、`narrow` を直して 4a へ戻る。0 になったら 3 を行う。`narrow` は次の版上げの手順の 1 で外す
 
 ### 並行と排他
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 表の移しと、同じ行を書く API の要求 | 行の `schema_version` と `version` | 移しは `updateIfSchemaVersion` で、`schema_version = <前の版>` と（行が持てば）読んだ `version` を条件に書く。書き手はどの書き込みでも `schema_version` を書く | 外れたら飛ばす（書き手が `latest` で書いたか行が消えた）。2 回走らせても書き換えは 1 回 |
-| 表の移しと、前の版で書く書き手（2 段目の反映の直後に残る古い書き手と、2 段目を戻した後の書き手） | `version` を持たない行（ログインの組・IdP の主体の一意の行・冪等の鍵） | 同時に走らせない。移しの条件は `schema_version = <前の版>` だけのため、移しが前の版の行を読んだ後に書き手が前の版のままその行を書き換えると、条件が外れず古い中身で上書きする。そこで、移しを起こすのは前の版で書く書き手が走り終えた後（2 段目の反映から API の Lambda の時間切れより後）に限り、書き手を前の版へ戻すのは移しの起動と起こし直しを止め、走っている移しが終わった後（版を上げる子の手順の 3a）に限る。書き込みのときに見つける条件（行のすべての列の一致）は、冪等の鍵の行が持つ要素の結果が大きく条件の式の上限を超えうるため採らない | 止めた後に移しを再び許すのは、次に 2 段目を反映するとき（上の起こし方の待ちを守る）。3a の待ちの途中で止めた移しは、続きの位置を持った非同期の起動ごと捨てられるが、次に起こすときに最初から走らせても結果は同じ |
-| 2 つの移しの起動 | 同じ表 | 取らない（条件つきの更新で同じ行を 2 回書き換えない） | 最後に処理を終えた行の鍵から再開できる。最初からやり直しても結果は同じ |
+| 表の移しと、同じ行を書く API の要求 | 行の `schema_version` と `version` | 移しは `replaceIfUnchanged` で、読んだ `schema_version` と（行が持てば）読んだ `version` を条件に置き換え、`version` を保つ。書き手は `replaceIfVersion` で読んだ `version` を条件に行全体を置き換え、`version` を上げる。移しが先なら書き手の条件は通り、書き手の行は読み手が見た形から作るため移しの結果を失わない。書き手が先なら移しの条件が外れ、移しは読み直して書き手の行を比べ直す | 2 回走らせても書き換えは 1 回（2 回目は保存の形が読み手の見る形と同じで書かない） |
+| 表の移しと、前の版で書く書き手（2 段目の反映の直後に残る古い書き手と、2 段目を戻した後の書き手） | 行の形 | 値は上の行の条件で失わない。走査の取りこぼし（移しが過ぎた後に前の版で書いた行）を作らないため、移しを起こすのは前の版で書く書き手が走り終えた後（2 段目の反映から API の Lambda の時間切れより後）に限り、書き手を前の版へ戻すのは移しの起動と起こし直しを止め、走っている移しが終わった後（版を上げる子の手順の 3a）に限る | 止めた後に移しを再び許すのは、次に 2 段目を反映するとき（上の起こし方の待ちを守る）。3a の待ちの途中で止めた移しは、続きの位置を持った非同期の起動ごと捨てられるが、次に起こすときに最初から走らせても結果は同じ |
+| 2 つの移しの起動 | 同じ表 | 取らない（条件つきの置き換えで、後の側は外れて読み直し、同じ形のため書かない） | 最後に処理を終えた行の鍵から再開できる。最初からやり直しても結果は同じ |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `rowCodec` | 版 1 と 2 の組で作れる | `previous` の無い行の種類 | `writeVersion` が 3・`previous.version` が `latest.version - 1` でない・`previous` があって `downgrade` が無い組・`downgradable: false` で `writeVersion` が前の版の組で投げる |
-| `readRow`・`writeRow` | 1 段目（`latest` 2・`previous` 1・`writeVersion` 1）で、版 1 の行と版 2 の行をどちらも版 2 の形で読み、`writeRow` は版 1 の行を出す。2 段目（`writeVersion` 2）で、同じ 2 つの行を同じに読み、`writeRow` は版 2 の行を出す。書き手を戻した状態（1 段目と同じ値に戻した `RowCodec`）で、2 段目に書いた版 2 の行と版 1 の行をどちらも読み、`writeRow` は版 1 の行を出す。2 段目に書いた版 2 の行を戻した書き手が別の列だけ書き換えても（`rowUpdateOf` の `set` と `remove` を当てた後に読んでも）、版 2 で書いた値が残る。版 1 → `upgrade` → `downgrade` で元の行に戻る | `previous` の無い行の種類（版 1 だけを読む） | 版 0・版 3（`latest` より新しい）・形の違いを拒む。`writeRow` に版の形を外れた値を渡すと投げる。前の版で書くときと、2 段目（`downgradable` の間）に次の版で書くとき、下げると失われる値（次の版だけの列）を持つ行で投げ、`downgradable: false` では書ける。`downgrade` が引数の列をその場で消しても値を失う行を通さず、`upgrade` が引数の列をその場で改めても書く前の版の行は前の版の形のまま。行の `z.looseObject` の下の集合（`Set`）から下げで要素が落ちる行を、前の版で書くときも次の版で書くときも投げ、要素の同じ集合は書ける。`upgrade` が集合から要素をその場で消しても、`readRow` の後の読んだ行は変わらず、`rowUpdateOf` が値の損失を投げる。`ArrayBuffer` 本体のバイナリでバイト列が下げで変わる行を投げ、同じバイト列は書ける |
+| `rowCodec` | 版 1 と 2 の組で作れる | `previous` の無い行の種類 | `writeVersion` が 3・`previous.version` が `latest.version - 1` でない・`previous` があって `downgrade` が無い組・`downgradable: false` で `writeVersion` が前の版の組・`narrow` があって `downgradable: false` か `writeVersion` が前の版の組で投げる |
+| `readRow`・`writeRow` | 1 段目（`latest` 2・`previous` 1・`writeVersion` 1）で、版 1 の行と版 2 の行をどちらも版 2 の形で読み、`writeRow` は版 1 の行を出す。2 段目（`writeVersion` 2）で、同じ 2 つの行を同じに読み、`writeRow` は版 2 の行を出す。書き手を戻した状態で、2 段目に書いた版 2 の行と版 1 の行をどちらも読み、`writeRow` は版 1 の行を出す。版 1 → `upgrade` → `downgrade` で元の行に戻る。`repair` を持つ種類で、形を外れた行が直した形で読め、形を通る行は `repair` を通らない。`narrow` を持つ種類で、読んだ行が狭めた値になる | `previous` の無い行の種類（版 1 だけを読む）。`repair` が `null` を返す行は `shape_invalid` | 版 0・版 3（`latest` より新しい）・形の違いを拒む。`writeRow` に版の形を外れた値を渡すと投げる。前の版で書くときと、2 段目（`downgradable` の間）に次の版で書くとき、下げると失われる値（次の版だけの列）を持つ行で投げ、`downgradable: false` では書ける。`downgrade` が引数の列をその場で消しても値を失う行を通さず、`upgrade` が引数の列をその場で改めても書く前の版の行は前の版の形のまま。行の `z.looseObject` の下の集合（`Set`）から下げで要素が落ちる行を、前の版で書くときも次の版で書くときも投げ、要素の同じ集合は書ける。`ArrayBuffer` 本体のバイナリでバイト列が下げで変わる行を投げ、同じバイト列は書ける。`repair` と `narrow` が引数をその場で変えても読んだ行は変わらない |
 | 移しの止め（`infra/test/app-stack.test.ts`） | `migrate` の Lambda の非同期の起動の設定が `MaximumEventAgeInSeconds` 60・`MaximumRetryAttempts` 0。止める設定で合成すると予約の同時実行が 0 | — | — |
-| `rowUpdateOf` | `set` が `writeRow` の戻り値から `pk`・`sk`・`version` を外したものと一致し、`schema_version` を含む。`latest` の版で消した列が `remove` に並ぶ | `version` を持たない行（`set` と `remove` に `version` が出ない）・消した列が無い（`remove` が空） | `set` と `remove` のどちらにも `pk`・`sk`・`version` が出ない（`raw` が持っていても）。書き換え後の鍵（席の `user_id` を変えたときなど）が `raw` の `pk`・`sk` と違うと投げる。`downgradable` の間、`upgrade` が前の版の列を捨て `downgrade` が固定値で補う組で、その列に値を持つ既にある前の版の行を、移し（`writeVersion` が次の版）でも通常の書き換え（前の版）でも投げ、`downgradable: false` では書ける。前の版の形を通らない `raw` で投げる |
-| `migrateTable` | 前の版の行が `latest` の版になり、`version` は変わらない。ログインの組（`version` を持たない行）も書き換わる。`latest` の版で消した列が行から消え、その列を鍵にした索引の引き（偽の `Db` の `queryIndex`）でその行が出なくなる | 残り時間がちょうど予備の時間で、取りかかる前に止まる。ページの途中（100 行のうち 3 行目を終えたところ）で残り時間が尽き、返した `cursor` が 3 行目の鍵で、その `cursor` で再び呼ぶと 4 行目から読み、2 回の呼び出しの後に前の版の行が 1 行も残らない。ページの 1 行目の前で尽きると受け取った `cursor` を返す | 2 回走らせても行が同じ。`rowUpdateOf` が投げる行（`upgrade` で値を失う前の版の行）と `readRow` が読めない行は、書かずに `refused` に数えて `migrate_refused` のログ（鍵の値も例外の文も含まず、行の種類の名前と理由の符号だけ。`z.record` の鍵が検証に外れた行でも、その鍵の値がログに出ない）を出し、後ろの行は移す。拒んだ行の後で止まった呼び出しも、走査を終えた呼び出しも、その呼び出しで拒んだ数を `refused` に返す。`createMigrateHandler` は起こし直しに `refused` の合計を渡し、合計が 1 以上なら `migrate_done` を `error` で出す。読んだ後に書き手が `latest` で書いた行と、消えた行を飛ばし、消えた行を作り直さない。`writeVersion` が前の版の行の種類は書き換えない。2 段目の書き手が先に `updateIfVersion`（`rowUpdateOf` の `set` と `remove`）で前の版の行を最新にした場合、移しはその行を飛ばし、`latest` の版で消した列は書き手の書き込みで消えていて、その列を鍵にした索引の引きでその行が出ない |
-| `updateIfSchemaVersion` | `schema_version` の条件と `attribute_exists(pk)` を持つ 1 件。`remove` の列が `REMOVE` 句に並ぶ | `version: null`・`version` あり・`remove` が空（`REMOVE` 句を持たない） | `remove` が `set` の鍵か `pk`・`sk`・`version`・`schema_version` を含むと投げる。`set` に `version` を含むと型で弾く |
+| `rowReplaceOf` | 戻り値が `writeRow` の戻り値から `version` を外したものと一致し、`pk`・`sk`・`schema_version` を含む。`raw` にあって書き手の行に無い列（`latest` の版で消した列・知らない列）は戻り値に無い | `version` を持たない行（戻り値に `version` が出ない）。`repair` で直る `raw` は直した行と比べる | 戻り値に `version` が出ない（`raw` が持っていても）。書き換え後の鍵（席の `user_id` を変えたときなど）が `raw` の `pk`・`sk` と違うと投げる（例外に鍵の値が出ない）。`downgradable` の間、`upgrade` が前の版の列を捨て `downgrade` が固定値で補う組で、その列に値を持つ既にある前の版の行を、移し（`writeVersion` が次の版）でも通常の書き換え（前の版）でも投げ、`downgradable: false` では書ける。前の版の形を通らず `repair` でも直らない `raw` で投げる |
+| `migrateTable` | 前の版の行が `latest` の版になり、`version` は変わらない。ログインの組も書き換わる。`latest` の版で消した列が行から消え、その列を鍵にした索引の引き（偽の `Db` の `queryIndex`）でその行が出なくなる。保存の形が読み手の見る形と同じ行は書かない（偽の `Db` への書き込みが 0 件）。`repair` で直る行と `narrow` で狭まる行（`schema_version` が `latest` の行も）を書き直す | 残り時間がちょうど予備の時間で、取りかかる前に止まる。ページの途中（100 行のうち 3 行目を終えたところ）で残り時間が尽き、返した `cursor` が 3 行目の鍵で、その `cursor` で再び呼ぶと 4 行目から読み、2 回の呼び出しの後に前の版の行が 1 行も残らない。ページの 1 行目の前で尽きると受け取った `cursor` を返す。書き込みが 1 回外れた行（読んだ後に書き手が前の版のまま `version` を上げた行）は読み直して書き直し、2 回外れても 3 回目で確定する | 2 回走らせても行が同じ。`rowReplaceOf` が投げる行と `readRow` が読めない行は、書かずに `refused` に数えて `migrate_refused` のログ（鍵の値も例外の文も含まず、行の種類の名前と理由の符号だけ。`z.record` の鍵が検証に外れた行でも、その鍵の値がログに出ない）を出し、後ろの行は移す。3 回外れた行は `contended` で拒む。拒んだ行の後で止まった呼び出しも、走査を終えた呼び出しも、その呼び出しで拒んだ数を `refused` に返す。`createMigrateHandler` は起こし直しに `refused` の合計を渡し、合計が 1 以上なら `migrate_done` を `error` で出す。外れの後に読み直して消えていた行を飛ばし、作り直さない。`writeVersion` が前の版の行の種類は書き換えない。2 段目の書き手が先に `replaceIfVersion` で前の版の行を置き換えた場合、移しはその行を書かず、`latest` の版で消した列は書き手の置き換えで消えていて、その列を鍵にした索引の引きでその行が出ない。移しが先に確定した前の版の行を、前の版を読んだ書き手が `replaceIfVersion` で置き換えても、移しが足した列は書き手の行に無ければ残らない |
+| `replaceIfVersion` | `op: "put"` で、行が `item` と `version + 1`、条件が `version` の一致（と `extra`） | `version` が 1・`extra` あり | `item` が `version` を持つ・`schema_version` を持たないと投げる。記録の表を指すと投げる |
+| `deleteIfVersion` | `op: "delete"` で、条件が `version` の一致（と `extra`） | `extra` あり | `version` が 0 で投げる |
+| `replaceIfUnchanged` | `op: "put"` で、条件が `attribute_exists(pk)`・`schema_version` の一致・`version` の一致で、`version` を上げない | `version: null`（`version` の条件を持たない）・`from: null`（`attribute_not_exists(schema_version)`） | `item` が `version` を持つと投げる |
 | `Db.scan`（`createDb`） | 偽のクライアントへ `Limit`・`ExclusiveStartKey`・`ConsistentRead` が渡る | `startKey` が `null` | — |
 
 ## #1 へ渡す欠け
