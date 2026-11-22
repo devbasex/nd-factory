@@ -36,6 +36,10 @@ const DETAIL_ROWS = [
 const OVERALL_ROWS = ["login_subject", "project", "assignment", "lane", "approval", "audit"];
 // 認証（Cognito の sub から利用者を引く読み手・サインアウトしたセッションを断つ・ログインをつなぐ流れ）のために足した行。19 の行に数えない
 const AUTH_ROWS = ["cognito_subject", "session_revocation", "login_link"];
+// 行の書き手の設計（#109）の決定 10 で足した行（委任の使った時刻）。19 の行に数えない
+const WRITER_ROWS = ["delegation_used"];
+// 作った後に書き換えるため、行の書き手の設計の決定 2 で version を持たせた行の種類
+const REWRITTEN_ROWS = ["login", "login_subject", "login_link", "idempotency", "answer"];
 
 const ajv = new Ajv2020({ strict: true, validateFormats: false });
 
@@ -59,9 +63,9 @@ function tableOfRow(name: string): TableSpec {
 const cases = Object.entries(ROW_CASES);
 
 describe("行の形（受け入れ条件 8）", () => {
-  it("19 の行と全体の設計の 6 つの行と認証の行がそろい、どの表の行の種類とも 1 対 1 に当たる", () => {
+  it("19 の行と全体の設計の 6 つの行と認証の行と委任の使った時刻の行がそろい、どの表の行の種類とも 1 対 1 に当たる", () => {
     expect(DETAIL_ROWS).toHaveLength(19);
-    expect(Object.keys(ROW_CASES).sort()).toEqual([...DETAIL_ROWS, ...OVERALL_ROWS, ...AUTH_ROWS].sort());
+    expect(Object.keys(ROW_CASES).sort()).toEqual([...DETAIL_ROWS, ...OVERALL_ROWS, ...AUTH_ROWS, ...WRITER_ROWS].sort());
     const specRows = Object.values(TABLES).flatMap((t) => t.rows.map((r) => r.name));
     expect(specRows.sort()).toEqual(Object.keys(ROW_CASES).sort());
   });
@@ -82,6 +86,28 @@ describe("行の形（受け入れ条件 8）", () => {
     const row = without(c.sample, "version");
     expect(c.schema.safeParse(row).success).toBe(false);
     expect(ajv.compile(z.toJSONSchema(c.schema))(row)).toBe(false);
+  });
+
+  it.each(cases.filter(([name]) => name !== "audit"))("%s: 記録の表のほかの行は行の世代 incarnation を UUID の形で必須にする", (_name, c) => {
+    const validate = ajv.compile(z.toJSONSchema(c.schema));
+    for (const row of [without(c.sample, "incarnation"), { ...c.sample, incarnation: "not-a-uuid" }, { ...c.sample, incarnation: 1 }]) {
+      expect(c.schema.safeParse(row).success).toBe(false);
+      expect(validate(row)).toBe(false);
+    }
+  });
+
+  it("記録の表の行は incarnation を持たない（追記だけで、表の移しも書き直さない）", () => {
+    const c = ROW_CASES["audit"];
+    if (c === undefined) throw new Error("audit が無い");
+    expect(Object.keys((c.schema as z.ZodObject).shape)).not.toContain("incarnation");
+    expect(c.schema.safeParse(c.sample).success).toBe(true);
+  });
+
+  it("作った後に書き換える行の種類（ログインの組・IdP の主体の一意の行・ログインをつなぐ流れ・冪等の鍵・答え・委任の使った時刻）は上書きの行で version を持つ", () => {
+    for (const name of [...REWRITTEN_ROWS, ...WRITER_ROWS]) {
+      expect(ROW_CASES[name]?.overwrite).toBe(true);
+      expect(Object.keys((ROW_CASES[name]?.schema as z.ZodObject).shape)).toContain("version");
+    }
   });
 
   it("上書きの行は表の仕様の overwrite の行と一致する", () => {
@@ -110,7 +136,6 @@ describe("行の形（受け入れ条件 8）", () => {
   it("空を許す列を持った行も通る", () => {
     const full = {
       ...ROW_CASES["delegation"]?.sample,
-      last_used_at: AT,
       revoked_at: AT,
     };
     expect(ROW_CASES["delegation"]?.schema.safeParse(full).success).toBe(true);
@@ -244,6 +269,27 @@ describe("行の形（受け入れ条件 8）", () => {
       expect(c.schema.safeParse(row).success).toBe(false);
       expect(validate(row)).toBe(false);
     }
+  });
+
+  it("委任の行は最後に使った時刻を持たず（読むと落とす）、委任の使った時刻の行が利用者と委任から鍵を組む", () => {
+    const delegation = ROW_CASES["delegation"];
+    const used = ROW_CASES["delegation_used"];
+    if (delegation === undefined || used === undefined) throw new Error("委任の行が無い");
+    expect(Object.keys((delegation.schema as z.ZodObject).shape)).not.toContain("last_used_at");
+    expect(delegation.schema.parse({ ...delegation.sample, last_used_at: AT })).not.toHaveProperty("last_used_at");
+    expect(keyOf("delegation_used", used.sample)).toEqual({ pk: `USER#${USR}`, sk: `DELEGATION_USED#${String(used.sample["delegation_id"])}` });
+    expect(Object.keys((used.schema as z.ZodObject).shape).sort()).toEqual(["delegation_id", "incarnation", "last_used_at", "schema_version", "user_id", "version"]);
+    const validate = ajv.compile(z.toJSONSchema(used.schema));
+    const rejected = ["delegation_id", "user_id", "last_used_at", "version", "incarnation"].map((column) => without(used.sample, column));
+    rejected.push({ ...used.sample, last_used_at: "2026-11-17T12:04:05+09:00" }, { ...used.sample, delegation_id: USR });
+    for (const row of rejected) {
+      expect(used.schema.safeParse(row).success).toBe(false);
+      expect(validate(row)).toBe(false);
+    }
+    // 委任の行と委任の使った時刻の行は同じ利用者の区切りに並び、並びの鍵の頭で取り違えない
+    const usedKey = keyOf("delegation_used", used.sample);
+    expect(TABLES.users.rows.find((r) => r.skPattern?.test(usedKey.sk ?? "") === true)?.name).toBe("delegation_used");
+    expect(TABLES.users.rows.find((r) => r.skPattern?.test(keyOf("delegation", delegation.sample).sk ?? "") === true)?.name).toBe("delegation");
   });
 
   it.each(["idempotency", "github_token", "audit", "session_revocation", "login_link"])("%s: TTL の列は 10 桁の秒の整数だけを通す", (name) => {

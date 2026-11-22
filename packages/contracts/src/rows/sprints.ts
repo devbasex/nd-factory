@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { rowCodec } from "../row-codec.ts";
+import { repairIdentity, rowCodec } from "../row-codec.ts";
 import { idOf, UUID_V7_PATTERN } from "../ids.ts";
 import { githubIssueRef, utcDateTime } from "../values.ts";
 import { identifier, inference, overwriteRow, place, reasonCode, type RowKey, SEQ_DIGITS, seqKey } from "./common.ts";
@@ -74,7 +74,8 @@ export const segmentKey = (row: SegmentRow): RowKey => ({
   sk: `SPRINT#${row.sprint_id}#LANE#${row.lane_id}#SEG#${seqKey(row.seq)}`,
 });
 
-// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
-export const sprintCodec = rowCodec({ latest: { version: 1, schema: sprintRow }, writeVersion: 1, keyOf: sprintKey });
-export const laneCodec = rowCodec({ latest: { version: 1, schema: laneRow }, writeVersion: 1, keyOf: laneKey });
-export const segmentCodec = rowCodec({ latest: { version: 1, schema: segmentRow }, writeVersion: 1, keyOf: segmentKey });
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない。
+// U3b より前の書き手が保存した行（incarnation と、U3b で足した version の無い行）を、旧形式の補い（repairIdentity）で読む
+export const sprintCodec = rowCodec({ latest: { version: 1, schema: sprintRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: sprintKey });
+export const laneCodec = rowCodec({ latest: { version: 1, schema: laneRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: laneKey });
+export const segmentCodec = rowCodec({ latest: { version: 1, schema: segmentRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: segmentKey });

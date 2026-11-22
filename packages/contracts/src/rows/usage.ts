@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { rowCodec } from "../row-codec.ts";
+import { repairIdentity, rowCodec } from "../row-codec.ts";
 import { idOf } from "../ids.ts";
 import { money, utcDateTime } from "../values.ts";
 import { type RowKey, versionlessRow } from "./common.ts";
@@ -31,5 +31,6 @@ export const costRecordRow = versionlessRow(1, {
 export type CostRecordRow = z.infer<typeof costRecordRow>;
 export const costRecordKey = (row: CostRecordRow): RowKey => ({ pk: `PROJECT#${row.project_id}`, sk: `COST#${row.occurred_at}#${row.segment_id}` });
 
-// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
-export const costRecordCodec = rowCodec({ latest: { version: 1, schema: costRecordRow }, writeVersion: 1, keyOf: costRecordKey });
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない。
+// U3b より前の書き手が保存した行（incarnation と、U3b で足した version の無い行）を、旧形式の補い（repairIdentity）で読む
+export const costRecordCodec = rowCodec({ latest: { version: 1, schema: costRecordRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: costRecordKey });

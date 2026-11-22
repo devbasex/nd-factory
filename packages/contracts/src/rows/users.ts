@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { rowCodec } from "../row-codec.ts";
+import { repairIdentity, rowCodec } from "../row-codec.ts";
 import { idOf } from "../ids.ts";
 import { languageTag, timeZone, utcDateTime } from "../values.ts";
 import { expireAt, overwriteRow, type RowKey, sha256Hex, uuid, versionlessRow } from "./common.ts";
 
-// db-users の行（利用者・ログインの組・IdP の主体の一意の行・Cognito の主体の対応の行・セッションの取り消しの行・ログインをつなぐ流れの行・委任）
+// db-users の行（利用者・ログインの組・IdP の主体の一意の行・Cognito の主体の対応の行・セッションの取り消しの行・ログインをつなぐ流れの行・委任・委任の使った時刻）
 
 export const idp = z.enum(["google", "github"]);
 
@@ -22,10 +22,11 @@ export const userRow = overwriteRow(1, {
 export type UserRow = z.infer<typeof userRow>;
 export const userKey = (row: UserRow): RowKey => ({ pk: `USER#${row.user_id}`, sk: "USER" });
 
-// ログインの組（USER#<利用者> / LOGIN#<IdP>#<主体>）。作ると消すだけ（ログインの付け替えのときだけ cognito_sub と bound_auth_time を書き換える）。
+// ログインの組（USER#<利用者> / LOGIN#<IdP>#<主体>）。上書き（作ると消すのほかは、ログインの付け替えで cognito_sub と bound_auth_time を書き換えるため、
+// issues/issue-2-design-row-writers.md の決定 2 で version を持つ）。
 // cognito_sub は外すときに Cognito の主体の対応の行の鍵を組む値、bound_auth_time は対応の行の bound_auth_time を写した値
 // （結んだ時のサインインの時刻。users.get がログインごとに返し、logins.delete の要素が読んだ値として持って照らす）
-export const loginRow = versionlessRow(1, {
+export const loginRow = overwriteRow(1, {
   user_id: idOf("usr"),
   idp,
   subject: z.string().min(1),
@@ -36,10 +37,10 @@ export const loginRow = versionlessRow(1, {
 export type LoginRow = z.infer<typeof loginRow>;
 export const loginKey = (row: LoginRow): RowKey => ({ pk: `USER#${row.user_id}`, sk: `LOGIN#${row.idp}#${row.subject}` });
 
-// IdP の主体の一意の行（LOGIN#<IdP>#<主体> / LOGIN、I16）。作ると消すだけ。
+// IdP の主体の一意の行（LOGIN#<IdP>#<主体> / LOGIN、I16）。上書き（ログインの付け替えで書き換えるため、決定 2 で version を持つ）。
 // 全体の設計の列は user_id・cognito_sub・bound_auth_time で、鍵を列から組むために idp と subject を持つ（全体の設計からの読み替え）。
 // cognito_sub と bound_auth_time はログインの組の行と同じ値を写し、ログインの付け替えのときだけ書き換える
-export const loginSubjectRow = versionlessRow(1, {
+export const loginSubjectRow = overwriteRow(1, {
   user_id: idOf("usr"),
   idp,
   subject: z.string().min(1),
@@ -83,11 +84,11 @@ export const loginLinkState = z.enum(["open", "verified", "used"]);
 
 // ログインをつなぐ流れの行（USER#<利用者> / LINK#<流れの ID>。docs/design/data.md の「ログインをつなぐ流れの行」）。
 // login_links.create が open で無いときだけ書き、logins.create の交換の要素が open を条件に verified へ、確定の要素が結ぶのと同じトランザクションで used へ書き換える。
-// version を持たず、state を条件にする。列の有無の決まり（code_verifier は open の間だけ・candidate_* は verified の間だけ・
+// 上書き（決定 2 で version を持つ。状態の遷移の条件はハンドラーが読んだ行で照らし、確定の条件は読んだ version にする）。列の有無の決まり（code_verifier は open の間だけ・candidate_* は verified の間だけ・
 // exchange_*・account_label は verified と used の間・used_idempotency_key・linked_* は used の間）は書き手（#4）が守る。
 // code_verifier はサーバーだけが持ち、画面へ返さずログに出さない。
 // expires_at は確定を受け付ける期限（作成から LOGIN_LINK_TTL_MS。書き換えで変えない）、expire_at は TTL（交換と確定がそれぞれ延ばす）
-export const loginLinkRow = versionlessRow(1, {
+export const loginLinkRow = overwriteRow(1, {
   link_id: uuid,
   state: loginLinkState,
   created_at: utcDateTime,
@@ -114,7 +115,8 @@ export const loginLinkRow = versionlessRow(1, {
 export type LoginLinkRow = z.infer<typeof loginLinkRow>;
 export const loginLinkKey = (row: LoginLinkRow): RowKey => ({ pk: `USER#${row.user_id}`, sk: `LINK#${row.link_id}` });
 
-// 委任（USER#<利用者> / DELEGATION#<委任>）。上書き。状態は expires_at・revoked_at から導き、列に持たない
+// 委任（USER#<利用者> / DELEGATION#<委任>）。上書き。状態は expires_at・revoked_at から導き、列に持たない。
+// 最後に使った時刻は委任の使った時刻の行に置き、使うたびにこの行の version を上げない（決定 10）
 export const delegationRow = overwriteRow(1, {
   delegation_id: idOf("dlg"),
   user_id: idOf("usr"),
@@ -124,17 +126,28 @@ export const delegationRow = overwriteRow(1, {
   secret_sha256: sha256Hex,
   expires_at: utcDateTime,
   created_at: utcDateTime,
-  last_used_at: utcDateTime.optional(),
   revoked_at: utcDateTime.optional(),
 });
 export type DelegationRow = z.infer<typeof delegationRow>;
 export const delegationKey = (row: DelegationRow): RowKey => ({ pk: `USER#${row.user_id}`, sk: `DELEGATION#${row.delegation_id}` });
 
-// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
-export const userCodec = rowCodec({ latest: { version: 1, schema: userRow }, writeVersion: 1, keyOf: userKey });
-export const loginCodec = rowCodec({ latest: { version: 1, schema: loginRow }, writeVersion: 1, keyOf: loginKey });
-export const loginSubjectCodec = rowCodec({ latest: { version: 1, schema: loginSubjectRow }, writeVersion: 1, keyOf: loginSubjectKey });
-export const cognitoSubjectCodec = rowCodec({ latest: { version: 1, schema: cognitoSubjectRow }, writeVersion: 1, keyOf: cognitoSubjectKey });
-export const sessionRevocationCodec = rowCodec({ latest: { version: 1, schema: sessionRevocationRow }, writeVersion: 1, keyOf: sessionRevocationKey });
-export const loginLinkCodec = rowCodec({ latest: { version: 1, schema: loginLinkRow }, writeVersion: 1, keyOf: loginLinkKey });
-export const delegationCodec = rowCodec({ latest: { version: 1, schema: delegationRow }, writeVersion: 1, keyOf: delegationKey });
+// 委任の使った時刻（USER#<利用者> / DELEGATION_USED#<委任>。issues/issue-2-design-row-writers.md の決定 10）。上書き。
+// authenticate が委任の認証に成功した後だけ、委任の行の version と incarnation の照らしと一緒に書く。委任の行と同じ長さ残り、表の期限を持たない
+export const delegationUsedRow = overwriteRow(1, {
+  delegation_id: idOf("dlg"),
+  user_id: idOf("usr"),
+  last_used_at: utcDateTime,
+});
+export type DelegationUsedRow = z.infer<typeof delegationUsedRow>;
+export const delegationUsedKey = (row: DelegationUsedRow): RowKey => ({ pk: `USER#${row.user_id}`, sk: `DELEGATION_USED#${row.delegation_id}` });
+
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない。
+// U3b より前の書き手が保存した行（incarnation と、U3b で足した version の無い行）を、旧形式の補い（repairIdentity）で読む
+export const userCodec = rowCodec({ latest: { version: 1, schema: userRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: userKey });
+export const loginCodec = rowCodec({ latest: { version: 1, schema: loginRow }, writeVersion: 1, repair: repairIdentity({ version: true }), keyOf: loginKey });
+export const loginSubjectCodec = rowCodec({ latest: { version: 1, schema: loginSubjectRow }, writeVersion: 1, repair: repairIdentity({ version: true }), keyOf: loginSubjectKey });
+export const cognitoSubjectCodec = rowCodec({ latest: { version: 1, schema: cognitoSubjectRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: cognitoSubjectKey });
+export const sessionRevocationCodec = rowCodec({ latest: { version: 1, schema: sessionRevocationRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: sessionRevocationKey });
+export const loginLinkCodec = rowCodec({ latest: { version: 1, schema: loginLinkRow }, writeVersion: 1, repair: repairIdentity({ version: true }), keyOf: loginLinkKey });
+export const delegationCodec = rowCodec({ latest: { version: 1, schema: delegationRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: delegationKey });
+export const delegationUsedCodec = rowCodec({ latest: { version: 1, schema: delegationUsedRow }, writeVersion: 1, repair: repairIdentity({ version: true }), keyOf: delegationUsedKey });

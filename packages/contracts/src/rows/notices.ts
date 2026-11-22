@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { rowCodec } from "../row-codec.ts";
+import { repairIdentity, rowCodec } from "../row-codec.ts";
 import { idOf } from "../ids.ts";
 import { utcDateTime } from "../values.ts";
 import { overwriteRow, type RowKey, sha256Hex } from "./common.ts";
@@ -15,7 +15,7 @@ export const noticeDelivery = z.strictObject({
   attempts: z.int().min(0),
 });
 
-// 知らせ（USER#<利用者> / NOTICE#<時刻>#<ID>）。上書き（既読は画面、送達は送り手が updateIfVersion で書く）
+// 知らせ（USER#<利用者> / NOTICE#<時刻>#<ID>）。上書き（既読は画面、送達は送り手が、読んだ行から作った行全体を replaceIfVersion で書く）
 export const noticeRow = overwriteRow(1, {
   notice_id: idOf("ntc"),
   user_id: idOf("usr"),
@@ -48,6 +48,7 @@ export const destinationRow = overwriteRow(1, {
 export type DestinationRow = z.infer<typeof destinationRow>;
 export const destinationKey = (row: DestinationRow): RowKey => ({ pk: `USER#${row.user_id}`, sk: `DEST#${row.destination_id}` });
 
-// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
-export const noticeCodec = rowCodec({ latest: { version: 1, schema: noticeRow }, writeVersion: 1, keyOf: noticeKey });
-export const destinationCodec = rowCodec({ latest: { version: 1, schema: destinationRow }, writeVersion: 1, keyOf: destinationKey });
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない。
+// U3b より前の書き手が保存した行（incarnation と、U3b で足した version の無い行）を、旧形式の補い（repairIdentity）で読む
+export const noticeCodec = rowCodec({ latest: { version: 1, schema: noticeRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: noticeKey });
+export const destinationCodec = rowCodec({ latest: { version: 1, schema: destinationRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: destinationKey });

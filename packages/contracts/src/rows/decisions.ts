@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { rowCodec } from "../row-codec.ts";
+import { repairIdentity, rowCodec } from "../row-codec.ts";
 import { idOf } from "../ids.ts";
 import { utcDateTime } from "../values.ts";
-import { identifier, overwriteRow, type RowKey, sha256Hex, uuid, versionlessRow } from "./common.ts";
+import { identifier, overwriteRow, type RowKey, sha256Hex, uuid } from "./common.ts";
 
 // db-decisions の行（承認の依頼・問い・答え）。承認の依頼と答えの ndf_event_seqs は全体の設計（docs/design/data.md の「テーブル定義」）の列
 
@@ -66,9 +66,10 @@ export const answeredBy = z.strictObject({
   delegation_id: idOf("dlg").optional(),
 });
 
-// 答え（PROJECT#<プロジェクト> / APPROVAL#<依頼>#ANSWER#<答え>・QUESTION#<問い>#ANSWER#<答え>）。追記だけ。
-// claimed_generation と ndf_event_seqs は空のときに 1 回だけ書く（I5）
-export const answerRow = versionlessRow(1, {
+// 答え（PROJECT#<プロジェクト> / APPROVAL#<依頼>#ANSWER#<答え>・QUESTION#<問い>#ANSWER#<答え>）。上書き。
+// 確定した列を書き換えず、claimed_generation と ndf_event_seqs だけを空のときに 1 回書き足す（I5）。書き足しを読んだ version で照らすため、
+// issues/issue-2-design-row-writers.md の決定 2 で version を持つ
+export const answerRow = overwriteRow(1, {
   answer_id: uuid,
   project_id: idOf("prj"),
   // 依頼か問いの ID。頭で並びの鍵の APPROVAL# か QUESTION# を決める
@@ -92,7 +93,8 @@ export const answerKey = (row: AnswerRow): RowKey => ({
   sk: `${row.parent_id.startsWith("apr_") ? "APPROVAL" : "QUESTION"}#${row.parent_id}#ANSWER#${row.answer_id}`,
 });
 
-// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
-export const approvalCodec = rowCodec({ latest: { version: 1, schema: approvalRow }, writeVersion: 1, keyOf: approvalKey });
-export const questionCodec = rowCodec({ latest: { version: 1, schema: questionRow }, writeVersion: 1, keyOf: questionKey });
-export const answerCodec = rowCodec({ latest: { version: 1, schema: answerRow }, writeVersion: 1, keyOf: answerKey });
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない。
+// U3b より前の書き手が保存した行（incarnation と、U3b で足した version の無い行）を、旧形式の補い（repairIdentity）で読む
+export const approvalCodec = rowCodec({ latest: { version: 1, schema: approvalRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: approvalKey });
+export const questionCodec = rowCodec({ latest: { version: 1, schema: questionRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: questionKey });
+export const answerCodec = rowCodec({ latest: { version: 1, schema: answerRow }, writeVersion: 1, repair: repairIdentity({ version: true }), keyOf: answerKey });
