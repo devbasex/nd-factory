@@ -50,9 +50,9 @@ graph TD
 graph TD
   rd["読み手 readRow<br/>前の版を上げる・直す（repair）・狭める（narrow）"]
   w["書き手（ハンドラー・冪等の鍵・月の使った量）<br/>読んだ行から行全体を作る rowReplaceOf"]
-  rv["replaceIfVersion<br/>Put。条件は読んだ version、version を 1 上げる"]
-  m["表の移し migrateTable<br/>保存の形が読み手の見る形と違う行だけ"]
-  ru["replaceIfUnchanged<br/>Put。条件は読んだ schema_version と version、version を保つ"]
+  rv["replaceIfVersion<br/>Put。条件は読んだ version と incarnation、version を 1 上げる"]
+  m["表の移し migrateTable<br/>保存の形が読み手の見る形と違う行だけ（記録の表は書かない）"]
+  ru["replaceIfUnchanged<br/>Put。条件は保存してあった schema_version・version・incarnation、version を保つ"]
   rb["dispatch の組み直し<br/>onConflict rebuild の件だけ、3 回まで"]
   row[("行（書き換える種類はどれも version を持つ）")]
   rd --> w --> rv --> row
@@ -61,18 +61,19 @@ graph TD
   ru -. "外れ" .-> m
 ```
 
-- 行を書き換える書き込みは、どれも読んだ行を読み手（`readRow`）で今の形にし、書き換えた行全体を書き手の版で `Put` する。条件は読んだ `version` だけで、書いた行は書き手の版の形をそのまま満たす。前の版の列も、移しが足した列も、書き手の行に無ければ残らない
-- 書き換える行の種類は、どれも `version` を持つ。`version` を持たないのは、作った後に書き換えない行（追記だけの行・作ると消すだけの行・期限で消える行）だけになる
-- 表の移しは、読み手が見る形を書き手の版で書いた行が、保存してある行と違う行だけを書き直す。条件は読んだ `schema_version` と `version` で、`version` を上げないため、並んだ書き手を外さない。外れたら強い整合で読み直してやり直す
+- 行を書き換える書き込みは、どれも読んだ行を読み手（`readRow`）で今の形にし、書き換えた行全体を書き手の版で `Put` する。条件は読んだ `version` と行の世代（`incarnation`。行を作るたびに新しくする値）だけで、書いた行は書き手の版の形をそのまま満たす。前の版の列も、移しが足した列も、書き手の行に無ければ残らない
+- 書き換える行の種類は、どれも `version` と `incarnation` を持つ。`version` を持たないのは、作った後に書き換えない行（追記だけの行・作ると消すだけの行・期限で消える行）だけになる
+- 表の移しは、読み手が見る形を書き手の版で書いた行が、保存してある行と違う行だけを書き直す。条件は保存してあった `schema_version`・`version`・`incarnation` で、`version` を上げないため、並んだ書き手を外さない。外れたら強い整合で読み直してやり直す。行の種類に当たらない行は拒んだ行に数える。追記だけの操作の記録の表は書き直さない
 - 拒んだ行の直しと、前の版へ戻す前の書き換えは、行の版の読み手に足す関数（`repair`・`narrow`）として反映し、表の移しが書き直す。運用者が行を手で書き換える手順は無くなる
-- 月の使った量の加算は、読んで足した行全体を置き換える。並んだ加算に外れたときは、`dispatch` がそのハンドラーを呼び直して組み直す（`onConflict: "rebuild"`）。`writeAtomically` は組み直しを持たない
+- 月の使った量の加算と利用者の行の `login_count` の足し引きは、読んで足した行全体を置き換える。並んだ書き込みに外れたときは、`dispatch` がそのハンドラーを呼び直して組み直す（`onConflict: "rebuild"`）。`writeAtomically` は組み直しを持たない
+- 委任の最後に使った時刻は、委任の行と別の行に置く。使うたびの書き込みで委任の行の `version` を上げない
 
 ## 決定の記録
 
 ### 決定 1: 移しに先を越された書き換えが古い列を残さないよう、書き換えは読んだ行から作った行全体の置き換えにする
 
 - 質問: 通常の書き換えが前の版の行を読んだ後に表の移しが確定すると、書き換えの `remove` に移しが足した列が載らない（r3-1）。書き換えをどう組めば、どちらが先に確定しても行が書き手の版の形を満たすか
-- 選んだ案: 書き換えは、読んだ行を `readRow` で今の形にし、書き換えた行を `rowReplaceOf`（`rowUpdateOf` を置き換える）で書き手の版の行全体にし、`replaceIfVersion` で `Put` する。条件は読んだ `version`（と操作ごとの `extra`）で、`version` を 1 上げる。`updateIfVersion` と `rowUpdateOf` の `set`・`remove` は無くす。行の列を一部だけ書き換える書き込みは作らない
+- 選んだ案: 書き換えは、読んだ行を `readRow` で今の形にし、書き換えた行を `rowReplaceOf`（`rowUpdateOf` を置き換える）で書き手の版の行全体にし、`replaceIfVersion` で `Put` する。条件は読んだ `version` と `incarnation`（決定 8。と操作ごとの `extra`）で、`version` を 1 上げる。`updateIfVersion` と `rowUpdateOf` の `set`・`remove` は無くす。行の列を一部だけ書き換える書き込みは作らない（例外を持たない。数の足し引きは決定 6 の組み直し、委任の最後に使った時刻は決定 10 の別の行で扱う）
 - 採らなかった案:
   - 通常の書き換えにも読んだ `schema_version` を条件に足し、外れたら読み直して `set` と `remove` を組み直す（r3-1 の示した案）。移しが確定するたびに並んだ書き手が外れ、組み直しの回数と終わり（r5-4）・ほかの取り消しの理由との優先（r6-2）を決め続けることになる。読んだ行の列から `remove` を作る限り、行に何が残るかは読んだ時と書いた時の差に左右される
   - 表の移しでも `version` を上げ、書き手の `version` の条件で外す。人が画面で読んだ版を持って送る書き換えが、裏の移しのために 409 `version_mismatch` になる
@@ -93,11 +94,12 @@ graph TD
 ### 決定 3: 移しが書き手と並んでも取りこぼさないよう、移しは保存の形が読み手の見る形と違う行を書き直し、外れたら読み直す
 
 - 質問: 表の移しは、どの行を書き直し、何を条件にし、条件が外れたらどうするか。今の決まりは `schema_version` が前の版の行だけを書き、外れたら飛ばすため、移しが読んだ後に直された行は前の版のまま `skipped` になり、`migrate_done` の `refused = 0` を満たしうる（r5-6）
-- 選んだ案: `migrateTable` は行ごとに、読み手（`readRow`）が見る形を `rowReplaceOf` で書き手の版の行全体にし、保存してある行と列の中身まで比べる。同じなら書かない。違えば `replaceIfUnchanged`（読んだ `schema_version` と、行が持てば読んだ `version` を条件にし、`version` を保つ `Put`）で書く。外れたら強い整合でその行を読み直し、消えていれば飛ばし、あればもう一度同じ手順を通す。1 行につき `MIGRATE_ROW_ATTEMPTS`（3 回）の書き込みで確定しなければ、理由の符号 `contended` で拒んだ行に数える。行の種類の `writeVersion` が `latest.version` でないとき（1 段目と、書き手を戻した状態）は、その種類の行を書かない
+- 選んだ案: `migrateTable` は行ごとに、読み手（`readRow`）が見る形を `rowReplaceOf` で書き手の版の行全体にし、保存してある行と列の中身まで比べる。同じなら書かない。違えば `replaceIfUnchanged`（`version` を保つ `Put`）で書く。条件に使う値と書く値は分ける。条件は保存してあった行の `schema_version`・`version`・`incarnation` の値そのもの（列が無ければ「無いこと」、行の形を外れた値でもその値との一致）で、書く行の `version` と `incarnation` は読み手が見る形（`repair` で直した値）にする。外れたら強い整合でその行を読み直し、消えていれば飛ばし、あればもう一度同じ手順を通す。1 行につき `MIGRATE_ROW_ATTEMPTS`（3 回）の書き込みで確定しなければ、理由の符号 `contended` で拒んだ行に数える。行の種類の `writeVersion` が `latest.version` でないとき（1 段目と、書き手を戻した状態）は、その種類の行を書かない。どの行の種類の `skPattern` にも当たらない行は、書かずに理由の符号 `row_kind_unknown` で拒んだ行に数える（飛ばした行を数えないと、実データを飛ばした走査でも `refused = 0` になる）。行の種類ごとに、`keyOf` が組む鍵が自分の `skPattern` に当たることをテストで縛る
 - 採らなかった案:
   - 直しの前に移しと非同期の起こし直しを止め、走っている移しの終わりを待ってから直す（r5-6 の示した案）。決定 4 で直しは手で書かず移しが書くため、止める相手が無い。並んだ書き手との外れは読み直しで取りこぼさない
   - 外れた行を飛ばしたままにし、`skipped` も 0 になるまで全走査を繰り返す。書き手が多い表では `skipped` が 0 にならず、終わりを決められない
-- 代償: 行ごとに書き手の行全体を作って比べる計算が増える（行の数に比例する。書かない行の書き込みの費用は掛からない）
+  - 条件にも書く値にも、読み手が見る形（`repair` の後）の `version` を使う。`repair` が欠けた `version` を補った行や誤った `version` を直した行では、条件が保存の値と合わずに外れ続け、直せない
+- 代償: 行ごとに書き手の行全体を作って比べる計算が増える（行の数に比例する。書かない行の書き込みの費用は掛からない）。`repair` で `version` を直した行は、移しが書き直すまで通常の書き手の条件が外れる（2c の反映の後すぐに 2d で移しを起こす）
 - 根拠: 「書き直すか」を版の数でなく読み手が見る形との違いで決めるため、版上げ・直し・狭めを 1 つの手順で扱え、`refused = 0` の全走査が「どの行も読み手の見る形で保存されている」ことを表す。Value 13・Value 14（MVV バージョン 2）
 
 ### 決定 4: 拒んだ行の直しと前の版へ戻す前の書き換えをレビューとテストに通すため、手で書かずに読み手の関数として反映し、移しで書き直す
@@ -106,7 +108,8 @@ graph TD
 - 選んだ案: 行を手で書き換える手順を無くす。直しは次のどちらかの反映で出し、反映の後に移しを最初から起こし直す
   - 前の版の決まりとして正しい値を `previous.schema`・`upgrade`・`downgrade` が表せないときは、それらを直す
   - 値そのものが誤った行（前の書き手の誤りで形を外れた値）は、`rowCodec` に足す `repair`（保存の形を通らない行を、通る行へ直す関数）で直す。`readRow` は行がその版の形を通らないときだけ `repair` を通し、直した行を読む
-  - 4b は、`rowCodec` に足す `narrow`（次の版だけの値を前の版で表せる値へ狭める関数）を、その値を作る機能を止める反映と一緒に `downgradable: true` のまま出す。`readRow` は今の形にした後に `narrow` を通す。読み手がどれも狭めた値を見るため、書き手も狭めた値から書き、移しが狭めた行へ書き直す
+  - 4b は、`rowCodec` に足す `narrow`（次の版だけの値を前の版で表せる値へ狭める関数）を、その値を作る機能を止める反映と一緒に `downgradable: true` のまま出す。`readRow` は今の形にした後に `narrow` を通す。読み手がどれも狭めた値を見るため、書き手も狭めた値から書き、移しが狭めた行へ書き直す。`narrow` は `writeVersion` が前の版の組でも許す（4c の後に 3b で `writeVersion` だけを戻すため）
+  - `repair` と `narrow` の反映（2c と 4a）の前に、3a と同じに移しの Lambda を止めて走っている移しの終わりを待つ。移しの置き換えは `version` を保つため、直す前のコードの移しが読んだ行の変換の結果は、直した後の移しの置き換えと同じ条件を通り、直した値を上書きしうるためである。反映で止めを解き、移しは反映の後に最初から起こす
   - 理由の符号ごとの直しの表は [詳細設計の版を上げる子の手順](./issue-2-design-detail.md#版を上げる子の手順) に置く（`row_invalid` と `downgrade_invalid` を含む）
 - 採らなかった案:
   - 2c で前の版の形のまま直す書き換えと、検証した次の版へ直に書く書き換えを、`updateIfSchemaVersion` に状態の条件の引数を足して運用者が書く（r4-3・r5-5・r5-8 の示した案）。手で書く値はレビューとテストを通らず、条件の付け忘れを書き込みが見つけない。決定 2 で状態の条件は `version` に含まれ、引数が要らない
@@ -117,7 +120,7 @@ graph TD
 ### 決定 5: 月の使った量の加算が版の違う行でも誤らないよう、読んで足した行全体を置き換える
 
 - 質問: 月の使った量の加算は、行の作成と並んだ加算の原子性を保ちつつ、前の版の行・次の版の行・ほかの版の書き手が書いた行へどう足すか（r4-2・r5-1・r5-2・r5-3・r6-1・r7-1）
-- 選んだ案: 加算は読んで足す形にする。ハンドラーは月の使った量の行を強い整合で読み（無ければ無い）、`readRow` で今の形にし、通貨が違えば今のとおり要素の 409 `state_mismatch` を返し、同じなら `used_amount_minor` に費用を足した行全体を `usageAddItem` で組む。行が無ければ `putIfAbsent`、あれば `replaceIfVersion` で、どちらも `onConflict: "rebuild"` を付ける。並んだ加算に外れたら、決定 6 の組み直しで読み直して足し直す。費用の記録の行は今のとおり区間の ID を鍵にした `putIfAbsent` で同じトランザクションに入れ、同じ区間の 2 回目は足さない。使える量の判定は、組んだ行の加算の後の値で行う（確定した値と同じ）
+- 選んだ案: 加算は読んで足す形にする。ハンドラーは月の使った量の行を強い整合で読み（無ければ無い）、`readRow` で今の形にし、通貨が違えば今のとおり要素の 409 `state_mismatch` を返し、同じなら `used_amount_minor` に費用を足した行全体を `usageAddItem` で組む。行が無ければ `putIfAbsent`、あれば `replaceIfVersion` で、どちらも `onConflict: "rebuild"` を付ける。並んだ加算に外れたら、決定 6 の組み直しで読み直して足し直す。費用の記録の行は今のとおり `putIfAbsent` で同じトランザクションに入れ、同じ区間の 2 回目は足さない。行の鍵は `COST#<時刻>#<区間の ID>` で、時刻は区間の終わりの事象の時刻（ランナーが区間ごとに 1 回決めて送り、送り直しでも変えない。[詳細設計の費用の記録の鍵の時刻](./issue-2-design-detail.md#決めた書き方)）にする。ハンドラーは要求を受けた時刻や組み直しの時刻をこの鍵に使わない（使うと同じ区間の送り直しと組み直しが別の行として通り、月の使った量に 2 回足す）。使える量の判定は、組んだ行の加算の後の値で行う（確定した値と同じ）
 - 採らなかった案:
   - 読まずに足す更新を保ち、条件を「行が無い、または書き手の版で通貨が同じ」にし、外れたら読んで変換してから足す（戻した直しの案）。作成の式に載せる列と除く列（r5-2）、版ごとの列の名前と単位（r5-3）、両版の書き手が並ぶ間の版の往復（r6-1）、金額に従う列の古さ（r7-1）を、どれも加算の式の側で決め続けることになる
 - 代償: 加算の前に強い整合の読みが 1 回増える。同じチームのレーンが同時に費用を書くと外れて組み直す（区間ごとの書き込みで、外れは並んだ加算が確定したときだけ起こる）
@@ -126,7 +129,8 @@ graph TD
 ### 決定 6: 組み直しの終わりと誤りの優先を 1 か所で決めるため、組み直しは `writeAtomically` に置かず、`dispatch` が `rebuild` の件だけを 3 回まで行う
 
 - 質問: 条件が外れた件の組み直しをどこで行い、いつ終え、ほかの取り消しの理由とどちらを先にするか（r5-4・r6-2）
-- 選んだ案: `writeAtomically` は今のとおり 1 回の確定で、表が断った理由（`ValidationError` など）があれば元の例外を投げ、無くて条件の外れがあれば `{ ok: false; failed }` を返す。`ConflictRule` に `rebuild`（外れたら読み直して組み直す）を足す。`dispatch` は、確定が `ok: false` で、外れた件がどれも `rebuild` の件（要求元の照らし・記録の行・冪等の鍵の済みの行が外れていない）のときだけ、その件を返したハンドラーを、借りた冪等の鍵をそのままに呼び直し（ハンドラーは行を読み直す）、組み直したトランザクションを確定し直す。1 つのトランザクションの組み直しは `DISPATCH_REBUILD_LIMIT`（3 回）までで、各回の前に残り時間を照らす。使い切ったら要求全体の 503 `unavailable` にする（呼び手は同じ冪等の鍵で送り直せる）。`rebuild` を付けるのは、サーバーが読んだ行から作る書き換え（月の使った量の加算）だけで、利用者が読んだ版を持って送る書き換えは今のとおり 409 `version_mismatch` にする
+- 選んだ案: `writeAtomically` は今のとおり 1 回の確定で、表が断った理由（`ValidationError` など）があれば元の例外を投げ、無くて条件の外れがあれば `{ ok: false; failed }` を返す。`ConflictRule` に `rebuild`（外れたら読み直して組み直す）を足す。`dispatch` は、確定が `ok: false` で、外れた件がどれも `rebuild` の件（要求元の照らし・記録の行・冪等の鍵の済みの行が外れていない）のときだけ、その件を返したハンドラーを、借りた冪等の鍵をそのままに呼び直し（ハンドラーは行を読み直す）、組み直したトランザクションを確定し直す。1 つのトランザクションの組み直しは `DISPATCH_REBUILD_LIMIT`（3 回）までで、各回の前に残り時間を照らす。使い切ったら要求全体の 503 `unavailable` にする（呼び手は同じ冪等の鍵で送り直せる）。`rebuild` を付けるのは、サーバーが読んだ行から作る書き換え（月の使った量の加算と、利用者の行の `login_count` の足し引き）だけで、利用者が読んだ版を持って送る書き換えは今のとおり 409 `version_mismatch` にする
+  - `logins.delete` と `logins.create` の利用者の行は、読んだ利用者の行の `login_count` を足し引きした行全体を `replaceIfVersion`（`onConflict: "rebuild"`）で書く。別のタブの呼び名の変更や、別のログインを外す並んだ要求に外れたら、`dispatch` がハンドラーを呼び直す。ハンドラーは行を読み直し、「最後のログイン」の判別（`login_count` が 2 未満なら書き込みを返さずに最後のログインの 409）を読み直した `login_count` で行う。`logins.delete` の呼び直しでは Cognito の利用者が先の呼び出しで消えているため、`AdminGetUser` が利用者を返さず、サインアウトと消しを打たずに確定へ進む（[データの文書のログインを外す](../docs/design/data.md#cognito-の主体の対応の行) の手順のとおり）。組み直しを使い切った 503 は、確定のトランザクションが外れたときと同じく、Cognito の利用者が消えてログインが残り、付け替えで戻る
 - 採らなかった案:
   - `writeAtomically` が外れた件を位置ごとに組み直す（戻した直しの案）。組み直しに要る読みと変換を条件つきの書き込みの部品が持つことになり、件ごとの枠と全体の上限（r5-4）・取り消しの理由の優先（r6-2）をその部品の中で決め続けることになる
   - 件ごとに組み直しの枠を持つ（r5-4 の示した案）。決定 1 で移しは書き手を外さないため、移しが行を順に移すことで外れが続く場面が無い。外れは並んだ書き手の確定のときだけで、要求ごとの上限で足りる
@@ -138,13 +142,42 @@ graph TD
 - 質問: 冪等の鍵の借りの取り直し・確定・手放しを、行の版の書き手の決まりにどう載せるか（r4-1）。期限を過ぎた借りを中身の違う要求で取り直してよいか（#110 の r3-2・r4-2・r4-3）
 - 選んだ案:
   - 冪等の鍵の行は決定 2 で `version` を持つ。`claimIdempotency` は借りの行を `putIfAbsent`（`version` 1）で書き、`fresh` のときに書いた行を返す。行があれば強い整合で読み、`readRow` で今の形にして照らす。取り直し（24 時間を過ぎた行・借りの期限を過ぎた同じ中身の行）は、新しい借りの行全体を `replaceIfVersion`（読んだ `version` が条件）で書き、書いた行を返す
-  - `settleIdempotency` は、`claimIdempotency` が返した借りの行から、状態を済みにし要素の結果を足した行全体を `replaceIfVersion`（借りの行の `version` が条件）で組む。持ち主・状態・指紋の条件は、取り直されれば `version` が変わるため `version` の条件に含まれる
-  - 全部か無かで確定しなかったときの手放しは、借りの行の `version` を条件にした `deleteIfVersion` で消す
+  - `settleIdempotency` は、`claimIdempotency` が返した借りの行から、状態を済みにし要素の結果を足した行全体を `replaceIfVersion`（借りの行の `version` と `incarnation` が条件。決定 8）で組む。持ち主・状態・指紋の条件は、取り直されれば `version` が変わるため `version` の条件に含まれる
+  - 全部か無かで確定しなかったときの手放しは、借りの行の `version` と `incarnation` を条件にした `deleteIfVersion` で消す。確定も同じ 2 つを条件にする（手放した後や表の期限で消えた後に、別の要求が同じ鍵で `version` 1 の借りを作り直しても、`incarnation` が違うため前の借りの確定と手放しが新しい借りを書き換えない）
   - 中身の違う送り直しは、借りの状態と期限によらず 422 `idempotency_key_reused` にする。今の API の文書と実装のとおりで、詳細設計にも、指紋の照らしを借りの期限の照らしより先に行うことを書く
 - 採らなかった案:
   - 期限を過ぎた未確定の借りを、中身によらず取り直す（#110 で戻した直しの案）。外へ働きかけ始めた借りを別の中身で上書きしうる（#110 の r4-3）。働きかけ始めたかを行に持たせて分ける案は、同期に外へ働きかける操作の確定の順（#94）を決める前に行の形を決めることになる
 - 代償: 後始末が時間内に終わらずに残った借りへ、直した中身を同じ鍵で送ると、24 時間 422 になる（呼び手は新しい鍵を作る）。これをどう和らげるかは #113 が扱う
 - 根拠: 鍵は 1 つの中身に結ぶ（外部の調査の S4・P1）。行の書き換えは決定 1・2 と同じ規則で、冪等の鍵だけの例外を持たない。Value 4・Value 17（MVV バージョン 2）
+
+### 決定 8: 消して同じ鍵で作り直した行を取り違えないよう、書き換える行は行の世代 `incarnation` を持ち、書き換え・消し・移しの条件にする
+
+- 質問: `schema_version` と `version` は、行を消して同じ鍵で作り直すと最初の値に戻る。冪等の鍵（手放しと表の期限で消えた後に同じ鍵で借り直す）・ログインの組と IdP の主体の一意の行（外して結び直す）では、移しや前の借りの確定が読んだ後に行が作り直されると、条件が通って新しい行を古い中身で上書きしうる（PR #122 の r1-2）。どう見分けるか
+- 選んだ案: `version` を持つ行は、どれも `incarnation`（行を作るときに書き手が作る UUID v4。置き換えと移しで変えない）を持つ。`putIfAbsent` が新しい値を入れ、`replaceIfVersion` と `deleteIfVersion` は読んだ `version` と `incarnation` の両方を条件にし、`replaceIfUnchanged` は保存してあった `incarnation` も条件にする。`version` を持たない行（作った後に書き換えない行）は、消した後に同じ鍵で作り直さない鍵の形にする（Cognito の主体の対応の行は `sub` を使い捨てにする。セッションの取り消しの行は `origin_jti`、追記だけの行は連番か ID を鍵に持つ）
+- 採らなかった案:
+  - `version` を作り直しで 1 に戻さず、消すときに墓の行を残して続きの値から作る。消した行が残り続け、表の期限で消える冪等の鍵では墓も消える
+  - 移しの条件に行のすべての列の一致を足す。冪等の鍵の行の要素の結果は大きく、条件の式の上限を超えうる（決定 2 と同じ）
+- 代償: 書き換える行に列が 1 つ増える。`repair` が `incarnation` を補うときは、同じ行で読むたびに同じ値になるよう鍵から決まる値にする
+- 根拠: 条件が「読んだ時と同じ行の、同じ版」を表し、作り直しの間の長さによらず取り違えない。Value 13・Value 17（MVV バージョン 2）
+
+### 決定 9: 操作の記録の追記だけの約束を崩さないよう、表の移しは記録の表の行を書き直さない
+
+- 質問: 表の移しは行を `Put` で置き換えるが、`writeAtomically` は記録の表（`db-audit`）への追記でない書き込みを `AuditAppendOnlyError` で拒み、移しの走査が途中で止まる（PR #122 の r1-1）。記録の行の版上げと直しを移しの対象にするか
+- 選んだ案: 対象にしない。`migrateTable` は記録の表を走査しても書かず、保存の形が読み手の見る形と違う行は理由の符号 `append_only` で拒んだ行に数える。記録の行の種類の版上げは、手順の 4（`downgradable: false`）と次の版上げの手順の 1 へ進む前に、前の版の行が表の期限（`AUDIT_RETENTION_DAYS`）で消えて `append_only` が 0 になるのを待つ。記録の行の直しは `repair` で読み手にだけ効かせ、保存の値は変えない（元の値を記録として残す）
+- 採らなかった案:
+  - 移しだけが使う記録の表への置き換えの経路を足す。通常の書き手の追記だけの検査を保っても、記録の行を書き換える権限と経路が残り、記録が後から変わらないこと（I9）を権限と部品の両方で守れなくなる
+- 代償: 記録の行の形を変える版上げは、`AUDIT_RETENTION_DAYS` 日より早く次の段へ進めない。記録の行の形は `dispatch` だけが作るため、形を変える頻度は低い
+- 根拠: 記録は書いた時の値のまま残す。Value 9・Value 13（MVV バージョン 2）
+
+### 決定 10: 委任を使うたびに取り消しが外れないよう、委任の最後に使った時刻を別の行に置く
+
+- 質問: `authenticate` は委任の最後に使った時刻を「今の値が 1 時間より前」を条件にした列の更新で書く（PR #122 の r1-8・r1-13）。決定 1 で列の一部だけの書き換えを作らないため、委任の行全体を `replaceIfVersion` で置き換えると、使うたびに委任の行の `version` が上がり、一覧で読んだ版を持って送る `delegations.revoke` が、使われている委任ほど 409 `version_mismatch` になる。漏れた token の取り消しが通りにくい
+- 選んだ案: 最後に使った時刻を、委任の行（`DELEGATION#<委任>`）と別の行「委任の使った時刻」（`db-users` / `USER#<利用者>` / `DELEGATION_USED#<委任>`。`delegation_id`・`user_id`・`last_used_at`・`version`・`incarnation`）に置き、委任の行から `last_used_at` を外す。`authenticate` は委任の行と同じ読みでこの行も強い整合で読み、行が無ければ `putIfAbsent`、`last_used_at` が `DELEGATION_TOUCH_MS` より前なら読んだ `version` と `incarnation` を条件に行全体を `replaceIfVersion` で置き換える（`writeAtomically` で 1 件）。外れても操作は続け、`warn` を出す。`delegations.list` は 2 つの行を合わせて返す
+- 採らなかった案:
+  - 委任の行全体を使うたびに置き換える。上の取り消しの 409 が起きる
+  - `version` を上げず版を条件にしない列の更新を、決定 1 の例外として残す。移しと並ぶと、移しが前に読んだ時刻で置き換えて時刻を戻し、列の名前を変える版上げでは前の版の列だけを書き足し、移しとの順の議論がまた要る
+- 代償: 委任の主体の要求ごとに強い整合の読みが 1 回増える（委任の行と並べて読む）。行の種類が 1 つ増える
+- 根拠: 取り消しの通りやすさを使う頻度に左右させない（漏れた token の害を抑える）。どの書き込みも決定 1 の規則のままで例外を持たない。Value 9・Value 17（MVV バージョン 2）
 
 ## 指摘ごとの決定
 
@@ -170,6 +203,17 @@ graph TD
 | #110 r3-2（後始末の間に合わない借りが 24 時間 422） | 採らない（#113 へ） | 決定 7 | 行の版の書き手の決まりでなく、確定しなかった借りの扱いの課題で、#113 が同じ事象を扱う。この設計は中身の違いを 422 にする今の契約を変えない |
 | #110 r4-2（API と詳細設計の 422 の条件を揃える） | 採る | 決定 7 | API の文書のとおり、借りの状態と期限によらず中身の違いは 422。詳細設計にも照らしの順を書く |
 | #110 r4-3（外へ働きかけ始めた借りを別の中身で取り直す） | 採らない（#94 へ） | 決定 7 | 中身の違う取り直しを許さないため、この設計の下では起きない。働きかけ始めた借りを同じ中身で再開するときの扱いは #94 が扱う |
+| #122 r1-1（移しが記録の表へ `Put` して止まる） | 採る（対象にしない形で） | 決定 9 | 記録の表は書き直さず `append_only` で数える。移し専用の書き込みの経路は作らない |
+| #122 r1-2（作り直した行を `schema_version` と `version` で見分けられない） | 採る | 決定 8 | 行の世代 `incarnation` を書き換え・消し・移し・冪等の鍵の確定と手放しの条件に足す |
+| #122 r1-3（`repair` で直した `version` を移しが書き戻せない） | 採る | 決定 3 | 条件は保存してあった値、書く値は読み手の見る形の値に分ける |
+| #122 r1-4（直す前のコードの移しが直した値を上書きする） | 採る（排出する形で） | 決定 4 | 2c と 4a の反映の前に 3a と同じに移しを止めて待つ |
+| #122 r1-5（3b で `narrow` が残り `rowCodec` が起動で投げる） | 採る | 決定 4 | `narrow` を `writeVersion` が前の版の組でも許し、4a から 3b への戻しをテストする |
+| #122 r1-6（行の種類に当たらない行を数えず `refused = 0` になる） | 採る | 決定 3 | `row_kind_unknown` で拒んだ行に数え、`keyOf` と `skPattern` の一致をテストで縛る |
+| #122 r1-7・r1-12（`login_count` の引き算が版の条件で外れ、最後のログインと取り違える） | 採る（組み直しの形で） | 決定 6 | `replaceIfVersion` に `rebuild` を付け、読み直した `login_count` で最後のログインを判別する |
+| #122 r1-8・r1-13（委任の最後に使った時刻の更新が規則に無い） | 採る（別の行の形で） | 決定 10 | 委任の使った時刻の行を分け、`replaceIfVersion` で書く。委任の行の `version` を上げない |
+| #122 r1-9（U3b が後の U5b2 の `rowReplaceOf` を使う） | 採る | — | `rowReplaceOf` の導入と今の呼び手の切り替えを U3b に移す（[既にマージした実装への影響と直す単位](#既にマージした実装への影響と直す単位)） |
+| #122 r1-10（費用の記録の鍵の時刻が送り直しで変わりうる） | 採る | 決定 5 | 鍵の時刻を区間の終わりの事象の時刻に限り、受けた時刻と組み直しの時刻を使わない |
+| #122 r1-14（知らせの行が `updateIfVersion` を指す） | 採る | 決定 1 | `replaceIfVersion` で行全体を組む書き方に直す |
 
 ## 影響と危険
 
@@ -180,16 +224,18 @@ graph TD
 
 | 実装 | 直す中身 | 直す単位 |
 | --- | --- | --- |
-| #79 の `row-codec.ts`（`rowUpdateOf`） | `rowUpdateOf` を `rowReplaceOf`（行全体を返す）に置き換え、`rowCodec` に `repair` と `narrow` を足し、`readRow` がそれを通す | U5b2（使うのは表の移しと版を上げる子の手順だけで、今の呼び手はテストだけ） |
+| #79 の `row-codec.ts`（`rowUpdateOf`） | `rowUpdateOf` を `rowReplaceOf`（行全体を返す）に置き換え、今の呼び手（テスト）を切り替える | 新しく足す単位 U3b（行の書き手の直し。U3b の書き手が `replaceIfVersion` へ `rowReplaceOf` の戻り値を渡すため、U3b の中で先に入れる） |
+| #79 の `row-codec.ts`（`rowCodec`・`readRow`） | `rowCodec` に `repair` と `narrow` を足し、`readRow` がそれを通す。`rowReplaceOf` の `repair` の扱い | U5b2（使うのは表の移しと版を上げる子の手順だけ） |
 | U3 の `conditional-write.ts`（`updateIfSchemaVersion`） | `replaceIfUnchanged` に置き換える | U5b2 |
-| U3 の `conditional-write.ts`（`updateIfVersion`・`ConflictRule`） | `updateIfVersion` を `replaceIfVersion` に置き換え、`deleteIfVersion` と `ConflictRule` の `rebuild` を足す。`writeAtomically` は変えない | 新しく足す単位 U3b（行の書き手の直し） |
-| U5a の行の形（ログインの組・IdP の主体の一意の行・ログインをつなぐ流れの行・冪等の鍵・答え） | 基の形を `overwriteRow` にし、`version` を持たせる。生成物を作り直す | U3b |
+| U3 の `conditional-write.ts`（`putIfAbsent`・`updateIfVersion`・`ConflictRule`） | `putIfAbsent` が `incarnation` を入れ、`updateIfVersion` を `replaceIfVersion` に置き換え、`deleteIfVersion` と `ConflictRule` の `rebuild` を足す。`writeAtomically` は変えない | U3b |
+| U5a の行の形（ログインの組・IdP の主体の一意の行・ログインをつなぐ流れの行・冪等の鍵・答え・`version` を持つ行の全部・委任） | 基の形を `overwriteRow` にし、`version` と `incarnation` を持たせる。委任の行から `last_used_at` を外し、委任の使った時刻の行を足す。生成物を作り直す | U3b |
 | U3 の `idempotency.ts` | `claimIdempotency` が借りの行を返し、取り直しと `settleIdempotency` を `replaceIfVersion` で組む | U3b |
 | U3 の `usage-limit.ts`（`usageAddItem`） | 読んだ行を受けて足した行全体を組む署名にする | U3b |
+| U4 の `auth/authenticate.ts`（`touchDelegation`） | 委任の使った時刻の行を読み、`putIfAbsent` か `replaceIfVersion` で書く | U3b |
 | #110 の `dispatch` | `settleIdempotency` に借りの行を渡し、手放しを `deleteIfVersion` にし、`rebuild` の組み直しを足す | U3b |
 | #118 の `api-fn`・`user-store` | 変えない（`ensureUser` は `putIfAbsent` と `writeAtomically` だけを使う） | — |
 
-U3b は U5b2 の前に作る。U5b2 のテスト（移しと書き手が並ぶ場面）が `replaceIfVersion` を使うためである。U3b は書き手の部品とその呼び手だけを直し、ハンドラーは作らない。実装計画（[issue-2-plan.md](./issue-2-plan.md)）へ U3b を足すのは、この設計の承認の後の計画の工程で行う。
+U3b は U5b2 の前に作る。U5b2 のテスト（移しと書き手が並ぶ場面）が `replaceIfVersion` と `rowReplaceOf` を使うためである。U3b は U5b2 に依らずに作れる（`rowReplaceOf` を U3b が入れ、`repair` と `narrow` は U5b2 が足す）。U3b は書き手の部品とその呼び手だけを直し、ハンドラーは作らない。実装計画（[issue-2-plan.md](./issue-2-plan.md)）へ U3b を足すのは、この設計の承認の後の計画の工程で行う。
 
 ### 範囲の外との境
 
@@ -233,6 +279,12 @@ U3b は U5b2 の前に作る。U5b2 のテスト（移しと書き手が並ぶ�
 | 月の使った量の加算が、前の版の行・次の版の行・行の無い月のどれにも足せ、2 段目の重なる間に前の版と次の版の書き手が交互に足しても失敗せず、足した後の行が `upgrade(downgrade(行))` で戻る | 加算を読まずに足す式に戻す・金額に従う列を作り直さない |
 | `dispatch` は `rebuild` の件だけが外れたときにハンドラーを呼び直し、3 回で 503 にする。`ValidationError` と条件の外れが並ぶと組み直さずに元の例外になる | 断った理由より先に組み直す・`version_mismatch` の件も組み直す |
 | 冪等の鍵の確定は、取り直された後に外れ、移しの後には通る。中身の違う送り直しは借りの期限の後も 422 | 持ち主の条件だけで確定する・期限の後に中身の違いで取り直す |
+| 手放した借りを別の要求が同じ鍵で `version` 1 から借り直すと、前の借りの確定・手放しと、前の行を読んだ移しが外れる | `incarnation` を条件から落とす |
+| 移しは `repair` で `version` を補った行（列が無い）と直した行（形を外れた値）を、保存の値を条件にして直した値で書く | 条件に直した値を使う・書く値に保存の値を使う |
+| 移しは記録の表を書かず `append_only` で数え、走査を最後まで続ける。どの行の種類にも当たらない行は `row_kind_unknown` で数える。どの行の種類も `keyOf` の鍵が自分の `skPattern` に当たる（主体に改行や `#` を含む値でも） | 記録の表へ `Put` する・当たらない行を数えずに飛ばす |
+| 4a の `rowCodec`（`narrow` あり）から `writeVersion` だけを前の版へ戻した組が読み込みで投げず、読み手は狭めた値を見る | `narrow` に `writeVersion` が次の版であることを求める |
+| `logins.delete` は、呼び名の変更で利用者の行の版が進んだ後でも組み直して確定し、別々のログインを外す並んだ 2 つの要求の後の方は読み直した `login_count` で最後のログインの 409 になる | 利用者の行の外れを組み直さずに最後のログインの 409 にする・読んだ版を条件にしない |
+| 委任を使っても委任の行の `version` は変わらず、使った時刻の行が 1 時間ごとに書き換わる | 委任の行を置き換える・列の更新で書く |
 
 細かい観点は [詳細設計の表の移し](./issue-2-design-detail.md#表の移し) の単体テストの観点 にある。
 
@@ -243,15 +295,15 @@ U3b は U5b2 の前に作る。U5b2 のテスト（移しと書き手が並ぶ�
 | 文書 | 変える所 |
 | --- | --- |
 | `issues/issue-2-design-detail.md` | 表の移しの関数の仕様・版を上げる子の手順・並行と排他・単体テストの観点。横断の部品の `updateIfVersion` の行。サービスの表の月の使った量と冪等の鍵の行 |
-| `docs/design/detail.md` | `claimIdempotency`・`settleIdempotency`・`updateIfVersion`・`usageAddItem` の仕様と並行の表と単体テストの観点 |
-| `docs/design/data.md` | 共通の列の `version` を持つ行の決まり |
+| `docs/design/detail.md` | `claimIdempotency`・`settleIdempotency`・`updateIfVersion`・`usageAddItem` の仕様と並行の表と単体テストの観点。委任の最後に使った時刻の書き方 |
+| `docs/design/data.md` | 共通の列の `version` と `incarnation` を持つ行の決まり。`logins.create` と `logins.delete` の利用者の行の書き方 |
 
 ## 設計の結果
 
 - 触るファイル（この PR）: `issues/issue-2-design-row-writers.md`（新設）・`issues/issue-2-design-detail.md`・`docs/design/detail.md`・`docs/design/data.md`
-- 触るファイル（実装の単位）: U3b は `packages/core/src/conditional-write.ts`・`idempotency.ts`・`usage-limit.ts`・`dispatch/dispatch.ts`・`dispatch/types.ts`・`packages/contracts/src/rows/{users,idempotency,decisions}.ts` とそのテスト。U5b2 は `packages/contracts/src/row-codec.ts`・`apps/api/src/entries/migrate.ts`・`packages/core/src/conditional-write.ts`（`replaceIfUnchanged`）とそのテスト
-- 増える仕組み: `ConflictRule` の `rebuild` と `dispatch` の組み直し（決定 5 の加算に要る）、`rowCodec` の `repair` と `narrow`（決定 4 の直しに要る）、`deleteIfVersion`（決定 2 の消しに要る）
-- 減る仕組み: `updateIfVersion` の `set`・`remove`、`updateIfSchemaVersion`、`rowUpdateOf` の `remove`、`version` を持たない書き換えの運用の順、2c と 4b の手で書く書き換え、加算の読まずに足す式
+- 触るファイル（実装の単位）: U3b は `packages/contracts/src/row-codec.ts`（`rowReplaceOf`）・`packages/core/src/conditional-write.ts`・`idempotency.ts`・`usage-limit.ts`・`auth/authenticate.ts`・`dispatch/dispatch.ts`・`dispatch/types.ts`・`packages/contracts/src/rows/` の行の形とそのテスト。U5b2 は `packages/contracts/src/row-codec.ts`（`repair`・`narrow`）・`apps/api/src/entries/migrate.ts`・`packages/core/src/conditional-write.ts`（`replaceIfUnchanged`）とそのテスト
+- 増える仕組み: `ConflictRule` の `rebuild` と `dispatch` の組み直し（決定 5 の加算と決定 6 の `login_count` に要る）、`rowCodec` の `repair` と `narrow`（決定 4 の直しに要る）、`deleteIfVersion`（決定 2 の消しに要る）、行の世代 `incarnation`（決定 8）、委任の使った時刻の行（決定 10）
+- 減る仕組み: `updateIfVersion` の `set`・`remove`、`updateIfSchemaVersion`、`rowUpdateOf` の `remove`、`version` を持たない書き換えの運用の順、2c と 4b の手で書く書き換え、加算の読まずに足す式、委任の最後に使った時刻の列の更新
 
 ## 未確認のまま残ること
 
