@@ -1,5 +1,7 @@
 import { RETRY_POLICIES } from "@nd-factory/contracts/data";
+import { writeRow, type RowCodec, type Stored } from "@nd-factory/contracts/row-codec";
 import pRetry from "p-retry";
+import { v4 } from "uuid";
 import type { Db, Row, RowKey, TableName } from "./db.ts";
 import type { Logger } from "./log.ts";
 import { classifyFailure, isRetryableCancellation } from "./retry.ts";
@@ -11,8 +13,10 @@ import { classifyFailure, isRetryableCancellation } from "./retry.ts";
 // DynamoDB の 1 つのトランザクションの件の上限（TransactWriteItems の仕様の値。AWS の DynamoDB の API の文書の TransactItems の上限）
 export const TRANSACT_MAX_ITEMS = 100;
 
-// 外れたときの扱い。呼び手が要素の 409 version_mismatch・state_mismatch か、前の 1 件の結果にする
-export type ConflictRule = "version_mismatch" | "state_mismatch" | "return_existing" | "fail";
+// 外れたときの扱い。呼び手が要素の 409 version_mismatch・state_mismatch か、前の 1 件の結果にする。
+// rebuild は、サーバーが読んだ行から作る書き換え（月の使った量の加算・利用者の行の login_count の足し引き）が外れたとき、
+// dispatch がハンドラーを呼び直して組み直す扱い。writeAtomically は訳さずに外れた件と一緒に返す（issues/issue-2-design-row-writers.md の決定 6）
+export type ConflictRule = "version_mismatch" | "state_mismatch" | "return_existing" | "rebuild" | "fail";
 
 // 比べる値の列の道。入れ子の地図の中は . で区切る（列の名前は英小文字と _ だけで . を持たない）
 export type ColumnPath = string;
@@ -108,40 +112,101 @@ function removeActions(remove: readonly string[]): UpdateAction[] {
   return remove.map((path) => ({ kind: "remove", path }));
 }
 
+// 記録の表を除く行の世代（incarnation）を持つ表。記録の表の行は追記だけで表の移しも書き直さないため持たない（決定 8・9）
+function hasIncarnation(table: TableName): boolean {
+  return table !== "audit";
+}
+
+function checkSchemaVersion(what: string, item: Row): void {
+  if (typeof item.pk !== "string" || item.pk.length === 0) throw new WriteSpecError(`${what}: pk は空でない文字列`);
+  if (!Number.isInteger(item.schema_version) || item.schema_version < 1) throw new WriteSpecError(`${what}: schema_version は 1 以上の整数`);
+}
+
+function keyOfItem(item: Row): RowKey {
+  return { pk: item.pk, sk: item.sk ?? null };
+}
+
+// 行が無いときだけ足す。記録の表を除くどの表でも（version の有無によらず）新しい incarnation（UUID v4）を足した行を書き、戻り値の item に載せる。
+// 書き手は作った行の incarnation をそこから読む。渡した行の incarnation（rowToCreate の仮の値）は新しい値で置き換える（決定 8）
 export function putIfAbsent(spec: { table: TableName; item: Row; onConflict: ConflictRule }): TransactItem {
-  const { item } = spec;
-  if (!Number.isInteger(item.schema_version) || item.schema_version < 1) throw new WriteSpecError("putIfAbsent: schema_version は 1 以上の整数");
+  checkSchemaVersion("putIfAbsent", spec.item);
+  const item: Row = hasIncarnation(spec.table) ? { ...spec.item, incarnation: v4() } : spec.item;
   return {
     table: spec.table,
     op: "put",
-    key: { pk: item.pk, sk: item.sk ?? null },
+    key: keyOfItem(item),
     item,
     condition: cond.notExists("pk"),
     onConflict: spec.onConflict,
   };
 }
 
-export function updateIfVersion(spec: {
+// putIfAbsent へ渡す新しい行を、行の版の書き手（writeRow）で作る。schema_version は writeRow が書き手の版にする。
+// 行の形は incarnation を必須にしているため仮の値を入れて照らし、putIfAbsent がそれを新しい UUID v4 で置き換える（仮の値は表に書かれない）
+const INCARNATION_PLACEHOLDER = "00000000-0000-4000-8000-000000000000";
+
+export function rowToCreate<L extends { readonly incarnation: string; readonly schema_version: number }>(codec: RowCodec<L>, row: Omit<L, "incarnation" | "schema_version">): Row {
+  const written = writeRow(codec, { ...row, schema_version: codec.latest.version, incarnation: INCARNATION_PLACEHOLDER } as unknown as L);
+  return written as Row;
+}
+
+// 読んだ行に保存してあった version と incarnation。readRow の stored の値（列が無ければ absent）
+export type StoredVersion = { readonly version: Stored; readonly incarnation: Stored };
+
+function storedCondition(column: "version" | "incarnation", stored: Stored): Condition {
+  return stored.kind === "absent" ? cond.notExists(column) : cond.eq(column, stored.value);
+}
+
+function checkExpect(what: string, expect: StoredVersion): void {
+  const version = expect.version;
+  if (version.kind === "value" && !(typeof version.value === "number" && Number.isInteger(version.value) && version.value >= 1)) {
+    throw new WriteSpecError(`${what}: expect の version は 1 以上の整数か absent`);
+  }
+  const incarnation = expect.incarnation;
+  if (incarnation.kind === "value" && !(typeof incarnation.value === "string" && incarnation.value.length > 0)) {
+    throw new WriteSpecError(`${what}: expect の incarnation は空でない文字列か absent`);
+  }
+}
+
+// 行があり、保存してあった version と incarnation が読んだときと同じこと（と extra）。attribute_exists(pk) は expect によらず必ず入れる
+// （version と incarnation の両方を補った行では 2 つの条件がどちらも attribute_not_exists になり、読んだ後に行が消えても通ってしまうため）
+function versionCondition(expect: StoredVersion, extra: Condition | undefined): Condition {
+  const of = [cond.exists("pk"), storedCondition("version", expect.version), storedCondition("incarnation", expect.incarnation)];
+  return cond.and(...(extra === undefined ? of : [...of, extra]));
+}
+
+// 読んだ行の置き換え（決定 1・8）。item は rowReplaceOf の戻り値（version と incarnation を持たない行全体）。
+// 保存してあった version と incarnation（expect。readRow の stored）のときだけ行を item で置き換え、version を読み手の見る形の値から 1 上げ、
+// incarnation を読み手の見る形の値にする。行に item に無い列があれば置き換えで消える。記録の表は拒む（追記だけ、I9）
+export function replaceIfVersion(spec: {
   table: TableName;
-  key: RowKey;
+  item: Row;
   version: number;
-  set: SetColumns;
-  remove?: readonly string[];
+  incarnation: string;
+  expect: StoredVersion;
   extra?: Condition;
   onConflict: ConflictRule;
 }): TransactItem {
-  if (!Number.isInteger(spec.version) || spec.version < 1) throw new WriteSpecError("updateIfVersion: version は 1 以上の整数");
-  const remove = spec.remove ?? [];
-  checkSetAndRemove("updateIfVersion", spec.set, remove, ["pk", "sk", "version", "schema_version"]);
-  const versionMatches = cond.eq("version", spec.version);
-  return {
-    table: spec.table,
-    op: "update",
-    key: spec.key,
-    update: [...setActions(spec.set), { kind: "increment", path: "version", by: 1 }, ...removeActions(remove)],
-    condition: spec.extra === undefined ? versionMatches : cond.and(versionMatches, spec.extra),
-    onConflict: spec.onConflict,
-  };
+  checkSchemaVersion("replaceIfVersion", spec.item);
+  for (const column of ["version", "incarnation"]) {
+    if (Object.hasOwn(spec.item, column)) throw new WriteSpecError(`replaceIfVersion: item に ${column} を含めない（rowReplaceOf の戻り値を渡す）`);
+  }
+  if (!Number.isInteger(spec.version) || spec.version < 1) throw new WriteSpecError("replaceIfVersion: version は 1 以上の整数");
+  if (typeof spec.incarnation !== "string" || spec.incarnation.length === 0) throw new WriteSpecError("replaceIfVersion: incarnation は空でない文字列");
+  checkExpect("replaceIfVersion", spec.expect);
+  const item: Row = { ...spec.item, version: spec.version + 1, incarnation: spec.incarnation };
+  const out: TransactItem = { table: spec.table, op: "put", key: keyOfItem(item), item, condition: versionCondition(spec.expect, spec.extra), onConflict: spec.onConflict };
+  checkAuditAppendOnly([out]);
+  return out;
+}
+
+// 保存してあった version と incarnation（readRow の stored）のときだけ行を消す。条件は replaceIfVersion と同じ（と extra）。
+// 消えていた行では外れる（書き手は既に無い行を自分が消したと取り違えない）。記録の表は拒む
+export function deleteIfVersion(spec: { table: TableName; key: RowKey; expect: StoredVersion; extra?: Condition; onConflict: ConflictRule }): TransactItem {
+  checkExpect("deleteIfVersion", spec.expect);
+  const out: TransactItem = { table: spec.table, op: "delete", key: spec.key, condition: versionCondition(spec.expect, spec.extra), onConflict: spec.onConflict };
+  checkAuditAppendOnly([out]);
+  return out;
 }
 
 // 行の形の版が from のときだけ書き換える（表の移しと、version を持たない行の書き換え）。version を上げない

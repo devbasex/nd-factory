@@ -1,6 +1,6 @@
 import { GetCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { describe, expect, it } from "vitest";
-import { cond, putIfAbsent, updateIfVersion } from "../src/conditional-write.ts";
+import { cond, deleteIfVersion, putIfAbsent, replaceIfVersion } from "../src/conditional-write.ts";
 import { createDb, dynamoDocumentClient, TABLE_PURPOSES, type TableNames } from "../src/db.ts";
 
 // 偽の文書のクライアントへ渡る命令の形を照らす。DynamoDB は呼ばない
@@ -75,28 +75,46 @@ describe("createDb", () => {
   it("transactWrite は件ごとに表の名前と条件式を持った TransactWriteCommand を送る", async () => {
     const { sent, client } = fakeClient();
     const db = createDb(client, NAMES);
+    const put = putIfAbsent({ table: "events", item: { pk: "PROJECT#p#LANE#l", sk: "SEQ#1", schema_version: 1, kind: "x" }, onConflict: "return_existing" });
+    const incarnation = "3f2b6c1e-8a4d-4f7b-9c2e-1d5a7b9e0f13";
     await db.transactWrite([
-      putIfAbsent({ table: "events", item: { pk: "PROJECT#p#LANE#l", sk: "SEQ#1", schema_version: 1, kind: "x" }, onConflict: "return_existing" }),
-      updateIfVersion({ table: "sprints", key: { pk: "PROJECT#p", sk: "SPRINT#s" }, version: 2, set: { state: "stopped" }, onConflict: "version_mismatch" }),
+      put,
+      replaceIfVersion({
+        table: "sprints",
+        item: { pk: "PROJECT#p", sk: "SPRINT#s", schema_version: 1, state: "stopped" },
+        version: 2,
+        incarnation,
+        expect: { version: { kind: "value", value: 2 }, incarnation: { kind: "value", value: incarnation } },
+        onConflict: "version_mismatch",
+      }),
+      deleteIfVersion({ table: "users", key: { pk: "USER#u", sk: "LOGIN#google#s" }, expect: { version: { kind: "value", value: 1 }, incarnation: { kind: "absent" } }, onConflict: "version_mismatch" }),
     ]);
     expect(inputOf(sent[0], TransactWriteCommand)).toEqual({
       TransactItems: [
         {
           Put: {
             TableName: "acme-dev-db-events",
-            Item: { pk: "PROJECT#p#LANE#l", sk: "SEQ#1", schema_version: 1, kind: "x" },
+            Item: { pk: "PROJECT#p#LANE#l", sk: "SEQ#1", schema_version: 1, kind: "x", incarnation: put.item?.["incarnation"] },
             ConditionExpression: "attribute_not_exists(#n0)",
             ExpressionAttributeNames: { "#n0": "pk" },
           },
         },
         {
-          Update: {
+          Put: {
             TableName: "acme-dev-db-sprints",
-            Key: { pk: "PROJECT#p", sk: "SPRINT#s" },
-            ConditionExpression: "#n0 = :v0",
-            UpdateExpression: "SET #n1 = :v1, #n0 = #n0 + :v2",
-            ExpressionAttributeNames: { "#n0": "version", "#n1": "state" },
-            ExpressionAttributeValues: { ":v0": 2, ":v1": "stopped", ":v2": 1 },
+            Item: { pk: "PROJECT#p", sk: "SPRINT#s", schema_version: 1, state: "stopped", version: 3, incarnation },
+            ConditionExpression: "(attribute_exists(#n0) AND #n1 = :v0 AND #n2 = :v1)",
+            ExpressionAttributeNames: { "#n0": "pk", "#n1": "version", "#n2": "incarnation" },
+            ExpressionAttributeValues: { ":v0": 2, ":v1": incarnation },
+          },
+        },
+        {
+          Delete: {
+            TableName: "acme-dev-db-users",
+            Key: { pk: "USER#u", sk: "LOGIN#google#s" },
+            ConditionExpression: "(attribute_exists(#n0) AND #n1 = :v0 AND attribute_not_exists(#n2))",
+            ExpressionAttributeNames: { "#n0": "pk", "#n1": "version", "#n2": "incarnation" },
+            ExpressionAttributeValues: { ":v0": 1 },
           },
         },
       ],

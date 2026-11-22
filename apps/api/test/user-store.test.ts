@@ -19,6 +19,8 @@ describe("ensureUser", () => {
       sk: "PROFILE",
       schema_version: SCHEMA_VERSION,
       created_at: T1.toISOString(),
+      // putIfAbsent が新しい行の世代（UUID v4）を入れる
+      incarnation: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
     });
     const write = store.calls[0] as TransactWriteCommand;
     expect(write).toBeInstanceOf(TransactWriteCommand);

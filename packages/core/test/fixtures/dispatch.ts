@@ -1,7 +1,7 @@
 import { idOf } from "@nd-factory/contracts/ids";
 import { defineOperation, okItem } from "@nd-factory/contracts/operation";
 import { z } from "zod";
-import { cond, putIfAbsent, updateIfVersion } from "../../src/conditional-write.ts";
+import { cond, putIfAbsent, replaceIfVersion } from "../../src/conditional-write.ts";
 import type { Handler } from "../../src/dispatch/types.ts";
 
 // 振り分けのテストが使う作り物の操作とハンドラー。要素と結果の形を持つ（形の未定の操作は fixtures/operations.ts）
@@ -145,6 +145,9 @@ const noteKey = (item: Note) => ({ pk: `PROJECT#${item.project_id}`, sk: `NOTE#$
 
 export const NOTE_KEY = (projectId: string) => ({ pk: `PROJECT#${projectId}`, sk: "NOTE" });
 
+// notes.rename が置き換えた行に書く作り物の行の世代
+export const NOTE_INCARNATION = "5b9e2c4a-7d1f-4e3b-8a6c-0f2d4e6a8b1c";
+
 const putNote: Handler = async (item) => {
   const note = item as Note;
   return { result: { ok: true, item: { title: note.title } }, writes: [putIfAbsent({ table: "sprints", item: { ...noteKey(note), schema_version: 1, version: 1, title: note.title }, onConflict: "state_mismatch" })] };
@@ -160,7 +163,17 @@ export const noteHandlers: Record<string, Handler> = {
     const note = item as Note;
     return {
       result: { ok: true, item: { title: note.title } },
-      writes: [updateIfVersion({ table: "sprints", key: NOTE_KEY(note.project_id), version: note.version ?? 1, set: { title: note.title }, onConflict: "version_mismatch" })],
+      // 要素が持つ読んだ版を条件にした行全体の置き換え。作り物の行は incarnation を持たない（U3b より前の行と同じく absent を条件にする）
+      writes: [
+        replaceIfVersion({
+          table: "sprints",
+          item: { ...NOTE_KEY(note.project_id), schema_version: 1, title: note.title },
+          version: note.version ?? 1,
+          incarnation: NOTE_INCARNATION,
+          expect: { version: { kind: "value", value: note.version ?? 1 }, incarnation: { kind: "absent" } },
+          onConflict: "version_mismatch",
+        }),
+      ],
     };
   },
   "notes.import": putNote,

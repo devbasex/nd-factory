@@ -1,9 +1,11 @@
 import { PLANS, type PlanRow } from "@nd-factory/contracts/data";
+import { readRow } from "@nd-factory/contracts/row-codec";
+import { usageMonthCodec } from "@nd-factory/contracts/rows/teams";
 import { describe, expect, it } from "vitest";
 import { createClock } from "../src/clock.ts";
 import { expressionsOf, writeAtomically } from "../src/conditional-write.ts";
 import { judgeUsage, usageAddItem, type UsageInput } from "../src/usage-limit.ts";
-import { fakeTable } from "./fakes/table.ts";
+import { fakeTable, type FakeTable } from "./fakes/table.ts";
 
 // プランの名前で分けず、行の値だけで決まることを、作り物のプランの行で照らす
 
@@ -63,37 +65,127 @@ describe("usageAddItem", () => {
   const clock = createClock(() => Date.parse("2026-11-30T23:59:59.999Z"));
   const key = { pk: `TEAM#${TEAM}`, sk: "USAGE#2026-11" };
 
-  it("通貨の条件と加算を持つ 1 件で、行が無ければ作る", async () => {
-    const item = usageAddItem(TEAM, usd(120), clock);
-    expect(item).toMatchObject({ table: "teams", op: "update", key });
-    expect(expressionsOf(item.condition, item.update).ConditionExpression).toBe("(attribute_not_exists(#n0) OR #n1 = :v0)");
+  // ハンドラーと同じく、月の使った量の行を強い整合で読み、行の版の読み手で今の形にする（無ければ null）
+  async function readUsage(table: FakeTable, at = key) {
+    const raw = await table.db.get("teams", at, true);
+    if (raw === null) return null;
+    const read = readRow(usageMonthCodec, raw);
+    if (!read.ok) throw new Error(read.reason);
+    return { raw, row: read.row };
+  }
+
+  async function add(table: FakeTable, cost: { amount_minor: number; currency: string }) {
+    const built = usageAddItem(await readUsage(table), TEAM, cost, clock);
+    if (!built.ok) return built;
+    return { ...built, outcome: await writeAtomically(table.db, [built.item]) };
+  }
+
+  it("行の無い月は、費用を使った額にした行を putIfAbsent（rebuild）で組み、足した後の行を返す", async () => {
+    const built = usageAddItem(null, TEAM, usd(120), clock);
+    if (!built.ok) throw new Error("ok でない");
+    expect(built.item).toMatchObject({ table: "teams", op: "put", key, onConflict: "rebuild" });
+    expect(expressionsOf(built.item.condition).ConditionExpression).toBe("attribute_not_exists(#n0)");
+    expect(built.row).toMatchObject({ team_id: TEAM, month: "2026-11", used_amount_minor: 120, used_currency: "USD", version: 1, schema_version: 1 });
+    expect(built.row.incarnation).toBe(built.item.item?.["incarnation"]);
     const table = fakeTable();
-    expect(await writeAtomically(table.db, [item])).toEqual({ ok: true });
-    expect(await writeAtomically(table.db, [usageAddItem(TEAM, usd(30), clock)])).toEqual({ ok: true });
-    expect(table.row("teams", key)).toMatchObject({ team_id: TEAM, month: "2026-11", used_amount_minor: 150, used_currency: "USD", version: 2, schema_version: 1 });
+    expect(await writeAtomically(table.db, [built.item])).toEqual({ ok: true });
+    expect(table.row("teams", key)).toEqual({ ...key, ...built.row });
+  });
+
+  it("読んだ行に費用を足した行全体を、読んだ version と incarnation を条件に replaceIfVersion（rebuild）で組む", async () => {
+    const table = fakeTable();
+    const created = await add(table, usd(120));
+    if (!created.ok) throw new Error("ok でない");
+    const added = await add(table, usd(30));
+    if (!added.ok) throw new Error("ok でない");
+    expect(added.item).toMatchObject({ table: "teams", op: "put", key, onConflict: "rebuild" });
+    expect(expressionsOf(added.item.condition)).toMatchObject({
+      ConditionExpression: "(attribute_exists(#n0) AND #n1 = :v0 AND #n2 = :v1)",
+      ExpressionAttributeValues: { ":v0": 1, ":v1": created.row.incarnation },
+    });
+    expect(added.outcome).toEqual({ ok: true });
+    // 使える量の判定は組んだ行の加算の後の値で行う（確定した値と同じ）
+    expect(added.row).toMatchObject({ used_amount_minor: 150, version: 2, incarnation: created.row.incarnation });
+    expect(table.row("teams", key)).toEqual({ ...key, ...added.row });
+  });
+
+  it("並んだ加算が先に確定すると外れ、rebuild の件として返る（足し直しは読み直して組む）", async () => {
+    const table = fakeTable();
+    await add(table, usd(100));
+    const read = await readUsage(table);
+    const first = usageAddItem(read, TEAM, usd(10), clock);
+    const second = usageAddItem(read, TEAM, usd(20), clock);
+    if (!first.ok || !second.ok) throw new Error("ok でない");
+    expect(await writeAtomically(table.db, [first.item])).toEqual({ ok: true });
+    expect(await writeAtomically(table.db, [second.item])).toEqual({ ok: false, failed: [{ index: 0, onConflict: "rebuild" }] });
+    const again = await add(table, usd(20));
+    expect(again.ok && again.outcome).toEqual({ ok: true });
+    expect(table.row("teams", key)).toMatchObject({ used_amount_minor: 130, version: 3 });
+  });
+
+  it("並んだ 2 つの作成は後の方が外れ、rebuild の件として返る", async () => {
+    const table = fakeTable();
+    const a = usageAddItem(null, TEAM, usd(10), clock);
+    const b = usageAddItem(null, TEAM, usd(20), clock);
+    if (!a.ok || !b.ok) throw new Error("ok でない");
+    expect(await writeAtomically(table.db, [a.item])).toEqual({ ok: true });
+    expect(await writeAtomically(table.db, [b.item])).toEqual({ ok: false, failed: [{ index: 0, onConflict: "rebuild" }] });
+    expect(table.row("teams", key)).toMatchObject({ used_amount_minor: 10 });
+  });
+
+  it("U3b より前の書き手が保存した行（incarnation の無い行）にも足せ、足した行は incarnation を保存する", async () => {
+    const table = fakeTable();
+    table.seed("teams", { ...key, schema_version: 1, version: 4, team_id: TEAM, month: "2026-11", used_amount_minor: 100, used_currency: "USD" });
+    const read = await readUsage(table);
+    const added = await add(table, usd(5));
+    if (!added.ok) throw new Error("ok でない");
+    expect(added.outcome).toEqual({ ok: true });
+    expect(expressionsOf(added.item.condition).ConditionExpression).toBe("(attribute_exists(#n0) AND #n1 = :v0 AND attribute_not_exists(#n2))");
+    expect(table.row("teams", key)).toMatchObject({ used_amount_minor: 105, version: 5, incarnation: read?.row.incarnation });
+  });
+
+  it("読んだ行に残る知らない列（書き手の版に無い列）は置き換えで消える", async () => {
+    const table = fakeTable();
+    await add(table, usd(1));
+    table.seed("teams", { ...table.row("teams", key), used: { amount_minor: 1, currency: "USD" } });
+    await add(table, usd(1));
+    expect(table.row("teams", key)).not.toHaveProperty("used");
   });
 
   it("UTC の年月で行を分ける", () => {
     const next = createClock(() => Date.parse("2026-12-01T00:00:00.000Z"));
-    expect(usageAddItem(TEAM, usd(1), next).key).toEqual({ pk: `TEAM#${TEAM}`, sk: "USAGE#2026-12" });
+    const built = usageAddItem(null, TEAM, usd(1), next);
+    expect(built.ok && built.item.key).toEqual({ pk: `TEAM#${TEAM}`, sk: "USAGE#2026-12" });
   });
 
   it("金額 0 でも行を作る", async () => {
     const table = fakeTable();
-    expect(await writeAtomically(table.db, [usageAddItem(TEAM, usd(0), clock)])).toEqual({ ok: true });
+    const built = await add(table, usd(0));
+    expect(built.ok && built.outcome).toEqual({ ok: true });
     expect(table.row("teams", key)).toMatchObject({ used_amount_minor: 0 });
   });
 
-  it("通貨の違いで条件が外れ、加算しない", async () => {
+  it("通貨が違えば書き込みを組まずに state_mismatch を返す", async () => {
     const table = fakeTable();
-    await writeAtomically(table.db, [usageAddItem(TEAM, usd(100), clock)]);
-    const outcome = await writeAtomically(table.db, [usageAddItem(TEAM, { amount_minor: 5, currency: "EUR" }, clock)]);
-    expect(outcome).toEqual({ ok: false, failed: [{ index: 0, onConflict: "state_mismatch" }] });
+    await add(table, usd(100));
+    const before = table.transactions.length;
+    expect(usageAddItem(await readUsage(table), TEAM, { amount_minor: 5, currency: "EUR" }, clock)).toEqual({ ok: false, onConflict: "state_mismatch" });
+    expect(table.transactions).toHaveLength(before);
     expect(table.row("teams", key)).toMatchObject({ used_amount_minor: 100, used_currency: "USD" });
   });
 
   it("負の金額と整数でない金額は投げる", () => {
-    expect(() => usageAddItem(TEAM, usd(-1), clock)).toThrow(RangeError);
-    expect(() => usageAddItem(TEAM, usd(1.5), clock)).toThrow(RangeError);
+    expect(() => usageAddItem(null, TEAM, usd(-1), clock)).toThrow(RangeError);
+    expect(() => usageAddItem(null, TEAM, usd(1.5), clock)).toThrow(RangeError);
+  });
+
+  it("読んだ行のチームか年月が違うと投げる（書き手の誤り）", async () => {
+    const table = fakeTable();
+    await add(table, usd(1));
+    const read = await readUsage(table);
+    if (read === null) throw new Error("行が無い");
+    const next = createClock(() => Date.parse("2026-12-01T00:00:00.000Z"));
+    expect(() => usageAddItem(read, TEAM, usd(1), next)).toThrow(RangeError);
+    expect(() => usageAddItem(read, "team_01890a5d-ac96-774b-bcce-b302099a8058", usd(1), clock)).toThrow(RangeError);
   });
 });
