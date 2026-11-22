@@ -7,6 +7,7 @@ import { cond, putIfAbsent, replaceIfVersion, rowToCreate, writeAtomically, type
 import type { Db, Row, StoredRow } from "../db.ts";
 import { parseId, type Id } from "../ids.ts";
 import type { Logger } from "../log.ts";
+import { personView, type PersonScope } from "../person-view.ts";
 import {
   DB_PREP_AUDIENCE,
   dbPrepClaimsOf,
@@ -169,15 +170,15 @@ export type AuthDeps = {
   readonly readers: AuthReaders;
   // 委任の使った時刻の行の読み書き（強い整合の読みと writeAtomically）。dispatch が自分の Db を渡す
   readonly db: Db;
-  // 委任した人が今持つ席（認可と同じ読み手。dispatch が ScopeReader.seatsOf を渡す）。委任の認証のうち今の席の照らしに使い、
-  // 席が 1 つも無ければ使った時刻の行を書かない（主体は決めたまま。範囲は認可が狭める）
-  readonly seatsOf: (userId: Id<"usr">) => Promise<readonly unknown[]>;
+  // 委任した人の今の席とチームのプロジェクトの読み手（認可と同じ ScopeReader。dispatch と serveMcp が自分の ScopeReader を渡す）。
+  // 委任の範囲と委任した人が今見られるプロジェクトの重なりが空なら使った時刻の行を書かない（主体は決めたまま。範囲は認可が狭める）
+  readonly scope: PersonScope;
   readonly clock: Clock;
   readonly log?: Logger;
 };
 
-// 起点が dispatch へ渡す認証の依存（Db と席の読み手は dispatch が自分のものを渡す）
-export type AuthSetup = Omit<AuthDeps, "db" | "seatsOf">;
+// 起点が dispatch・serveMcp へ渡す認証の依存（Db と ScopeReader は dispatch・serveMcp が DispatchDeps の自分のものを渡す）
+export type AuthSetup = Omit<AuthDeps, "db" | "scope">;
 
 // 利用者へ結んでいない人の主体を受ける唯一の経路（初めてのサインインで利用者を作る）
 export const SESSIONS_CREATE = "sessions.create";
@@ -338,7 +339,8 @@ function usedWrite(userId: Id<"usr">, delegationId: Id<"dlg">, used: StoredRow |
   });
 }
 
-// 委任した人が今の席を 1 つも持たなければ書かない（席を失った人の委任の要求で、取り消しの判断に使う時刻を進めない）。
+// 委任の範囲と委任した人が今見られるプロジェクトの重なりが空なら書かない（範囲のプロジェクトの席を失った人の委任の要求は認可が拒むため、
+// 取り消しの判断に使う時刻を進めない。認可の viewOf と同じ重なり）。
 // 書けなくても主体は決めたまま続ける（次の要求で書き直す）。ログに行の値と委任の ID を出さない
 async function touch(userId: Id<"usr">, delegationId: Id<"dlg">, row: DelegationRecord, used: StoredRow | null, deps: AuthDeps): Promise<void> {
   const warn = (fields: Record<string, unknown>): void => deps.log?.warn("委任の最後に使った時刻を書けない", { principal: "delegation", ...fields });
@@ -349,8 +351,9 @@ async function touch(userId: Id<"usr">, delegationId: Id<"dlg">, row: Delegation
     return;
   }
   try {
-    // 書くときだけ席を読む（認可が後で同じ席を読み直す。要求をまたいで控えない）
-    if ((await deps.seatsOf(userId)).length === 0) return;
+    // 書くときだけ席とプロジェクトを読む（認可が後で同じものを読み直す。要求をまたいで控えない）
+    const { visible } = await personView(userId, deps.scope);
+    if (!row.scope.projectIds.some((id) => visible.has(id))) return;
     const outcome = await writeAtomically(deps.db, [delegationUnchanged(userId, delegationId, row.stored), write], deps.log);
     if (!outcome.ok) warn({ result: "conflict" });
   } catch (error) {

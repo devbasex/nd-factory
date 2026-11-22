@@ -2,6 +2,7 @@ import type { DelegationKind, OperationDef } from "@nd-factory/contracts/operati
 import { SESSIONS_CREATE, type Principal } from "./auth/authenticate.ts";
 import type { Id } from "./ids.ts";
 import type { Logger } from "./log.ts";
+import { personView } from "./person-view.ts";
 
 // 認可の判定（docs/design/api.md の「認可」、I2）。操作の表の印と主体から、要求全体と要素ごとに通すかを 1 か所で決める。
 // 見えない要素は存在しないときと同じ 404 not_found で返し、見えない要素の役割を照らさない（403 で存在を明かさない）。
@@ -66,14 +67,6 @@ const HUMAN_ONLY: ItemAuthz = Object.freeze({ decision: "deny", status: 403, rea
 
 const DELEGATION_RANK: Record<DelegationKind, number> = { read: 0, run: 1, manage: 2 };
 
-async function humanView(userId: Id<"usr">, scope: ScopeReader): Promise<{ seats: Map<TeamId, SeatRole>; visible: Set<ProjectId> }> {
-  const seats = new Map((await scope.seatsOf(userId)).map((s) => [s.teamId, s.role] as const));
-  const projects = seats.size === 0 ? [] : await scope.projectsOfTeams([...seats.keys()]);
-  // 読み手が席の外のチームの行を返しても通さない
-  const visible = new Set(projects.filter((p) => seats.has(p.teamId)).map((p) => p.projectId));
-  return { seats, visible };
-}
-
 async function laneProjects(principal: RunnerOrMachine, scope: ScopeReader): Promise<Set<ProjectId>> {
   const lanes = await scope.laneOf(principal);
   // ランナーは自分のレーンの、token に結んだプロジェクトだけ
@@ -84,10 +77,10 @@ async function laneProjects(principal: RunnerOrMachine, scope: ScopeReader): Pro
 export async function visibleProjectIds(principal: Principal, scope: ScopeReader): Promise<readonly ProjectId[]> {
   switch (principal.kind) {
     case "human":
-      return [...(await humanView(principal.userId, scope)).visible];
+      return [...(await personView(principal.userId, scope)).visible];
     case "delegation": {
       // 委任した人の今の集まりと委任の範囲の重なり。要求をまたいで控えない
-      const { visible } = await humanView(principal.userId, scope);
+      const { visible } = await personView(principal.userId, scope);
       return principal.scope.projectIds.filter((id, i, all) => visible.has(id) && all.indexOf(id) === i);
     }
     case "runner":
@@ -132,7 +125,7 @@ type View =
 
 async function viewOf(principal: Principal, scope: ScopeReader): Promise<View> {
   if (principal.kind === "human" || principal.kind === "delegation") {
-    const { seats, visible } = await humanView(principal.userId, scope);
+    const { seats, visible } = await personView(principal.userId, scope);
     const inScope = principal.kind === "delegation" ? new Set(principal.scope.projectIds) : null;
     return { kind: "person", principal, seats, visible: inScope === null ? visible : new Set([...visible].filter((id) => inScope.has(id))) };
   }
