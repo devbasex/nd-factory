@@ -18,7 +18,8 @@
     "./client": "./src/client.ts",
     "./row-codec": "./src/row-codec.ts",
     "./rows/*": "./src/rows/*.ts",
-    "./tables": "./src/tables.ts"
+    "./tables": "./src/tables.ts",
+    "./generated/routes.json": "./generated/routes.json"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."
