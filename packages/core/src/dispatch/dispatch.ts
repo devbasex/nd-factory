@@ -4,7 +4,7 @@ import { cognitoSubjectKey, sessionRevocationKey, type CognitoSubjectRow, type S
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { actorOfCreatedUser, appendAudit, auditItem, type AuditActor, type AuditEntry, type AuditResult } from "../audit.ts";
-import { authenticate, idempotencyPrincipalKey, SESSIONS_DELETE, type Principal } from "../auth/authenticate.ts";
+import { authenticate, idempotencyPrincipalKey, recordDelegationUse, SESSIONS_DELETE, type Principal } from "../auth/authenticate.ts";
 import { authorize, type ItemAuthz, type ProjectId } from "../authorize.ts";
 import { AuditAppendOnlyError, cond, TRANSACT_MAX_ITEMS, WriteSpecError, WriteUnavailableError, writeAtomically, type ConflictRule, type TransactItem, type WriteOutcome } from "../conditional-write.ts";
 import type { StoredRow } from "../db.ts";
@@ -627,6 +627,11 @@ async function run(req: Request): Promise<DispatchResult> {
     return finish(req, problem(503, "unavailable"));
   }
   if ("reject" in decision) return finish(req, problem(403, decision.reject));
+  // I2 の例外で通した委任の要素があれば、委任の使った時刻を書く（認証は範囲の重なりがあるときだけ書くため、移す途中のプロジェクトだけを
+  // 範囲に持つ委任の読みでは書いていない。失敗しても要求は続ける）
+  if (principal.kind === "delegation" && decision.items.some((d) => d.decision === "allow" && d.viaTransfer === true)) {
+    await recordDelegationUse(principal, { ...deps.auth, db: deps.db, scope: deps.scope, log: req.log });
+  }
   const authz: (ItemAuthz | undefined)[] = parsed.map(() => undefined);
   valid.forEach((v, i) => (authz[v.index] = decision.items[i]));
   req.seen.authz = authz;

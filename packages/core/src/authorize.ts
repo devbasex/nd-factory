@@ -55,7 +55,9 @@ export type ScopeReader = {
 export type ItemDenyReason = "not_found" | "role_insufficient" | "human_only";
 
 export type ItemAuthz =
-  | { readonly decision: "allow"; readonly projectId: ProjectId | null; readonly role: SeatRole | null }
+  // viaTransfer は I2 の例外（移す途中のプロジェクトの名前を移す先のチームの持ち主に読ませる）で通したときだけ true。
+  // 委任の主体では、dispatch がこの印で委任の使った時刻を書く（認証の時の範囲の重なりの照らしに当たらない読みのため）
+  | { readonly decision: "allow"; readonly projectId: ProjectId | null; readonly role: SeatRole | null; readonly viaTransfer?: true }
   | { readonly decision: "deny"; readonly status: 404 | 403; readonly reason: ItemDenyReason };
 
 export type AuthzDecision = { readonly reject: "human_only" | "scope_insufficient" } | { readonly items: readonly ItemAuthz[] };
@@ -133,7 +135,7 @@ async function viewOf(principal: Principal, scope: ScopeReader): Promise<View> {
 }
 
 // 見えるか。見えれば対象のプロジェクトと役割、見えなければ null
-async function visibility(view: View, op: OperationDef, item: unknown, target: Target, scope: ScopeReader): Promise<{ projectId: ProjectId | null; role: SeatRole | null } | null> {
+async function visibility(view: View, op: OperationDef, item: unknown, target: Target, scope: ScopeReader): Promise<{ projectId: ProjectId | null; role: SeatRole | null; viaTransfer?: true } | null> {
   if (view.kind === "bound") {
     if (target.kind === "project") return view.visible.has(target.projectId) ? { projectId: target.projectId, role: null } : null;
     return target.kind === "none" ? { projectId: null, role: null } : null;
@@ -147,7 +149,7 @@ async function visibility(view: View, op: OperationDef, item: unknown, target: T
       const transfer = await scope.transferTargetOf(op, item);
       const inScope = view.principal.kind === "human" || view.principal.scope.projectIds.includes(target.projectId);
       if (transfer !== null && transfer.projectId === target.projectId && view.seats.get(transfer.toTeamId) === "owner" && inScope) {
-        return { projectId: target.projectId, role: "owner" };
+        return { projectId: target.projectId, role: "owner", viaTransfer: true };
       }
       return null;
     }
@@ -170,7 +172,7 @@ async function itemAuthz(principal: Principal, view: View, op: OperationDef, ite
   if (seen === null) return NOT_FOUND;
   if (op.humanOnly === "per_item" && principal.kind === "delegation" && (await scope.isHumanOnlyItem(op, item))) return HUMAN_ONLY;
   if (op.ownerOnly && seen.role !== "owner") return ROLE_INSUFFICIENT;
-  return { decision: "allow", projectId: seen.projectId, role: seen.role };
+  return { decision: "allow", projectId: seen.projectId, role: seen.role, ...(seen.viaTransfer === true ? { viaTransfer: true as const } : {}) };
 }
 
 export async function authorize(principal: Principal, op: OperationDef, items: readonly unknown[], scope: ScopeReader, log?: Logger): Promise<AuthzDecision> {

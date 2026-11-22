@@ -8,6 +8,7 @@ import {
   DELEGATION_TOUCH_MS,
   idempotencyPrincipalKey,
   LOGIN_BIND_FRESH_MS,
+  recordDelegationUse,
   SESSION_DELETE_EXPIRED_GRACE_MS,
   type AuthDeps,
   type AuthReaders,
@@ -579,6 +580,20 @@ describe("authenticate: 委任", () => {
       await expect(authenticate(req("user", f.token), deps)).resolves.toMatchObject({ ok: true, principal: { kind: "delegation" } });
       expect(table.transactions).toHaveLength(0);
       expect(table.row("users", USED_KEY)).toEqual(usedAt === undefined ? undefined : usedRowOf(usedAt));
+    }
+  });
+
+  it("recordDelegationUse は範囲の重なりを照らさずに時刻の行を書き、取り消し・期限切れの委任では書かない", async () => {
+    const f = delegationFixture();
+    const principal = { kind: "delegation" as const, userId: USER, delegationId: DELEGATION, scope: f.record.scope, clientName: f.record.clientName };
+    const a = setup({ delegation: f.record, seats: [] });
+    await recordDelegationUse(principal, a.deps);
+    expect(a.table.row("users", USED_KEY)).toMatchObject({ last_used_at: iso(NOW) });
+    for (const over of [{ revokedAt: iso(NOW - 1) }, { expiresAt: iso(NOW - 1) }]) {
+      const b = setup({ delegation: delegationFixture(over).record, seats: [] });
+      await recordDelegationUse(principal, b.deps);
+      expect(b.table.transactions).toHaveLength(0);
+      expect(b.table.row("users", USED_KEY)).toBeUndefined();
     }
   });
 

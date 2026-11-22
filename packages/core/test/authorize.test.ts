@@ -203,7 +203,7 @@ describe("authorize: 割り当てを移す途中（I2 の例外）", () => {
   it("移す先のチームの持ち主は、名前だけを読む操作の要素だけ通る", async () => {
     const table = world();
     const scope = fakeScope(table, { nameOnlyOperations: ["projects.get"] });
-    expect(items(await authorize(human(OWNER), projectsGet, [{ project_id: P_MOVING }], scope))).toEqual([{ decision: "allow", projectId: P_MOVING, role: "owner" }]);
+    expect(items(await authorize(human(OWNER), projectsGet, [{ project_id: P_MOVING }], scope))).toEqual([{ decision: "allow", projectId: P_MOVING, role: "owner", viaTransfer: true }]);
     expect(items(await authorize(human(OWNER), projectsRename, [{ project_id: P_MOVING }], scope))).toEqual([NOT_FOUND]);
     // 移す先のチームのメンバーと、移さないプロジェクトには効かない
     expect(items(await authorize(human(MEMBER), projectsGet, [{ project_id: P_MOVING }], scope))).toEqual([NOT_FOUND]);
