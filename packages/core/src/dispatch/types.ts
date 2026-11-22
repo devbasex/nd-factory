@@ -65,7 +65,8 @@ export type HandlerContext = {
 // existing は onConflict が return_existing の件で、既にある行（強い整合で読んだ行。読んだ時に無ければ null）から今回の結果を組む
 export type WriteConflict = { readonly result: ItemResult } | { readonly existing: (row: StoredRow | null) => ItemResult };
 
-// ハンドラーは状態を自分で書かない。要素の結果と組んだ書き込み（putIfAbsent・updateIfVersion・usageAddItem の戻り値）を返す。
+// ハンドラーは状態を自分で書かない。要素の結果と組んだ書き込み（putIfAbsent・replaceIfVersion・deleteIfVersion・usageAddItem の戻り値）を返す。
+// onConflict が rebuild の件だけが外れたら、dispatch が同じ要素と借りた冪等の鍵のままハンドラーを呼び直す（ハンドラーは行を読み直して組む）。
 // 要求元の照らし（人の書き込み）は dispatch が足すため、ハンドラーは要求元の行を照らさない。
 // conflicts は writes と同じ番号の件が外れたときの結果（無い件は onConflict の version_mismatch・state_mismatch を要素の 409 にする）。
 // createdUserId は sessions.create の初回で利用者を作った要素だけが返し、記録の主体をその利用者の人にする（audit の actorOfCreatedUser）
@@ -84,7 +85,8 @@ export type DispatchDeps = {
   // 鍵は操作の表の名前
   readonly handlers: Readonly<Record<string, Handler>>;
   readonly scope: ScopeReader;
-  readonly auth: AuthDeps;
+  // 認証の依存のうち Db を除くもの。dispatch が下の db を渡す（委任の使った時刻の行の読み書き）
+  readonly auth: Omit<AuthDeps, "db">;
   readonly db: Db;
   readonly clock: Clock;
   readonly log: Logger;

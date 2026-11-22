@@ -1,4 +1,5 @@
 import { isPending, resultSchemaOf, type OperationDef } from "@nd-factory/contracts/operation";
+import type { IdempotencyRow } from "@nd-factory/contracts/rows/idempotency";
 import { cognitoSubjectKey, sessionRevocationKey, type CognitoSubjectRow, type SessionRevocationRow } from "@nd-factory/contracts/rows/users";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
@@ -7,7 +8,7 @@ import { authenticate, idempotencyPrincipalKey, SESSIONS_DELETE, type Principal 
 import { authorize, type ItemAuthz, type ProjectId } from "../authorize.ts";
 import { AuditAppendOnlyError, cond, TRANSACT_MAX_ITEMS, WriteSpecError, WriteUnavailableError, writeAtomically, type ConflictRule, type TransactItem, type WriteOutcome } from "../conditional-write.ts";
 import type { StoredRow } from "../db.ts";
-import { claimIdempotency, idempotencyKeyOf, settleIdempotency, type IdempotencyClaimInput, type ItemResult } from "../idempotency.ts";
+import { claimIdempotency, releaseIdempotency, settleIdempotency, type IdempotencyClaimInput, type ItemResult } from "../idempotency.ts";
 import { newId, type Id } from "../ids.ts";
 import type { Logger } from "../log.ts";
 import { bodyFaultOf, canonicalJson, problem } from "./http.ts";
@@ -26,6 +27,10 @@ export const DISPATCH_RESERVE_MS = 1500;
 
 // 予備の時間のうち、要約の記録と応答だけに残す時間（ミリ秒）。確定しなかった要素の後始末（冪等の鍵の借りの手放し）はこれを超える分だけを使う
 export const DISPATCH_SUMMARY_MS = 1000;
+
+// 1 つのトランザクションの組み直しの上限（onConflict が rebuild の件だけが外れたとき、ハンドラーを呼び直して組み直す回数。
+// issues/issue-2-design-row-writers.md の決定 6）。外れは並んだ書き手の確定のときだけ起きる
+export const DISPATCH_REBUILD_LIMIT = 3;
 
 // 認可の対象を要素の指す行でなく主体の利用者自身にする操作（外したログインの行の有無は、冪等の鍵の照合の後にハンドラーが照らす）
 const LOGINS_DELETE = "logins.delete";
@@ -171,7 +176,8 @@ type Handled = {
   readonly result: ItemResult;
   readonly writes: readonly TransactItem[];
   readonly conflicts: readonly (WriteConflict | undefined)[];
-  readonly claim: IdempotencyClaimInput | null;
+  // claimIdempotency が fresh で返した借りの行（冪等の鍵を持たない操作は null）。組み直しでも借りたまま使う
+  readonly leased: IdempotencyRow | null;
   readonly authz: AllowedAuthz;
   readonly item: unknown;
   readonly createdUserId: Id<"usr"> | null;
@@ -186,7 +192,7 @@ const sameRow = (a: TransactItem, b: TransactItem): boolean => a.table === b.tab
 
 function partOf(req: Request, principal: Principal, op: OperationDef, element: number, h: Handled, result: ItemResult, writes: readonly TransactItem[]): Part {
   const entry = entryOf(req, actorOf(req, principal, h.createdUserId), { targetIds: record(h.item), projectId: h.authz.projectId, result: itemAuditResult(result), itemIndex: element });
-  return { element, writes, audit: auditItem(entry, op, req.deps.clock), settle: h.claim === null ? null : settleIdempotency(h.claim, result, op, req.deps.clock) };
+  return { element, writes, audit: auditItem(entry, op, req.deps.clock), settle: h.leased === null ? null : settleIdempotency(h.leased, result, op, req.deps.clock) };
 }
 
 // 同じ行を指す件は 2 回指せないため 1 件にまとめる。書かない照らし（check）は、同じ行の照らしか書き込みの条件へ AND で足す
@@ -231,6 +237,21 @@ function failedOf(outcome: Extract<WriteOutcome, { ok: false }>, slots: readonly
   return outcome.failed.flatMap((f) => slots[f.index] ?? []);
 }
 
+// 外れた件がどれもハンドラーの rebuild の件か（要求元の照らし・記録の行・冪等の鍵の済みの行・ほかの扱いの件が外れていない）。
+// 同じ行へまとめた件は持ち手のどれかが rebuild でなければ組み直さない
+function rebuildOnly(failed: readonly Owner[]): boolean {
+  return failed.length > 0 && failed.every((f) => f.role === "write" && !f.guarded && f.onConflict === "rebuild");
+}
+
+// 組み直しの前の照らし。使い切ったら要求全体の 503 unavailable（呼び手は同じ冪等の鍵で送り直せる）、残り時間が足りなければ checkTime の 503
+function checkRebuild(req: Request, rebuilds: number): void {
+  if (rebuilds >= DISPATCH_REBUILD_LIMIT) {
+    req.log.warn("組み直しの上限を使い切った", { rebuilds });
+    throw halt(503, "unavailable");
+  }
+  checkTime(req);
+}
+
 type Verdict = { readonly kind: "result"; readonly result: ItemResult } | { readonly kind: "existing"; readonly writeIndex: number };
 
 // 1 つの要素の外れた件を結果へ訳す。要求元の照らし（同じ行へまとめた件を含む）を先に当て、残りはハンドラーが並べた件の順の最初の理由
@@ -244,7 +265,8 @@ function verdictOf(req: Request, failed: readonly Owner[], conflicts: readonly (
   const result = (r: ItemResult): Verdict => ({ kind: "result", result: r });
   if (failed.some((f) => f.guarded)) return result(failure(409, "state_mismatch"));
   if (failed.some((f) => f.role === "audit")) throw halt(503, "audit_unavailable");
-  const own = failed.filter((f) => f.role === "write").sort((a, b) => a.writeIndex - b.writeIndex);
+  // rebuild の件は、ほかの件と一緒に外れたときだけここへ来る（rebuild の件だけなら組み直す）。結果はほかの件で決める
+  const own = failed.filter((f) => f.role === "write" && f.onConflict !== "rebuild").sort((a, b) => a.writeIndex - b.writeIndex);
   if (own.length === 0) return result(failure(409, "in_progress"));
   const replayable = own.find((f) => {
     const conflict = conflicts[f.writeIndex];
@@ -284,8 +306,8 @@ function checkTime(req: Request): void {
   }
 }
 
-// taken は全部か無かの操作で、この要求が借りた冪等の鍵を集める（確定しなかったときに手放すため）
-type Ctx = { readonly req: Request; readonly principal: Principal; readonly sessionRevokedAt: string | null; readonly op: OperationDef; readonly handler: Handler; readonly taken: IdempotencyClaimInput[] };
+// taken は全部か無かの操作で、この要求が借りた冪等の鍵の借りの行を集める（確定しなかったときに手放すため）
+type Ctx = { readonly req: Request; readonly principal: Principal; readonly sessionRevokedAt: string | null; readonly op: OperationDef; readonly handler: Handler; readonly taken: IdempotencyRow[] };
 
 // 要素の結果を操作の結果の形で照らし、照らした値（形に無い鍵を除いた値）を返す。合わなければ 503 unavailable
 function resultOf(c: Ctx, value: unknown): ItemResult {
@@ -346,11 +368,11 @@ async function prepare(c: Ctx, index: number, parsed: ParsedItem, authz: ItemAut
   if (!parsed.ok) return failure(400, "item_invalid", parsed.fields);
   if (authz === undefined || authz.decision === "deny") return failure(authz?.status ?? 404, authz?.reason ?? "not_found");
 
-  let claim: IdempotencyClaimInput | null = null;
+  let leased: IdempotencyRow | null = null;
   if (op.idempotencyKey) {
     const key = record(parsed.value)["idempotency_key"];
     if (typeof key !== "string" || key.length === 0) return failure(400, "item_invalid", [`/${index}/idempotency_key`]);
-    claim = { principalKey: idempotencyPrincipalKey(principal, op.name), operation: op.name, key, fingerprint: fingerprintOf(parsed.value), requestId: req.call.requestId };
+    const claim: IdempotencyClaimInput = { principalKey: idempotencyPrincipalKey(principal, op.name), operation: op.name, key, fingerprint: fingerprintOf(parsed.value), requestId: req.call.requestId };
     let claimed;
     try {
       claimed = await claimIdempotency(req.deps.db, claim, req.deps.clock, req.log);
@@ -361,13 +383,19 @@ async function prepare(c: Ctx, index: number, parsed: ParsedItem, authz: ItemAut
     if (claimed.kind === "replay") return claimed.result;
     if (claimed.kind === "in_progress") return failure(409, "in_progress");
     if (claimed.kind === "reused") return failure(422, "idempotency_key_reused");
-    c.taken.push(claim);
+    leased = claimed.leased;
+    c.taken.push(leased);
   }
+  return handle(c, parsed.value, authz, leased);
+}
 
+// ハンドラーを呼び、戻り値を照らす。組み直しでは同じ要素と借りの行のまま呼び直す（ハンドラーは行を読み直す）
+async function handle(c: Ctx, value: unknown, authz: AllowedAuthz, leased: IdempotencyRow | null): Promise<ItemResult | Handled> {
+  const { req, principal } = c;
   const requester: RequesterCheck = { failed: false, halted: null };
   let output: HandlerOutput | undefined;
   try {
-    output = await c.handler(parsed.value, {
+    output = await c.handler(value, {
       principal,
       authz,
       clock: req.deps.clock,
@@ -385,10 +413,10 @@ async function prepare(c: Ctx, index: number, parsed: ParsedItem, authz: ItemAut
   if (requester.failed) return failure(409, "state_mismatch");
   const checked = checkOutput(c, output);
   const createdUserId = principal.kind === "newcomer" ? (checked.createdUserId ?? null) : null;
-  return { result: checked.result, writes: checked.writes, conflicts: checked.conflicts, claim, authz, item: parsed.value, createdUserId };
+  return { result: checked.result, writes: checked.writes, conflicts: checked.conflicts, leased, authz, item: value, createdUserId };
 }
 
-const isHandled = (p: ItemResult | Handled): p is Handled => "writes" in p && "claim" in p;
+const isHandled = (p: ItemResult | Handled): p is Handled => "writes" in p && "leased" in p;
 
 // return_existing の件の既にある行を強い整合で読み、ハンドラーの組み方で今回の結果にする
 async function existingResult(c: Ctx, h: Handled, writeIndex: number): Promise<ItemResult> {
@@ -405,17 +433,29 @@ async function existingResult(c: Ctx, h: Handled, writeIndex: number): Promise<I
   return resultOf(c, value);
 }
 
-// 要素ごとの確定。状態を書かず冪等の鍵も押さえていない要素は、要約の行だけに残す
-async function settleElement(c: Ctx, index: number, h: Handled): Promise<ItemResult> {
+// 要素ごとの確定。状態を書かず冪等の鍵も押さえていない要素は、要約の行だけに残す。
+// 外れた件がどれも rebuild の件なら、ハンドラーを呼び直して組み直したトランザクションを確定し直す（DISPATCH_REBUILD_LIMIT 回まで）
+async function settleElement(c: Ctx, index: number, handled: Handled): Promise<ItemResult> {
   const { req, principal, op } = c;
-  if (op.access === "read" || (h.writes.length === 0 && h.claim === null)) return h.result;
   const guards = requesterGuards(op, principal);
-  const { items, slots } = compose([partOf(req, principal, op, index, h, h.result, h.writes)], guards);
-  const outcome = await commit(req, items);
-  if (outcome.ok) {
-    // 要約の主体は利用者を作ったトランザクションが確定してから替える
-    if (h.createdUserId !== null) req.seen.createdUserId = h.createdUserId;
-    return h.result;
+  let h = handled;
+  let outcome: WriteOutcome;
+  let slots: Owner[][];
+  for (let rebuilds = 0; ; rebuilds += 1) {
+    if (op.access === "read" || (h.writes.length === 0 && h.leased === null)) return h.result;
+    const composed = compose([partOf(req, principal, op, index, h, h.result, h.writes)], guards);
+    slots = composed.slots;
+    outcome = await commit(req, composed.items);
+    if (outcome.ok) {
+      // 要約の主体は利用者を作ったトランザクションが確定してから替える
+      if (h.createdUserId !== null) req.seen.createdUserId = h.createdUserId;
+      return h.result;
+    }
+    if (!rebuildOnly(failedOf(outcome, slots))) break;
+    checkRebuild(req, rebuilds);
+    const again = await handle(c, h.item, h.authz, h.leased);
+    if (!isHandled(again)) return again;
+    h = again;
   }
   const verdict = verdictOf(req, failedOf(outcome, slots), h.conflicts);
   if (verdict.kind === "result") return verdict.result;
@@ -442,28 +482,22 @@ async function eachItem(c: Ctx, parsed: readonly ParsedItem[], authz: readonly (
   return results;
 }
 
-// 全部か無かで確定しなかったとき、この要求が借りた冪等の鍵を手放す。持ち主が自分で借りたままの行だけを消す（取り直された行・済みの行は残す）。
+// 全部か無かで確定しなかったとき、この要求が借りた冪等の鍵を手放す。借りの行の version と incarnation を条件に消す（releaseIdempotency）ため、
+// 取り直された行・済みの行と、手放しや表の期限の後に同じ鍵で借り直した行は残す。
 // 手放せなかった鍵は借りの期限の後に取り直せるため、要求の結果は変えない。
 // 後始末は要約の記録と応答の時間（DISPATCH_SUMMARY_MS）を食わない。残り時間がそれを超える分だけを使い、鍵ごとの手放しを並べて打ち、
-// その時間で終わらなければ待たずに返す（終わらなかった手放しは持ち主の条件つきのため、後で届いても他の要求の行を消さない）
+// その時間で終わらなければ待たずに返す（終わらなかった手放しは借りの行の条件つきのため、後で届いても他の要求の行を消さない）
 async function releaseTaken(c: Ctx): Promise<void> {
-  const claims = c.taken.splice(0);
-  if (claims.length === 0) return;
+  const leases = c.taken.splice(0);
+  if (leases.length === 0) return;
   const budget = c.req.call.remainingMs() - DISPATCH_SUMMARY_MS;
   if (budget <= 0) {
-    c.req.log.warn("残り時間が足りないため冪等の鍵の借りを手放さない", { count: claims.length });
+    c.req.log.warn("残り時間が足りないため冪等の鍵の借りを手放さない", { count: leases.length });
     return;
   }
-  const release = async (claim: IdempotencyClaimInput): Promise<void> => {
-    const item: TransactItem = {
-      table: "idempotency",
-      op: "delete",
-      key: idempotencyKeyOf(claim),
-      condition: cond.and(cond.eq("state", "leased"), cond.eq("owner_request_id", claim.requestId), cond.eq("fingerprint", claim.fingerprint)),
-      onConflict: "fail",
-    };
+  const release = async (leased: IdempotencyRow): Promise<void> => {
     try {
-      await writeAtomically(c.req.deps.db, [item], c.req.log);
+      await writeAtomically(c.req.deps.db, [releaseIdempotency(leased)], c.req.log);
     } catch (error) {
       c.req.log.warn("確定しなかった要素の冪等の鍵の借りを手放せない", { error: errorName(error) });
     }
@@ -473,8 +507,8 @@ async function releaseTaken(c: Ctx): Promise<void> {
     timer = setTimeout(() => resolve("expired"), budget);
   });
   try {
-    const done = await Promise.race([Promise.all(claims.map(release)).then(() => "done" as const), expired]);
-    if (done === "expired") c.req.log.warn("後始末の時間内に冪等の鍵の借りを手放し終えない", { count: claims.length });
+    const done = await Promise.race([Promise.all(leases.map(release)).then(() => "done" as const), expired]);
+    if (done === "expired") c.req.log.warn("後始末の時間内に冪等の鍵の借りを手放し終えない", { count: leases.length });
   } finally {
     clearTimeout(timer);
   }
@@ -499,37 +533,50 @@ async function allOrNothingOnce(c: Ctx, parsed: readonly ParsedItem[], authz: re
     checkTime(req);
     prepared.push(await prepare(c, index, item, authz[index]));
   }
-  const results = prepared.map((p) => (isHandled(p) ? p.result : p));
   const notApplied = failure(409, "not_applied");
-  if (results.some((r) => !r.ok)) return results.map((r) => (r.ok ? notApplied : r));
+  for (let rebuilds = 0; ; rebuilds += 1) {
+    const results = prepared.map((p) => (isHandled(p) ? p.result : p));
+    if (results.some((r) => !r.ok)) return results.map((r) => (r.ok ? notApplied : r));
 
-  const parts = prepared.flatMap((p, index) => (isHandled(p) && (p.writes.length > 0 || p.claim !== null) ? [partOf(req, principal, op, index, p, p.result, p.writes)] : []));
-  if (parts.length === 0) {
-    onCommitted();
-    return results;
+    const parts = prepared.flatMap((p, index) => (isHandled(p) && (p.writes.length > 0 || p.leased !== null) ? [partOf(req, principal, op, index, p, p.result, p.writes)] : []));
+    if (parts.length === 0) {
+      onCommitted();
+      return results;
+    }
+    const { items, slots } = compose(parts, requesterGuards(op, principal));
+    if (items.length > TRANSACT_MAX_ITEMS) {
+      req.log.error("全部か無かの書き込みが 1 つのトランザクションに収まらない", { count: items.length });
+      throw halt(503, "unavailable");
+    }
+    const outcome = await commit(req, items);
+    if (outcome.ok) {
+      onCommitted();
+      return results;
+    }
+    const failed = failedOf(outcome, slots);
+    if (rebuildOnly(failed)) {
+      // 外れた件を返した要素のハンドラーだけを呼び直す。外れていない要素の書き込みはそのまま使う
+      checkRebuild(req, rebuilds);
+      for (const element of new Set(failed.map((f) => f.element))) {
+        const p = element === null ? undefined : prepared[element];
+        if (element === null || p === undefined || !isHandled(p)) continue;
+        prepared[element] = await handle(c, p.item, p.authz, p.leased);
+      }
+      continue;
+    }
+    if (failed.some((f) => f.role === "audit")) throw halt(503, "audit_unavailable");
+    // 要求元の照らしの件が外れたら、どの要素も 409 state_mismatch
+    if (failed.some((f) => f.guarded)) return results.map(() => failure(409, "state_mismatch"));
+    return results.map((_, element) => {
+      const mine = failed.filter((f) => f.element === element);
+      const p = prepared[element];
+      // rebuild の件だけが外れた要素は、ほかの要素の外れで確定しなかっただけ
+      if (mine.length === 0 || p === undefined || !isHandled(p) || rebuildOnly(mine)) return notApplied;
+      const verdict = verdictOf(req, mine, p.conflicts);
+      // 全部か無かでは既にある行の結果を返さない（ほかの要素とともに確定しない）
+      return verdict.kind === "result" ? verdict.result : failure(409, "state_mismatch");
+    });
   }
-  const { items, slots } = compose(parts, requesterGuards(op, principal));
-  if (items.length > TRANSACT_MAX_ITEMS) {
-    req.log.error("全部か無かの書き込みが 1 つのトランザクションに収まらない", { count: items.length });
-    throw halt(503, "unavailable");
-  }
-  const outcome = await commit(req, items);
-  if (outcome.ok) {
-    onCommitted();
-    return results;
-  }
-  const failed = failedOf(outcome, slots);
-  if (failed.some((f) => f.role === "audit")) throw halt(503, "audit_unavailable");
-  // 要求元の照らしの件が外れたら、どの要素も 409 state_mismatch
-  if (failed.some((f) => f.guarded)) return results.map(() => failure(409, "state_mismatch"));
-  return results.map((_, element) => {
-    const mine = failed.filter((f) => f.element === element);
-    const p = prepared[element];
-    if (mine.length === 0 || p === undefined || !isHandled(p)) return notApplied;
-    const verdict = verdictOf(req, mine, p.conflicts);
-    // 全部か無かでは既にある行の結果を返さない（ほかの要素とともに確定しない）
-    return verdict.kind === "result" ? verdict.result : failure(409, "state_mismatch");
-  });
 }
 
 // logins.delete の認可の対象は、要素が指すログインの組の行でなく認証した主体の利用者自身（読み手に外すログインの行を引かせない）
@@ -550,7 +597,7 @@ async function run(req: Request): Promise<DispatchResult> {
   let sessionRevokedAt: string | null = null;
   if (call.principal !== undefined) principal = call.principal;
   else {
-    const auth = await authenticate({ endpoint: call.endpoint, operation: call.operation, token: call.token }, { ...deps.auth, log: req.log });
+    const auth = await authenticate({ endpoint: call.endpoint, operation: call.operation, token: call.token }, { ...deps.auth, db: deps.db, log: req.log });
     if (!auth.ok) return finish(req, auth.reason === "unavailable" ? problem(503, "unavailable") : problem(401, auth.reason));
     principal = auth.principal;
     sessionRevokedAt = auth.sessionRevokedAt;

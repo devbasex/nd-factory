@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { AuthDeps, DelegationRecord, Principal } from "../src/auth/authenticate.ts";
 import type { ScopeReader } from "../src/authorize.ts";
 import { createClock } from "../src/clock.ts";
-import { cond, putIfAbsent, updateIfVersion, type TransactItem } from "../src/conditional-write.ts";
-import { DISPATCH_RESERVE_MS, DISPATCH_SUMMARY_MS, dispatch, readHttpCall, type DispatchDeps, type DispatchResult, type Handler, type HttpEvent, type OperationCall } from "../src/dispatch/dispatch.ts";
+import { cond, putIfAbsent, replaceIfVersion, type TransactItem } from "../src/conditional-write.ts";
+import type { StoredRow } from "../src/db.ts";
+import { DISPATCH_REBUILD_LIMIT, DISPATCH_RESERVE_MS, DISPATCH_SUMMARY_MS, dispatch, readHttpCall, type DispatchDeps, type DispatchResult, type Handler, type HttpEvent, type OperationCall } from "../src/dispatch/dispatch.ts";
 import { createLogger } from "../src/log.ts";
-import { DISPATCH_OPERATIONS, NOTE_KEY, noteHandlers } from "./fixtures/dispatch.ts";
+import { DISPATCH_OPERATIONS, NOTE_INCARNATION, NOTE_KEY, noteHandlers } from "./fixtures/dispatch.ts";
 import { projectsGet } from "./fixtures/operations.ts";
 import { leakedSecrets, SECRET_SAMPLES } from "./fixtures/secrets.ts";
 import { fakeScope, seedWorld } from "./fakes/scope.ts";
@@ -43,13 +44,15 @@ const delegate = (operations: "read" | "run" | "manage", projectIds = [P_A]): Pr
 
 const SECRET = randomBytes(32).toString("base64url");
 const DELEGATION_TOKEN = `ndfd_${OWNER}.${DELEGATION}.${SECRET}`;
+// 委任の行の世代（作り物の値）。偽の表の委任の行と、読み手が返す保存の値で同じにする
+const DELEGATION_INCARNATION = "3f6c1a2b-4d5e-4f70-8a9b-0c1d2e3f4a5b";
 const delegationRecord = (operations: "read" | "run" | "manage" = "read"): DelegationRecord => ({
   secretSha256: createHash("sha256").update(SECRET).digest("hex"),
   expiresAt: new Date(NOW + 86_400_000).toISOString(),
   revokedAt: null,
-  lastUsedAt: new Date(NOW).toISOString(),
   scope: { projectIds: [P_A], operations },
   clientName: "acme-agent",
+  stored: { version: { kind: "value", value: 1 }, incarnation: { kind: "value", value: DELEGATION_INCARNATION } },
 });
 
 type Setup = { table: FakeTable; deps: DispatchDeps; lines: string[]; readerCalls: string[]; authzItems: unknown[] };
@@ -67,12 +70,13 @@ function setup(opts: { handlers?: Record<string, Handler>; delegation?: Delegati
   });
   table.seed("users", bindingRow(SUB));
   table.seed("users", bindingRow(OTHER_SUB));
+  table.seed("users", { pk: `USER#${OWNER}`, sk: `DELEGATION#${DELEGATION}`, schema_version: 1, version: 1, incarnation: DELEGATION_INCARNATION });
   const lines: string[] = [];
   const readerCalls: string[] = [];
   const authzItems: unknown[] = [];
   const clock = createClock(() => NOW);
   const record = opts.delegation === undefined ? delegationRecord() : opts.delegation;
-  const auth: AuthDeps = {
+  const auth: Omit<AuthDeps, "db"> = {
     // 偽の Cognito の照らし: 署名と claim を通した token として、要求元のサインインの claim を返す
     cognito: async () => ({ ok: true, value: { sub: SUB, username: "acme-user", authTime: AUTH_TIME, originJti: SESSION } }),
     signingKey: null,
@@ -95,7 +99,6 @@ function setup(opts: { handlers?: Record<string, Handler>; delegation?: Delegati
         if (opts.readerFail !== undefined) throw opts.readerFail;
         return record;
       },
-      async touchDelegation() {},
       async machine() {
         return null;
       },
@@ -178,7 +181,7 @@ describe("dispatch: 書く要素と記録（I9・受け入れ条件 4）", () =>
     ]);
     expect(stateWrites(table)).toHaveLength(2);
     for (const transaction of stateWrites(table)) {
-      expect(shapeOf(transaction)).toEqual(["sprints:put", "audit:put", "idempotency:update", "users:check", "users:check"]);
+      expect(shapeOf(transaction)).toEqual(["sprints:put", "audit:put", "idempotency:put", "users:check", "users:check"]);
     }
     expect(table.rows("sprints")).toHaveLength(2);
     expect(table.rows("idempotency").map((r) => r["state"])).toEqual(["settled", "settled"]);
@@ -208,7 +211,8 @@ describe("dispatch: 書く要素と記録（I9・受け入れ条件 4）", () =>
   it("ハンドラーが記録の表の書き換えを返すと 503 で確定しない", async () => {
     const tamper: Handler = async () => ({
       result: { ok: true, item: { title: "x" } },
-      writes: [updateIfVersion({ table: "audit", key: { pk: `PROJECT#${P_A}`, sk: "x" }, version: 1, set: { result: "ok" }, onConflict: "fail" })],
+      // 既にある記録の行の上書き（replaceIfVersion は組む時点で記録の表を拒むため、件を手で組む）
+      writes: [{ table: "audit", op: "put", key: { pk: `PROJECT#${P_A}`, sk: "x" }, item: { pk: `PROJECT#${P_A}`, sk: "x", schema_version: 1, result: "ok" }, condition: cond.exists("pk"), onConflict: "fail" }],
     });
     const { table, deps } = setup({ handlers: { ...noteHandlers, "notes.rename": tamper } });
     const result = await dispatch(call("notes.rename", [{ project_id: P_A, title: "x", version: 1 }]), deps);
@@ -263,7 +267,7 @@ describe("dispatch: 人の書き込みの要求元の照らし", () => {
   it("既にある利用者の sessions.create は、記録と冪等の鍵の済みの行だけの書き込みにも足す", async () => {
     const { table, deps } = setup();
     await dispatch(call("sessions.create", [{ idempotency_key: IDEM_1 }]), deps);
-    expect(shapeOf(table.transactions.find((t) => t.some((i) => i.table === "idempotency" && i.op === "update")) ?? [])).toEqual(["audit:put", "idempotency:update", "users:check", "users:check"]);
+    expect(shapeOf(table.transactions.find((t) => t.some((i) => i.table === "idempotency" && i.op === "put" && i.condition.kind === "and")) ?? [])).toEqual(["audit:put", "idempotency:put", "users:check", "users:check"]);
   });
 
   it("認証の後に要求元のセッションが取り消されたら、要素を書かずに 409 state_mismatch（ハンドラーの理由より先）", async () => {
@@ -313,7 +317,7 @@ describe("dispatch: 人の書き込みの要求元の照らし", () => {
     const result = await dispatch(call("logins.delete", [{ cognito_sub: SUB, idempotency_key: IDEM_1 }]), deps);
     expect(itemsOf(result)).toEqual([{ ok: true, item: { cognito_sub: SUB } }]);
     const transaction = stateWrites(table, "users")[0] ?? [];
-    expect(shapeOf(transaction)).toEqual(["users:delete", "audit:put", "idempotency:update", "users:check"]);
+    expect(shapeOf(transaction)).toEqual(["users:delete", "audit:put", "idempotency:put", "users:check"]);
     expect(transaction[0]?.condition).toEqual({
       kind: "and",
       of: [
@@ -697,7 +701,14 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
         result: { ok: true, item: { title: note.title } },
         writes: [
           putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: note.title }, onConflict: "return_existing" }),
-          updateIfVersion({ table: "sprints", key: NOTE_KEY(P_A), version: 1, set: { title: note.title }, onConflict: "version_mismatch" }),
+          replaceIfVersion({
+            table: "sprints",
+            item: { ...NOTE_KEY(P_A), schema_version: 1, title: note.title },
+            version: 1,
+            incarnation: NOTE_INCARNATION,
+            expect: { version: { kind: "value", value: 1 }, incarnation: { kind: "absent" } },
+            onConflict: "version_mismatch",
+          }),
         ],
         conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }) }],
       };
@@ -719,7 +730,14 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
         result: { ok: true, item: { title: note.title } },
         writes: [
           putIfAbsent({ table: "sprints", item: { ...eventKey, schema_version: 1, version: 1, title: note.title }, onConflict: "return_existing" }),
-          updateIfVersion({ table: "sprints", key: NOTE_KEY(P_A), version: 1, set: { title: note.title }, onConflict: "version_mismatch" }),
+          replaceIfVersion({
+            table: "sprints",
+            item: { ...NOTE_KEY(P_A), schema_version: 1, title: note.title },
+            version: 1,
+            incarnation: NOTE_INCARNATION,
+            expect: { version: { kind: "value", value: 1 }, incarnation: { kind: "absent" } },
+            onConflict: "version_mismatch",
+          }),
         ],
         conflicts: [{ existing: (row) => ({ ok: true, item: { title: String(row?.["title"]) } }) }],
       };
@@ -785,6 +803,214 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
   it("結果の形に無い鍵は応答に残さない", async () => {
     const { deps } = setup();
     expect(itemsOf(await dispatch(call("notes.peek", [{ project_id: P_A }]), deps))).toEqual([{ ok: true, item: { title: "acme" } }]);
+  });
+});
+
+// 組み直しの作り物: 数の行を強い整合で読み、1 足した行全体を読んだ version と incarnation を条件に rebuild で置き換えるハンドラー。
+// raceOn(n) が真の呼び出し（1 から数える）では、読んだ後に並んだ書き手が同じ行へ 1 足して確定したことにする
+const counterKey = (name: string) => ({ pk: `PROJECT#${P_A}`, sk: `COUNTER#${name}` });
+const counterRow = (name: string, count: number, version: number) => ({ ...counterKey(name), schema_version: 1, version, incarnation: NOTE_INCARNATION, count });
+
+function counting(table: FakeTable, raceOn: (call: number, name: string) => boolean, extra: (name: string) => TransactItem[] = () => []) {
+  const calls: string[] = [];
+  const handler: Handler = async (item, ctx) => {
+    const name = (item as { title: string }).title;
+    calls.push(name);
+    const raw: StoredRow | null = await ctx.db.get("sprints", counterKey(name), true);
+    const count = Number(raw?.["count"]);
+    const version = Number(raw?.["version"]);
+    if (raceOn(calls.filter((n) => n === name).length, name)) table.seed("sprints", counterRow(name, count + 1, version + 1));
+    return {
+      result: { ok: true, item: { title: name } },
+      writes: [
+        replaceIfVersion({
+          table: "sprints",
+          item: { ...counterKey(name), schema_version: 1, count: count + 1 },
+          version,
+          incarnation: NOTE_INCARNATION,
+          expect: { version: { kind: "value", value: version }, incarnation: { kind: "value", value: NOTE_INCARNATION } },
+          onConflict: "rebuild",
+        }),
+        ...extra(name),
+      ],
+    };
+  };
+  return { calls, handler };
+}
+
+describe("dispatch: 組み直し（rebuild）", () => {
+  it("外れた件がどれも rebuild の件なら、ハンドラーを借りた冪等の鍵のまま呼び直し（行を読み直す）、組み直したトランザクションが確定する", async () => {
+    const { table, deps } = setup();
+    table.seed("sprints", counterRow("a", 5, 1));
+    const { calls, handler } = counting(table, (n) => n === 1);
+    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "a", idempotency_key: IDEM_1 }]), { ...deps, handlers: { ...noteHandlers, "notes.create": handler } });
+    expect(itemsOf(result)).toEqual([{ ok: true, item: { title: "a" } }]);
+    expect(calls).toEqual(["a", "a"]);
+    // 並んだ書き手の 1 と、読み直した行に足した 1
+    expect(table.row("sprints", counterKey("a"))).toMatchObject({ count: 7, version: 3 });
+    // 借りは 1 回だけ（借りの version 1 を済みで 2 にした）で、取り直していない
+    const [leased] = table.rows("idempotency");
+    expect(leased).toMatchObject({ state: "settled", version: 2, owner_request_id: "req-1" });
+    expect(table.transactions.filter((t) => t.length === 1 && t[0]?.table === "idempotency")).toHaveLength(1);
+    expect(elementRows(table)).toHaveLength(1);
+  });
+
+  it(`${DISPATCH_REBUILD_LIMIT} 回目の組み直しで確定し、${DISPATCH_REBUILD_LIMIT + 1} 回目は打たずに要求全体の 503 unavailable で warn を残す`, async () => {
+    const ok = setup();
+    ok.table.seed("sprints", counterRow("a", 0, 1));
+    const last = counting(ok.table, (n) => n <= DISPATCH_REBUILD_LIMIT);
+    const done = await dispatch(call("notes.create", [{ project_id: P_A, title: "a", idempotency_key: IDEM_1 }]), { ...ok.deps, handlers: { ...noteHandlers, "notes.create": last.handler } });
+    expect(itemsOf(done)).toEqual([{ ok: true, item: { title: "a" } }]);
+    expect(last.calls).toHaveLength(DISPATCH_REBUILD_LIMIT + 1);
+
+    const ng = setup();
+    ng.table.seed("sprints", counterRow("a", 0, 1));
+    const always = counting(ng.table, () => true);
+    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "a", idempotency_key: IDEM_1 }]), { ...ng.deps, handlers: { ...noteHandlers, "notes.create": always.handler } });
+    expect(result).toEqual(problem(503, "unavailable"));
+    expect(always.calls).toHaveLength(DISPATCH_REBUILD_LIMIT + 1);
+    expect(elementRows(ng.table)).toHaveLength(0);
+    expect(ng.lines.map((l) => JSON.parse(l))).toContainEqual(expect.objectContaining({ level: "warn", rebuilds: DISPATCH_REBUILD_LIMIT }));
+  });
+
+  it("組み直しの前に残り時間を照らし、予備の時間を下回れば組み直さずに 503 unavailable", async () => {
+    const { table, deps } = setup();
+    table.seed("sprints", counterRow("a", 0, 1));
+    const { calls, handler } = counting(table, () => true);
+    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "a", idempotency_key: IDEM_1 }], { remainingMs: () => (calls.length === 0 ? DISPATCH_RESERVE_MS : DISPATCH_RESERVE_MS - 1) }), {
+      ...deps,
+      handlers: { ...noteHandlers, "notes.create": handler },
+    });
+    expect(result).toEqual(problem(503, "unavailable"));
+    expect(calls).toEqual(["a"]);
+  });
+
+  it("version_mismatch の件と一緒に外れると組み直さず、409 version_mismatch", async () => {
+    const { table, deps } = setup();
+    table.seed("sprints", counterRow("a", 0, 1));
+    table.seed("sprints", { ...NOTE_KEY(P_A), schema_version: 1, version: 2, title: "before" });
+    const stale = (): TransactItem[] => [
+      replaceIfVersion({
+        table: "sprints",
+        item: { ...NOTE_KEY(P_A), schema_version: 1, title: "after" },
+        version: 1,
+        incarnation: NOTE_INCARNATION,
+        expect: { version: { kind: "value", value: 1 }, incarnation: { kind: "absent" } },
+        onConflict: "version_mismatch",
+      }),
+    ];
+    const { calls, handler } = counting(table, () => true, stale);
+    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "a", idempotency_key: IDEM_1 }]), { ...deps, handlers: { ...noteHandlers, "notes.create": handler } });
+    expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "version_mismatch" }]);
+    expect(calls).toEqual(["a"]);
+  });
+
+  it("要求元の照らしと一緒に外れると組み直さず、409 state_mismatch", async () => {
+    const { table, deps } = setup();
+    table.seed("sprints", counterRow("a", 0, 1));
+    const { calls, handler } = counting(table, () => {
+      revoke(table);
+      return true;
+    });
+    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "a", idempotency_key: IDEM_1 }]), { ...deps, handlers: { ...noteHandlers, "notes.create": handler } });
+    expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "state_mismatch" }]);
+    expect(calls).toEqual(["a"]);
+  });
+
+  it("冪等の鍵の済みの行と一緒に外れる（借りを取り直された）と組み直さず、409 in_progress", async () => {
+    const { table, deps } = setup();
+    table.seed("sprints", counterRow("a", 0, 1));
+    const { calls, handler } = counting(table, () => {
+      // 借りの行を別の要求が取り直した（version が進んだ）
+      const [leased] = table.rows("idempotency");
+      if (leased !== undefined) table.seed("idempotency", { ...leased, version: Number(leased["version"]) + 1, owner_request_id: "req-other" });
+      return true;
+    });
+    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "a", idempotency_key: IDEM_1 }]), { ...deps, handlers: { ...noteHandlers, "notes.create": handler } });
+    expect(itemsOf(result)).toEqual([{ ok: false, status: 409, reason: "in_progress" }]);
+    expect(calls).toEqual(["a"]);
+  });
+
+  it("表が断った理由（ValidationError）と条件の外れが同じ取り消しに並ぶと、組み直さずに 503 unavailable", async () => {
+    const { table, deps } = setup();
+    table.seed("sprints", counterRow("a", 0, 1));
+    const { calls, handler } = counting(table, () => {
+      table.failNext("invalid_with_conflict");
+      return true;
+    });
+    const result = await dispatch(call("notes.create", [{ project_id: P_A, title: "a", idempotency_key: IDEM_1 }]), { ...deps, handlers: { ...noteHandlers, "notes.create": handler } });
+    expect(result).toEqual(problem(503, "unavailable"));
+    expect(calls).toEqual(["a"]);
+    expect(table.row("sprints", counterKey("a"))).toMatchObject({ count: 1, version: 2 });
+  });
+
+  it("全部か無かでは外れた件を返した要素のハンドラーだけを呼び直し、外れていない要素の書き込みはそのまま使う", async () => {
+    const { table, deps } = setup();
+    table.seed("sprints", counterRow("a", 0, 1));
+    table.seed("sprints", counterRow("b", 0, 1));
+    const { calls, handler } = counting(table, (n, name) => name === "b" && n === 1);
+    const result = await dispatch(call("notes.import", [{ project_id: P_A, title: "a" }, { project_id: P_A, title: "b" }]), { ...deps, handlers: { ...noteHandlers, "notes.import": handler } });
+    expect(itemsOf(result)).toEqual([
+      { ok: true, item: { title: "a" } },
+      { ok: true, item: { title: "b" } },
+    ]);
+    expect(calls).toEqual(["a", "b", "b"]);
+    expect(table.row("sprints", counterKey("a"))).toMatchObject({ count: 1, version: 2 });
+    expect(table.row("sprints", counterKey("b"))).toMatchObject({ count: 2, version: 3 });
+  });
+});
+
+describe("dispatch: 冪等の鍵の借りの行", () => {
+  it("済みの行は借りの行の version と incarnation を条件に置き換え、全部か無かの手放しも同じ条件で消す", async () => {
+    const ok = setup();
+    await dispatch(call("notes.create", [{ project_id: P_A, title: "one", idempotency_key: IDEM_1 }]), ok.deps);
+    const claimed = ok.table.transactions[0]?.[0]?.item;
+    const settle = stateWrites(ok.table)[0]?.find((i) => i.table === "idempotency");
+    expect(settle).toMatchObject({
+      op: "put",
+      item: { state: "settled", version: 2, incarnation: claimed?.["incarnation"] },
+      condition: { kind: "and", of: [{ kind: "exists", path: "pk" }, { kind: "cmp", path: "version", value: 1 }, { kind: "cmp", path: "incarnation", value: claimed?.["incarnation"] }] },
+    });
+
+    const ng = setup();
+    ng.table.seed("sprints", { pk: `PROJECT#${P_A}`, sk: "NOTE#two", schema_version: 1, version: 1, title: "two" });
+    await dispatch(
+      call("notes.bulk", [
+        { project_id: P_A, title: "one", idempotency_key: IDEM_1 },
+        { project_id: P_A, title: "two", idempotency_key: IDEM_2 },
+      ]),
+      ng.deps,
+    );
+    // 借りの行の鍵ごとの incarnation
+    const leases = new Map(ng.table.transactions.filter((t) => t.length === 1 && t[0]?.table === "idempotency" && t[0].op === "put").map((t) => [t[0]?.key.pk, t[0]?.item?.["incarnation"]]));
+    const releases = ng.table.transactions.filter((t) => t.some((i) => i.table === "idempotency" && i.op === "delete")).map((t) => t[0]);
+    expect(leases.size).toBe(2);
+    expect(releases).toHaveLength(2);
+    for (const release of releases) {
+      expect(release?.condition).toMatchObject({ kind: "and", of: [{ kind: "exists", path: "pk" }, { kind: "cmp", path: "version", value: 1 }, { kind: "cmp", path: "incarnation", value: leases.get(release?.key.pk) }] });
+    }
+    expect(ng.table.rows("idempotency")).toHaveLength(0);
+  });
+
+  it("手放しは同じ鍵で借り直した行（incarnation の違う行）を消さない", async () => {
+    const { table, deps } = setup();
+    table.seed("sprints", { pk: `PROJECT#${P_A}`, sk: "NOTE#two", schema_version: 1, version: 1, title: "two" });
+    // 手放しの前に、借りが表の期限で消えて別の要求が同じ鍵で version 1 から借り直した
+    const racing: Handler = async (item, ctx) => {
+      const out = await noteHandlers["notes.bulk"]!(item, ctx);
+      if ((item as { title: string }).title === "two") {
+        for (const row of table.rows("idempotency")) table.seed("idempotency", { ...row, incarnation: "0f1e2d3c-4b5a-4968-8776-655443322110", owner_request_id: "req-other" });
+      }
+      return out;
+    };
+    await dispatch(
+      call("notes.bulk", [
+        { project_id: P_A, title: "one", idempotency_key: IDEM_1 },
+        { project_id: P_A, title: "two", idempotency_key: IDEM_2 },
+      ]),
+      { ...deps, handlers: { ...noteHandlers, "notes.bulk": racing } },
+    );
+    expect(table.rows("idempotency").map((r) => r["owner_request_id"])).toEqual(["req-other", "req-other"]);
   });
 });
 

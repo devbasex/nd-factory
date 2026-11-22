@@ -20,6 +20,7 @@ import {
 } from "../src/auth/authenticate.ts";
 import { createClock } from "../src/clock.ts";
 import { createLogger } from "../src/log.ts";
+import { fakeTable } from "./fakes/table.ts";
 
 // IdP と表には触れない。Cognito の公開鍵は差し替えた取り手が返し、鍵と token はテストの中で作った作り物にする。
 // 時刻は注入した時計の NOW を使う。実時刻も NOW に止め、注入した時計と実時刻が違うときの照らしは個別に実時刻をずらして確かめる
@@ -97,15 +98,26 @@ function signedToken(payload: Record<string, unknown>, key: KeyObject = ed.priva
 const laneClaims = (over: Record<string, unknown> = {}) => ({ aud: "lane", token_use: "lane", sub: LANE, project_id: PROJECT, generation: 2, exp: NOW_SEC + 3600, ...over });
 const prepClaims = (over: Record<string, unknown> = {}) => ({ aud: "db_prep", token_use: "exchange", sub: PREP, project_id: PROJECT, exp: NOW_SEC + 600, ...over });
 
+// 委任の行と委任の使った時刻の行（偽の表に置く）。行の世代は作り物の値
+const DELEGATION_KEY = { pk: `USER#${USER}`, sk: `DELEGATION#${DELEGATION}` };
+const USED_KEY = { pk: `USER#${USER}`, sk: `DELEGATION_USED#${DELEGATION}` };
+const DELEGATION_INCARNATION = "3f6c1a2b-4d5e-4f70-8a9b-0c1d2e3f4a5b";
+const USED_INCARNATION = "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d";
+const delegationRowOf = (version: number) => ({ ...DELEGATION_KEY, schema_version: 1, version, incarnation: DELEGATION_INCARNATION, delegation_id: DELEGATION, user_id: USER });
+const usedRowOf = (lastUsedAt: string) => ({ ...USED_KEY, schema_version: 1, version: 1, incarnation: USED_INCARNATION, delegation_id: DELEGATION, user_id: USER, last_used_at: lastUsedAt });
+
 // 読み手の作り物
 
 type World = {
   delegation?: DelegationRecord | null;
+  // 表の委任の行の version（既定は読んだ値と同じ 1。2 にすると、認証の読みの後に delegations.revoke が確定したことになる）
+  delegationRowVersion?: number;
+  // 表の委任の使った時刻の行の last_used_at（無ければ行が無い）
+  usedAt?: string;
   machine?: MachineRecord | null;
   lane?: LaneRecord | null;
   prep?: DbPrepRecord | null;
   fail?: Error;
-  touchFail?: Error;
   // 結んだ主体（cognito-sub-1）の対応の行の bound_auth_time
   boundAuthTime?: string;
   // cognito-sub-1 以外の主体の対応の行。無ければ結んでいない
@@ -114,13 +126,11 @@ type World = {
   revoked?: Readonly<Record<string, string>>;
 };
 
-function readers(world: World): AuthReaders & { touches: string[][] } {
-  const touches: string[][] = [];
+function readers(world: World): AuthReaders {
   const guard = () => {
     if (world.fail !== undefined) throw world.fail;
   };
   return {
-    touches,
     async userOfSubject(sub) {
       guard();
       if (sub === "cognito-sub-1") return { userId: USER, boundAuthTime: world.boundAuthTime ?? iso(NOW - 86_400_000) };
@@ -143,10 +153,6 @@ function readers(world: World): AuthReaders & { touches: string[][] } {
       guard();
       return world.delegation ?? null;
     },
-    async touchDelegation(userId, delegationId, at, ifBefore) {
-      touches.push([userId, delegationId, at, ifBefore]);
-      if (world.touchFail !== undefined) throw world.touchFail;
-    },
     async machine() {
       guard();
       return world.machine ?? null;
@@ -165,15 +171,19 @@ function readers(world: World): AuthReaders & { touches: string[][] } {
 function setup(world: World = {}, opts: { fetcher?: Fetcher; webhookSecret?: string | null } = {}) {
   const lines: string[] = [];
   const r = readers(world);
+  const table = fakeTable();
+  if (world.delegation != null) table.seed("users", delegationRowOf(world.delegationRowVersion ?? 1));
+  if (world.usedAt !== undefined) table.seed("users", usedRowOf(world.usedAt));
   const deps: AuthDeps = {
     cognito: createCognitoCheck({ userPoolId: POOL, clientId: CLIENT }, { fetcher: opts.fetcher ?? fakeFetcher() }),
     signingKey: ed.publicKey,
     webhookSecret: opts.webhookSecret === undefined ? "acme-webhook-secret" : opts.webhookSecret,
     readers: r,
+    db: table.db,
     clock,
     log: createLogger({ request_id: "req-1", fn: "test", endpoint: "user" }, (line) => lines.push(line)),
   };
-  return { deps, lines, readers: r };
+  return { deps, lines, table };
 }
 
 const req = (endpoint: InboundRequest["endpoint"], token: string | null, operation = "projects.get"): InboundRequest => ({ endpoint, operation, token });
@@ -186,9 +196,10 @@ function delegationFixture(over: Partial<DelegationRecord> = {}) {
     secretSha256: sha256(secret),
     expiresAt: iso(NOW + 7 * 86_400_000),
     revokedAt: null,
-    lastUsedAt: iso(NOW - 60_000),
     scope: { projectIds: [PROJECT], operations: "read" },
     clientName: "acme-agent",
+    // 読んだ委任の行に保存してあった version と incarnation（偽の表の委任の行と同じ）
+    stored: { version: { kind: "value", value: 1 }, incarnation: { kind: "value", value: DELEGATION_INCARNATION } },
     ...over,
   };
   return { token, secret, record };
@@ -467,33 +478,110 @@ describe("authenticate: 委任", () => {
     }
   });
 
-  it("最後に使った時刻は前の値から 1 時間以上たったときだけ書く", async () => {
-    const recent = delegationFixture({ lastUsedAt: iso(NOW - DELEGATION_TOUCH_MS + 1) });
-    const old = delegationFixture({ lastUsedAt: iso(NOW - DELEGATION_TOUCH_MS) });
-    const never = delegationFixture({ lastUsedAt: null });
-    const a = setup({ delegation: recent.record });
-    await authenticate(req("user", recent.token), a.deps);
-    expect(a.readers.touches).toHaveLength(0);
-    const b = setup({ delegation: old.record });
-    await authenticate(req("user", old.token), b.deps);
-    expect(b.readers.touches).toEqual([[USER, DELEGATION, iso(NOW), iso(NOW - DELEGATION_TOUCH_MS)]]);
-    const c = setup({ delegation: never.record });
-    await authenticate(req("user", never.token), c.deps);
-    expect(c.readers.touches).toHaveLength(1);
+  it("委任の認証に成功すると、使った時刻の行を委任の行と並べて強い整合で読み、無ければ委任の行の照らしと同じトランザクションで作り、委任の行は書かない", async () => {
+    const f = delegationFixture();
+    const { deps, table } = setup({ delegation: f.record });
+    await expect(authenticate(req("user", f.token), deps)).resolves.toMatchObject({ ok: true, principal: { kind: "delegation" } });
+    expect(table.reads).toContainEqual({ table: "users", key: USED_KEY, consistent: true });
+    expect(table.transactions).toHaveLength(1);
+    const [check, put] = table.transactions[0] ?? [];
+    expect(check).toMatchObject({
+      table: "users",
+      op: "check",
+      key: DELEGATION_KEY,
+      condition: {
+        kind: "and",
+        of: [
+          { kind: "exists", path: "pk" },
+          { kind: "cmp", path: "version", op: "=", value: 1 },
+          { kind: "cmp", path: "incarnation", op: "=", value: DELEGATION_INCARNATION },
+        ],
+      },
+    });
+    expect(put).toMatchObject({ table: "users", op: "put", key: USED_KEY, condition: { kind: "not_exists", path: "pk" } });
+    const used = table.row("users", USED_KEY);
+    expect(used).toMatchObject({ schema_version: 1, version: 1, delegation_id: DELEGATION, user_id: USER, last_used_at: iso(NOW) });
+    expect(String(used?.["incarnation"])).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(used?.["incarnation"]).not.toBe("00000000-0000-4000-8000-000000000000");
+    expect(table.row("users", DELEGATION_KEY)).toEqual(delegationRowOf(1));
   });
 
-  it("最後に使った時刻を書けなくても主体は決まり、warn を残す", async () => {
-    const f = delegationFixture({ lastUsedAt: null });
-    const failure = Object.assign(new Error("throttled"), { name: "ProvisionedThroughputExceededException" });
-    const { deps, lines } = setup({ delegation: f.record, touchFail: failure });
+  it("使った時刻の行は last_used_at が DELEGATION_TOUCH_MS より前のときだけ、読んだ行の version と incarnation を条件に置き換え、委任の行の version は変わらない", async () => {
+    const recent = delegationFixture();
+    const a = setup({ delegation: recent.record, usedAt: iso(NOW - DELEGATION_TOUCH_MS + 1) });
+    await expect(authenticate(req("user", recent.token), a.deps)).resolves.toMatchObject({ ok: true });
+    expect(a.table.transactions).toHaveLength(0);
+    expect(a.table.row("users", USED_KEY)).toEqual(usedRowOf(iso(NOW - DELEGATION_TOUCH_MS + 1)));
+
+    const old = delegationFixture();
+    const b = setup({ delegation: old.record, usedAt: iso(NOW - DELEGATION_TOUCH_MS) });
+    await expect(authenticate(req("user", old.token), b.deps)).resolves.toMatchObject({ ok: true });
+    expect(b.table.transactions).toHaveLength(1);
+    expect(b.table.transactions[0]?.[1]).toMatchObject({
+      op: "put",
+      key: USED_KEY,
+      condition: {
+        kind: "and",
+        of: [
+          { kind: "exists", path: "pk" },
+          { kind: "cmp", path: "version", op: "=", value: 1 },
+          { kind: "cmp", path: "incarnation", op: "=", value: USED_INCARNATION },
+        ],
+      },
+    });
+    expect(b.table.row("users", USED_KEY)).toEqual({ ...usedRowOf(iso(NOW)), version: 2 });
+    expect(b.table.row("users", DELEGATION_KEY)).toEqual(delegationRowOf(1));
+  });
+
+  it("秘密の部分が違う・期限を過ぎた・取り消した委任の token の要求では、時刻の行を作らず書き換えない（行が無い場合も古い場合も）", async () => {
+    const good = delegationFixture();
+    const cases: [string, DelegationRecord][] = [
+      [`ndfd_${USER}.${DELEGATION}.${newSecret()}`, good.record],
+      [good.token, { ...good.record, expiresAt: iso(NOW - 1000) }],
+      [good.token, { ...good.record, revokedAt: iso(NOW - 1) }],
+    ];
+    for (const [token, record] of cases) {
+      for (const usedAt of [undefined, iso(NOW - DELEGATION_TOUCH_MS)]) {
+        const { deps, table } = setup({ delegation: record, ...(usedAt === undefined ? {} : { usedAt }) });
+        await expect(authenticate(req("user", token), deps)).resolves.toEqual(UNAUTHORIZED);
+        expect(table.transactions).toHaveLength(0);
+        expect(table.row("users", USED_KEY)).toEqual(usedAt === undefined ? undefined : usedRowOf(usedAt));
+      }
+    }
+  });
+
+  it("認証の読みの後に delegations.revoke が確定して委任の行の版が進むと、時刻の行を作らず置き換えず、主体は決めたまま warn を残す", async () => {
+    for (const usedAt of [undefined, iso(NOW - DELEGATION_TOUCH_MS)]) {
+      const f = delegationFixture();
+      const { deps, table, lines } = setup({ delegation: f.record, delegationRowVersion: 2, ...(usedAt === undefined ? {} : { usedAt }) });
+      await expect(authenticate(req("user", f.token), deps)).resolves.toMatchObject({ ok: true, principal: { kind: "delegation" } });
+      expect(table.transactions).toHaveLength(1);
+      expect(table.row("users", USED_KEY)).toEqual(usedAt === undefined ? undefined : usedRowOf(usedAt));
+      expect(table.row("users", DELEGATION_KEY)).toEqual(delegationRowOf(2));
+      expect(lines.map((l) => JSON.parse(l))).toContainEqual(expect.objectContaining({ level: "warn", principal: "delegation", result: "conflict" }));
+    }
+  });
+
+  it("最後に使った時刻を書けなくても主体は決まり、warn を残し、行の値と委任の ID を出さない", async () => {
+    const f = delegationFixture();
+    const { deps, lines, table } = setup({ delegation: f.record });
+    table.failNext("unavailable");
     await expect(authenticate(req("user", f.token), deps)).resolves.toMatchObject({ ok: true, principal: { kind: "delegation" } });
-    expect(lines.map((l) => JSON.parse(l))).toContainEqual(expect.objectContaining({ level: "warn", error: "ProvisionedThroughputExceededException" }));
+    expect(lines.map((l) => JSON.parse(l))).toContainEqual(expect.objectContaining({ level: "warn", principal: "delegation", error: "WriteUnavailableError" }));
+    const text = lines.join("\n");
+    expect(text).not.toContain(DELEGATION);
+    expect(text).not.toContain(f.secret);
+    expect(text).not.toContain("last_used_at");
   });
 
   it("表に届かないときは unavailable", async () => {
     const f = delegationFixture();
     const failure = Object.assign(new Error("down"), { name: "InternalServerError" });
     await expect(authenticate(req("user", f.token), setup({ delegation: f.record, fail: failure }).deps)).resolves.toEqual(UNAVAILABLE);
+    // 委任の使った時刻の行の読みが表に届かないときも同じ
+    const unread = setup({ delegation: f.record });
+    unread.table.failReads(failure);
+    await expect(authenticate(req("user", f.token), unread.deps)).resolves.toEqual(UNAVAILABLE);
   });
 
   it("ログに token・秘密の部分・要約値を出さず、unauthorized の内訳はログにだけ出す", async () => {
