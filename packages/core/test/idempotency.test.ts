@@ -117,8 +117,9 @@ describe("claimIdempotency", () => {
     const table = fakeTable();
     const { clock } = clockAt(T0 + IDEMPOTENCY_LEASE_MS);
     const key = idempotencyKeyOf(claim());
+    // 区切りの鍵だけの表の行は sk の列を持たない（DynamoDB が返す行と同じ形にする）
     table.seed("idempotency", {
-      ...key,
+      pk: key.pk,
       schema_version: 1,
       principal_key: claim().principalKey,
       operation: "sprints.create",
