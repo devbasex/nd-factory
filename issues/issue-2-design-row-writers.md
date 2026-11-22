@@ -155,6 +155,8 @@ graph TD
 - 質問: `schema_version` と `version` は、行を消して同じ鍵で作り直すと最初の値に戻る。冪等の鍵（手放しと表の期限で消えた後に同じ鍵で借り直す）・ログインの組と IdP の主体の一意の行（外して結び直す）では、移しや前の借りの確定が読んだ後に行が作り直されると、条件が通って新しい行を古い中身で上書きしうる（PR #122 の r1-2）。どう見分けるか
 - 選んだ案: 記録の表を除くどの行も、`version` の有無によらず `incarnation`（行を作るときに書き手が作る UUID v4。置き換えと移しで変えない）を持つ。`putIfAbsent` が新しい値を入れ、`replaceIfVersion` と `deleteIfVersion` は読んだ行の `version` と `incarnation` を条件にし、`replaceIfUnchanged` は保存してあった `incarnation` も条件にする。`version` を持たない行（作った後に書き換えない行）も、同じ鍵で作り直されうる。たとえばセッションの取り消しの行（`REVOKED#<origin_jti>`）は、取り消しから `SESSION_REVOKED_KEEP_MS`（31 日）で表の期限に消える。一方、`sessions.delete` は `exp` から `SESSION_DELETE_EXPIRED_GRACE_MS`（30 日）まで後発の access token を受けるため、消えた後に同じ鍵で作り直されうる。鍵の形や期限の長さの組で作り直しを防ぐ前提に頼らず、移しの条件の `incarnation` で、前の行を読んだ移しが作り直した行を外す
   - 条件に使う値と書く値を、通常の書き手でも移し（決定 3）と同じに分ける。`readRow` は読み手が見る形の行と一緒に、保存してあった `schema_version`・`version`・`incarnation` の値そのもの（列が無ければ「無いこと」）を返す。`replaceIfVersion` と `deleteIfVersion` の条件は保存してあった値にする。`replaceIfVersion` が書く `version` は読み手の見る形の値に 1 足した値、`incarnation` は読み手の見る形の値にする。`repair` が欠けた `incarnation` を鍵から決まる値で補った行は、条件が「`incarnation` が無いこと」になり、移しが済む前でも通常の書き換えと消し（委任の取り消しを含む）が通る。作り直した行は `putIfAbsent` が入れた `incarnation` を必ず持つため、この条件に外れ、前の行を読んだ書き手は作り直した行を書き換えない。並んだ 2 つの書き手がどちらも補った値を読んだときは、先に確定した側が `incarnation` を書くため、後の側が外れる
+  - `replaceIfVersion` と `deleteIfVersion` は、`replaceIfUnchanged` と同じに `attribute_exists(pk)` を必ず条件に入れる。`version` と `incarnation` の両方を補った行では 2 つの列の条件がどちらも「無いこと」になり、読んだ後に行が消えると、鍵に何も無くても条件が通って、`Put` が読んだ古い中身で行を作り直すためである
+  - `incarnation`（と、書き換える行の種類に新しく足す `version`）を必須の列にする U3b は、その前の書き手が保存した行（利用者の行など）を読めるよう、同じ単位で旧形式の補い（`repairIdentity`。列が無いときだけ `incarnation` を鍵から決まる値で、`version` を 1 で補う `repair`）をその行の種類に持たせる。補いが無いと、U3b の反映から移しの U5b2 までの間、旧形式の行が `readRow` の形の検査に外れ、その行の読み取りと更新が止まる。新しく作る行は `putIfAbsent` が、置き換える行は `replaceIfVersion` が `incarnation` を保存するため、旧形式の行は書き換えられるたびに減り、残りは U5b2 の移しが書き直す
 - 採らなかった案:
   - `version` を作り直しで 1 に戻さず、消すときに墓の行を残して続きの値から作る。消した行が残り続け、表の期限で消える冪等の鍵では墓も消える
   - 移しの条件に行のすべての列の一致を足す。冪等の鍵の行の要素の結果は大きく、条件の式の上限を超えうる（決定 2 と同じ）
@@ -166,8 +168,9 @@ graph TD
 ### 決定 9: 操作の記録の追記だけの約束を崩さないよう、表の移しは記録の表の行を書き直さない
 
 - 質問: 表の移しは行を `Put` で置き換えるが、`writeAtomically` は記録の表（`db-audit`）への追記でない書き込みを `AuditAppendOnlyError` で拒み、移しの走査が途中で止まる（PR #122 の r1-1）。記録の行の版上げと直しを移しの対象にするか
-- 選んだ案: 対象にしない。`migrateTable` は記録の表を走査しても書かず、保存の形が読み手の見る形と違う行は理由の符号 `append_only` で拒んだ行に数える。記録の行の種類の版上げは、手順の 4（`downgradable: false`）と次の版上げの手順の 1 へ進む前に、前の版の行が表の期限（`AUDIT_RETENTION_DAYS`）で消えて `append_only` が 0 になるのを待つ。記録の行の直しは `repair` で読み手にだけ効かせ、保存の値は変えない（元の値を記録として残す）
-  - 手順の 4 の後に記録の行の種類の書き手を前の版へ戻すとき（4a から 4c）は、読み手の互換で戻す。`narrow` は記録の行の保存の値を変えないため、次の版だけで表せる値を持つ行は `append_only` のまま残る。4c では、記録の表の `append_only` を `refused` の判定から除く（ほかの符号が 0 なら 3 へ進む）。代わりに、その行の種類の `rowCodec` の `latest`（次の版）と `narrow` を、表の期限で `append_only` が 0 になるまで外さない。前の版の書き手に戻した後も、読み手は次の版の行を読めて狭めた値を見る。次の版の形を外すのは、`append_only` が 0 になった後の版を下げる反映か次の版上げの手順の 1 だけである
+- 選んだ案: 対象にしない。`migrateTable` は記録の表を走査しても書かず、保存の形が読み手の見る形と違う行は理由の符号 `append_only` で拒んだ行に数える。記録の行の種類の版上げは、手順の 4（`downgradable: false`）と次の版上げの手順の 1 へ進む前に、前の版の行が表の期限（`AUDIT_RETENTION_DAYS`）で消え、保存の `schema_version` の数えで 0 になるのを待つ。記録の行の直しは `repair` で読み手にだけ効かせ、保存の値は変えない（元の値を記録として残す）
+  - 手順の 4 の後に記録の行の種類の書き手を前の版へ戻すとき（4a から 4c）は、読み手の互換で戻す。`narrow` は記録の行の保存の値を変えないため、次の版だけで表せる値を持つ行は `append_only` のまま残る。4c では、記録の表の `append_only` を `refused` の判定から除く（ほかの符号が 0 なら 3 へ進む）。代わりに、その行の種類の `rowCodec` の `latest`（次の版）と `narrow` を、表の期限で `append_only` が 0 になるまで外さない。前の版の書き手に戻した後も、読み手は次の版の行を読めて狭めた値を見る。次の版の形を外すのは、版を下げる反映か次の版上げの手順の 1 だけである
+  - 行の種類のある版の読み手を外してよいか（前の版の行と、戻した後の次の版の行が残っていないか）は、`append_only` の数で決めない。`append_only` は書き手の版の行と保存の行の比べの結果で、`narrow` を通しても値の変わらない次の版の行を数えず、3b の後は移しがその行の種類を飛ばすためである。代わりに、書かない数え（`countRowVersions`。読みだけの権限の `census` の Lambda）で、その版を書く書き手を無くした後に、保存してある `schema_version` ごとに行を数え、その版の行が 0 であることを確かめてから外す（[詳細設計の版を上げる子の手順](./issue-2-design-detail.md#版を上げる子の手順) の 5）。記録の表に限らず、どの表の行の種類の読み手を外すときも同じ確かめを通す
 - 採らなかった案:
   - 記録の行の種類では手順の 4 の後に書き手を前の版へ戻さない（戻せなくなる制約として書く）。記録の形を変えた反映の障害が `AUDIT_RETENTION_DAYS` 日の間直せなくなり、その間は誤った書き手で記録が書かれ続ける
   - 移しだけが使う記録の表への置き換えの経路を足す。通常の書き手の追記だけの検査を保っても、記録の行を書き換える権限と経路が残り、記録が後から変わらないこと（I9）を権限と部品の両方で守れなくなる
@@ -228,6 +231,9 @@ graph TD
 | #122 r2-3（記録の行の種類を手順の 4 の後に戻すと `append_only` で `refused = 0` を満たせない） | 採る（読み手の互換で戻す形で） | 決定 9 | 4c で記録の表の `append_only` を判定から除き、次の版の形と `narrow` を表の期限で 0 になるまで残す |
 | #122 r2-4（認証に失敗した要求でも使った時刻が進みうる） | 採る | 決定 10 | 時刻の行の作成と置き換えは、秘密・期限・取り消し・席の照らしを通した後だけ行う |
 | #122 r2-5（使った時刻の行を消す手順が無く、取り消しと並ぶと作り直される） | 採る（委任の行と同じ寿命の形で） | 決定 10 | 委任の行は取り消しと期限切れの後も残るため、時刻の行も表の期限を持たず同じ長さ残す。書き込みに委任の行の `version` と `incarnation` の照らしを入れ、取り消しの後に作り直さない。委任の行を消す書き込みを足すときは同じトランザクションで消す |
+| #122 r3-1（`append_only` が 0 でも読み手を外すと、比べで同じになる次の版の行や 3b の後に飛ばす行が読めなくなる） | 採る | 決定 9 | 読み手を外す条件を、書かない数え（`countRowVersions`）で保存の `schema_version` ごとに対象の版の行が 0 であることにする。どの表の行の種類でも同じ確かめを通す |
+| #122 r3-2（両列を補った行が消えた後に `replaceIfVersion` が古い中身で作り直す） | 採る | 決定 8 | `replaceIfVersion` と `deleteIfVersion` に `attribute_exists(pk)` を必ず入れ、消えた行のテストを足す |
+| #122 r3-3（U3b で必須にした `incarnation` を補う `repair` が後の U5b2 にある） | 採る | 決定 8 | `repair` と旧形式の補い `repairIdentity` を U3b に移し、新規作成と置き換えで `incarnation` を保存するところまで U3b に含める |
 
 ## 影響と危険
 
@@ -239,17 +245,19 @@ graph TD
 | 実装 | 直す中身 | 直す単位 |
 | --- | --- | --- |
 | #79 の `row-codec.ts`（`rowUpdateOf`） | `rowUpdateOf` を `rowReplaceOf`（行全体を返す）に置き換え、今の呼び手（テスト）を切り替える | 新しく足す単位 U3b（行の書き手の直し。U3b の書き手が `replaceIfVersion` へ `rowReplaceOf` の戻り値を渡すため、U3b の中で先に入れる） |
-| #79 の `row-codec.ts`（`rowCodec`・`readRow`） | `rowCodec` に `repair` と `narrow` を足し、`readRow` がそれを通す。`readRow` は保存してあった `schema_version`・`version`・`incarnation` の値も返す（U3b の書き手が条件に使うため、この戻り値は U3b で先に入れる）。`rowReplaceOf` の `repair` の扱い | U5b2（使うのは表の移しと版を上げる子の手順だけ） |
+| #79 の `row-codec.ts`（`rowCodec`・`readRow` の `repair` と `stored`） | `rowCodec` に `repair` を足し、`readRow` と `rowReplaceOf` がそれを通す。`readRow` は保存してあった `schema_version`・`version`・`incarnation` の値も返す。旧形式の補い `repairIdentity` を足す（U3b の書き手が条件に `stored` を使い、U3b の行の形が旧形式の行を `repairIdentity` で読むため、どれも U3b で入れる） | U3b |
+| #79 の `row-codec.ts`（`rowCodec`・`readRow` の `narrow`） | `rowCodec` に `narrow` を足し、`readRow` がそれを通す | U5b2（使うのは表の移しと版を上げる子の手順だけ） |
+| 版の数え（新設） | 書かない数え `countRowVersions` と、表の読みだけの権限の `census` の Lambda | U5b2（版を上げる子の手順の 5 で使う） |
 | U3 の `conditional-write.ts`（`updateIfSchemaVersion`） | `replaceIfUnchanged` に置き換える | U5b2 |
 | U3 の `conditional-write.ts`（`putIfAbsent`・`updateIfVersion`・`ConflictRule`） | `putIfAbsent` が `incarnation` を入れ、`updateIfVersion` を `replaceIfVersion`（条件は保存してあった `version` と `incarnation`）に置き換え、`deleteIfVersion` と `ConflictRule` の `rebuild` を足す。`writeAtomically` は変えない | U3b |
-| U5a の行の形（ログインの組・IdP の主体の一意の行・ログインをつなぐ流れの行・冪等の鍵・答え・`version` を持つ行の全部・委任・記録の表を除く `version` を持たない行） | 書き換える行は基の形を `overwriteRow` にし、`version` と `incarnation` を持たせる。`version` を持たない行には `incarnation` を持たせる。委任の行から `last_used_at` を外し、委任の使った時刻の行を足す。生成物を作り直す | U3b |
+| U5a の行の形（ログインの組・IdP の主体の一意の行・ログインをつなぐ流れの行・冪等の鍵・答え・`version` を持つ行の全部・委任・記録の表を除く `version` を持たない行） | 書き換える行は基の形を `overwriteRow` にし、`version` と `incarnation` を持たせる。`version` を持たない行には `incarnation` を持たせる。列を足した行の種類のどれにも `repairIdentity` を持たせ、U3b より前の書き手が保存した行を読めるようにする。新しく作る行（`putIfAbsent`）と置き換える行（`replaceIfVersion`）は `incarnation` を保存する。委任の行から `last_used_at` を外し、委任の使った時刻の行を足す。生成物を作り直す | U3b |
 | U3 の `idempotency.ts` | `claimIdempotency` が借りの行を返し、取り直しと `settleIdempotency` を `replaceIfVersion` で組む | U3b |
 | U3 の `usage-limit.ts`（`usageAddItem`） | 読んだ行を受けて足した行全体を組む署名にする | U3b |
 | U4 の `auth/authenticate.ts`（`touchDelegation`） | 委任の使った時刻の行を読み、委任の認証に成功した後だけ、委任の行の照らしと一緒に `putIfAbsent` か `replaceIfVersion` で書く | U3b |
 | #110 の `dispatch` | `settleIdempotency` に借りの行を渡し、手放しを `deleteIfVersion` にし、`rebuild` の組み直しを足す | U3b |
 | #118 の `api-fn`・`user-store` | 変えない（`ensureUser` は `putIfAbsent` と `writeAtomically` だけを使う） | — |
 
-U3b は U5b2 の前に作る。U5b2 のテスト（移しと書き手が並ぶ場面）が `replaceIfVersion` と `rowReplaceOf` を使うためである。U3b は U5b2 に依らずに作れる（`rowReplaceOf` を U3b が入れ、`repair` と `narrow` は U5b2 が足す）。U3b は書き手の部品とその呼び手だけを直し、ハンドラーは作らない。実装計画（[issue-2-plan.md](./issue-2-plan.md)）へ U3b を足すのは、この設計の承認の後の計画の工程で行う。
+U3b は U5b2 の前に作る。U5b2 のテスト（移しと書き手が並ぶ場面）が `replaceIfVersion` と `rowReplaceOf` を使うためである。U3b は U5b2 に依らずに作れる（`rowReplaceOf`・`repair`・`repairIdentity` を U3b が入れ、`narrow` と版の数えは U5b2 が足す）。U3b を反映した時点で、旧形式の行は `repairIdentity` で読め、通常の書き換えで `incarnation` を持つ行へ置き換わる（U5b2 の移しを待たずに読み取りと更新が通る）。U3b は書き手の部品とその呼び手だけを直し、ハンドラーは作らない。実装計画（[issue-2-plan.md](./issue-2-plan.md)）へ U3b を足すのは、この設計の承認の後の計画の工程で行う。
 
 ### 範囲の外との境
 
@@ -305,6 +313,9 @@ U3b は U5b2 の前に作る。U5b2 のテスト（移しと書き手が並ぶ�
 | `repair` が `incarnation` を補った行（保存の行に列が無い）を、移しの前に通常の `replaceIfVersion` と `deleteIfVersion` で書き換え・消せる。同じ鍵で作り直した行（`incarnation` あり）は、前の行を読んだ書き手から書き換わらない | 条件に補った値を使う・「無いこと」の条件を落とす |
 | セッションの取り消しの行を移しが読んだ後に、表の期限で消えて同じ鍵で作り直されると、移しの置き換えが `incarnation` の違いで外れ、前の `revoked_at` と `expire_at` で上書きしない | `version` を持たない行の条件から `incarnation` を落とす |
 | 記録の行の種類を手順の 4 の後に 4a から 4c で戻すと、`append_only` が残っても 3 へ進め、戻した後も読み手が次の版の記録の行を狭めた値で読む | `append_only` を `refused` の判定に入れる・戻すときに次の版の形を外す |
+| 版の数えは、`narrow` で値の変わらない次の版の記録の行と、3b の後の行の種類の次の版の行を、保存の `schema_version` のとおりに数え、書き込みを 1 件もしない | 数えを移しの比べや `writeVersion` で絞る・`append_only` の数で代える |
+| `repair` が `version` と `incarnation` の両方を補った行を読んだ後に行が消えると、`replaceIfVersion` は外れて行を作らず、`deleteIfVersion` も外れる | `attribute_exists(pk)` を `expect` が `value` のときだけ入れる |
+| U3b の後、`incarnation`（と新しく足した `version`）の無い U3b より前の行が `readRow` で読め、通常の書き換えの後は `incarnation` を保存した行になる。新しく作る行は `incarnation` を持つ | 旧形式の補いを U5b2 まで入れない・置き換えで `incarnation` を書かない |
 
 細かい観点は [詳細設計の表の移し](./issue-2-design-detail.md#表の移し) の単体テストの観点 にある。
 
@@ -321,7 +332,7 @@ U3b は U5b2 の前に作る。U5b2 のテスト（移しと書き手が並ぶ�
 ## 設計の結果
 
 - 触るファイル（この PR）: `issues/issue-2-design-row-writers.md`（新設）・`issues/issue-2-design-detail.md`・`docs/design/detail.md`・`docs/design/data.md`
-- 触るファイル（実装の単位）: U3b は `packages/contracts/src/row-codec.ts`（`rowReplaceOf`）・`packages/core/src/conditional-write.ts`・`idempotency.ts`・`usage-limit.ts`・`auth/authenticate.ts`・`dispatch/dispatch.ts`・`dispatch/types.ts`・`packages/contracts/src/rows/` の行の形とそのテスト。U5b2 は `packages/contracts/src/row-codec.ts`（`repair`・`narrow`）・`apps/api/src/entries/migrate.ts`・`packages/core/src/conditional-write.ts`（`replaceIfUnchanged`）とそのテスト
+- 触るファイル（実装の単位）: U3b は `packages/contracts/src/row-codec.ts`（`rowReplaceOf`・`repair`・`repairIdentity`・`readRow` の `stored`）・`packages/core/src/conditional-write.ts`・`idempotency.ts`・`usage-limit.ts`・`auth/authenticate.ts`・`dispatch/dispatch.ts`・`dispatch/types.ts`・`packages/contracts/src/rows/` の行の形とそのテスト。U5b2 は `packages/contracts/src/row-codec.ts`（`narrow`）・`apps/api/src/entries/migrate.ts`・`apps/api/src/entries/census.ts`・`infra/lib/app-stack.ts`（`migrate` と `census` の Lambda）・`packages/core/src/conditional-write.ts`（`replaceIfUnchanged`）とそのテスト
 - 増える仕組み: `ConflictRule` の `rebuild` と `dispatch` の組み直し（決定 5 の加算と決定 6 の `login_count` に要る）、`rowCodec` の `repair` と `narrow`（決定 4 の直しに要る）、`deleteIfVersion`（決定 2 の消しに要る）、行の世代 `incarnation`（決定 8）、委任の使った時刻の行（決定 10）
 - 減る仕組み: `updateIfVersion` の `set`・`remove`、`updateIfSchemaVersion`、`rowUpdateOf` の `remove`、`version` を持たない書き換えの運用の順、2c と 4b の手で書く書き換え、加算の読まずに足す式、委任の最後に使った時刻の列の更新
 
