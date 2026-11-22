@@ -1,5 +1,5 @@
 import { defineOperation, okItem } from "@nd-factory/contracts/operation";
-import type { AuthDeps } from "@nd-factory/core/auth";
+import type { AuthSetup } from "@nd-factory/core/auth";
 import type { ScopeReader } from "@nd-factory/core/authorize";
 import { createClock } from "@nd-factory/core/clock";
 import { TABLE_PURPOSES } from "@nd-factory/core/db";
@@ -45,7 +45,7 @@ function setup(handler: Handler = echo) {
   const lines: string[] = [];
   const clock = createClock(() => NOW);
   // Db は振り分けが自分の db を渡す
-  const auth: Omit<AuthDeps, "db"> = {
+  const auth: AuthSetup = {
     cognito: async () => ({ ok: true, value: { sub: "acme-sub-1", username: "acme-user", authTime: Date.parse(BOUND_AT) / 1000, originJti: "acme-jti-1" } }),
     signingKey: null,
     webhookSecret: null,

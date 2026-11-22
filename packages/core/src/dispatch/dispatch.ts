@@ -597,7 +597,7 @@ async function run(req: Request): Promise<DispatchResult> {
   let sessionRevokedAt: string | null = null;
   if (call.principal !== undefined) principal = call.principal;
   else {
-    const auth = await authenticate({ endpoint: call.endpoint, operation: call.operation, token: call.token }, { ...deps.auth, db: deps.db, log: req.log });
+    const auth = await authenticate({ endpoint: call.endpoint, operation: call.operation, token: call.token }, { ...deps.auth, db: deps.db, seatsOf: (userId) => deps.scope.seatsOf(userId), log: req.log });
     if (!auth.ok) return finish(req, auth.reason === "unavailable" ? problem(503, "unavailable") : problem(401, auth.reason));
     principal = auth.principal;
     sessionRevokedAt = auth.sessionRevokedAt;

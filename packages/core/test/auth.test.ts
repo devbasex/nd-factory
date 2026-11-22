@@ -114,6 +114,8 @@ type World = {
   delegationRowVersion?: number;
   // 表の委任の使った時刻の行の last_used_at（無ければ行が無い）
   usedAt?: string;
+  // 委任した人が今持つ席の数（既定は 1。0 にすると、委任した人が席を失ったことになる）
+  seats?: number;
   machine?: MachineRecord | null;
   lane?: LaneRecord | null;
   prep?: DbPrepRecord | null;
@@ -180,6 +182,7 @@ function setup(world: World = {}, opts: { fetcher?: Fetcher; webhookSecret?: str
     webhookSecret: opts.webhookSecret === undefined ? "acme-webhook-secret" : opts.webhookSecret,
     readers: r,
     db: table.db,
+    seatsOf: async () => Array.from({ length: world.seats ?? 1 }, () => ({ teamId: TEAM, role: "member" })),
     clock,
     log: createLogger({ request_id: "req-1", fn: "test", endpoint: "user" }, (line) => lines.push(line)),
   };
@@ -547,6 +550,16 @@ describe("authenticate: 委任", () => {
         expect(table.transactions).toHaveLength(0);
         expect(table.row("users", USED_KEY)).toEqual(usedAt === undefined ? undefined : usedRowOf(usedAt));
       }
+    }
+  });
+
+  it("委任した人が今の席を 1 つも持たなければ、主体は決めたまま時刻の行を作らず書き換えない（行が無い場合も古い場合も）", async () => {
+    for (const usedAt of [undefined, iso(NOW - DELEGATION_TOUCH_MS)]) {
+      const f = delegationFixture();
+      const { deps, table } = setup({ delegation: f.record, seats: 0, ...(usedAt === undefined ? {} : { usedAt }) });
+      await expect(authenticate(req("user", f.token), deps)).resolves.toMatchObject({ ok: true, principal: { kind: "delegation" } });
+      expect(table.transactions).toHaveLength(0);
+      expect(table.row("users", USED_KEY)).toEqual(usedAt === undefined ? undefined : usedRowOf(usedAt));
     }
   });
 

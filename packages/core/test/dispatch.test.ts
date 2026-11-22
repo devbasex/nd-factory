@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import type { AuthDeps, DelegationRecord, Principal } from "../src/auth/authenticate.ts";
+import type { AuthSetup, DelegationRecord, Principal } from "../src/auth/authenticate.ts";
 import type { ScopeReader } from "../src/authorize.ts";
 import { createClock } from "../src/clock.ts";
 import { cond, putIfAbsent, replaceIfVersion, type TransactItem } from "../src/conditional-write.ts";
@@ -76,7 +76,7 @@ function setup(opts: { handlers?: Record<string, Handler>; delegation?: Delegati
   const authzItems: unknown[] = [];
   const clock = createClock(() => NOW);
   const record = opts.delegation === undefined ? delegationRecord() : opts.delegation;
-  const auth: Omit<AuthDeps, "db"> = {
+  const auth: AuthSetup = {
     // 偽の Cognito の照らし: 署名と claim を通した token として、要求元のサインインの claim を返す
     cognito: async () => ({ ok: true, value: { sub: SUB, username: "acme-user", authTime: AUTH_TIME, originJti: SESSION } }),
     signingKey: null,

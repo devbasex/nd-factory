@@ -1,6 +1,6 @@
 import type { OperationDef } from "@nd-factory/contracts/operation";
 import type { AuditChannel } from "../audit.ts";
-import type { AuthDeps, AuthEndpoint, Principal } from "../auth/authenticate.ts";
+import type { AuthEndpoint, AuthSetup, Principal } from "../auth/authenticate.ts";
 import type { ItemAuthz, ScopeReader } from "../authorize.ts";
 import type { Clock } from "../clock.ts";
 import type { TransactItem } from "../conditional-write.ts";
@@ -85,8 +85,8 @@ export type DispatchDeps = {
   // 鍵は操作の表の名前
   readonly handlers: Readonly<Record<string, Handler>>;
   readonly scope: ScopeReader;
-  // 認証の依存のうち Db を除くもの。dispatch が下の db を渡す（委任の使った時刻の行の読み書き）
-  readonly auth: Omit<AuthDeps, "db">;
+  // 認証の依存のうち Db と席の読み手を除くもの。dispatch が下の db（委任の使った時刻の行の読み書き）と scope.seatsOf（委任した人の今の席の照らし）を渡す
+  readonly auth: AuthSetup;
   readonly db: Db;
   readonly clock: Clock;
   readonly log: Logger;
