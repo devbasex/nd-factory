@@ -92,6 +92,12 @@
 - **変更内容:** 詳細設計の「サービスの表」の部品と「表の移し」の `migrateTable`。アプリのスタックには入れない（設計の決定 8・9）
 - **満たす受け入れ条件:** 8・9
 
+### Task 14: 行の書き手の直し
+
+- **対象ファイル:** `packages/contracts/src/row-codec.ts`・`rows/*.ts`・`tables.ts`・`test/row-codec.test.ts`・`test/rows.test.ts`・`generated/*`・`packages/core/src/conditional-write.ts`・`idempotency.ts`・`usage-limit.ts`・`auth/authenticate.ts`・`dispatch/*.ts`・`test/*`
+- **変更内容:** 行の書き手の設計（[issue-2-design-row-writers.md](./issue-2-design-row-writers.md)、PR #122）の「既にマージした実装への影響と直す単位」の U3b の行。`rowUpdateOf` を `rowReplaceOf` に、`updateIfVersion` を `replaceIfVersion` に置き換え、`repair`・`readRow` の保存値・旧形式の補い `repairIdentity`・`putIfAbsent` の `incarnation`・`deleteIfVersion`・`ConflictRule` の `rebuild` を足す。書き換える行に `version` を、記録の表を除くどの行にも `incarnation` を持たせ、委任の使った時刻の行を足す。冪等の鍵・月の使った量の加算・委任の使った時刻・`dispatch` の確定と手放しと組み直し（3 回まで）を新しい書き込みへ移す。`narrow`・`replaceIfUnchanged`・`countRowVersions` は U5b2 で作る。#118 の `api-fn`・`user-store` は変えない
+- **満たす受け入れ条件:** 4・8・9（書き手）
+
 ## レビューの単位
 
 設計の決定 12 の 5 つの単位のうち、見込みが 1,000 行を超える U1 と U5 を依存の向きで分けた。U1a は実装の後に Task 1〜3 で 1,374 行と分かり、Task 3 を U1a2 へ分け直した。表の実際の行数は各単位をスプリントブランチへマージした時に数え、レビューの修正を含むため、分け直しの時の 1,374 行と和が合わない。どの単位も単独で `npm run check` が通る。順は表の上からで、前の単位をスプリントブランチへマージしてから次の単位をスプリントブランチから切る。行数は `git diff --shortstat <スプリントブランチ>...HEAD -- . ':(exclude)package-lock.json' ':(exclude)packages/contracts/generated'` で数える。
@@ -107,9 +113,12 @@
 | U4 認証と振り分け | Task 10・11 | 2:2・2:4・2:5 | 約 1,000 | |
 | U5a 表の行の形 | Task 12 | 2:8・2:9（読み手） | 約 900 | |
 | U5b1 表と経路の部品 | Task 13（`ServiceTable`・`ApiRoutes`） | 2:8・2:9（部品） | 約 300 | |
-| U5b2 表の移し | Task 13（`migrateTable`。#109 の設計承認の後） | 2:8・2:9（移し） | 約 400 | |
+| U3b 行の書き手の直し | Task 14（#122 の承認の後） | 2:4・2:8・2:9（書き手） | 約 1,000 | |
+| U5b2 表の移し | Task 13（`migrateTable`。#122 の承認の後、U3b の後） | 2:8・2:9（移し） | 約 400 | |
 
 U5b は 2026-11-22 の利用者の決定で U5b1 と U5b2 に分けた。表の移しの `migrateTable` は行の版の書き手の決まりに左右され、その決まりを #109 で設計として決めて設計承認ゲートを通すまで作らない。表と経路の部品はその決まりに左右されないため、先に U5b1 で作る。
+
+U3b は、2026-11-22 の設計承認ゲートで利用者が #109 の設計 PR #122 を承認したことを受けて足した。#122 は既にマージした U3・U4・U5a・#79・#110 の書き手の直しを U3b に、表の移しを U5b2 に割り当て、U5b2 のテストが U3b の `replaceIfVersion` と `rowReplaceOf` を使うため、U3b を U5b2 より先に作る。
 
 受け入れ条件 11（詳細設計）は設計 PR #51 で満たした。
 

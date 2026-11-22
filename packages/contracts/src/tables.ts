@@ -3,7 +3,7 @@ import { answerCodec, approvalCodec, questionCodec } from "./rows/decisions.ts";
 import { assignmentCodec, githubTokenCodec, projectCodec, repositoryCodec } from "./rows/projects.ts";
 import { auditCodec } from "./rows/audit.ts";
 import { costRecordCodec } from "./rows/usage.ts";
-import { cognitoSubjectCodec, delegationCodec, loginCodec, loginLinkCodec, loginSubjectCodec, sessionRevocationCodec, userCodec } from "./rows/users.ts";
+import { cognitoSubjectCodec, delegationCodec, delegationUsedCodec, loginCodec, loginLinkCodec, loginSubjectCodec, sessionRevocationCodec, userCodec } from "./rows/users.ts";
 import { destinationCodec, noticeCodec } from "./rows/notices.ts";
 import { idempotencyCodec } from "./rows/idempotency.ts";
 import { invitationCodec, machineCodec, seatCodec, teamCodec, usageMonthCodec } from "./rows/teams.ts";
@@ -18,9 +18,10 @@ export const TABLE_PURPOSES = ["users", "teams", "projects", "sprints", "events"
 
 export type TablePurpose = (typeof TABLE_PURPOSES)[number];
 
-// 行の書き方。上書き（version で照らす）・追記だけ・作ると消すだけ・借りから済みへ 1 回だけ書き換える・
-// 状態を条件に決まった向きへだけ書き換える（version を持たない。ログインをつなぐ流れの open → verified → used）
-export type RowWrites = "overwrite" | "append" | "create_delete" | "settle_once" | "advance_state";
+// 行の書き方。上書き（作った後に書き換える行の種類はどれも version を持ち、読んだ version と incarnation で照らす）・
+// 作った後に書き換えない（追記だけ・作ると消すだけ・期限で消える。version を持たず、書き直すのは表の移しだけ）。
+// issues/issue-2-design-row-writers.md の決定 2
+export type RowWrites = "overwrite" | "append";
 
 // 索引。鍵は元の行の列そのもので、索引のための写しの列を持たない。どの索引も結果整合で、候補を出すだけに使う（決定 14）
 export type IndexSpec = {
@@ -99,12 +100,14 @@ export const TABLES = defineTables([
     ttl: true,
     rows: [
       { name: "user", skPattern: /^USER$/, codec: userCodec, writes: "overwrite" },
-      { name: "login_subject", skPattern: /^LOGIN$/, codec: loginSubjectCodec, writes: "create_delete" },
+      { name: "login_subject", skPattern: /^LOGIN$/, codec: loginSubjectCodec, writes: "overwrite" },
       { name: "cognito_subject", skPattern: /^COGNITO$/, codec: cognitoSubjectCodec, writes: "overwrite" },
       { name: "session_revocation", skPattern: new RegExp(`^REVOKED#${ID}$`), codec: sessionRevocationCodec, writes: "append" },
-      { name: "login_link", skPattern: new RegExp(`^LINK#${ID}$`), codec: loginLinkCodec, writes: "advance_state" },
-      { name: "login", skPattern: new RegExp(`^LOGIN#${ID}#.+$`), codec: loginCodec, writes: "create_delete" },
+      { name: "login_link", skPattern: new RegExp(`^LINK#${ID}$`), codec: loginLinkCodec, writes: "overwrite" },
+      { name: "login", skPattern: new RegExp(`^LOGIN#${ID}#.+$`), codec: loginCodec, writes: "overwrite" },
       { name: "delegation", skPattern: new RegExp(`^DELEGATION#${ID}$`), codec: delegationCodec, writes: "overwrite" },
+      // 委任の最後に使った時刻（委任の行と分ける。決定 10）
+      { name: "delegation_used", skPattern: new RegExp(`^DELEGATION_USED#${ID}$`), codec: delegationUsedCodec, writes: "overwrite" },
     ],
   }),
   table("teams", {
@@ -143,7 +146,7 @@ export const TABLES = defineTables([
     // 見えるプロジェクトの待っているもの。古い順。waiting_since のある依頼と問いだけが載る（答えの行は持たない）
     indexes: [{ name: "waiting", partitionKey: "project_id", sortKey: "waiting_since", projection: ["sprint_id", "lane_id", "gate", "category"] }],
     rows: [
-      { name: "answer", skPattern: new RegExp(`^(APPROVAL|QUESTION)#${ID}#ANSWER#${ID}$`), codec: answerCodec, writes: "append" },
+      { name: "answer", skPattern: new RegExp(`^(APPROVAL|QUESTION)#${ID}#ANSWER#${ID}$`), codec: answerCodec, writes: "overwrite" },
       { name: "approval", skPattern: new RegExp(`^APPROVAL#${ID}$`), codec: approvalCodec, writes: "overwrite" },
       { name: "question", skPattern: new RegExp(`^QUESTION#${ID}$`), codec: questionCodec, writes: "overwrite" },
     ],
@@ -164,7 +167,7 @@ export const TABLES = defineTables([
   table("idempotency", {
     sortKey: false,
     ttl: true,
-    rows: [{ name: "idempotency", skPattern: null, codec: idempotencyCodec, writes: "settle_once" }],
+    rows: [{ name: "idempotency", skPattern: null, codec: idempotencyCodec, writes: "overwrite" }],
   }),
 ]);
 

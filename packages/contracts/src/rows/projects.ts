@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { rowCodec } from "../row-codec.ts";
+import { repairIdentity, rowCodec } from "../row-codec.ts";
 import { idOf } from "../ids.ts";
 import { githubRepo, utcDateTime } from "../values.ts";
 import { expireAt, identifier, overwriteRow, type RowKey, seqKey, versionlessRow } from "./common.ts";
@@ -77,8 +77,9 @@ export const githubTokenKey = (row: GithubTokenRow): RowKey => ({
   sk: `GHTOKEN#${row.expires_at}#${row.lane_id}#${seqKey(row.generation)}`,
 });
 
-// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない
-export const projectCodec = rowCodec({ latest: { version: 1, schema: projectRow }, writeVersion: 1, keyOf: projectKey });
-export const assignmentCodec = rowCodec({ latest: { version: 1, schema: assignmentRow }, writeVersion: 1, keyOf: assignmentKey });
-export const repositoryCodec = rowCodec({ latest: { version: 1, schema: repositoryRow }, writeVersion: 1, keyOf: repositoryKey });
-export const githubTokenCodec = rowCodec({ latest: { version: 1, schema: githubTokenRow }, writeVersion: 1, keyOf: githubTokenKey });
+// 行の版の読み手と書き手。今の行はどれも版 1 で、前の版を持たない。
+// U3b より前の書き手が保存した行（incarnation と、U3b で足した version の無い行）を、旧形式の補い（repairIdentity）で読む
+export const projectCodec = rowCodec({ latest: { version: 1, schema: projectRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: projectKey });
+export const assignmentCodec = rowCodec({ latest: { version: 1, schema: assignmentRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: assignmentKey });
+export const repositoryCodec = rowCodec({ latest: { version: 1, schema: repositoryRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: repositoryKey });
+export const githubTokenCodec = rowCodec({ latest: { version: 1, schema: githubTokenRow }, writeVersion: 1, repair: repairIdentity({ version: false }), keyOf: githubTokenKey });

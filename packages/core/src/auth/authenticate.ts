@@ -1,6 +1,10 @@
 import type { DelegationKind } from "@nd-factory/contracts/operation";
+import { readRow, rowReplaceOf, type Stored } from "@nd-factory/contracts/row-codec";
+import { delegationKey, delegationUsedCodec, delegationUsedKey, type DelegationRow, type DelegationUsedRow } from "@nd-factory/contracts/rows/users";
 import type { KeyObject } from "node:crypto";
 import type { Clock } from "../clock.ts";
+import { cond, putIfAbsent, replaceIfVersion, rowToCreate, writeAtomically, type Condition, type StoredVersion, type TransactItem } from "../conditional-write.ts";
+import type { Db, Row, StoredRow } from "../db.ts";
 import { parseId, type Id } from "../ids.ts";
 import type { Logger } from "../log.ts";
 import {
@@ -96,14 +100,17 @@ export type InboundRequest = {
 // 最後に使った時刻を、前の値からこの時間がたったときだけ書く
 export const DELEGATION_TOUCH_MS = 3_600_000;
 
-// 委任の行の読んだ値（中身は委任の持ち主の子 #11 が apps/api/src/modules/ で読む）
+// 委任の行の読んだ値（中身は委任の持ち主の子 #11 が apps/api/src/modules/ で読む）。
+// stored は読んだ委任の行に保存してあった version と incarnation（readRow の stored）。委任の使った時刻の行を書くトランザクションが、
+// 認証の読みの後に委任の行が変わっていない（delegations.revoke が確定していない）ことをこの値で照らす。
+// 最後に使った時刻は委任の行に無く、authenticate が委任の使った時刻の行（DELEGATION_USED#<委任>）を読む（issues/issue-2-design-row-writers.md の決定 10）
 export type DelegationRecord = {
   readonly secretSha256: string;
   readonly expiresAt: string;
   readonly revokedAt: string | null;
-  readonly lastUsedAt: string | null;
   readonly scope: { readonly projectIds: readonly Id<"prj">[]; readonly operations: DelegationKind };
   readonly clientName: string;
+  readonly stored: StoredVersion;
 };
 
 // 手元のマシンの行の読んだ値（#7）
@@ -144,8 +151,9 @@ export type AuthReaders = {
   // IdP の名前は設定で google か github に当てる。利用者が無い・identities が 1 件でない・当たる IdP が無ければ null
   cognitoIdentity(username: string): Promise<{ readonly cognitoSub: string; readonly idp: "google" | "github"; readonly subject: string } | null>;
   delegation(userId: Id<"usr">, delegationId: Id<"dlg">): Promise<DelegationRecord | null>;
-  // 最後に使った時刻を at にする。今の値が ifBefore より前（か無い）ときだけ書く条件つきの更新
-  touchDelegation(userId: Id<"usr">, delegationId: Id<"dlg">, at: string, ifBefore: string): Promise<void>;
+  // 使わない（U3b で、委任の使った時刻の行は authenticate が Db で読み書きするようにした）。
+  // apps/api の閉じた読み手（entries/api-fn.ts）がまだ持つため、型に任意で残す。読み手の中身を書く #11 がその読み手と一緒に外す
+  touchDelegation?(userId: Id<"usr">, delegationId: Id<"dlg">, at: string, ifBefore: string): Promise<void>;
   machine(teamId: Id<"team">, machineId: Id<"mch">): Promise<MachineRecord | null>;
   lane(laneId: Id<"lane">): Promise<LaneRecord | null>;
   dbPrep(projectId: Id<"prj">): Promise<DbPrepRecord | null>;
@@ -159,9 +167,17 @@ export type AuthDeps = {
   // GitHub の Webhook の署名の秘密
   readonly webhookSecret: string | null;
   readonly readers: AuthReaders;
+  // 委任の使った時刻の行の読み書き（強い整合の読みと writeAtomically）。dispatch が自分の Db を渡す
+  readonly db: Db;
+  // 委任した人が今持つ席（認可と同じ読み手。dispatch が ScopeReader.seatsOf を渡す）。委任の認証のうち今の席の照らしに使い、
+  // 席が 1 つも無ければ使った時刻の行を書かない（主体は決めたまま。範囲は認可が狭める）
+  readonly seatsOf: (userId: Id<"usr">) => Promise<readonly unknown[]>;
   readonly clock: Clock;
   readonly log?: Logger;
 };
+
+// 起点が dispatch へ渡す認証の依存（Db と席の読み手は dispatch が自分のものを渡す）
+export type AuthSetup = Omit<AuthDeps, "db" | "seatsOf">;
 
 // 利用者へ結んでいない人の主体を受ける唯一の経路（初めてのサインインで利用者を作る）
 export const SESSIONS_CREATE = "sessions.create";
@@ -270,24 +286,75 @@ async function delegation(token: string, deps: AuthDeps): Promise<Outcome> {
   const userId = parsed === null ? null : parseId("usr", parsed.first);
   const delegationId = parsed === null ? null : parseId("dlg", parsed.second);
   if (parsed === null || userId === null || delegationId === null) return unauthorized("shape");
-  const row = await deps.readers.delegation(userId, delegationId);
+  // 委任の行と委任の使った時刻の行を強い整合で並べて読む
+  const [row, used] = await Promise.all([deps.readers.delegation(userId, delegationId), deps.db.get("users", usedKeyOf(userId, delegationId), true)]);
   if (row === null || !secretMatches(parsed.secret, row.secretSha256)) return unauthorized("signature");
   const now = deps.clock.epochMs();
   if (row.revokedAt !== null) return unauthorized("revoked");
   if (isExpired(row.expiresAt, now)) return unauthorized("expired");
-  await touch(userId, delegationId, row, deps);
+  // 秘密・取り消し・期限を通した後、委任した人の今の席の照らしを通したときだけ使った時刻の行を書く（外れた要求では作らず書き換えない）
+  await touch(userId, delegationId, row, used, deps);
   return ok({ kind: "delegation", userId, delegationId, scope: row.scope, clientName: row.clientName });
 }
 
-// 書けなくても主体は決めたまま続ける（次の要求で書き直す）
-async function touch(userId: Id<"usr">, delegationId: Id<"dlg">, row: DelegationRecord, deps: AuthDeps): Promise<void> {
-  const now = deps.clock.epochMs();
-  const last = row.lastUsedAt === null ? Number.NEGATIVE_INFINITY : Date.parse(row.lastUsedAt);
-  if (Number.isFinite(last) && now - last < DELEGATION_TOUCH_MS) return;
+function usedKeyOf(userId: Id<"usr">, delegationId: Id<"dlg">) {
+  return delegationUsedKey({ user_id: userId, delegation_id: delegationId } as DelegationUsedRow);
+}
+
+function storedCondition(column: "version" | "incarnation", stored: Stored): Condition {
+  return stored.kind === "absent" ? cond.notExists(column) : cond.eq(column, stored.value);
+}
+
+// 読んだ委任の行が今もある・保存してあった version と incarnation のままであることの照らし（書かない）。
+// 認証の読みの後に delegations.revoke が確定すると version が上がって外れ、取り消しの後に使った時刻の行を作り直さず書き換えない
+function delegationUnchanged(userId: Id<"usr">, delegationId: Id<"dlg">, stored: StoredVersion): TransactItem {
+  return {
+    table: "users",
+    op: "check",
+    key: delegationKey({ user_id: userId, delegation_id: delegationId } as DelegationRow),
+    condition: cond.and(cond.exists("pk"), storedCondition("version", stored.version), storedCondition("incarnation", stored.incarnation)),
+    onConflict: "fail",
+  };
+}
+
+// 使った時刻の行の書き込み。行が無ければ作り、last_used_at が DELEGATION_TOUCH_MS より前なら読んだ行の version と incarnation を条件に置き換える。
+// 書かなくてよいときは null。行を読めなければ（行の版の読み手が拒んだ）書かずに unreadable を返し、呼び手が warn を出す
+function usedWrite(userId: Id<"usr">, delegationId: Id<"dlg">, used: StoredRow | null, deps: AuthDeps): TransactItem | "unreadable" | null {
+  const at = deps.clock.iso();
+  if (used === null) {
+    return putIfAbsent({ table: "users", item: rowToCreate(delegationUsedCodec, { delegation_id: delegationId, user_id: userId, last_used_at: at, version: 1 }), onConflict: "fail" });
+  }
+  const read = readRow(delegationUsedCodec, used);
+  if (!read.ok) return "unreadable";
+  const last = Date.parse(read.row.last_used_at);
+  if (Number.isFinite(last) && deps.clock.epochMs() - last < DELEGATION_TOUCH_MS) return null;
+  return replaceIfVersion({
+    table: "users",
+    item: rowReplaceOf(delegationUsedCodec, used, { ...read.row, last_used_at: at }) as Row,
+    version: read.row.version,
+    incarnation: read.row.incarnation,
+    expect: { version: read.stored.version, incarnation: read.stored.incarnation },
+    onConflict: "fail",
+  });
+}
+
+// 委任した人が今の席を 1 つも持たなければ書かない（席を失った人の委任の要求で、取り消しの判断に使う時刻を進めない）。
+// 書けなくても主体は決めたまま続ける（次の要求で書き直す）。ログに行の値と委任の ID を出さない
+async function touch(userId: Id<"usr">, delegationId: Id<"dlg">, row: DelegationRecord, used: StoredRow | null, deps: AuthDeps): Promise<void> {
+  const warn = (fields: Record<string, unknown>): void => deps.log?.warn("委任の最後に使った時刻を書けない", { principal: "delegation", ...fields });
+  const write = usedWrite(userId, delegationId, used, deps);
+  if (write === null) return;
+  if (write === "unreadable") {
+    warn({ result: "unreadable" });
+    return;
+  }
   try {
-    await deps.readers.touchDelegation(userId, delegationId, deps.clock.iso(), new Date(now - DELEGATION_TOUCH_MS).toISOString());
+    // 書くときだけ席を読む（認可が後で同じ席を読み直す。要求をまたいで控えない）
+    if ((await deps.seatsOf(userId)).length === 0) return;
+    const outcome = await writeAtomically(deps.db, [delegationUnchanged(userId, delegationId, row.stored), write], deps.log);
+    if (!outcome.ok) warn({ result: "conflict" });
   } catch (error) {
-    deps.log?.warn("委任の最後に使った時刻を書けない", { principal: "delegation", error: error instanceof Error ? error.name : "unknown" });
+    warn({ error: error instanceof Error ? error.name : "unknown" });
   }
 }
 

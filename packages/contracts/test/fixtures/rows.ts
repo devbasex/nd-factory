@@ -14,6 +14,8 @@ import {
   cognitoSubjectRow,
   delegationKey,
   delegationRow,
+  delegationUsedKey,
+  delegationUsedRow,
   loginKey,
   loginLinkKey,
   loginLinkRow,
@@ -33,6 +35,8 @@ export const id = (kind: string, n: number): string => `${kind}_01935b4e-7c2a-7d
 export const AT = "2026-11-17T03:04:05.123Z";
 const SHA = "a".repeat(64);
 const UUID = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b";
+// 行の世代（putIfAbsent が入れる UUID v4 の作り物の値）
+export const INC = "3d2c1b0a-9f8e-4d7c-8b6a-5f4e3d2c1b0a";
 
 export const USR = id("usr", 1);
 export const TEAM = id("team", 2);
@@ -44,38 +48,40 @@ export const APR = id("apr", 6);
 export type RowCase = {
   readonly schema: z.ZodType;
   readonly keyOf: (row: never) => RowKey;
-  // 上書きの行（version を持つ）か
+  // 上書きの行（version を持つ）か。記録の行のほかはどれも incarnation を持つ
   readonly overwrite: boolean;
   readonly sample: Readonly<Record<string, unknown>>;
 };
 
 export const ROW_CASES: Readonly<Record<string, RowCase>> = {
-  user: { schema: userRow, keyOf: userKey, overwrite: true, sample: { schema_version: 1, version: 1, user_id: USR, login_count: 1, display_name: "acme の人", created_at: AT } },
+  user: { schema: userRow, keyOf: userKey, overwrite: true, sample: { schema_version: 1, version: 1, incarnation: INC, user_id: USR, login_count: 1, display_name: "acme の人", created_at: AT } },
   login: {
     schema: loginRow,
     keyOf: loginKey,
-    overwrite: false,
-    sample: { schema_version: 1, user_id: USR, idp: "google", subject: "1234567890", cognito_sub: UUID, bound_auth_time: AT, linked_at: AT },
+    overwrite: true,
+    sample: { schema_version: 1, version: 1, incarnation: INC, user_id: USR, idp: "google", subject: "1234567890", cognito_sub: UUID, bound_auth_time: AT, linked_at: AT },
   },
-  login_subject: { schema: loginSubjectRow, keyOf: loginSubjectKey, overwrite: false, sample: { schema_version: 1, user_id: USR, idp: "github", subject: "42", cognito_sub: UUID, bound_auth_time: AT } },
+  login_subject: { schema: loginSubjectRow, keyOf: loginSubjectKey, overwrite: true, sample: { schema_version: 1, version: 1, incarnation: INC, user_id: USR, idp: "github", subject: "42", cognito_sub: UUID, bound_auth_time: AT } },
   cognito_subject: {
     schema: cognitoSubjectRow,
     keyOf: cognitoSubjectKey,
     overwrite: true,
-    sample: { schema_version: 1, version: 1, cognito_sub: UUID, cognito_username: "github_42", idp: "github", subject: "42", user_id: USR, bound_auth_time: AT },
+    sample: { schema_version: 1, version: 1, incarnation: INC, cognito_sub: UUID, cognito_username: "github_42", idp: "github", subject: "42", user_id: USR, bound_auth_time: AT },
   },
   session_revocation: {
     schema: sessionRevocationRow,
     keyOf: sessionRevocationKey,
     overwrite: false,
-    sample: { schema_version: 1, cognito_sub: UUID, session_id: "session-1", revoked_at: AT, expire_at: 1797595445 },
+    sample: { schema_version: 1, incarnation: INC, cognito_sub: UUID, session_id: "session-1", revoked_at: AT, expire_at: 1797595445 },
   },
   login_link: {
     schema: loginLinkRow,
     keyOf: loginLinkKey,
-    overwrite: false,
+    overwrite: true,
     sample: {
       schema_version: 1,
+      version: 1,
+      incarnation: INC,
       link_id: UUID,
       state: "open",
       created_at: AT,
@@ -95,6 +101,7 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
     sample: {
       schema_version: 1,
       version: 1,
+      incarnation: INC,
       delegation_id: id("dlg", 7),
       user_id: USR,
       client_name: "acme-cli",
@@ -105,30 +112,36 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
       created_at: AT,
     },
   },
+  delegation_used: {
+    schema: delegationUsedRow,
+    keyOf: delegationUsedKey,
+    overwrite: true,
+    sample: { schema_version: 1, version: 1, incarnation: INC, delegation_id: id("dlg", 7), user_id: USR, last_used_at: AT },
+  },
   team: {
     schema: teamRow,
     keyOf: teamKey,
     overwrite: true,
-    sample: { schema_version: 1, version: 1, team_id: TEAM, name: "acme", plan: "unlimited", currency: "JPY", default_place: "hosted", default_inference: "managed", created_at: AT },
+    sample: { schema_version: 1, version: 1, incarnation: INC, team_id: TEAM, name: "acme", plan: "unlimited", currency: "JPY", default_place: "hosted", default_inference: "managed", created_at: AT },
   },
-  seat: { schema: seatRow, keyOf: seatKey, overwrite: true, sample: { schema_version: 1, version: 1, team_id: TEAM, user_id: USR, role: "owner", added_at: AT } },
+  seat: { schema: seatRow, keyOf: seatKey, overwrite: true, sample: { schema_version: 1, version: 1, incarnation: INC, team_id: TEAM, user_id: USR, role: "owner", added_at: AT } },
   invitation: {
     schema: invitationRow,
     keyOf: invitationKey,
     overwrite: true,
-    sample: { schema_version: 1, version: 1, invitation_id: id("inv", 8), team_id: TEAM, role: "member", created_by: USR, created_at: AT, expires_at: AT },
+    sample: { schema_version: 1, version: 1, incarnation: INC, invitation_id: id("inv", 8), team_id: TEAM, role: "member", created_by: USR, created_at: AT, expires_at: AT },
   },
   machine: {
     schema: machineRow,
     keyOf: machineKey,
     overwrite: true,
-    sample: { schema_version: 1, version: 1, machine_id: id("mch", 9), team_id: TEAM, name: "acme-mac", token_sha256: SHA, token_expires_at: AT, created_at: AT },
+    sample: { schema_version: 1, version: 1, incarnation: INC, machine_id: id("mch", 9), team_id: TEAM, name: "acme-mac", token_sha256: SHA, token_expires_at: AT, created_at: AT },
   },
   usage_month: {
     schema: usageMonthRow,
     keyOf: usageMonthKey,
     overwrite: true,
-    sample: { schema_version: 1, version: 1, team_id: TEAM, month: "2026-11", used_amount_minor: 1200, used_currency: "JPY" },
+    sample: { schema_version: 1, version: 1, incarnation: INC, team_id: TEAM, month: "2026-11", used_amount_minor: 1200, used_currency: "JPY" },
   },
   project: {
     schema: projectRow,
@@ -137,6 +150,7 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
     sample: {
       schema_version: 1,
       version: 1,
+      incarnation: INC,
       project_id: PRJ,
       name: "acme-app",
       progress_db_state: "absent",
@@ -147,14 +161,14 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
       created_at: AT,
     },
   },
-  assignment: { schema: assignmentRow, keyOf: assignmentKey, overwrite: false, sample: { schema_version: 1, assign_id: "asg-1", project_id: PRJ, team_id: TEAM, confirmed_by: USR, confirmed_at: AT } },
+  assignment: { schema: assignmentRow, keyOf: assignmentKey, overwrite: false, sample: { schema_version: 1, incarnation: INC, assign_id: "asg-1", project_id: PRJ, team_id: TEAM, confirmed_by: USR, confirmed_at: AT } },
   repository: {
     schema: repositoryRow,
     keyOf: repositoryKey,
     overwrite: true,
-    sample: { schema_version: 1, version: 1, repo_id: id("repo", 10), project_id: PRJ, github_repo: "acme/app", installation_id: 1, primary: true, added_at: AT },
+    sample: { schema_version: 1, version: 1, incarnation: INC, repo_id: id("repo", 10), project_id: PRJ, github_repo: "acme/app", installation_id: 1, primary: true, added_at: AT },
   },
-  github_token: { schema: githubTokenRow, keyOf: githubTokenKey, overwrite: false, sample: { schema_version: 1, project_id: PRJ, lane_id: LANE, generation: 1, expires_at: AT, expire_at: 1795000000 } },
+  github_token: { schema: githubTokenRow, keyOf: githubTokenKey, overwrite: false, sample: { schema_version: 1, incarnation: INC, project_id: PRJ, lane_id: LANE, generation: 1, expires_at: AT, expire_at: 1795000000 } },
   sprint: {
     schema: sprintRow,
     keyOf: sprintKey,
@@ -162,6 +176,7 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
     sample: {
       schema_version: 1,
       version: 1,
+      incarnation: INC,
       sprint_id: SPR,
       project_id: PRJ,
       title: "acme の課題",
@@ -180,6 +195,7 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
     sample: {
       schema_version: 1,
       version: 1,
+      incarnation: INC,
       lane_id: LANE,
       project_id: PRJ,
       sprint_id: SPR,
@@ -192,18 +208,18 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
       last_seq: 0,
     },
   },
-  segment: { schema: segmentRow, keyOf: segmentKey, overwrite: true, sample: { schema_version: 1, version: 1, project_id: PRJ, sprint_id: SPR, lane_id: LANE, seq: 1, started_at: AT } },
+  segment: { schema: segmentRow, keyOf: segmentKey, overwrite: true, sample: { schema_version: 1, version: 1, incarnation: INC, project_id: PRJ, sprint_id: SPR, lane_id: LANE, seq: 1, started_at: AT } },
   progress_event: {
     schema: progressEventRow,
     keyOf: progressEventKey,
     overwrite: false,
-    sample: { schema_version: 1, project_id: PRJ, lane_id: LANE, seq: 1, generation: 1, kind: "segment_started", occurred_at: AT, body: {} },
+    sample: { schema_version: 1, incarnation: INC, project_id: PRJ, lane_id: LANE, seq: 1, generation: 1, kind: "segment_started", occurred_at: AT, body: {} },
   },
   approval: {
     schema: approvalRow,
     keyOf: approvalKey,
     overwrite: true,
-    sample: { schema_version: 1, version: 1, approval_id: APR, project_id: PRJ, sprint_id: SPR, lane_id: LANE, gate: "design", material_digest: SHA, state: "waiting", waiting_since: AT },
+    sample: { schema_version: 1, version: 1, incarnation: INC, approval_id: APR, project_id: PRJ, sprint_id: SPR, lane_id: LANE, gate: "design", material_digest: SHA, state: "waiting", waiting_since: AT },
   },
   question: {
     schema: questionRow,
@@ -212,6 +228,7 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
     sample: {
       schema_version: 1,
       version: 1,
+      incarnation: INC,
       question_id: id("qst", 11),
       project_id: PRJ,
       sprint_id: SPR,
@@ -225,14 +242,14 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
   answer: {
     schema: answerRow,
     keyOf: answerKey,
-    overwrite: false,
-    sample: { schema_version: 1, answer_id: UUID, project_id: PRJ, parent_id: APR, word: "approved", answered_by: { kind: "human", user_id: USR }, answered_at: AT },
+    overwrite: true,
+    sample: { schema_version: 1, version: 1, incarnation: INC, answer_id: UUID, project_id: PRJ, parent_id: APR, word: "approved", answered_by: { kind: "human", user_id: USR }, answered_at: AT },
   },
   notice: {
     schema: noticeRow,
     keyOf: noticeKey,
     overwrite: true,
-    sample: { schema_version: 1, version: 1, notice_id: id("ntc", 12), user_id: USR, project_id: PRJ, kind: "approval", target_id: APR, occurred_at: AT, deliveries: {} },
+    sample: { schema_version: 1, version: 1, incarnation: INC, notice_id: id("ntc", 12), user_id: USR, project_id: PRJ, kind: "approval", target_id: APR, occurred_at: AT, deliveries: {} },
   },
   destination: {
     schema: destinationRow,
@@ -241,6 +258,7 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
     sample: {
       schema_version: 1,
       version: 1,
+      incarnation: INC,
       destination_id: id("dst", 13),
       user_id: USR,
       kind: "web_push",
@@ -257,6 +275,7 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
     overwrite: false,
     sample: {
       schema_version: 1,
+      incarnation: INC,
       project_id: PRJ,
       sprint_id: SPR,
       lane_id: LANE,
@@ -287,9 +306,11 @@ export const ROW_CASES: Readonly<Record<string, RowCase>> = {
   idempotency: {
     schema: idempotencyRow,
     keyOf: idempotencyKey,
-    overwrite: false,
+    overwrite: true,
     sample: {
       schema_version: 1,
+      version: 1,
+      incarnation: INC,
       principal_key: `usr#${USR}`,
       operation: "sprints.create",
       key: UUID,

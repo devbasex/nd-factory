@@ -7,7 +7,7 @@ import { z } from "zod";
 // 行の鍵。区切りの鍵だけの表（冪等の鍵）は sk が null
 export type RowKey = { readonly pk: string; readonly sk: string | null };
 
-// エンティティの版。書くたびに 1 上げ、条件つきの書き込み（updateIfVersion）で照らす
+// エンティティの版。書き換えるたびに 1 上げ、条件つきの書き込み（replaceIfVersion・deleteIfVersion）で照らす
 export const entityVersion = z.int().min(1);
 
 // TTL の列（expire_at）。UNIX の秒の整数で、DynamoDB の TTL の属性。
@@ -44,14 +44,23 @@ export function seqKey(n: number): string {
   return String(n).padStart(SEQ_DIGITS, "0");
 }
 
+// 行の世代（issues/issue-2-design-row-writers.md の決定 8）。行を作るときに putIfAbsent が UUID v4 を入れ、置き換えと表の移しで変えない。
+// 消して同じ鍵で作り直した行を見分ける（version は作り直すと 1 に戻る）。U3b より前の行は repairIdentity が鍵から決まる UUID の形の値で補うため、版の桁を縛らない
+export const incarnation = uuid;
+
 type Shape = Record<string, z.ZodType>;
 
-// 上書きの行。形の版とエンティティの版を持つ
+// 上書きの行（作った後に書き換える行の種類はどれも。決定 2）。形の版とエンティティの版と行の世代を持つ
 export function overwriteRow<const S extends Shape>(schemaVersion: number, shape: S) {
-  return z.object({ schema_version: z.literal(schemaVersion), version: entityVersion, ...shape });
+  return z.object({ schema_version: z.literal(schemaVersion), version: entityVersion, incarnation, ...shape });
 }
 
-// 追記だけの行と、作ると消すだけの行。形の版だけを持ち、エンティティの版を持たない
+// 作った後に書き換えない行（追記だけの行・作ると消すだけの行・期限で消える行）。形の版と行の世代を持ち、エンティティの版を持たない
 export function versionlessRow<const S extends Shape>(schemaVersion: number, shape: S) {
+  return z.object({ schema_version: z.literal(schemaVersion), incarnation, ...shape });
+}
+
+// 記録の表（db-audit）の行。追記だけで表の移しも書き直さない（決定 9）ため、形の版だけを持ち、行の世代を持たない
+export function auditRecordRow<const S extends Shape>(schemaVersion: number, shape: S) {
   return z.object({ schema_version: z.literal(schemaVersion), ...shape });
 }
