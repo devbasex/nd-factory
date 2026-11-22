@@ -61,7 +61,7 @@ graph TD
   ru -. "外れ" .-> m
 ```
 
-- 行を書き換える書き込みは、どれも読んだ行を読み手（`readRow`）で今の形にし、書き換えた行全体を書き手の版で `Put` する。条件は読んだ `version` と行の世代（`incarnation`。行を作るたびに新しくする値）だけで、書いた行は書き手の版の形をそのまま満たす。前の版の列も、移しが足した列も、書き手の行に無ければ残らない
+- 行を書き換える書き込みは、どれも読んだ行を読み手（`readRow`）で今の形にし、書き換えた行全体を書き手の版で `Put` する。条件は読んだ行に保存してあった `version` と行の世代（`incarnation`。行を作るたびに新しくする値）だけで、書いた行は書き手の版の形をそのまま満たす。前の版の列も、移しが足した列も、書き手の行に無ければ残らない
 - 書き換える行の種類は、どれも `version` と `incarnation` を持つ。`version` を持たないのは、作った後に書き換えない行（追記だけの行・作ると消すだけの行・期限で消える行）だけになる
 - 表の移しは、読み手が見る形を書き手の版で書いた行が、保存してある行と違う行だけを書き直す。条件は保存してあった `schema_version`・`version`・`incarnation` で、`version` を上げないため、並んだ書き手を外さない。外れたら強い整合で読み直してやり直す。行の種類に当たらない行は拒んだ行に数える。追記だけの操作の記録の表は書き直さない
 - 拒んだ行の直しと、前の版へ戻す前の書き換えは、行の版の読み手に足す関数（`repair`・`narrow`）として反映し、表の移しが書き直す。運用者が行を手で書き換える手順は無くなる
@@ -73,7 +73,7 @@ graph TD
 ### 決定 1: 移しに先を越された書き換えが古い列を残さないよう、書き換えは読んだ行から作った行全体の置き換えにする
 
 - 質問: 通常の書き換えが前の版の行を読んだ後に表の移しが確定すると、書き換えの `remove` に移しが足した列が載らない（r3-1）。書き換えをどう組めば、どちらが先に確定しても行が書き手の版の形を満たすか
-- 選んだ案: 書き換えは、読んだ行を `readRow` で今の形にし、書き換えた行を `rowReplaceOf`（`rowUpdateOf` を置き換える）で書き手の版の行全体にし、`replaceIfVersion` で `Put` する。条件は読んだ `version` と `incarnation`（決定 8。と操作ごとの `extra`）で、`version` を 1 上げる。`updateIfVersion` と `rowUpdateOf` の `set`・`remove` は無くす。行の列を一部だけ書き換える書き込みは作らない（例外を持たない。数の足し引きは決定 6 の組み直し、委任の最後に使った時刻は決定 10 の別の行で扱う）
+- 選んだ案: 書き換えは、読んだ行を `readRow` で今の形にし、書き換えた行を `rowReplaceOf`（`rowUpdateOf` を置き換える）で書き手の版の行全体にし、`replaceIfVersion` で `Put` する。条件は読んだ行に保存してあった `version` と `incarnation`（決定 8。と操作ごとの `extra`）で、`version` を読み手の見る形の値から 1 上げる。`updateIfVersion` と `rowUpdateOf` の `set`・`remove` は無くす。行の列を一部だけ書き換える書き込みは作らない（例外を持たない。数の足し引きは決定 6 の組み直し、委任の最後に使った時刻は決定 10 の別の行で扱う）
 - 採らなかった案:
   - 通常の書き換えにも読んだ `schema_version` を条件に足し、外れたら読み直して `set` と `remove` を組み直す（r3-1 の示した案）。移しが確定するたびに並んだ書き手が外れ、組み直しの回数と終わり（r5-4）・ほかの取り消しの理由との優先（r6-2）を決め続けることになる。読んだ行の列から `remove` を作る限り、行に何が残るかは読んだ時と書いた時の差に左右される
   - 表の移しでも `version` を上げ、書き手の `version` の条件で外す。人が画面で読んだ版を持って送る書き換えが、裏の移しのために 409 `version_mismatch` になる
@@ -99,7 +99,7 @@ graph TD
   - 直しの前に移しと非同期の起こし直しを止め、走っている移しの終わりを待ってから直す（r5-6 の示した案）。決定 4 で直しは手で書かず移しが書くため、止める相手が無い。並んだ書き手との外れは読み直しで取りこぼさない
   - 外れた行を飛ばしたままにし、`skipped` も 0 になるまで全走査を繰り返す。書き手が多い表では `skipped` が 0 にならず、終わりを決められない
   - 条件にも書く値にも、読み手が見る形（`repair` の後）の `version` を使う。`repair` が欠けた `version` を補った行や誤った `version` を直した行では、条件が保存の値と合わずに外れ続け、直せない
-- 代償: 行ごとに書き手の行全体を作って比べる計算が増える（行の数に比例する。書かない行の書き込みの費用は掛からない）。`repair` で `version` を直した行は、移しが書き直すまで通常の書き手の条件が外れる（2c の反映の後すぐに 2d で移しを起こす）
+- 代償: 行ごとに書き手の行全体を作って比べる計算が増える（行の数に比例する。書かない行の書き込みの費用は掛からない）。通常の書き手も同じに条件を保存してあった値にする（決定 8）ため、`repair` で `version` や `incarnation` を直した行も、移しが書き直す前から書き換えられる
 - 根拠: 「書き直すか」を版の数でなく読み手が見る形との違いで決めるため、版上げ・直し・狭めを 1 つの手順で扱え、`refused = 0` の全走査が「どの行も読み手の見る形で保存されている」ことを表す。Value 13・Value 14（MVV バージョン 2）
 
 ### 決定 4: 拒んだ行の直しと前の版へ戻す前の書き換えをレビューとテストに通すため、手で書かずに読み手の関数として反映し、移しで書き直す
@@ -153,26 +153,35 @@ graph TD
 ### 決定 8: 消して同じ鍵で作り直した行を取り違えないよう、書き換える行は行の世代 `incarnation` を持ち、書き換え・消し・移しの条件にする
 
 - 質問: `schema_version` と `version` は、行を消して同じ鍵で作り直すと最初の値に戻る。冪等の鍵（手放しと表の期限で消えた後に同じ鍵で借り直す）・ログインの組と IdP の主体の一意の行（外して結び直す）では、移しや前の借りの確定が読んだ後に行が作り直されると、条件が通って新しい行を古い中身で上書きしうる（PR #122 の r1-2）。どう見分けるか
-- 選んだ案: `version` を持つ行は、どれも `incarnation`（行を作るときに書き手が作る UUID v4。置き換えと移しで変えない）を持つ。`putIfAbsent` が新しい値を入れ、`replaceIfVersion` と `deleteIfVersion` は読んだ `version` と `incarnation` の両方を条件にし、`replaceIfUnchanged` は保存してあった `incarnation` も条件にする。`version` を持たない行（作った後に書き換えない行）は、消した後に同じ鍵で作り直さない鍵の形にする（Cognito の主体の対応の行は `sub` を使い捨てにする。セッションの取り消しの行は `origin_jti`、追記だけの行は連番か ID を鍵に持つ）
+- 選んだ案: 記録の表を除くどの行も、`version` の有無によらず `incarnation`（行を作るときに書き手が作る UUID v4。置き換えと移しで変えない）を持つ。`putIfAbsent` が新しい値を入れ、`replaceIfVersion` と `deleteIfVersion` は読んだ行の `version` と `incarnation` を条件にし、`replaceIfUnchanged` は保存してあった `incarnation` も条件にする。`version` を持たない行（作った後に書き換えない行）も、同じ鍵で作り直されうる。たとえばセッションの取り消しの行（`REVOKED#<origin_jti>`）は、取り消しから `SESSION_REVOKED_KEEP_MS`（31 日）で表の期限に消える。一方、`sessions.delete` は `exp` から `SESSION_DELETE_EXPIRED_GRACE_MS`（30 日）まで後発の access token を受けるため、消えた後に同じ鍵で作り直されうる。鍵の形や期限の長さの組で作り直しを防ぐ前提に頼らず、移しの条件の `incarnation` で、前の行を読んだ移しが作り直した行を外す
+  - 条件に使う値と書く値を、通常の書き手でも移し（決定 3）と同じに分ける。`readRow` は読み手が見る形の行と一緒に、保存してあった `schema_version`・`version`・`incarnation` の値そのもの（列が無ければ「無いこと」）を返す。`replaceIfVersion` と `deleteIfVersion` の条件は保存してあった値にする。`replaceIfVersion` が書く `version` は読み手の見る形の値に 1 足した値、`incarnation` は読み手の見る形の値にする。`repair` が欠けた `incarnation` を鍵から決まる値で補った行は、条件が「`incarnation` が無いこと」になり、移しが済む前でも通常の書き換えと消し（委任の取り消しを含む）が通る。作り直した行は `putIfAbsent` が入れた `incarnation` を必ず持つため、この条件に外れ、前の行を読んだ書き手は作り直した行を書き換えない。並んだ 2 つの書き手がどちらも補った値を読んだときは、先に確定した側が `incarnation` を書くため、後の側が外れる
 - 採らなかった案:
   - `version` を作り直しで 1 に戻さず、消すときに墓の行を残して続きの値から作る。消した行が残り続け、表の期限で消える冪等の鍵では墓も消える
   - 移しの条件に行のすべての列の一致を足す。冪等の鍵の行の要素の結果は大きく、条件の式の上限を超えうる（決定 2 と同じ）
-- 代償: 書き換える行に列が 1 つ増える。`repair` が `incarnation` を補うときは、同じ行で読むたびに同じ値になるよう鍵から決まる値にする
+  - `version` を持たない行は同じ鍵で作り直さない鍵の形にし、セッションの取り消しの行は `SESSION_REVOKED_KEEP_MS` を受付の期限（refresh token の寿命と access token の寿命と `SESSION_DELETE_EXPIRED_GRACE_MS` の和）より長くする。行の種類を足すたびに、鍵の形と期限の長さの組が作り直しを防いでいるかを確かめ続けることになり、書き込みはその誤りを見つけない
+  - 補った値を持つ行を、通常の書き手を有効にする前に移しで書き直し終える。移しが拒んだ行や `contended` の行は書き直されないまま残り、その行の書き換え（漏れた委任の取り消しを含む）が直すまで止まる
+- 代償: 記録の表を除くどの行にも列が 1 つ増える。`repair` が `incarnation` を補うときは、同じ行で読むたびに同じ値になるよう鍵から決まる値にする。`readRow` の戻り値に保存してあった値が増える
 - 根拠: 条件が「読んだ時と同じ行の、同じ版」を表し、作り直しの間の長さによらず取り違えない。Value 13・Value 17（MVV バージョン 2）
 
 ### 決定 9: 操作の記録の追記だけの約束を崩さないよう、表の移しは記録の表の行を書き直さない
 
 - 質問: 表の移しは行を `Put` で置き換えるが、`writeAtomically` は記録の表（`db-audit`）への追記でない書き込みを `AuditAppendOnlyError` で拒み、移しの走査が途中で止まる（PR #122 の r1-1）。記録の行の版上げと直しを移しの対象にするか
 - 選んだ案: 対象にしない。`migrateTable` は記録の表を走査しても書かず、保存の形が読み手の見る形と違う行は理由の符号 `append_only` で拒んだ行に数える。記録の行の種類の版上げは、手順の 4（`downgradable: false`）と次の版上げの手順の 1 へ進む前に、前の版の行が表の期限（`AUDIT_RETENTION_DAYS`）で消えて `append_only` が 0 になるのを待つ。記録の行の直しは `repair` で読み手にだけ効かせ、保存の値は変えない（元の値を記録として残す）
+  - 手順の 4 の後に記録の行の種類の書き手を前の版へ戻すとき（4a から 4c）は、読み手の互換で戻す。`narrow` は記録の行の保存の値を変えないため、次の版だけで表せる値を持つ行は `append_only` のまま残る。4c では、記録の表の `append_only` を `refused` の判定から除く（ほかの符号が 0 なら 3 へ進む）。代わりに、その行の種類の `rowCodec` の `latest`（次の版）と `narrow` を、表の期限で `append_only` が 0 になるまで外さない。前の版の書き手に戻した後も、読み手は次の版の行を読めて狭めた値を見る。次の版の形を外すのは、`append_only` が 0 になった後の版を下げる反映か次の版上げの手順の 1 だけである
 - 採らなかった案:
+  - 記録の行の種類では手順の 4 の後に書き手を前の版へ戻さない（戻せなくなる制約として書く）。記録の形を変えた反映の障害が `AUDIT_RETENTION_DAYS` 日の間直せなくなり、その間は誤った書き手で記録が書かれ続ける
   - 移しだけが使う記録の表への置き換えの経路を足す。通常の書き手の追記だけの検査を保っても、記録の行を書き換える権限と経路が残り、記録が後から変わらないこと（I9）を権限と部品の両方で守れなくなる
-- 代償: 記録の行の形を変える版上げは、`AUDIT_RETENTION_DAYS` 日より早く次の段へ進めない。記録の行の形は `dispatch` だけが作るため、形を変える頻度は低い
+- 代償: 記録の行の形を変える版上げは、`AUDIT_RETENTION_DAYS` 日より早く次の段へ進めない。戻した後も、記録の行の種類の次の版の形と `narrow` を同じ日数だけ残す。記録の行の形は `dispatch` だけが作るため、形を変える頻度は低い
 - 根拠: 記録は書いた時の値のまま残す。Value 9・Value 13（MVV バージョン 2）
 
 ### 決定 10: 委任を使うたびに取り消しが外れないよう、委任の最後に使った時刻を別の行に置く
 
 - 質問: `authenticate` は委任の最後に使った時刻を「今の値が 1 時間より前」を条件にした列の更新で書く（PR #122 の r1-8・r1-13）。決定 1 で列の一部だけの書き換えを作らないため、委任の行全体を `replaceIfVersion` で置き換えると、使うたびに委任の行の `version` が上がり、一覧で読んだ版を持って送る `delegations.revoke` が、使われている委任ほど 409 `version_mismatch` になる。漏れた token の取り消しが通りにくい
-- 選んだ案: 最後に使った時刻を、委任の行（`DELEGATION#<委任>`）と別の行「委任の使った時刻」（`db-users` / `USER#<利用者>` / `DELEGATION_USED#<委任>`。`delegation_id`・`user_id`・`last_used_at`・`version`・`incarnation`）に置き、委任の行から `last_used_at` を外す。`authenticate` は委任の行と同じ読みでこの行も強い整合で読み、行が無ければ `putIfAbsent`、`last_used_at` が `DELEGATION_TOUCH_MS` より前なら読んだ `version` と `incarnation` を条件に行全体を `replaceIfVersion` で置き換える（`writeAtomically` で 1 件）。外れても操作は続け、`warn` を出す。`delegations.list` は 2 つの行を合わせて返す
+- 選んだ案: 最後に使った時刻を、委任の行（`DELEGATION#<委任>`）と別の行「委任の使った時刻」（`db-users` / `USER#<利用者>` / `DELEGATION_USED#<委任>`。`delegation_id`・`user_id`・`last_used_at`・`version`・`incarnation`）に置き、委任の行から `last_used_at` を外す。`authenticate` は委任の行と同じ読みでこの行も強い整合で読む（2 つの読みは並べてよい）
+  - 時刻の行の作成と置き換えは、委任の認証に成功した後だけ行う。成功は、読んだ委任の行で秘密の部分の SHA-256 が一致し、期限の内で、取り消されておらず、委任した人の今の席の照らしを通したことである。どれかに外れた要求では、時刻の行を読んでいても書かない（認証に失敗した要求で、利用者が取り消しの判断に使う時刻を進めない）
+  - 成功したら、行が無ければ `putIfAbsent`、`last_used_at` が `DELEGATION_TOUCH_MS` より前なら読んだ行に保存してあった `version` と `incarnation` を条件に行全体を `replaceIfVersion` で置き換える。どちらも、読んだ委任の行に保存してあった `version` と `incarnation` の一致を照らす件（書かない条件の照らし）と一緒に `writeAtomically` で確定する。認証の読みの後に `delegations.revoke` が確定すると委任の行の `version` が上がるため、取り消しと並んだ `authenticate` は時刻の行を作り直さず、書き換えない。外れても操作は続け、`warn` を出す
+  - 時刻の行は委任の行と同じ長さだけ残す。委任の行は取り消しと期限切れの後も `revoked_at` と `expires_at` を持って残り（表の期限を持たない）、`delegations.list` が取り消し・期限切れの委任も示すため、時刻の行も表の期限を持たず消さない。委任の行を消す書き込み（今は無い。利用者の削除などで足すとき）は、同じ `writeAtomically` で時刻の行も `deleteIfVersion` で消す。時刻の行は、委任の行が無い間には作られず残らない
+  - `delegations.list` は 2 つの行を合わせて返す
 - 採らなかった案:
   - 委任の行全体を使うたびに置き換える。上の取り消しの 409 が起きる
   - `version` を上げず版を条件にしない列の更新を、決定 1 の例外として残す。移しと並ぶと、移しが前に読んだ時刻で置き換えて時刻を戻し、列の名前を変える版上げでは前の版の列だけを書き足し、移しとの順の議論がまた要る
@@ -214,6 +223,11 @@ graph TD
 | #122 r1-9（U3b が後の U5b2 の `rowReplaceOf` を使う） | 採る | — | `rowReplaceOf` の導入と今の呼び手の切り替えを U3b に移す（[既にマージした実装への影響と直す単位](#既にマージした実装への影響と直す単位)） |
 | #122 r1-10（費用の記録の鍵の時刻が送り直しで変わりうる） | 採る | 決定 5 | 鍵の時刻を区間の終わりの事象の時刻に限り、受けた時刻と組み直しの時刻を使わない |
 | #122 r1-14（知らせの行が `updateIfVersion` を指す） | 採る | 決定 1 | `replaceIfVersion` で行全体を組む書き方に直す |
+| #122 r2-1（セッションの取り消しの行が期限で消えた後に同じ鍵で作り直され、前の行を読んだ移しが上書きする） | 採る（行の世代の形で） | 決定 8 | 記録の表を除くどの行にも `incarnation` を持たせ、移しの条件にする。鍵の形と期限の長さの組には頼らない |
+| #122 r2-2（`repair` で補った `incarnation` が保存行に無く、通常の書き換えと消しが外れ続ける） | 採る（条件の付け方で） | 決定 3・8 | 通常の書き手も、条件は保存してあった値（無ければ無いこと）、書く値は読み手の見る形の値にする |
+| #122 r2-3（記録の行の種類を手順の 4 の後に戻すと `append_only` で `refused = 0` を満たせない） | 採る（読み手の互換で戻す形で） | 決定 9 | 4c で記録の表の `append_only` を判定から除き、次の版の形と `narrow` を表の期限で 0 になるまで残す |
+| #122 r2-4（認証に失敗した要求でも使った時刻が進みうる） | 採る | 決定 10 | 時刻の行の作成と置き換えは、秘密・期限・取り消し・席の照らしを通した後だけ行う |
+| #122 r2-5（使った時刻の行を消す手順が無く、取り消しと並ぶと作り直される） | 採る（委任の行と同じ寿命の形で） | 決定 10 | 委任の行は取り消しと期限切れの後も残るため、時刻の行も表の期限を持たず同じ長さ残す。書き込みに委任の行の `version` と `incarnation` の照らしを入れ、取り消しの後に作り直さない。委任の行を消す書き込みを足すときは同じトランザクションで消す |
 
 ## 影響と危険
 
@@ -225,13 +239,13 @@ graph TD
 | 実装 | 直す中身 | 直す単位 |
 | --- | --- | --- |
 | #79 の `row-codec.ts`（`rowUpdateOf`） | `rowUpdateOf` を `rowReplaceOf`（行全体を返す）に置き換え、今の呼び手（テスト）を切り替える | 新しく足す単位 U3b（行の書き手の直し。U3b の書き手が `replaceIfVersion` へ `rowReplaceOf` の戻り値を渡すため、U3b の中で先に入れる） |
-| #79 の `row-codec.ts`（`rowCodec`・`readRow`） | `rowCodec` に `repair` と `narrow` を足し、`readRow` がそれを通す。`rowReplaceOf` の `repair` の扱い | U5b2（使うのは表の移しと版を上げる子の手順だけ） |
+| #79 の `row-codec.ts`（`rowCodec`・`readRow`） | `rowCodec` に `repair` と `narrow` を足し、`readRow` がそれを通す。`readRow` は保存してあった `schema_version`・`version`・`incarnation` の値も返す（U3b の書き手が条件に使うため、この戻り値は U3b で先に入れる）。`rowReplaceOf` の `repair` の扱い | U5b2（使うのは表の移しと版を上げる子の手順だけ） |
 | U3 の `conditional-write.ts`（`updateIfSchemaVersion`） | `replaceIfUnchanged` に置き換える | U5b2 |
-| U3 の `conditional-write.ts`（`putIfAbsent`・`updateIfVersion`・`ConflictRule`） | `putIfAbsent` が `incarnation` を入れ、`updateIfVersion` を `replaceIfVersion` に置き換え、`deleteIfVersion` と `ConflictRule` の `rebuild` を足す。`writeAtomically` は変えない | U3b |
-| U5a の行の形（ログインの組・IdP の主体の一意の行・ログインをつなぐ流れの行・冪等の鍵・答え・`version` を持つ行の全部・委任） | 基の形を `overwriteRow` にし、`version` と `incarnation` を持たせる。委任の行から `last_used_at` を外し、委任の使った時刻の行を足す。生成物を作り直す | U3b |
+| U3 の `conditional-write.ts`（`putIfAbsent`・`updateIfVersion`・`ConflictRule`） | `putIfAbsent` が `incarnation` を入れ、`updateIfVersion` を `replaceIfVersion`（条件は保存してあった `version` と `incarnation`）に置き換え、`deleteIfVersion` と `ConflictRule` の `rebuild` を足す。`writeAtomically` は変えない | U3b |
+| U5a の行の形（ログインの組・IdP の主体の一意の行・ログインをつなぐ流れの行・冪等の鍵・答え・`version` を持つ行の全部・委任・記録の表を除く `version` を持たない行） | 書き換える行は基の形を `overwriteRow` にし、`version` と `incarnation` を持たせる。`version` を持たない行には `incarnation` を持たせる。委任の行から `last_used_at` を外し、委任の使った時刻の行を足す。生成物を作り直す | U3b |
 | U3 の `idempotency.ts` | `claimIdempotency` が借りの行を返し、取り直しと `settleIdempotency` を `replaceIfVersion` で組む | U3b |
 | U3 の `usage-limit.ts`（`usageAddItem`） | 読んだ行を受けて足した行全体を組む署名にする | U3b |
-| U4 の `auth/authenticate.ts`（`touchDelegation`） | 委任の使った時刻の行を読み、`putIfAbsent` か `replaceIfVersion` で書く | U3b |
+| U4 の `auth/authenticate.ts`（`touchDelegation`） | 委任の使った時刻の行を読み、委任の認証に成功した後だけ、委任の行の照らしと一緒に `putIfAbsent` か `replaceIfVersion` で書く | U3b |
 | #110 の `dispatch` | `settleIdempotency` に借りの行を渡し、手放しを `deleteIfVersion` にし、`rebuild` の組み直しを足す | U3b |
 | #118 の `api-fn`・`user-store` | 変えない（`ensureUser` は `putIfAbsent` と `writeAtomically` だけを使う） | — |
 
@@ -266,6 +280,7 @@ U3b は U5b2 の前に作る。U5b2 のテスト（移しと書き手が並ぶ�
 | --- | --- | --- |
 | 行の置き換え | 読んだ行から作った行全体を、条件つきの `Put` で書く書き換え | 追加（設計文書の中だけで使い、用語集へは足さない。部品の名前の説明のため） |
 | 組み直し | 条件が外れた書き込みを、ハンドラーが行を読み直して組み、確定し直すこと | 追加（同上） |
+| 委任の使った時刻の行 | 委任の最後に使った時刻を持つ、委任の行と別の行。委任の認証に成功した後だけ書き、委任の行と同じ長さ残る | 追加（同上。データの文書の `db-users` の行にも書く） |
 
 ## テスト設計
 
@@ -285,6 +300,11 @@ U3b は U5b2 の前に作る。U5b2 のテスト（移しと書き手が並ぶ�
 | 4a の `rowCodec`（`narrow` あり）から `writeVersion` だけを前の版へ戻した組が読み込みで投げず、読み手は狭めた値を見る | `narrow` に `writeVersion` が次の版であることを求める |
 | `logins.delete` は、呼び名の変更で利用者の行の版が進んだ後でも組み直して確定し、別々のログインを外す並んだ 2 つの要求の後の方は読み直した `login_count` で最後のログインの 409 になる | 利用者の行の外れを組み直さずに最後のログインの 409 にする・読んだ版を条件にしない |
 | 委任を使っても委任の行の `version` は変わらず、使った時刻の行が 1 時間ごとに書き換わる | 委任の行を置き換える・列の更新で書く |
+| 秘密の部分が違う・期限を過ぎた・取り消した委任の token の要求では、時刻の行が作られず書き換わらない（時刻の行が無い場合も古い場合も） | 時刻の行の有無と古さだけで書く・認証の照らしの前に書く |
+| 認証の読みの後に `delegations.revoke` が確定すると、並んだ `authenticate` の時刻の行の作成と置き換えが外れ、取り消しの後に時刻の行が作り直されない。取り消した委任の行と時刻の行はどちらも残り、委任の行の無い時刻の行は無い | 委任の行の照らしを落とす・時刻の行に表の期限を付ける |
+| `repair` が `incarnation` を補った行（保存の行に列が無い）を、移しの前に通常の `replaceIfVersion` と `deleteIfVersion` で書き換え・消せる。同じ鍵で作り直した行（`incarnation` あり）は、前の行を読んだ書き手から書き換わらない | 条件に補った値を使う・「無いこと」の条件を落とす |
+| セッションの取り消しの行を移しが読んだ後に、表の期限で消えて同じ鍵で作り直されると、移しの置き換えが `incarnation` の違いで外れ、前の `revoked_at` と `expire_at` で上書きしない | `version` を持たない行の条件から `incarnation` を落とす |
+| 記録の行の種類を手順の 4 の後に 4a から 4c で戻すと、`append_only` が残っても 3 へ進め、戻した後も読み手が次の版の記録の行を狭めた値で読む | `append_only` を `refused` の判定に入れる・戻すときに次の版の形を外す |
 
 細かい観点は [詳細設計の表の移し](./issue-2-design-detail.md#表の移し) の単体テストの観点 にある。
 
@@ -295,8 +315,8 @@ U3b は U5b2 の前に作る。U5b2 のテスト（移しと書き手が並ぶ�
 | 文書 | 変える所 |
 | --- | --- |
 | `issues/issue-2-design-detail.md` | 表の移しの関数の仕様・版を上げる子の手順・並行と排他・単体テストの観点。横断の部品の `updateIfVersion` の行。サービスの表の月の使った量と冪等の鍵の行 |
-| `docs/design/detail.md` | `claimIdempotency`・`settleIdempotency`・`updateIfVersion`・`usageAddItem` の仕様と並行の表と単体テストの観点。委任の最後に使った時刻の書き方 |
-| `docs/design/data.md` | 共通の列の `version` と `incarnation` を持つ行の決まり。`logins.create` と `logins.delete` の利用者の行の書き方 |
+| `docs/design/detail.md` | `claimIdempotency`・`settleIdempotency`・`updateIfVersion`・`usageAddItem` の仕様と並行の表と単体テストの観点。委任の最後に使った時刻の書き方（認証に成功した後だけ・委任の行の照らしと一緒に） |
+| `docs/design/data.md` | 共通の列の `version` と `incarnation` を持つ行の決まり（`incarnation` は記録の表を除くどの行にも持たせる）。`logins.create` と `logins.delete` の利用者の行の書き方。委任の使った時刻の行の寿命（委任の行と同じ長さ残し、取り消しの後に作り直さない） |
 
 ## 設計の結果
 
