@@ -412,7 +412,7 @@ infra/
 | conditional-write | `src/conditional-write.ts` | `./conditional-write` | `putIfAbsent`・`replaceIfVersion`・`deleteIfVersion`・`writeAtomically`・`replaceIfUnchanged`（新設。[表の移し](#表の移し)。`updateIfVersion` は置かない） |
 | auth | `src/auth/authenticate.ts`・`tokens.ts` | `./auth` | `authenticate`（公開鍵の控えは `aws-jwt-verify` の組み込み。全体の設計の決定 48） |
 | authorize | `src/authorize.ts` | `./authorize` | `visibleProjectIds`・`authorize` |
-| usage-limit | `src/usage-limit.ts` | `./usage-limit` | `judgeUsage`・`usageAddItem` |
+| usage-limit | `src/usage-limit.ts` | `./usage-limit` | `judgeUsage`・`usageAddItem`・`usageMonthOf` |
 | audit | `src/audit.ts` | `./audit` | `auditItem`・`appendAudit` |
 | dispatch | `src/dispatch/types.ts`・`http.ts`・`dispatch.ts` | `./dispatch` | `readHttpCall`・`dispatch`・`writeHttpResponse` |
 
