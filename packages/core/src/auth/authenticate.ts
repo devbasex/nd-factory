@@ -295,7 +295,7 @@ async function delegation(token: string, deps: AuthDeps): Promise<Outcome> {
   if (isExpired(row.expiresAt, now)) return unauthorized("expired");
   // 秘密・取り消し・期限を通せば認証は成功し、主体を返す。使った時刻の行は、そのうえで委任の範囲と委任した人が今見られるプロジェクトが
   // 重なるときだけ書く（重なりは時刻の行の更新の条件で、認証の条件でない。重なりが空でも主体を返し、認可が要素ごとに 404 で返す）
-  await touch(userId, delegationId, row, used, deps, "overlap");
+  await touch(userId, delegationId, row, used, deps);
   return ok({ kind: "delegation", userId, delegationId, scope: row.scope, clientName: row.clientName });
 }
 
@@ -340,10 +340,10 @@ function usedWrite(userId: Id<"usr">, delegationId: Id<"dlg">, used: StoredRow |
   });
 }
 
-// 使った時刻の行を書く。when が "overlap" なら、委任の範囲と委任した人が今見られるプロジェクトの重なりが空のとき書かない（範囲のプロジェクトの席を
-// 失った人の委任の要求は認可が拒むため、取り消しの判断に使う時刻を進めない。認可の viewOf と同じ重なり）。"granted" は認可が I2 の例外で要素を通した後で、
-// 重なりを照らさずに書く（recordDelegationUse）。書けなくても主体は決めたまま続ける（次の要求で書き直す）。ログに行の値と委任の ID を出さない
-async function touch(userId: Id<"usr">, delegationId: Id<"dlg">, row: DelegationRecord, used: StoredRow | null, deps: AuthDeps, when: "overlap" | "granted"): Promise<void> {
+// 委任の範囲と委任した人が今見られるプロジェクトの重なりが空なら書かない（範囲のプロジェクトの席を失った人の委任の要求は認可が拒むため、
+// 取り消しの判断に使う時刻を進めない。認可の viewOf と同じ重なり。I2 の移す途中の例外は人の主体だけで、委任の読みを通さない）。
+// 書けなくても主体は決めたまま続ける（次の要求で書き直す）。ログに行の値と委任の ID を出さない
+async function touch(userId: Id<"usr">, delegationId: Id<"dlg">, row: DelegationRecord, used: StoredRow | null, deps: AuthDeps): Promise<void> {
   const warn = (fields: Record<string, unknown>): void => deps.log?.warn("委任の最後に使った時刻を書けない", { principal: "delegation", ...fields });
   const write = usedWrite(userId, delegationId, used, deps);
   if (write === null) return;
@@ -352,29 +352,13 @@ async function touch(userId: Id<"usr">, delegationId: Id<"dlg">, row: Delegation
     return;
   }
   try {
-    if (when === "overlap") {
-      // 書くときだけ席とプロジェクトを読む（認可が後で同じものを読み直す。要求をまたいで控えない）
-      const { visible } = await personView(userId, deps.scope);
-      if (!row.scope.projectIds.some((id) => visible.has(id))) return;
-    }
+    // 書くときだけ席とプロジェクトを読む（認可が後で同じものを読み直す。要求をまたいで控えない）
+    const { visible } = await personView(userId, deps.scope);
+    if (!row.scope.projectIds.some((id) => visible.has(id))) return;
     const outcome = await writeAtomically(deps.db, [delegationUnchanged(userId, delegationId, row.stored), write], deps.log);
     if (!outcome.ok) warn({ result: "conflict" });
   } catch (error) {
     warn({ error: error instanceof Error ? error.name : "unknown" });
-  }
-}
-
-// 認可が I2 の例外（移す途中のプロジェクトの名前を、移す先のチームの持ち主に読ませる）で委任の要素を通した後に、使った時刻を書く。
-// 認証の時は重なりが空で書かなかった読みでも、成功した読みの時刻を残す。委任の行と使った時刻の行を強い整合で読み直し、
-// 取り消し・期限を照らし直して、認証と同じ書き込み（委任の行の version と incarnation の照らしと一緒）で確定する。失敗しても投げない
-export async function recordDelegationUse(principal: Extract<Principal, { kind: "delegation" }>, deps: AuthDeps): Promise<void> {
-  const { userId, delegationId } = principal;
-  try {
-    const [row, used] = await Promise.all([deps.readers.delegation(userId, delegationId), deps.db.get("users", usedKeyOf(userId, delegationId), true)]);
-    if (row === null || row.revokedAt !== null || isExpired(row.expiresAt, deps.clock.epochMs())) return;
-    await touch(userId, delegationId, row, used, deps, "granted");
-  } catch (error) {
-    deps.log?.warn("委任の最後に使った時刻を書けない", { principal: "delegation", error: error instanceof Error ? error.name : "unknown" });
   }
 }
 

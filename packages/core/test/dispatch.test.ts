@@ -376,18 +376,13 @@ describe("dispatch: 本文は配列（I12・受け入れ条件 5）", () => {
 });
 
 describe("dispatch: 認証と要求全体の拒み", () => {
-  it("移す途中のプロジェクトだけを範囲に持つ委任が I2 の例外で読めたら、委任の使った時刻の行を書く（認証は範囲の重なりが空で書かない）", async () => {
+  it("移す先のチームの持ち主の委任は、範囲に移す途中のプロジェクトだけを持つと要素が 404 で、委任の使った時刻の行を作らない（I2 の例外は人だけ）", async () => {
     const usedKey = { pk: `USER#${OWNER}`, sk: `DELEGATION_USED#${DELEGATION}` };
     const record = { ...delegationRecord("read"), scope: { projectIds: [P_B], operations: "read" as const } };
     const moving = setup({ delegation: record, transferToA: true });
-    const result = await dispatch(call("notes.get", [{ project_id: P_B }], viaToken(DELEGATION_TOKEN, "api")), moving.deps);
-    expect(itemsOf(result)).toMatchObject([{ ok: true }]);
-    expect(moving.table.row("users", usedKey)).toMatchObject({ delegation_id: DELEGATION, user_id: OWNER, last_used_at: new Date(NOW).toISOString() });
-    // 移す途中でなければ要素は 404 で、時刻の行を作らない
-    const still = setup({ delegation: record });
-    const denied = await dispatch(call("notes.get", [{ project_id: P_B }], viaToken(DELEGATION_TOKEN, "api")), still.deps);
+    const denied = await dispatch(call("notes.get", [{ project_id: P_B }], viaToken(DELEGATION_TOKEN, "api")), moving.deps);
     expect(itemsOf(denied)).toMatchObject([{ ok: false, status: 404 }]);
-    expect(still.table.row("users", usedKey)).toBeUndefined();
+    expect(moving.table.row("users", usedKey)).toBeUndefined();
   });
 
   it("POST でない要求は認証の前に 405 で、主体の無い記録の行を 1 件書く", async () => {

@@ -55,9 +55,7 @@ export type ScopeReader = {
 export type ItemDenyReason = "not_found" | "role_insufficient" | "human_only";
 
 export type ItemAuthz =
-  // viaTransfer は I2 の例外（移す途中のプロジェクトの名前を移す先のチームの持ち主に読ませる）で通したときだけ true。
-  // 委任の主体では、dispatch がこの印で委任の使った時刻を書く（認証の時の範囲の重なりの照らしに当たらない読みのため）
-  | { readonly decision: "allow"; readonly projectId: ProjectId | null; readonly role: SeatRole | null; readonly viaTransfer?: true }
+  | { readonly decision: "allow"; readonly projectId: ProjectId | null; readonly role: SeatRole | null }
   | { readonly decision: "deny"; readonly status: 404 | 403; readonly reason: ItemDenyReason };
 
 export type AuthzDecision = { readonly reject: "human_only" | "scope_insufficient" } | { readonly items: readonly ItemAuthz[] };
@@ -135,7 +133,7 @@ async function viewOf(principal: Principal, scope: ScopeReader): Promise<View> {
 }
 
 // 見えるか。見えれば対象のプロジェクトと役割、見えなければ null
-async function visibility(view: View, op: OperationDef, item: unknown, target: Target, scope: ScopeReader): Promise<{ projectId: ProjectId | null; role: SeatRole | null; viaTransfer?: true } | null> {
+async function visibility(view: View, op: OperationDef, item: unknown, target: Target, scope: ScopeReader): Promise<{ projectId: ProjectId | null; role: SeatRole | null } | null> {
   if (view.kind === "bound") {
     if (target.kind === "project") return view.visible.has(target.projectId) ? { projectId: target.projectId, role: null } : null;
     return target.kind === "none" ? { projectId: null, role: null } : null;
@@ -145,11 +143,12 @@ async function visibility(view: View, op: OperationDef, item: unknown, target: T
       // 見える集まりに入り、かつ本体の今の割り当てのチームに席がある（索引の値だけで通さない）
       const role = target.teamId === null ? undefined : view.seats.get(target.teamId);
       if (view.visible.has(target.projectId) && role !== undefined) return { projectId: target.projectId, role };
-      // I2 の例外: 割り当てを移す途中のプロジェクトの名前だけを読む要素は、移す先のチームの持ち主に通す
+      // I2 の例外: 割り当てを移す途中のプロジェクトの名前だけを読む要素は、移す先のチームの持ち主（人の主体）本人だけに通す。
+      // 委任は「割り当てたチームの席を持つ人の委任」に限るため、移す先の持ち主の委任には例外を広げず 404 で返す
+      if (view.principal.kind !== "human") return null;
       const transfer = await scope.transferTargetOf(op, item);
-      const inScope = view.principal.kind === "human" || view.principal.scope.projectIds.includes(target.projectId);
-      if (transfer !== null && transfer.projectId === target.projectId && view.seats.get(transfer.toTeamId) === "owner" && inScope) {
-        return { projectId: target.projectId, role: "owner", viaTransfer: true };
+      if (transfer !== null && transfer.projectId === target.projectId && view.seats.get(transfer.toTeamId) === "owner") {
+        return { projectId: target.projectId, role: "owner" };
       }
       return null;
     }
@@ -172,7 +171,7 @@ async function itemAuthz(principal: Principal, view: View, op: OperationDef, ite
   if (seen === null) return NOT_FOUND;
   if (op.humanOnly === "per_item" && principal.kind === "delegation" && (await scope.isHumanOnlyItem(op, item))) return HUMAN_ONLY;
   if (op.ownerOnly && seen.role !== "owner") return ROLE_INSUFFICIENT;
-  return { decision: "allow", projectId: seen.projectId, role: seen.role, ...(seen.viaTransfer === true ? { viaTransfer: true as const } : {}) };
+  return { decision: "allow", projectId: seen.projectId, role: seen.role };
 }
 
 export async function authorize(principal: Principal, op: OperationDef, items: readonly unknown[], scope: ScopeReader, log?: Logger): Promise<AuthzDecision> {
