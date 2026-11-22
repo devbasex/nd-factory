@@ -180,6 +180,17 @@ describe("replaceIfVersion", () => {
     expect(recreated.row("teams", teamKey)).toMatchObject({ name: "acme", incarnation: OTHER_INCARNATION });
   });
 
+  it("repair が形を外れた version（文字列・0）を直した行は、保存してあった値を条件にし、読み手の見る形の値から 1 上げて書く", async () => {
+    for (const [stored, seen] of [["3", 3], [0, 1]] as const) {
+      const table = fakeTable();
+      table.seed("teams", { ...teamRow(1), version: stored, incarnation: INCARNATION });
+      const write = replaceIfVersion({ table: "teams", item: replacement(), version: seen, incarnation: INCARNATION, expect: { version: value(stored), incarnation: value(INCARNATION) }, onConflict: "version_mismatch" });
+      expect(expressionsOf(write.condition).ExpressionAttributeValues).toEqual({ ":v0": stored, ":v1": INCARNATION });
+      expect(await writeAtomically(table.db, [write])).toEqual({ ok: true });
+      expect(table.row("teams", teamKey)).toEqual({ ...replacement(), version: seen + 1, incarnation: INCARNATION });
+    }
+  });
+
   it("version と incarnation の両方を補った行を読んだ後に消えると外れ、行を作らない", async () => {
     const table = fakeTable();
     const outcome = await writeAtomically(table.db, [
@@ -207,11 +218,22 @@ describe("deleteIfVersion", () => {
     expect(expressionsOf(item.condition).ConditionExpression).toBe("(attribute_exists(#n0) AND #n1 = :v0 AND attribute_not_exists(#n2) AND #n3 = :v1)");
   });
 
-  it("expect の version が 1 以上の整数でない・incarnation が空の文字列だと投げる", () => {
-    for (const version of [value(0), value(1.5), value("1")]) {
-      expect(() => deleteIfVersion({ table: "users", key: { pk: "USER#u", sk: "USER" }, expect: { version, incarnation: ABSENT }, onConflict: "fail" })).toThrow(WriteSpecError);
+  it("expect の値が undefined だと投げる（列が無ければ absent）", () => {
+    for (const expectation of [{ version: value(undefined), incarnation: ABSENT }, { version: value(1), incarnation: value(undefined) }]) {
+      expect(() => deleteIfVersion({ table: "users", key: { pk: "USER#u", sk: "USER" }, expect: expectation, onConflict: "fail" })).toThrow(WriteSpecError);
     }
-    expect(() => deleteIfVersion({ table: "users", key: { pk: "USER#u", sk: "USER" }, expect: { version: value(1), incarnation: value("") }, onConflict: "fail" })).toThrow(WriteSpecError);
+  });
+
+  it("repair が形を外れた version と incarnation を直した行は、保存してあった値（文字列・0・空の文字列）をそのまま条件にして消せる", async () => {
+    const key = { pk: "USER#u", sk: "LOGIN#google#s" };
+    for (const [version, incarnation] of [["3", INCARNATION], [0, ""]] as const) {
+      const table = fakeTable();
+      table.seed("users", { ...key, schema_version: 1, version, incarnation, user_id: "u" });
+      const del = deleteIfVersion({ table: "users", key, expect: { version: value(version), incarnation: value(incarnation) }, onConflict: "fail" });
+      expect(expressionsOf(del.condition).ExpressionAttributeValues).toEqual({ ":v0": version, ":v1": incarnation });
+      expect(await writeAtomically(table.db, [del])).toEqual({ ok: true });
+      expect(table.row("users", key)).toBeUndefined();
+    }
   });
 
   it("記録の表を指すと投げる", () => {

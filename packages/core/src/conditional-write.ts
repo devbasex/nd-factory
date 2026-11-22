@@ -157,14 +157,13 @@ function storedCondition(column: "version" | "incarnation", stored: Stored): Con
   return stored.kind === "absent" ? cond.notExists(column) : cond.eq(column, stored.value);
 }
 
+// expect は保存してあった値そのもの（決定 3・8）。repair が形を外れた version や incarnation（文字列の version・0 など）を直した行でも、
+// 条件は修復の前の値で組み、書く値（version と incarnation の引数）だけを読み手の見る形で照らす。そのため値の形は照らさず、
+// 条件に載せられない値（undefined）だけを拒む（readRow の stored は undefined を absent にするため、届くのは呼び手の誤り）
 function checkExpect(what: string, expect: StoredVersion): void {
-  const version = expect.version;
-  if (version.kind === "value" && !(typeof version.value === "number" && Number.isInteger(version.value) && version.value >= 1)) {
-    throw new WriteSpecError(`${what}: expect の version は 1 以上の整数か absent`);
-  }
-  const incarnation = expect.incarnation;
-  if (incarnation.kind === "value" && !(typeof incarnation.value === "string" && incarnation.value.length > 0)) {
-    throw new WriteSpecError(`${what}: expect の incarnation は空でない文字列か absent`);
+  for (const column of ["version", "incarnation"] as const) {
+    const stored = expect[column];
+    if (stored.kind === "value" && stored.value === undefined) throw new WriteSpecError(`${what}: expect の ${column} の value は undefined にしない（列が無ければ absent）`);
   }
 }
 
