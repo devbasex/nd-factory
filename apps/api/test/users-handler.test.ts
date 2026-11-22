@@ -1,3 +1,5 @@
+import { createClock } from "@nd-factory/core/clock";
+import { createLogger } from "@nd-factory/core/log";
 import type { APIGatewayProxyEventV2WithJWTAuthorizer } from "aws-lambda";
 import { describe, expect, it, vi } from "vitest";
 import { answerItems, createHandler } from "../src/users-handler.ts";
@@ -24,22 +26,30 @@ function event(body: string | undefined, opts: { sub?: string | null; base64?: b
   } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;
 }
 
+const clock = createClock(() => NOW.getTime());
+const loggerTo = (lines: string[]) => (requestId: string) => createLogger({ request_id: requestId, fn: "users-api", endpoint: "user" }, (line) => lines.push(line));
+
 function setup() {
   const store = new FakeStore();
   const lines: string[] = [];
+  const tables: string[] = [];
   const handler = createHandler({
-    client: () => store.asClient(),
+    db: (table) => {
+      tables.push(table);
+      return store.asDb(table);
+    },
     table: () => "acme-test-accounts",
-    now: () => NOW,
-    log: (line) => lines.push(line),
+    clock,
+    log: loggerTo(lines),
   });
-  return { store, lines, handler };
+  return { store, lines, tables, handler };
 }
 
 describe("handler", () => {
   it("self は 200 と自分の行", async () => {
-    const { handler, lines } = setup();
+    const { handler, lines, tables } = setup();
     const res = await handler(event('[{"id":"self"}]'));
+    expect(tables).toEqual(["acme-test-accounts"]);
     expect(res.statusCode).toBe(200);
     expect(res.headers?.["content-type"]).toBe("application/json");
     expect(JSON.parse(res.body ?? "")).toEqual([{ status: "ok", item: ROW }]);
@@ -121,14 +131,16 @@ describe("handler", () => {
 
   it("表の名前が無いと 503 にする", async () => {
     const lines: string[] = [];
+    const store = new FakeStore();
     const handler = createHandler({
-      client: () => new FakeStore().asClient(),
+      db: (table) => store.asDb(table),
       table: () => undefined,
-      now: () => NOW,
-      log: (l) => lines.push(l),
+      clock,
+      log: loggerTo(lines),
     });
     const res = await handler(event('[{"id":"self"}]'));
     expect(res.statusCode).toBe(503);
+    expect(store.calls).toHaveLength(0);
     expect(JSON.parse(lines[0]!)).toMatchObject({ level: "error", status: 503 });
   });
 });
