@@ -179,13 +179,24 @@ describe("usageAddItem", () => {
     expect(() => usageAddItem(null, TEAM, usd(1.5), clock)).toThrow(RangeError);
   });
 
-  it("読んだ行のチームか年月が違うと投げる（書き手の誤り）", async () => {
+  it("読んだ行のチームが違うと投げる（書き手の誤り）", async () => {
+    const table = fakeTable();
+    await add(table, usd(1));
+    const read = await readUsage(table);
+    if (read === null) throw new Error("行が無い");
+    expect(() => usageAddItem(read, "team_01890a5d-ac96-774b-bcce-b302099a8058", usd(1), clock)).toThrow(RangeError);
+  });
+
+  it("読んだ後に月が替わっても、読んだ行の年月の行へ足す（読みと加算で年月を取り直さない）", async () => {
     const table = fakeTable();
     await add(table, usd(1));
     const read = await readUsage(table);
     if (read === null) throw new Error("行が無い");
     const next = createClock(() => Date.parse("2026-12-01T00:00:00.000Z"));
-    expect(() => usageAddItem(read, TEAM, usd(1), next)).toThrow(RangeError);
-    expect(() => usageAddItem(read, "team_01890a5d-ac96-774b-bcce-b302099a8058", usd(1), clock)).toThrow(RangeError);
+    const built = usageAddItem(read, TEAM, usd(2), next);
+    if (!built.ok) throw new Error("組めない");
+    expect(built.row).toMatchObject({ month: read.row.month, used_amount_minor: 3 });
+    expect(built.item.key).toEqual({ pk: `TEAM#${TEAM}`, sk: `USAGE#${read.row.month}` });
+    expect(await writeAtomically(table.db, [built.item])).toEqual({ ok: true });
   });
 });

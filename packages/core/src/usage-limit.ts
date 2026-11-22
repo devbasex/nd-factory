@@ -84,8 +84,9 @@ export type UsageAddResult = { readonly ok: true; readonly item: TransactItem; r
 // row は足した後の行で、使える量の判定に使う（確定した値と同じ）
 export function usageAddItem(current: { readonly raw: StoredRow; readonly row: UsageMonthRow } | null, team: Id<"team">, cost: Money, clock: Clock): UsageAddResult {
   if (!Number.isInteger(cost.amount_minor) || cost.amount_minor < 0) throw new RangeError("費用は 0 以上の整数の最小単位");
-  const month = clock.iso().slice(0, 7);
   if (current === null) {
+    // 読んだ行が無いときだけ時計から年月を決める。読みと組みの間に月が替わって前の月の行が作られていても、putIfAbsent が外れ、組み直しで読み直す
+    const month = clock.iso().slice(0, 7);
     const item = putIfAbsent({
       table: "teams",
       item: rowToCreate(usageMonthCodec, { team_id: team, month, used_amount_minor: cost.amount_minor, used_currency: cost.currency, version: 1 }),
@@ -94,7 +95,8 @@ export function usageAddItem(current: { readonly raw: StoredRow; readonly row: U
     return { ok: true, item, row: usageRowOf(item.item) };
   }
   const read = current.row;
-  if (read.team_id !== team || read.month !== month) throw new RangeError("読んだ行がこのチームのこの月の行でない");
+  // 年月は読んだ行のものを使う（読んだ後に月が替わっても、読んだ行の鍵の行へ足す。時計から取り直すと読んだ行と別の月の行を組む）
+  if (read.team_id !== team) throw new RangeError("読んだ行がこのチームの行でない");
   if (read.used_currency !== cost.currency) return { ok: false, onConflict: "state_mismatch" };
   const next: UsageMonthRow = { ...read, used_amount_minor: read.used_amount_minor + cost.amount_minor };
   const item = replaceIfVersion({
