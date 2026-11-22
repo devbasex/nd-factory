@@ -107,47 +107,7 @@ export class AppStack extends Stack {
     const webOrigin = `https://${distribution.distributionDomainName}`;
     const webRoot = `${webOrigin}/`;
 
-    // Google の secret の器。値は自動で作り、人が本物の値で上書きする。生成の設定と名前は設定の値で変えない
-    // （変えると器に新しい版ができ、人が入れた値を上書きしたかを版で見分けられなくなる）
-    const googleSecret = new Secret(this, "GoogleOAuthSecret", {
-      secretName: names.googleSecret,
-      description: "Google の OAuth クライアントの secret。人が本物の値を入れる",
-      generateSecretString: { passwordLength: 32, excludePunctuation: true },
-    });
-
-    // 利用者プール。自分の登録を止め、利用者は Google の IdP からだけ入る
-    const userPool = new UserPool(this, "UserPool", {
-      userPoolName: names.userPool,
-      selfSignUpEnabled: false,
-      signInAliases: { email: true },
-    });
-    userPool.addDomain("LoginDomain", { cognitoDomain: { domainPrefix: names.loginDomain } });
-
-    let google: UserPoolIdentityProviderGoogle | undefined;
-    if (clientId) {
-      google = new UserPoolIdentityProviderGoogle(this, "GoogleIdp", {
-        userPool,
-        clientId,
-        // 合成の出力に値を持たない動的な参照で渡す
-        clientSecretValue: SecretValue.secretsManager(googleSecret.secretArn),
-        scopes: ["openid", "email", "profile"],
-        attributeMapping: { email: ProviderAttribute.GOOGLE_EMAIL },
-      });
-    }
-
-    const client = userPool.addClient("WebClient", {
-      userPoolClientName: names.webClient,
-      generateSecret: false,
-      preventUserExistenceErrors: true,
-      supportedIdentityProviders: [google ? UserPoolClientIdentityProvider.GOOGLE : UserPoolClientIdentityProvider.COGNITO],
-      oAuth: {
-        flows: { authorizationCodeGrant: true },
-        scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
-        callbackUrls: [webRoot],
-        logoutUrls: [webRoot],
-      },
-    });
-    if (google) client.node.addDependency(google);
+    const { userPool, client } = this.addLogin(names, clientId, webRoot);
 
     // API。認証の無い要求は JWT の認可で拒み、Lambda を起こさない
     const authorizer = new HttpJwtAuthorizer("Jwt", `https://cognito-idp.${this.region}.amazonaws.com/${userPool.userPoolId}`, {
@@ -164,6 +124,7 @@ export class AppStack extends Stack {
       },
     });
     api.addRoutes({
+      // eslint-disable-next-line no-restricted-syntax -- #4 が置き換える
       path: "/v1/users",
       methods: [HttpMethod.PUT],
       integration: new HttpLambdaIntegration("UsersIntegration", fn),
@@ -205,6 +166,52 @@ export class AppStack extends Stack {
     new CfnOutput(this, "ApiUrl", { value: api.apiEndpoint });
 
     applyTags(this, s);
+  }
+
+  // Google の secret の器・利用者プール・Google の IdP・画面のクライアントを作る
+  private addLogin(names: ReturnType<typeof appResourceNames>, clientId: string | undefined, webRoot: string) {
+    // Google の secret の器。値は自動で作り、人が本物の値で上書きする。生成の設定と名前は設定の値で変えない
+    // （変えると器に新しい版ができ、人が入れた値を上書きしたかを版で見分けられなくなる）
+    const googleSecret = new Secret(this, "GoogleOAuthSecret", {
+      secretName: names.googleSecret,
+      description: "Google の OAuth クライアントの secret。人が本物の値を入れる",
+      generateSecretString: { passwordLength: 32, excludePunctuation: true },
+    });
+
+    // 利用者プール。自分の登録を止め、利用者は Google の IdP からだけ入る
+    const userPool = new UserPool(this, "UserPool", {
+      userPoolName: names.userPool,
+      selfSignUpEnabled: false,
+      signInAliases: { email: true },
+    });
+    userPool.addDomain("LoginDomain", { cognitoDomain: { domainPrefix: names.loginDomain } });
+
+    let google: UserPoolIdentityProviderGoogle | undefined;
+    if (clientId) {
+      google = new UserPoolIdentityProviderGoogle(this, "GoogleIdp", {
+        userPool,
+        clientId,
+        // 合成の出力に値を持たない動的な参照で渡す
+        clientSecretValue: SecretValue.secretsManager(googleSecret.secretArn),
+        scopes: ["openid", "email", "profile"],
+        attributeMapping: { email: ProviderAttribute.GOOGLE_EMAIL },
+      });
+    }
+
+    const client = userPool.addClient("WebClient", {
+      userPoolClientName: names.webClient,
+      generateSecret: false,
+      preventUserExistenceErrors: true,
+      supportedIdentityProviders: [google ? UserPoolClientIdentityProvider.GOOGLE : UserPoolClientIdentityProvider.COGNITO],
+      oAuth: {
+        flows: { authorizationCodeGrant: true },
+        scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
+        callbackUrls: [webRoot],
+        logoutUrls: [webRoot],
+      },
+    });
+    if (google) client.node.addDependency(google);
+    return { userPool, client };
   }
 
   // AZ を反映の時に Fn::GetAZs から 2 つ選ぶ。既定の getter は環境を明示したスタックで lookup を走らせ、

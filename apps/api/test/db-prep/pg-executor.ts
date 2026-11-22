@@ -228,7 +228,7 @@ export function authTimeoutClusterUrl(): string {
   return PG_AUTH_TIMEOUT_URL;
 }
 
-export type Credentials = { user: string; password: string };
+type Credentials = { user: string; password: string };
 
 export type TestDatabase = {
   // 使い捨てのデータベースの名前

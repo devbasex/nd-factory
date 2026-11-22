@@ -8,7 +8,7 @@ import { ADMIN_DATABASE, inTransaction, readFlag, type SqlExecutor, type SqlPara
 export type ProjectIdent = { projectId: string; database: string; role: string };
 
 // 手順の 1 で PUBLIC から接続を外す、クラスタに初めからあるデータベース。接続し直してカタログと統計から他の名前を読ませない
-export const SYSTEM_DATABASES: readonly string[] = ["postgres", "template1"];
+const SYSTEM_DATABASES: readonly string[] = ["postgres", "template1"];
 
 // 手順の 4 で PUBLIC から読み取りを外す pg_catalog の表とビュー。どれも他のデータベース・役割の名前か数を返す。
 // 共有のカタログでも、読み取りの権限はデータベースごとの pg_class に載るため、プロジェクトのデータベースでだけ外れる。

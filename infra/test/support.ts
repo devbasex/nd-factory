@@ -57,7 +57,7 @@ export function resources(template: Template): Resources {
 }
 
 // 時間で費用が掛かる資源の種類。どれか 1 つでもあれば費用の前提が崩れる
-export const HOURLY_COST_TYPES = [
+const HOURLY_COST_TYPES = [
   "AWS::EC2::NatGateway",
   "AWS::ECS::Service",
   "AWS::ElasticLoadBalancingV2::LoadBalancer",
@@ -107,17 +107,15 @@ export function hourlyCostResources(template: Template): string[] {
 }
 
 // 全体の設計の「スタックのテストに足す行」の 8 つの決まり
-export const STACK_RULES = [
-  "nat",
-  "task_ingress",
-  "lambda_in_vpc",
-  "ecs_service",
-  "task_role_statement",
-  "aurora_min",
-  "deletable",
-  "pitr",
-] as const;
-export type StackRule = (typeof STACK_RULES)[number];
+export type StackRule =
+  | "nat"
+  | "task_ingress"
+  | "lambda_in_vpc"
+  | "ecs_service"
+  | "task_role_statement"
+  | "aurora_min"
+  | "deletable"
+  | "pitr";
 export type StackRuleViolation = { rule: StackRule; id: string };
 
 const TABLE_TYPES = ["AWS::DynamoDB::Table", "AWS::DynamoDB::GlobalTable"];

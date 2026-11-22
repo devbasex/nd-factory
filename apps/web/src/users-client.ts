@@ -22,6 +22,7 @@ async function readReason(res: Response): Promise<string> {
 export async function fetchSelf(apiUrl: string, token: string, fetchFn: typeof fetch): Promise<SelfResult> {
   let res: Response;
   try {
+    // eslint-disable-next-line no-restricted-syntax -- #4 が置き換える
     res = await fetchFn(`${apiUrl.replace(/\/+$/, "")}/v1/users`, {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },

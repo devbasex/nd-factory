@@ -39,7 +39,7 @@ export type PrepCompletionPort = {
 export type PrepStage = "is_current" | "claim" | "read_target" | "read_password" | "terminate" | "promote" | "record";
 
 // ログに出す項目はこれだけ。値はどれも決まった形の ID・種類・コード・数で、名前・パスワード・URL・SQL の文を持たない
-export type PrepLogFields = {
+type PrepLogFields = {
   prep_id?: string;
   kind?: DbPrepInvocation["kind"];
   result?: DbPrepOutcome["result"] | "not_current" | "duplicate_delivery";
@@ -52,7 +52,7 @@ export type PrepLogFields = {
 };
 
 // メッセージは定数だけにし、値を埋め込まない
-export const PREP_LOG_MESSAGES = Object.freeze({
+const PREP_LOG_MESSAGES = Object.freeze({
   invalidInvocation: "呼び出しが形に合わない",
   notCurrent: "用意の ID が今の値でないため何もしない",
   duplicateDelivery: "同じ用意の ID の 2 つ目の配信のため何もしない",
@@ -61,9 +61,9 @@ export const PREP_LOG_MESSAGES = Object.freeze({
   functionError: "終わりを記さずに止まった",
 } as const);
 
-export type PrepLogMessage = (typeof PREP_LOG_MESSAGES)[keyof typeof PREP_LOG_MESSAGES];
+type PrepLogMessage = (typeof PREP_LOG_MESSAGES)[keyof typeof PREP_LOG_MESSAGES];
 
-export type PrepLogger = {
+type PrepLogger = {
   info(fields: PrepLogFields, msg: PrepLogMessage): void;
   warn(fields: PrepLogFields, msg: PrepLogMessage): void;
   error(fields: PrepLogFields, msg: PrepLogMessage): void;

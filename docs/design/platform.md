@@ -146,7 +146,7 @@ graph TD
 | 形の正本 | 設定のファイル・操作の表・事象・値の形・終了コードを zod で持ち、型・JSON Schema・OpenAPI・MCP の道具・ダミーデータ・文書の表を作る | 組み立ての時（`packages/contracts/`） |
 | 設置のコマンド | 確かめ・合成・差分・確認の値・反映（`npm run nd-setup`） | 設置する人の端末 |
 | 反映のパイプライン | 起点のブランチへの push → 準備 → 人の承認 → 反映 | CodePipeline と CodeBuild |
-| 検査 | 漏れ・参照・形の往復・境界・I8・I14・CI の資格情報・NDF の契約の照合 | GitHub の workflow |
+| 検査 | 漏れ・参照・形の往復・境界・依存の向き・I8・I14・CI の資格情報・使っていないコード・ワークフローの点検・NDF の契約の照合 | GitHub の workflow |
 
 ### 配置の図
 
@@ -410,10 +410,12 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 | --- | --- | --- |
 | 漏れの検査 | 作り物の値（`123456789012`・`us-west-2`・`acme`・`example.com`）でない AWS のアカウント ID の形の 12 桁・ARN・資源の ID・端点の形と、CI の秘密から受ける実際の値（アカウント・profile・環境の名前）の当たり。秘密の形（私有鍵の頭・token の頭）も同じ検査で探す | Value 7 |
 | 形の往復 | 形の正本 → JSON Schema・OpenAPI・MCP の道具 → 見本の値の検証が往復で同じ結果にならない | Value 2・Value 4 |
-| 境界の検査（横断の部品の外での直の利用） | 下の [横断の部品の置き場の基準](#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」 | Value 1・Value 7 |
+| 境界の検査（横断の部品の外での直の利用） | 下の [横断の部品の置き場の基準](#横断の部品の置き場の基準) の「置き場の外で直に使わないもの」のうち、関数・グローバル・import の名前で書けるもの。自前の再試行のループと入口ごとの独自の認可の判定は構文で見分けられないので検査で落とさず、外部の呼び出しを横断の部品だけに通すこと（再試行は部品の中にある）と、振り分けが操作ごとに認可の判定を通すこと（#2 の I2 のテスト）で守る | Value 1・Value 7 |
 | 使える量の判定の外の比べ | 判定の外で上限の値と比べるコード・料金プランの名前で分ける画面 | I8 |
 | 操作の一覧と画面と MCP の対応 | 形の正本の操作の表に、画面の操作か MCP の道具の無い行がある・表に無い画面の操作がある（F1〜F20） | I14・Value 4 |
-| NDF の契約の照合（定期） | 固定の NDF の契約の見本と、ランナーの翻訳の食い違い（F23）。毎日 1 回と `ndf-pin.json` を変える PR で走らせる（[実行の契約の照合の定期の検査](execution.md#契約の照合の定期の検査)） | F23 |
+| NDF の契約の照合（定期） | 固定の NDF の契約の見本と、ランナーの翻訳の食い違い（F23）。すべての PR・main への push・毎日 1 回で走らせる（[実行の契約の照合の定期の検査](execution.md#契約の照合の定期の検査)） | F23 |
+| 使っていないコード | どこからも読まれないファイル・使われない書き出し・使われない依存（knip）。検査の CI は #1 が足す | Value 13 |
+| ワークフローの点検 | ワークフローの広すぎる権限・資格情報の持ち出し・固定していない動作の参照など（zizmor）。検査の CI は #1 が足す | Value 8 |
 | 依存の向き | `packages/contracts` → `packages/core` → `apps/*` の一方向に反する import・`apps/*` どうしの import・`infra` から `apps/*` への import（[詳細設計の依存の表](detail.md#クラスと関数の構造)）。検査の CI は #1 が足す | Value 1・Value 7 |
 | スタックのテストに足す行 | NAT が 1 件以上・タスクの SG に受け入れの規則・Lambda が VPC の中・`AWS::ECS::Service` か `TaskSet` が 1 件以上・タスクの役割に許可の文・Aurora の最小が 0 でない・表とバケットが消せる設定・PITR が無い | Value 6・I11 |
 
@@ -441,7 +443,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 | 種類 | 置き場 | 例 |
 | --- | --- | --- |
-| 事実と方針（変わりうる値と表） | 形の正本の下の JSON のデータのファイルと、その形 | 置き場は `packages/contracts/data/`。料金プランの値・再試行の方針・秘密の形（伏せ字と漏れの検査が同じものを読む）・終了コード（`exit-codes.json`） |
+| 事実と方針（変わりうる値と表） | 形の正本の下の JSON のデータのファイルと、その形 | 置き場は `packages/contracts/data/`。料金プランの値・再試行の方針・秘密の形（伏せ字が読む。漏れの検査は gitleaks の既定の規則とリポジトリの `.gitleaks.toml` が持つ）・終了コード（`exit-codes.json`） |
 | 閉じた語の集まり | 形の正本の値の集合（zod の列挙。TypeScript の enum は使わない） | 承認ゲートの種類・実行の場所・推論の手段・入口の種類 |
 | 外部の仕様の値 | 出所を添えた定数 | NDF の環境変数の名前・GitHub の Webhook の種類・AWS の上限 |
 | 環境ごとに違う値 | 設定のファイル（リポジトリの外）と profile | 接頭辞・環境・予算の宛先・最大 ACU |
@@ -450,7 +452,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 ## 言語と書き方の決まり
 
-子の課題が詳細設計で引く、言語と画面の組み方と TypeScript の書き方の細則の正本である（決定 140）。縛るのは共通の `tsconfig.base.json`（各置き場の `tsconfig.json` が `extends` で引く）・`apps/web/tsconfig.json`・`eslint.config.js`・`apps/web/package.json`・`apps/web/vite.config.ts` である。画面の組み方の行（React と TSX）を除き、値は今のリポジトリの設定と同じである。React と TSX の規約は #12 で入れ、その PR が `apps/web/package.json` の依存（LIB87・LIB90）、`apps/web/tsconfig.json` の `jsx` と `include` の `.tsx`、`apps/web/vite.config.ts` の React のプラグイン、画面の外から React と `.tsx` を import すると落とす ESLint の規則を整える。それまでの画面は今の骨組み（素の TypeScript）のままである。`AGENTS.md` は手順（`npm run generate`・`npm run check`）だけを持ち、細則はこの節を指す。
+子の課題が詳細設計で引く、言語と画面の組み方と TypeScript の書き方の細則の正本である（決定 140）。縛るのは共通の `tsconfig.base.json`（各置き場の `tsconfig.json` が `extends` で引く）・`apps/web/tsconfig.json`・`eslint.config.js`・`.dependency-cruiser.cjs`・`apps/web/package.json`・`apps/web/vite.config.ts` である。画面の組み方の行（React と TSX）を除き、値は今のリポジトリの設定と同じである。React と TSX の規約は #12 で入れ、その PR が `apps/web/package.json` の依存（LIB87・LIB90）、`apps/web/tsconfig.json` の `jsx` と `include` の `.tsx`、`apps/web/vite.config.ts` の React のプラグインを整える。画面の外から React を import すると落とす規則（dependency-cruiser の `react-only-in-web`。型だけの import を含む）と、`apps/web` の外の `*.tsx` を落とす規則（ESLint）は、#1 が CI の検査として先に入れる（[#1 の設計](../design-process/issue-1/design.md)）。それまでの画面は今の骨組み（素の TypeScript）のままである。`AGENTS.md` は手順（`npm run generate`・`npm run check`）だけを持ち、細則はこの節を指す。
 
 | 項目 | 決まり | 縛るもの |
 | --- | --- | --- |
@@ -459,7 +461,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | 型の厳しさ | `strict` と `noUncheckedIndexedAccess` を外さない | `tsconfig.base.json` |
 | import | 型だけの import は `import type` で書く。相対の import は実ファイルの拡張子（`.ts` か `.tsx`）まで書く。画面や単体テストから部品を import するときは `.tsx` を書く | `verbatimModuleSyntax`・`allowImportingTsExtensions`、ESLint の `consistent-type-imports` |
 | 使わない名前 | 使わない引数と変数は `_` で始める | ESLint の `no-unused-vars` |
-| 画面の組み方 | #12 から、部品は React 19（LIB87）の関数の部品として TSX で書く。束ねと開発のサーバーは Vite（LIB86）と React の Vite のプラグイン（LIB90）。部品の単体テストは vitest で書く。画面の外のコードは TSX と React を import しない | `apps/web/package.json` の依存・`apps/web/tsconfig.json` の `jsx`・`eslint.config.js` の置き場ごとの規則 |
+| 画面の組み方 | #12 から、部品は React 19（LIB87）の関数の部品として TSX で書く。束ねと開発のサーバーは Vite（LIB86）と React の Vite のプラグイン（LIB90）。部品の単体テストは vitest で書く。画面の外のコードは TSX と React を import しない | `apps/web/package.json` の依存・`apps/web/tsconfig.json` の `jsx`・`.dependency-cruiser.cjs` の `react-only-in-web`（画面の外の React の import）・`eslint.config.js` の置き場ごとの規則（画面の外の `*.tsx`） |
 | テスト | 振る舞いを足すときは先に落ちるテストを書く。単体は vitest、画面は Playwright の e2e | `npm run check`・`npm run e2e`（[基本の検査](#基本の検査)） |
 | NDF の版 | NDF の版の数字を読んで大小を比べない | 参照の検査 |
 

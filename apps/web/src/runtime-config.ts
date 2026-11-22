@@ -2,8 +2,9 @@ import { type WebConfig, webConfigSchema } from "@nd-factory/contracts/web-confi
 
 // 画面の設定の値を同じ配信元の /config.json から読む。値は反映のときにスタックが書くので、ビルドに焼き込まない
 
-export const CONFIG_PATH = "/config.json";
+const CONFIG_PATH = "/config.json";
 
+/** 失敗の種類をテストが見分けるために書き出す。画面の入口からは使わない（knip の production の検査で外す。#1 の K2-2） @internal */
 export class RuntimeConfigError extends Error {
   override name = "RuntimeConfigError";
 }

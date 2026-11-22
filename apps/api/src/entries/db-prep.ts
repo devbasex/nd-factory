@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- #2 が横断の部品へ移す
 import { SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import { DB_PREP_ENV } from "@nd-factory/contracts/db-prep";
 import { type PrepCompletionPort, createDbPrepHandler, createPrepLogger } from "../db-prep/handler.ts";

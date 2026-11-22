@@ -11,13 +11,13 @@ import type { Network } from "./network.ts";
 // 接続 0 本で一時停止し、使わない間の計算の費用を 0 にする。DB の用意の関数は Data API で打ち、Aurora へ接続しない
 
 // 自動の一時停止を持つ 16 系（16.3 以上）のうち、aws-cdk-lib が持つ最新の版に固定する
-export const PROGRESS_DB_ENGINE_VERSION = AuroraPostgresEngineVersion.VER_16_13;
+const PROGRESS_DB_ENGINE_VERSION = AuroraPostgresEngineVersion.VER_16_13;
 export const PROGRESS_DB_ADMIN_USER = "nd_admin";
 // 接続 0 本でこの秒数が経つと一時停止する。スタックのテストの Aurora の許しもこの値で照らす
-export const PROGRESS_DB_AUTO_PAUSE_SECONDS = 300;
+const PROGRESS_DB_AUTO_PAUSE_SECONDS = 300;
 
 // クラスタのパラメータ。スタックのテストもこの値で照らす
-export const PROGRESS_DB_PARAMETERS = {
+const PROGRESS_DB_PARAMETERS = {
   "rds.force_ssl": "1",
   log_parameter_max_length: "0",
   log_parameter_max_length_on_error: "0",

@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- #2 が横断の部品へ移す
 import {
   DescribeSecretCommand,
   GetSecretValueCommand,
@@ -7,7 +8,7 @@ import {
 import { defaultNow, defaultSleep } from "./clock.ts";
 
 // ランナーへ渡す URL を読む版に付くラベル。関数は SQL を終えた版へだけ移す（docs/design/data.md のパスワードの版の 4）
-export const CURRENT_STAGE = "AWSCURRENT";
+const CURRENT_STAGE = "AWSCURRENT";
 
 // プロジェクトの秘密の器の、行に結んだ版の URL からパスワードを読む。ラベル（AWSPENDING・AWSCURRENT）では読まない。
 // 例外の文に URL とパスワードを入れない（ログへ流れうるため）。URL の照らしの例外は入力を持つため、元の例外を繋がない
@@ -41,7 +42,7 @@ export type PromoteOptions = {
 };
 
 // 期限を過ぎた。値を持たない
-export class PromoteDeadlineError extends Error {
+class PromoteDeadlineError extends Error {
   override name = "PromoteDeadlineError";
 }
 

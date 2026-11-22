@@ -1,0 +1,35 @@
+name: ndf-contract
+
+# NDF の契約の照合（F23。#1 の決定 6）。どの起動でも固定の点（ndf-pin.json）と NDF のリポジトリの既定の枝の
+# 先端の両方を照らす。固定の点の食い違いで失敗し、先端の食い違いは要約に並べる。起動をパスで絞らない（必須のチェック）。
+# AWS の資格情報を持たない。NDF のリポジトリは公開のリポジトリとして読むだけ
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ndf-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ndf-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: NDF の契約の照合（固定の点と既定の枝の先端）
+        run: npm run ndf-contract -- --summary "$GITHUB_STEP_SUMMARY"

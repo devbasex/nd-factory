@@ -21,7 +21,7 @@ export type MissingCheck = { label: string; run: (ctx: MissingContext) => Promis
 
 const IDP_DOC = "docs/operations/idp-and-apps.md";
 
-export async function checkGoogleClientId(ctx: MissingContext): Promise<MissingItem[]> {
+async function checkGoogleClientId(ctx: MissingContext): Promise<MissingItem[]> {
   if (ctx.settings.login.google.client_id) return [];
   return [
     {
@@ -58,7 +58,7 @@ function unreadableAction(org: OrganizationManager): string {
   return askManager(org.managementAccount);
 }
 
-export async function checkCostAllocationTags(ctx: MissingContext): Promise<MissingItem[]> {
+async function checkCostAllocationTags(ctx: MissingContext): Promise<MissingItem[]> {
   if (infraValues(ctx.settings).budgetScope !== "tags") return [];
   const keys = [...TAG_KEYS];
   let statuses: Record<string, CostAllocationTagStatus>;
@@ -91,7 +91,7 @@ export async function checkCostAllocationTags(ctx: MissingContext): Promise<Miss
   ];
 }
 
-export async function checkOpsNotifyEmails(ctx: MissingContext): Promise<MissingItem[]> {
+async function checkOpsNotifyEmails(ctx: MissingContext): Promise<MissingItem[]> {
   if (infraValues(ctx.settings).opsEmails.length > 0) return [];
   return [
     {
@@ -102,7 +102,7 @@ export async function checkOpsNotifyEmails(ctx: MissingContext): Promise<Missing
 }
 
 // AZ は Fn::GetAZs から 2 つ選ぶため、返す AZ が 2 つ未満だと反映がネットワークを作れずに止まる
-export const MIN_GET_AZS = 2;
+const MIN_GET_AZS = 2;
 
 // 値をシェルの 1 つの引数にする。安全な文字だけならそのまま、ほかは単一引用符で囲み、中の ' は '\'' にする
 export function shellArg(value: string): string {
@@ -110,7 +110,7 @@ export function shellArg(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-export async function checkGetAzs(ctx: MissingContext): Promise<MissingItem[]> {
+async function checkGetAzs(ctx: MissingContext): Promise<MissingItem[]> {
   let count: number;
   try {
     count = await ctx.readGetAzsCount(ctx.target);

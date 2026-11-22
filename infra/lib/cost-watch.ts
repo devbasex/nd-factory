@@ -10,7 +10,7 @@ import { TAG_KEYS, type AppResourceNames } from "./naming.ts";
 // 費用の見張り: 運用の知らせのトピックと宛先の購読、月の予算と 3 つの知らせ
 
 // 実績 80%・100%、見込み 100% でトピックへ送る
-export const BUDGET_NOTICES = [
+const BUDGET_NOTICES = [
   { type: "ACTUAL", percent: 80 },
   { type: "ACTUAL", percent: 100 },
   { type: "FORECASTED", percent: 100 },

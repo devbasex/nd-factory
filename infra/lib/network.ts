@@ -6,7 +6,7 @@ import type { AppResourceNames } from "./naming.ts";
 // ネットワーク: VPC・4 つのサブネット・S3 の Gateway のエンドポイント・タスクの SG・Aurora の SG。
 // NAT と Interface 型のエンドポイントは時間で費用が掛かるため置かない。タスクは公開のサブネットで公開 IP を付けて外へ出る
 
-export const POSTGRES_PORT = 5432;
+const POSTGRES_PORT = 5432;
 
 // 4 つのサブネット（2 つの AZ に公開と出口の無いものを 1 つずつ）を VPC の範囲で等しく切る接頭辞の長さ
 export function subnetMask(cidr: string): number {

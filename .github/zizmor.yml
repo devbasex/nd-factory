@@ -1,0 +1,8 @@
+# zizmor の設定（#1 の決定 5）。ci.yml の workflow-audit が --offline --config で明示して読む（自動の探索に頼らない）。
+# 既定の点検を外さない。外すときは rules の下に点検の名前を置き、理由と課題の番号を注に書く
+rules:
+  # 動作はすべてコミットの SHA で固定する。v1.32.0 の既定と同じだが、版を上げても緩まないよう明示する
+  unpinned-uses:
+    config:
+      policies:
+        "*": hash-pin

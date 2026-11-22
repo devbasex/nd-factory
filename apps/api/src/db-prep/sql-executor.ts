@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- #2 が横断の部品へ移す
 import {
   BeginTransactionCommand,
   type ColumnMetadata,
@@ -72,7 +73,7 @@ export const ADMIN_DATABASE = "postgres";
 // https://docs.aws.amazon.com/rdsdataservice/latest/APIReference/API_ExecuteStatement.html#API_ExecuteStatement_Errors
 export const RESUME_WAIT_ERRORS: readonly string[] = ["DatabaseResumingException"];
 
-export const DATA_API_RETRY_DEFAULTS = { attempts: 12, delayMs: 5_000, deadlineMs: 60_000 } as const;
+const DATA_API_RETRY_DEFAULTS = { attempts: 12, delayMs: 5_000, deadlineMs: 60_000 } as const;
 
 export type DataApiRetry = { attempts: number; delayMs: number; deadlineMs: number; now: () => number };
 

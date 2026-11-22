@@ -1,8 +1,9 @@
+// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- #2 が横断の部品へ移す
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
 
 // PostgreSQL の既定と同じ回数と塩の長さ
-export const SCRAM_ITERATIONS = 4096;
-export const SCRAM_SALT_BYTES = 16;
+const SCRAM_ITERATIONS = 4096;
+const SCRAM_SALT_BYTES = 16;
 
 // 印字できる ASCII だけ。PostgreSQL が掛ける SASLprep を持たないため、それで形の変わらない文字に限る
 const PRINTABLE_ASCII = /^[\x20-\x7e]+$/;

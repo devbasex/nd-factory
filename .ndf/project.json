@@ -78,14 +78,21 @@
     "workflows": [
       {
         "path": ".github/workflows/ci.yml",
-        "jobs": 4
+        "jobs": 6
+      },
+      {
+        "path": ".github/workflows/ndf-contract.yml",
+        "jobs": 1
       }
     ],
     "required_checks": [
       "check",
       "synth",
       "e2e",
-      "ref-check"
+      "ref-check",
+      "leak-check",
+      "workflow-audit",
+      "ndf-contract"
     ]
   },
   "services": {
