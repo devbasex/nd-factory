@@ -496,8 +496,8 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | --- | --- | --- | --- | --- |
 | `createApiHandler` | `apps/api/src/entries/api-fn.ts` | 新設 | `(deps: ApiDeps) => (event: APIGatewayProxyEventV2, context: Context) => Promise<APIGatewayProxyResultV2>` | `readHttpCall` → `dispatch` → `writeHttpResponse` を通す |
 | `handler` | 同上 | 新設 | 既定の依存で作った `createApiHandler` の戻り値 | 実行環境ごとに 1 回、時計・`awsClient`・`createDb`・ログ・ハンドラーの表（今は空）を組む |
-| `ensureUser` | `apps/api/src/user-store.ts` | 変更 | `(db: Db, table: string, sub: string, clock: Clock) => Promise<UserRow>` | `putIfAbsent` と `writeAtomically` で行を作り、外れたら強い整合で読み直す |
-| `handler` | `apps/api/src/users-handler.ts` | 変更 | 変えない | 既定の依存を `createClock`・`awsClient`・`createDb`・`createLogger` で組む。`HandlerDeps` の `client` は `Db` に、`now` は `Clock` に、`log` は `Logger` に替える |
+| `ensureUser` | `apps/api/src/user-store.ts` | 変更 | `(db: Db, table: TableName, sub: string, clock: Clock) => Promise<UserRow>` | `putIfAbsent` と `writeAtomically` で行を作り、外れたら強い整合で読み直す。`table` は表の用途のキーで、呼び出し側は `"users"` を渡す（`USERS_TABLE` の実際の表の名前を渡さない） |
+| `handler` | `apps/api/src/users-handler.ts` | 変更 | 変えない | 既定の依存を `createClock`・`awsClient`・`createDb`・`createLogger` で組む。`HandlerDeps` の `client` は `Db` に、`now` は `Clock` に、`log` は `Logger` に替える。`USERS_TABLE` から読んだ実際の表の名前は `createDb` の `names`（`TableNames` の `users`）に渡し、`ensureUser` には用途のキー `"users"` を渡す。`USERS_TABLE` が無いときは `Db` を組まずに `StoreError` として 503 を返す（今の扱いのまま） |
 
 - `createApiHandler`
   - 事前条件: `deps.handlers` の鍵は操作の表の名前
