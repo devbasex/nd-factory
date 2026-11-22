@@ -476,7 +476,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | `ItemAuthz` | `authorize.ts` | `{decision: "allow", projectId, role}`・`{decision: "deny", status: 404 \| 403, reason}` |
 | `AuditEntry` | `audit.ts` | `auditId`・`requestId`・`at`・`actor`・`channel`・`operation`・`targetIds`・`projectId`・`result`・`itemIndex`。`actor` は主体の種類と当たる ID だけを持つ記録の主体で、`Principal` から作る。`newcomer` は `{kind: "newcomer"}`（ID も `CognitoLogin` の値も持たない）にし、`sessions.create` の初回で利用者を作った要素と要約は `{kind: "human", userId: <作った利用者の ID>}` に入れ替える（[detail.md の `auditItem`](../docs/design/detail.md#関数の仕様)） |
 | `OperationCall` | `dispatch/types.ts` | `endpoint`・`channel`・`operation`・`token`・`principal?`・`items`・`requestId`・`mcpClientName?`・`remainingMs` |
-| `DispatchDeps` | `dispatch/types.ts` | `operations`・`handlers`・`scope`・`auth`・`db`・`clock`・`log` |
+| `DispatchDeps` | `dispatch/types.ts` | `operations`・`handlers`・`scope`・`auth`・`db`・`clock`・`log`（`auth` は `AuthSetup`。`dispatch` と `serveMcp` は `authenticate` へ `auth` に `db` と `scope` を足した `AuthDeps` を渡す） |
 | `Handler` | `dispatch/types.ts` | `(item, ctx: { principal; authz: ItemAuthz; clock; db }) => Promise<{ result; writes: TransactItem[] }>` |
 | `TableNames` | `db.ts` | 表の用途（`users`・`teams`・…・`idempotency`）から実際の表の名前への対応。値は起点が環境変数から渡す |
 
