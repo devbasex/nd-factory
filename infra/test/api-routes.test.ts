@@ -62,6 +62,24 @@ describe("ApiRoutes", () => {
     expect(routeKeys(template).every((key) => key.startsWith("POST /v1/"))).toBe(true);
   });
 
+  it("すべての受け口の経路を登録しても、関数の呼び出しの許可はこの API に限った 1 件だけを作る", () => {
+    const { stack, api, fn } = scaffold();
+    new ApiRoutes(stack, "Routes", { api, fn, endpoints: API_ENDPOINTS });
+    const template = Template.fromStack(stack);
+    template.resourceCountIs("AWS::Lambda::Permission", 1);
+    const [permission] = Object.values(resources(template)).filter((r) => r.Type === "AWS::Lambda::Permission");
+    expect(permission?.Properties?.["Principal"]).toBe("apigateway.amazonaws.com");
+    expect(JSON.stringify(permission?.Properties?.["SourceArn"])).toContain(JSON.stringify(stack.resolve(api.apiId)));
+    expect(JSON.stringify(permission?.Properties?.["SourceArn"])).toContain("/*/*/*");
+  });
+
+  it("同じ API と関数へ 2 つの部品で経路を登録しても、呼び出しの許可は 1 件を共有する", () => {
+    const { stack, api, fn } = scaffold();
+    new ApiRoutes(stack, "UserRoutes", { api, fn, endpoints: ["user"] });
+    new ApiRoutes(stack, "RunnerRoutes", { api, fn, endpoints: ["runner"] });
+    Template.fromStack(stack).resourceCountIs("AWS::Lambda::Permission", 1);
+  });
+
   it("受け口 runner だけを渡すと、runner の経路だけを作る", () => {
     const { stack, api, fn } = scaffold();
     const built = new ApiRoutes(stack, "Routes", { api, fn, endpoints: ["runner"] });

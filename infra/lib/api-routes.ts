@@ -57,7 +57,9 @@ export class ApiRoutes extends Construct {
       if (wanted.has(endpoint)) throw new Error(`受け口が重なる: ${endpoint}`);
       wanted.add(endpoint);
     }
-    const integration = new HttpLambdaIntegration("Integration", props.fn);
+    // 呼び出しの許可は経路ごとに作らず、この API からの呼び出しに限った 1 件を共有する。既定の経路ごとの許可では、
+    // user だけで数十の経路があり、関数のリソースベースポリシーが Lambda の上限（20 KB）を超えてデプロイが落ちる
+    const integration = new HttpLambdaIntegration("Integration", props.fn, { scopePermissionToRoute: false });
     // 経路は API の下に POST<path> の ID で作る。同じ API へ同じ経路を 2 回登録すると、ID の重なりで合成が投げる
     this.routes = ROUTES.filter((route) => wanted.has(route.endpoint)).flatMap((route) =>
       props.api.addRoutes({ path: route.path, methods: [HttpMethod.POST], integration }),
