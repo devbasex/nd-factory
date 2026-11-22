@@ -20,7 +20,6 @@ import {
 } from "../src/auth/authenticate.ts";
 import { createClock } from "../src/clock.ts";
 import { createLogger } from "../src/log.ts";
-import type { Id } from "../src/ids.ts";
 import { fakeTable } from "./fakes/table.ts";
 
 // IdP と表には触れない。Cognito の公開鍵は差し替えた取り手が返し、鍵と token はテストの中で作った作り物にする。
@@ -46,9 +45,6 @@ const TEAM = id("team", 3);
 const MACHINE = id("mch", 4);
 const LANE = id("lane", 5);
 const PROJECT = id("prj", 6);
-// 委任した人が別に席を持つチームと、そのチームのプロジェクト（委任の範囲の外）
-const OTHER_TEAM = id("team", 7);
-const OTHER_PROJECT = id("prj", 8);
 const PREP = "prep-acme-1";
 
 const UNAUTHORIZED = { ok: false, reason: "unauthorized" } as const;
@@ -118,8 +114,8 @@ type World = {
   delegationRowVersion?: number;
   // 表の委任の使った時刻の行の last_used_at（無ければ行が無い）
   usedAt?: string;
-  // 委任した人が今持つ席と、そのチームに今割り当てたプロジェクト（既定は TEAM の席と、TEAM の PROJECT。空にすると、委任した人が席を失ったことになる）
-  seats?: readonly { teamId: Id<"team">; projectIds: readonly Id<"prj">[] }[];
+  // 委任した人が今持つ席の数（既定は 1。0 にすると、委任した人が席を失ったことになる）
+  seats?: number;
   machine?: MachineRecord | null;
   lane?: LaneRecord | null;
   prep?: DbPrepRecord | null;
@@ -174,8 +170,6 @@ function readers(world: World): AuthReaders {
   };
 }
 
-const seatsOf = (world: World) => world.seats ?? [{ teamId: TEAM, projectIds: [PROJECT] }];
-
 function setup(world: World = {}, opts: { fetcher?: Fetcher; webhookSecret?: string | null } = {}) {
   const lines: string[] = [];
   const r = readers(world);
@@ -188,10 +182,7 @@ function setup(world: World = {}, opts: { fetcher?: Fetcher; webhookSecret?: str
     webhookSecret: opts.webhookSecret === undefined ? "acme-webhook-secret" : opts.webhookSecret,
     readers: r,
     db: table.db,
-    scope: {
-      seatsOf: async () => seatsOf(world).map((s) => ({ teamId: s.teamId, role: "member" as const })),
-      projectsOfTeams: async (teamIds) => seatsOf(world).filter((s) => teamIds.includes(s.teamId)).flatMap((s) => s.projectIds.map((projectId) => ({ projectId, teamId: s.teamId }))),
-    },
+    seatsOf: async () => Array.from({ length: world.seats ?? 1 }, () => ({ teamId: TEAM, role: "member" })),
     clock,
     log: createLogger({ request_id: "req-1", fn: "test", endpoint: "user" }, (line) => lines.push(line)),
   };
@@ -565,28 +556,11 @@ describe("authenticate: 委任", () => {
   it("委任した人が今の席を 1 つも持たなければ、主体は決めたまま時刻の行を作らず書き換えない（行が無い場合も古い場合も）", async () => {
     for (const usedAt of [undefined, iso(NOW - DELEGATION_TOUCH_MS)]) {
       const f = delegationFixture();
-      const { deps, table } = setup({ delegation: f.record, seats: [], ...(usedAt === undefined ? {} : { usedAt }) });
+      const { deps, table } = setup({ delegation: f.record, seats: 0, ...(usedAt === undefined ? {} : { usedAt }) });
       await expect(authenticate(req("user", f.token), deps)).resolves.toMatchObject({ ok: true, principal: { kind: "delegation" } });
       expect(table.transactions).toHaveLength(0);
       expect(table.row("users", USED_KEY)).toEqual(usedAt === undefined ? undefined : usedRowOf(usedAt));
     }
-  });
-
-  it("委任した人が範囲のプロジェクトのチームの席を失い、範囲の外のチームの席だけを残すと、主体は決めたまま時刻の行を作らず書き換えない", async () => {
-    for (const usedAt of [undefined, iso(NOW - DELEGATION_TOUCH_MS)]) {
-      const f = delegationFixture();
-      const { deps, table } = setup({ delegation: f.record, seats: [{ teamId: OTHER_TEAM, projectIds: [OTHER_PROJECT] }], ...(usedAt === undefined ? {} : { usedAt }) });
-      await expect(authenticate(req("user", f.token), deps)).resolves.toMatchObject({ ok: true, principal: { kind: "delegation" } });
-      expect(table.transactions).toHaveLength(0);
-      expect(table.row("users", USED_KEY)).toEqual(usedAt === undefined ? undefined : usedRowOf(usedAt));
-    }
-  });
-
-  it("範囲のプロジェクトのうち 1 つでも今見られれば、時刻の行を作る", async () => {
-    const f = delegationFixture({ scope: { projectIds: [OTHER_PROJECT, PROJECT], operations: "read" } });
-    const { deps, table } = setup({ delegation: f.record, seats: [{ teamId: TEAM, projectIds: [PROJECT] }] });
-    await expect(authenticate(req("user", f.token), deps)).resolves.toMatchObject({ ok: true, principal: { kind: "delegation" } });
-    expect(table.row("users", USED_KEY)).toMatchObject({ last_used_at: iso(NOW) });
   });
 
   it("認証の読みの後に delegations.revoke が確定して委任の行の版が進むと、時刻の行を作らず置き換えず、主体は決めたまま warn を残す", async () => {

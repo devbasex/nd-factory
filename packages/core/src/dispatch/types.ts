@@ -85,7 +85,7 @@ export type DispatchDeps = {
   // 鍵は操作の表の名前
   readonly handlers: Readonly<Record<string, Handler>>;
   readonly scope: ScopeReader;
-  // 認証の依存のうち Db と ScopeReader を除くもの。dispatch（と serveMcp）が下の db（委任の使った時刻の行の読み書き）と scope（委任の範囲と委任した人が今見られるプロジェクトの重なりの照らし）を渡す
+  // 認証の依存のうち Db と席の読み手を除くもの。dispatch が下の db（委任の使った時刻の行の読み書き）と scope.seatsOf（委任した人の今の席の照らし）を渡す
   readonly auth: AuthSetup;
   readonly db: Db;
   readonly clock: Clock;

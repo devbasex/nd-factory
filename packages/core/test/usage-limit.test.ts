@@ -4,7 +4,7 @@ import { usageMonthCodec } from "@nd-factory/contracts/rows/teams";
 import { describe, expect, it } from "vitest";
 import { createClock } from "../src/clock.ts";
 import { expressionsOf, writeAtomically } from "../src/conditional-write.ts";
-import { judgeUsage, usageAddItem, usageMonthOf, type UsageInput } from "../src/usage-limit.ts";
+import { judgeUsage, usageAddItem, type UsageInput } from "../src/usage-limit.ts";
 import { fakeTable, type FakeTable } from "./fakes/table.ts";
 
 // プランの名前で分けず、行の値だけで決まることを、作り物のプランの行で照らす
@@ -62,7 +62,7 @@ describe("judgeUsage", () => {
 
 describe("usageAddItem", () => {
   const TEAM = "team_01890a5d-ac96-774b-bcce-b302099a8057";
-  const MONTH = "2026-11";
+  const clock = createClock(() => Date.parse("2026-11-30T23:59:59.999Z"));
   const key = { pk: `TEAM#${TEAM}`, sk: "USAGE#2026-11" };
 
   // ハンドラーと同じく、月の使った量の行を強い整合で読み、行の版の読み手で今の形にする（無ければ null）
@@ -75,13 +75,13 @@ describe("usageAddItem", () => {
   }
 
   async function add(table: FakeTable, cost: { amount_minor: number; currency: string }) {
-    const built = usageAddItem(await readUsage(table), TEAM, MONTH, cost);
+    const built = usageAddItem(await readUsage(table), TEAM, cost, clock);
     if (!built.ok) return built;
     return { ...built, outcome: await writeAtomically(table.db, [built.item]) };
   }
 
   it("行の無い月は、費用を使った額にした行を putIfAbsent（rebuild）で組み、足した後の行を返す", async () => {
-    const built = usageAddItem(null, TEAM, MONTH, usd(120));
+    const built = usageAddItem(null, TEAM, usd(120), clock);
     if (!built.ok) throw new Error("ok でない");
     expect(built.item).toMatchObject({ table: "teams", op: "put", key, onConflict: "rebuild" });
     expect(expressionsOf(built.item.condition).ConditionExpression).toBe("attribute_not_exists(#n0)");
@@ -113,8 +113,8 @@ describe("usageAddItem", () => {
     const table = fakeTable();
     await add(table, usd(100));
     const read = await readUsage(table);
-    const first = usageAddItem(read, TEAM, MONTH, usd(10));
-    const second = usageAddItem(read, TEAM, MONTH, usd(20));
+    const first = usageAddItem(read, TEAM, usd(10), clock);
+    const second = usageAddItem(read, TEAM, usd(20), clock);
     if (!first.ok || !second.ok) throw new Error("ok でない");
     expect(await writeAtomically(table.db, [first.item])).toEqual({ ok: true });
     expect(await writeAtomically(table.db, [second.item])).toEqual({ ok: false, failed: [{ index: 0, onConflict: "rebuild" }] });
@@ -125,8 +125,8 @@ describe("usageAddItem", () => {
 
   it("並んだ 2 つの作成は後の方が外れ、rebuild の件として返る", async () => {
     const table = fakeTable();
-    const a = usageAddItem(null, TEAM, MONTH, usd(10));
-    const b = usageAddItem(null, TEAM, MONTH, usd(20));
+    const a = usageAddItem(null, TEAM, usd(10), clock);
+    const b = usageAddItem(null, TEAM, usd(20), clock);
     if (!a.ok || !b.ok) throw new Error("ok でない");
     expect(await writeAtomically(table.db, [a.item])).toEqual({ ok: true });
     expect(await writeAtomically(table.db, [b.item])).toEqual({ ok: false, failed: [{ index: 0, onConflict: "rebuild" }] });
@@ -152,28 +152,10 @@ describe("usageAddItem", () => {
     expect(table.row("teams", key)).not.toHaveProperty("used");
   });
 
-  it("渡した年月の行を組み、時計を引かない。usageMonthOf は UTC の年月を返す", () => {
-    const built = usageAddItem(null, TEAM, "2026-12", usd(1));
+  it("UTC の年月で行を分ける", () => {
+    const next = createClock(() => Date.parse("2026-12-01T00:00:00.000Z"));
+    const built = usageAddItem(null, TEAM, usd(1), next);
     expect(built.ok && built.item.key).toEqual({ pk: `TEAM#${TEAM}`, sk: "USAGE#2026-12" });
-    expect(usageMonthOf(createClock(() => Date.parse("2026-11-30T23:59:59.999Z")))).toBe("2026-11");
-    expect(usageMonthOf(createClock(() => Date.parse("2026-12-01T00:00:00.000Z")))).toBe("2026-12");
-  });
-
-  it("月の替わり目をまたいでも、読んだ年月の行へ足す（読みと加算で同じ年月を使う）", async () => {
-    let now = Date.parse("2026-11-30T23:59:59.999Z");
-    const clock = createClock(() => now);
-    const table = fakeTable();
-    await add(table, usd(100));
-    // ハンドラーが年月を 1 回だけ求めて読んだ後に、時計が翌月へ進む
-    const month = usageMonthOf(clock);
-    const read = await readUsage(table, { pk: `TEAM#${TEAM}`, sk: `USAGE#${month}` });
-    now = Date.parse("2026-12-01T00:00:00.001Z");
-    const added = usageAddItem(read, TEAM, month, usd(5));
-    if (!added.ok) throw new Error("ok でない");
-    expect(added.item.key).toEqual(key);
-    expect(await writeAtomically(table.db, [added.item])).toEqual({ ok: true });
-    expect(table.row("teams", key)).toMatchObject({ used_amount_minor: 105, version: 2 });
-    expect(table.row("teams", { pk: `TEAM#${TEAM}`, sk: "USAGE#2026-12" })).toBeUndefined();
   });
 
   it("金額 0 でも行を作る", async () => {
@@ -187,14 +169,14 @@ describe("usageAddItem", () => {
     const table = fakeTable();
     await add(table, usd(100));
     const before = table.transactions.length;
-    expect(usageAddItem(await readUsage(table), TEAM, MONTH, { amount_minor: 5, currency: "EUR" })).toEqual({ ok: false, onConflict: "state_mismatch" });
+    expect(usageAddItem(await readUsage(table), TEAM, { amount_minor: 5, currency: "EUR" }, clock)).toEqual({ ok: false, onConflict: "state_mismatch" });
     expect(table.transactions).toHaveLength(before);
     expect(table.row("teams", key)).toMatchObject({ used_amount_minor: 100, used_currency: "USD" });
   });
 
   it("負の金額と整数でない金額は投げる", () => {
-    expect(() => usageAddItem(null, TEAM, MONTH, usd(-1))).toThrow(RangeError);
-    expect(() => usageAddItem(null, TEAM, MONTH, usd(1.5))).toThrow(RangeError);
+    expect(() => usageAddItem(null, TEAM, usd(-1), clock)).toThrow(RangeError);
+    expect(() => usageAddItem(null, TEAM, usd(1.5), clock)).toThrow(RangeError);
   });
 
   it("読んだ行のチームか年月が違うと投げる（書き手の誤り）", async () => {
@@ -202,7 +184,8 @@ describe("usageAddItem", () => {
     await add(table, usd(1));
     const read = await readUsage(table);
     if (read === null) throw new Error("行が無い");
-    expect(() => usageAddItem(read, TEAM, "2026-12", usd(1))).toThrow(RangeError);
-    expect(() => usageAddItem(read, "team_01890a5d-ac96-774b-bcce-b302099a8058", MONTH, usd(1))).toThrow(RangeError);
+    const next = createClock(() => Date.parse("2026-12-01T00:00:00.000Z"));
+    expect(() => usageAddItem(read, TEAM, usd(1), next)).toThrow(RangeError);
+    expect(() => usageAddItem(read, "team_01890a5d-ac96-774b-bcce-b302099a8058", usd(1), clock)).toThrow(RangeError);
   });
 });

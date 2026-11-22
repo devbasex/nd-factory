@@ -77,20 +77,14 @@ function usageRowOf(written: Row | undefined): UsageMonthRow {
 
 export type UsageAddResult = { readonly ok: true; readonly item: TransactItem; readonly row: UsageMonthRow } | { readonly ok: false; readonly onConflict: "state_mismatch" };
 
-// 月の使った量の行の年月（UTC の YYYY-MM）。ハンドラーは要素ごとに 1 回だけ求め、同じ値で行を読み（USAGE#<年月>）、usageAddItem へ渡す
-// （読みと加算で時計を引き直すと、月の替わり目をまたいだときに読んだ月と足す月が食い違う）
-export function usageMonthOf(clock: Clock): string {
-  return clock.iso().slice(0, 7);
-}
-
 // チームの月の使った量の行（db-teams の TEAM#<チーム> / USAGE#<UTC の年月>）へ費用を足した行全体を組む（issues/issue-2-design-row-writers.md の決定 5）。
-// month は行を読んだ年月（usageMonthOf で 1 回だけ求めた値）。usageAddItem は時計を引かない。
 // current はハンドラーがその月の行を強い整合で読み、行の版の読み手で今の形にした値（無ければ null）。
 // 行が無ければ足した行の putIfAbsent、あれば読んだ行に保存してあった version と incarnation を条件にした replaceIfVersion で、どちらも onConflict: "rebuild"
 // （並んだ加算に外れたら dispatch がハンドラーを呼び直し、読み直して足し直す）。通貨が違えば書き込みを組まずに state_mismatch（換算しない）。
 // row は足した後の行で、使える量の判定に使う（確定した値と同じ）
-export function usageAddItem(current: { readonly raw: StoredRow; readonly row: UsageMonthRow } | null, team: Id<"team">, month: string, cost: Money): UsageAddResult {
+export function usageAddItem(current: { readonly raw: StoredRow; readonly row: UsageMonthRow } | null, team: Id<"team">, cost: Money, clock: Clock): UsageAddResult {
   if (!Number.isInteger(cost.amount_minor) || cost.amount_minor < 0) throw new RangeError("費用は 0 以上の整数の最小単位");
+  const month = clock.iso().slice(0, 7);
   if (current === null) {
     const item = putIfAbsent({
       table: "teams",

@@ -209,12 +209,6 @@ describe("authorize: 割り当てを移す途中（I2 の例外）", () => {
     expect(items(await authorize(human(MEMBER), projectsGet, [{ project_id: P_MOVING }], scope))).toEqual([NOT_FOUND]);
     expect(items(await authorize(human(OWNER), projectsGet, [{ project_id: P_B }], scope))).toEqual([NOT_FOUND]);
   });
-
-  it("移す先のチームの持ち主の委任は、範囲に移す途中のプロジェクトを含んでも 404（例外は人の主体だけ）", async () => {
-    const table = world();
-    const scope = fakeScope(table, { nameOnlyOperations: ["projects.get"] });
-    expect(items(await authorize(delegation(OWNER, [P_MOVING], "read"), projectsGet, [{ project_id: P_MOVING }], scope))).toEqual([NOT_FOUND]);
-  });
 });
 
 describe("authorize: チームと本人の対象", () => {

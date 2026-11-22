@@ -59,13 +59,13 @@ type Setup = { table: FakeTable; deps: DispatchDeps; lines: string[]; readerCall
 
 const bindingRow = (sub: string, userId = OWNER, boundAt = BOUND_AT) => ({ pk: `COGNITO#${sub}`, sk: "COGNITO", schema_version: 1, version: 1, cognito_sub: sub, user_id: userId, bound_auth_time: boundAt });
 
-function setup(opts: { handlers?: Record<string, Handler>; delegation?: DelegationRecord | null; readerFail?: Error; transferToA?: boolean } = {}): Setup {
+function setup(opts: { handlers?: Record<string, Handler>; delegation?: DelegationRecord | null; readerFail?: Error } = {}): Setup {
   const table = fakeTable();
   seedWorld(table, {
     seats: [{ teamId: TEAM_A, userId: OWNER, role: "owner" }],
     projects: [
       { projectId: P_A, teamId: TEAM_A },
-      { projectId: P_B, teamId: TEAM_B, ...(opts.transferToA === true ? { transferTo: TEAM_A } : {}) },
+      { projectId: P_B, teamId: TEAM_B },
     ],
   });
   table.seed("users", bindingRow(SUB));
@@ -110,7 +110,7 @@ function setup(opts: { handlers?: Record<string, Handler>; delegation?: Delegati
       },
     },
   };
-  const scope = fakeScope(table, opts.transferToA === true ? { nameOnlyOperations: ["notes.get"] } : {});
+  const scope = fakeScope(table);
   const recording: ScopeReader = {
     ...scope,
     async projectOfTarget(op, item) {
@@ -376,15 +376,6 @@ describe("dispatch: 本文は配列（I12・受け入れ条件 5）", () => {
 });
 
 describe("dispatch: 認証と要求全体の拒み", () => {
-  it("移す先のチームの持ち主の委任は、範囲に移す途中のプロジェクトだけを持つと要素が 404 で、委任の使った時刻の行を作らない（I2 の例外は人だけ）", async () => {
-    const usedKey = { pk: `USER#${OWNER}`, sk: `DELEGATION_USED#${DELEGATION}` };
-    const record = { ...delegationRecord("read"), scope: { projectIds: [P_B], operations: "read" as const } };
-    const moving = setup({ delegation: record, transferToA: true });
-    const denied = await dispatch(call("notes.get", [{ project_id: P_B }], viaToken(DELEGATION_TOKEN, "api")), moving.deps);
-    expect(itemsOf(denied)).toMatchObject([{ ok: false, status: 404 }]);
-    expect(moving.table.row("users", usedKey)).toBeUndefined();
-  });
-
   it("POST でない要求は認証の前に 405 で、主体の無い記録の行を 1 件書く", async () => {
     const { table, deps, readerCalls } = setup();
     const result = await dispatch(call("notes.get", [], { ...viaToken(DELEGATION_TOKEN, "api"), fault: { status: 405, reason: null } }), deps);
