@@ -234,6 +234,7 @@ ID の種類の頭:
 | 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | 人だけか | 読む / 書く |
 | --- | --- | --- | --- | --- | --- |
 | `notification_targets.list` | `/v1/notification_targets/list` | F15 | 道具 | — | 読む（read） |
+| `notification_targets.authorize` | `/v1/notification_targets/authorize` | F15 | 依頼と材料の読み出しだけ（`notification_targets.list`） | 人だけ | 書く |
 | `notification_targets.create` | `/v1/notification_targets/create` | F15 | 依頼と材料の読み出しだけ（`notification_targets.list`） | 人だけ | 書く |
 | `notification_targets.test` | `/v1/notification_targets/test` | F15 | 道具 | — | 書く（manage） |
 | `notification_targets.delete` | `/v1/notification_targets/delete` | F15 | 道具 | — | 書く（manage） |
@@ -262,6 +263,7 @@ ID の種類の頭:
 | `teams.create`・`seats.update`・`seats.delete`・`invitations.create`・`invitations.accept`・`invitations.delete` | 席はプロジェクトを見られる人を決める。席を足すことはチームの外の人へ見せることに当たる（P2）。席を変える・外す操作も、同じ判断の流れに置くため人だけにそろえる |
 | `delegations.create`・`delegations.revoke` | 委任が委任を作ると、人の確かめない範囲が広がる（Value 4） |
 | `notification_targets.create`・`model_keys.create` | 宛先の値と持ち込みのキーは秘密の値で、秘密を受け取る操作は人だけ（[全体の設計](overview.md) の「人へ残す判断」の C1） |
+| `notification_targets.authorize` | Slack の登録を始め、認可の取引を人のサインインのセッションに結ぶ。`notification_targets.create` と同じセッションで呼ぶ必要がある（[実行の文書の Slack の登録](execution.md#slack-の登録)） |
 | `execution_settings.update`・`spend_caps.update` | 推論の手段と上限額は請求の額を変える |
 | `machines.create` | 登録の token（秘密）を発行する |
 | `sessions.create`・`sessions.delete`・`logins.create`・`logins.delete`・`github_installations.link` | 人のブラウザーの中の流れ（サインイン・IdP のログインをつなぐ戻り・GitHub の導入の戻り）で、委任の主体が通る流れでない。`logins.delete` は最後の 1 つのログインを外す要求を 409 で拒む |

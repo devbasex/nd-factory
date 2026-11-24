@@ -622,11 +622,18 @@ OS の通知の文面（ロック画面のプレビューを含む）は、端�
 
 ### Slack の登録
 
-Slack の OAuth の戻りは、登録を始めた nd-factory の利用者の、同じブラウザーのタブでだけ受ける。Slack の `authed_user.id` が示すのは、Slack 側でアプリを認可した人であり、nd-factory のどの利用者が登録を始めたかは示さない。戻りを登録の開始と照らさないと、攻撃者は自分の Slack で得た認可コードの戻りの URL を、サインインした利用者に開かせられる。すると、その利用者の通知先に攻撃者の Slack が結ばれ、利用者のプロジェクトで事象が起きた時刻が攻撃者の DM へ届く。そこで、サインインの戻り（[画面の文書の画面の地図](screens.md#画面の地図)）と同じく `state` で照らす。
+Slack の通知先は、登録を始めた nd-factory の利用者とサインインのセッションが、戻りを受けたときも同じである場合にだけ登録する。Slack の `authed_user.id` が示すのは、Slack 側でアプリを認可した人であり、nd-factory のどの利用者が登録を始めたかは示さない。戻りを登録の開始と照らさないと、攻撃者は自分の Slack で得た認可コードの戻りの URL を、サインインした利用者に開かせられる。すると、その利用者の通知先に攻撃者の Slack が結ばれ、利用者のプロジェクトで事象が起きた時刻が攻撃者の DM へ届く。
 
-1. 利用者が自分の設定（R14）で「Slack に追加」を押すと、画面は暗号論的な乱数で `state` を作り、作った時刻と一緒にタブの `sessionStorage` に置いてから、Slack の認可の画面へ移る。戻り先（`redirect_uri`）は R14 の `/me` に固定する
-2. 戻りは `/me` で受ける。画面は検索の値の `state` を `sessionStorage` の値と照らし、照らした直後に `sessionStorage` から消す。検索の値も履歴から消す。一致しない・`sessionStorage` に無い・作ってから 10 分を超えたときは、認可コードを使わずに捨て、「Slack の登録をやり直してください」を出す
-3. 一致したときだけ、画面は認可コードを `notification_targets.create` に渡す。`notification_targets.create` は人だけの操作で、要求したサインイン中の利用者を通知先の持ち主にする。サーバーはアプリの秘密（client secret）と同じ `redirect_uri` で `oauth.v2.access` を呼んで認可コードを token に替え、得た `authed_user.id` と bot の token をその利用者の通知先に結ぶ（LIB64）。認可コードは 1 回しか使えないので、同じ戻りを開き直しても 2 つ目の通知先は出来ない
+ブラウザーの `state` を照らすだけでは足りない。同じタブでも、Slack から戻った後にサインインし直すと、nd-factory の利用者が入れ替わりうる。そのまま登録すると、登録を始めた利用者の Slack に、入れ替わった先の利用者のプロジェクトの事象の時刻が届く。そこで、登録の開始をサーバーに「Slack の認可の取引」として記録し、利用者とセッションに結ぶ。セッションは、Cognito の access token の `origin_jti`（そのセッションの refresh token を指す値）で見分ける（[Cognito の access token](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-the-access-token.html)）。
+
+Slack アプリには、戻り先として、設置先の画面のオリジンに `/me` を付けた HTTPS の絶対 URL（例: `https://<画面のドメイン>/me`）を登録する。認可要求と認可コードの引き換えでは、その同じ URL を `redirect_uri` に指定する（[Slack の OAuth](https://docs.slack.dev/authentication/installing-with-oauth/)）。通知の送信に使う `chat.postMessage` は bot の `chat:write` の権限が要るため、認可要求では `scope=chat:write` を指定する（[chat.postMessage](https://docs.slack.dev/reference/methods/chat.postMessage/)）。
+
+1. 利用者が自分の設定（R14）で「Slack に追加」を押すと、画面は `notification_targets.authorize` を呼ぶ。サーバーは暗号論的な乱数で `state` を作り、取引の行（`state` の要約値・利用者・セッションの `origin_jti`・作った時刻・未使用）を書き、`state`・`scope=chat:write`・上の `redirect_uri` を入れた Slack の認可の URL を返す。画面は `state` をタブの `sessionStorage` に置いてから、その URL へ移る
+2. 戻りは `/me` で受ける。画面は検索の値の `state` を `sessionStorage` の値と照らし、照らした直後に `sessionStorage` から消す。検索の値も履歴から消す。一致しない・`sessionStorage` に無いときは、認可コードを使わずに捨て、「Slack の登録をやり直してください」を出す
+3. 一致したときだけ、画面は認可コードと `state` を `notification_targets.create` に渡す。`notification_targets.create` は人だけの操作である。サーバーはまず、要求した利用者の取引の行を `state` の要約値で読み、セッションの `origin_jti` が行と同じで、未使用で、作ってから 10 分以内であることを確かめる。確かめた行は、条件つきの書き込みで使用済みにしてから先へ進む。どれかが合わなければ認可コードを引き換えずに 409 を返し、画面は「Slack の登録をやり直してください」を出す
+4. サーバーはアプリの秘密（client secret）と同じ `redirect_uri` で `oauth.v2.access` を呼び、認可コードを token に替える。引き換えの結果に、`scope` に `chat:write` を含む bot の token があるときだけ、得た `authed_user.id` と bot の token をその利用者の通知先に結ぶ（LIB64）。無ければ通知先を作らず、画面は「Slack の権限が足りません。登録をやり直してください」を出す。認可コードと取引はどちらも 1 回しか使えないので、同じ戻りを開き直しても 2 つ目の通知先は出来ない
+
+セッションが切れた・サインアウトした・サインインし直したときは、`origin_jti` が変わるため、取引は手順 3 で合わない。この取引は使えないので破棄し、利用者は登録を初めからやり直す。使われなかった取引の行は、作ってから 10 分を有効期限（DynamoDB の TTL）にして消す。TTL の削除は遅れることがあるため、期限は手順 3 で時刻を比べて判定する。
 
 ### Web Push のリンク先
 
