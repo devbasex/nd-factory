@@ -59,7 +59,7 @@ C4 の System context（STD2）。nd-factory を 1 つの箱にし、こちら�
 ```mermaid
 graph TD
     P[開発を任せる人・チームの人・持ち主<br/>A1〜A3] -->|画面| F[nd-factory]
-    AG[AI のエージェント・連携するシステム<br/>A4・A5] -->|API と MCP| F
+    AG[AI エージェント・連携するシステム<br/>A4・A5] -->|API と MCP| F
     OP[自分で設置する人・運用する人<br/>A6・A7] -->|設置のコマンド・反映のパイプライン| F
     F -->|App の token・課題と PR| GH[GitHub]
     F -->|ログイン| IDP[Google と GitHub の IdP]
