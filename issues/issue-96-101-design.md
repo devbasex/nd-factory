@@ -64,7 +64,7 @@ flowchart TB
     end
     secA["環境 leak-scan の秘密 LEAK_CHECK_PATTERN（main の実行だけが使える）"] --> ls
     secA --> lp
-    secD["Dependabot の秘密 LEAK_CHECK_PATTERN（同じ名前で登録する）"] -->|Dependabot の実行| ls
+    secD["Dependabot の秘密 LEAK_CHECK_PATTERN（検証で要ると分かったときだけ同じ名前で登録する。決定 2）"] -.->|Dependabot の実行| ls
     shared["秘密を使う探しのスクリプト（新設）"]
     ls --> shared
     lp --> shared
@@ -73,11 +73,11 @@ flowchart TB
 - Pull Request ごとに、新しいチェック `leak-check-secret` が既定のブランチのコードだけで動く。fork・同じリポジトリのブランチ・Dependabot のどの Pull Request でも、途中のコミットを含む全コミットを、実際の値の規則でマージの前に探す。必須のチェックにするのは導入の 2 本目の Pull Request からである（決定 10）
 - NDF は、`leak-check-secret` の結果を、名前だけでなく、出したワークフローのファイル・起動のイベント・探した head の SHA と base のブランチで確かめてから受け入れる。NDF にその機能を足す依頼は、承認を得てから devbasex/ai-plugins へ出す（決定 7）
 - Pull Request の側の `leak-check` は秘密を一切受けない。秘密の正規表現を書いた設定のファイルを、Pull Request のコードが読む経路が無くなる
-- `leak-check-secret` は、Pull Request の出所と起動した人によらず、秘密が空なら必ず落ちる。変数 `LEAK_CHECK_REQUIRE_PATTERN` は main への push の `leak-check-push` だけが読む。Dependabot の実行には同じ名前の Dependabot の秘密が渡るので、秘密の欠けでは落ちない
+- `leak-check-secret` は、Pull Request の出所と起動した人によらず、秘密が空なら必ず落ちる。変数 `LEAK_CHECK_REQUIRE_PATTERN` は main への push の `leak-check-push` だけが読む。Dependabot の実行が秘密の欠けで落ちないことは、環境の秘密と Dependabot の秘密のどちらが渡るかを検証用のリポジトリで確かめてから保証する（決定 2）
 - 実際の値の正規表現は、既定のブランチ（main）の実行だけが読める環境 `leak-scan` の秘密に置く。Pull Request の側のワークフローを書き換えても読めない（決定 9）
 - 秘密を使う探し（`leak-check-secret` と main への push の `leak-check-push`）は、実際の値の規則の当たりを件数だけで出し、ファイル・行・コミットを出さない。公開の Pull Request から、どの行が正規表現に当たるかを試せないようにする（決定 8）
 - 秘密の正規表現を重ねる処理と必須の判定は、新設する 1 本のスクリプトにまとめ、main への push の `leak-check-push` と `leak-check-secret` の両方がそれを呼ぶ
-- 持ち主の操作（環境 `leak-scan` の秘密と Dependabot の秘密の登録・`pull_request_target` を許すイベントポリシー）は、新設する運用の文書（`docs/operations/ci-checks.md`）と `AGENTS.md` に書く
+- 持ち主の操作（環境 `leak-scan` の秘密の登録・検証で要ると分かったときの Dependabot の秘密の登録・`pull_request_target` を許すイベントポリシー）は、新設する運用の文書（`docs/operations/ci-checks.md`）と `AGENTS.md` に書く
 
 ## 構成要素
 
@@ -94,7 +94,7 @@ flowchart TB
 | ワークフローの点検の結合のテスト（`tools/test/workflow-audit.integration.test.ts`） | `dangerous-triggers` 以外の点検が今の設定で外れていないことを保つ |
 | 必須のチェックの宣言（`.ndf/project.json`） | 導入の 2 本目の Pull Request で、`required_checks` に `leak-check-secret` を、NDF が出どころを確かめる形で足し、`ci.workflows` に新しいワークフローを足す。1 本目（実装の Pull Request）では変えない（決定 10） |
 | NDF のマージの判定（devbasex/ai-plugins、このリポジトリの外） | 必須のチェックを、名前に加えて、出したワークフローのファイル・起動のイベント・表示名の head の SHA と base のブランチで受け入れる機能。この変更では作らず、依頼を出す（決定 7） |
-| 運用の文書（`docs/operations/ci-checks.md`、新設）と指示書（`AGENTS.md`） | 持ち主が秘密を登録して検査を必須にする手順（環境 `leak-scan` の作成と、その秘密・同じ名前の Dependabot の秘密・変数・`pull_request_target` を許すイベントポリシー・導入の 2 本目の Pull Request へ進む条件）と、秘密を使う探しがどこで動くか。`nd-real-value` に当たったときに、持ち主が手元で当たりの場所を引く手順 |
+| 運用の文書（`docs/operations/ci-checks.md`、新設）と指示書（`AGENTS.md`） | 持ち主が秘密を登録して検査を必須にする手順（環境 `leak-scan` の作成と、その秘密・検証で要ると分かったときの同じ名前の Dependabot の秘密・変数・`pull_request_target` を許すイベントポリシー・導入の 2 本目の Pull Request へ進む条件）と、秘密を使う探しがどこで動くか。`nd-real-value` に当たったときに、持ち主が手元で当たりの場所を引く手順 |
 | プラットフォームの設計（`docs/design/platform.md` の「設計の決まりを縛る検査」） | 漏れの検査の行に、実際の値の規則での探しが Pull Request ごとに信頼できる側で動くことを足す |
 
 ```mermaid
@@ -203,13 +203,17 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 - 比べた候補: STD1 / STD2 / STD4 / PRD1 / PRD2 / LIB1
 - 根拠: Value 7 / Value 17（MVV バージョン 3）。混入は検査で機械的に止める（Value 7）。手順が増えても、秘密を隔てる堅牢な形を選ぶ（Value 17）。外部の調査は STD1・STD2
 
-### 決定 2: Dependabot の Pull Request も同じ探しを通してマージできるよう、`LEAK_CHECK_PATTERN` を同じ名前で Dependabot の秘密にも登録し、起動した人で分ける条件を置かない
+### 決定 2: Dependabot の Pull Request も同じ探しを通してマージできるよう、起動した人で分ける条件を置かず、Dependabot の秘密への登録は検証用のリポジトリで要ると分かったときだけにする
 
 - **質問**: Dependabot が起動した実行で、実際の値の規則をどう扱うか（Dependabot の秘密に登録して探すか、fork と同じく必須にしないか）
-- **選んだ案**: 持ち主が環境 `leak-scan` の秘密（決定 9）と同じ名前・同じ値で Dependabot の秘密 `LEAK_CHECK_PATTERN` を登録する。ワークフローは `secrets.LEAK_CHECK_PATTERN` を 1 か所で読み、`github.actor` や `dependabot[bot]` で分ける条件を持たない。Dependabot の Pull Request の全コミットは、ほかの Pull Request と同じく Pull Request の時（`leak-check-secret`）に探す。人が Dependabot のブランチへ push して起動した実行は、環境の秘密を受けて同じ探しをする
+- **選んだ案**: ワークフローは `secrets.LEAK_CHECK_PATTERN` を 1 か所で読み、`github.actor` や `dependabot[bot]` で分ける条件を持たない。Dependabot の Pull Request の全コミットは、ほかの Pull Request と同じく Pull Request の時（`leak-check-secret`）に探す。Dependabot が起動した `pull_request_target` の実行に、環境 `leak-scan` の秘密と Dependabot の秘密のどちらが渡るかは、GitHub の文書から決められない（STD3）。そのため、実際の値を登録する前に、検証用のリポジトリで作り物の値を使って確かめ（決定 10 の手順 1）、結果で登録先を決める
+  - 環境の秘密に値 A、Dependabot の秘密に別の値 B を、どちらも作り物の正規表現で登録する。A だけに当たるコミットと B だけに当たるコミットを持つ Dependabot の Pull Request を作り、`nd-real-value` の件数から、どちらの値が渡ったかを読む。続けて Dependabot の秘密を消して打ち直し、環境の秘密だけで探せるかを確かめる
+  - 環境の秘密だけで探せた場合: Dependabot の秘密に `LEAK_CHECK_PATTERN` を登録しない。登録してあれば消す
+  - Dependabot の秘密が要る場合: 環境の秘密と同じ名前・同じ値で Dependabot の秘密に登録する。そのときは、Dependabot が起動した `pull_request` の実行で Pull Request のコードがその値を読めること（決定 9 の代償）を承認資料に書き、持ち主の承認を受けてから登録する
+  - どちらでも探せない場合: 2 本目の Pull Request へ進まず、この決定を作り直す
 - 採らなかった案: `github.actor == 'dependabot[bot]'` の実行を fork と同じく必須にしない（Dependabot の Pull Request の途中のコミットがマージの前に探されず、squash の後は main からも辿れない。起動した人での判定は、人が同じブランチへ push すると外れる）
-- 採らなかった案: `pull_request_target` の実行には Dependabot でも Actions の秘密が渡ると見て、Dependabot の秘密を登録しない（GitHub の文書は、Dependabot が起動した実行で使える秘密は Dependabot の秘密だけと書く。一方で、`pull_request_target` はこの制限を持たないとも書く。どちらが当たるかを文書から決められない。STD3）
-- **代償**: 持ち主が同じ値を 2 か所に登録し、値を変えるときも 2 か所を直す。参照の検査の秘密 `REF_CHECK_TERMS` と同じ運用になる
+- 採らなかった案: 確かめずに、環境の秘密と Dependabot の秘密の両方に同じ値を登録する（成功しても、どちらの登録が要ったのかが分からない。要らなかった場合も、Dependabot の Pull Request のコードと依存が実際の値の正規表現を読める経路が残る）
+- **代償**: 検証用のリポジトリで Dependabot の Pull Request を起こす手間が増える。Dependabot の秘密が要る場合は、持ち主が同じ値を 2 か所に登録し、値を変えるときも 2 か所を直す（参照の検査の秘密 `REF_CHECK_TERMS` と同じ運用）
 - 根拠: Value 7 / Value 14（MVV バージョン 3）。Dependabot の Pull Request も実際の値の規則で探す（Value 7）。依存の更新の Pull Request を止めない（Value 14）。外部の調査は STD3
 
 ### 決定 3: Pull Request のコードが秘密を読めないよう、Pull Request の側の `leak-check` には秘密を渡さず、必須にする条件は出所で分けない
@@ -272,7 +276,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 
 - **質問**: 秘密を登録して検査を必須にする持ち主の操作（#101 の受け入れ条件 6）を、どこに書くか
 - **選んだ案**: `docs/operations/ci-checks.md` を新設し、次の 4 つを書く。
-  - 参照の検査と漏れの検査で、持ち主が GitHub の設定で行う操作（環境 `leak-scan` とその秘密 `LEAK_CHECK_PATTERN`・同じ名前の Dependabot の秘密・変数 `LEAK_CHECK_REQUIRE_PATTERN`・`pull_request_target` を許すイベントポリシー・今ある `REF_CHECK_TERMS` の 2 か所の登録）
+  - 参照の検査と漏れの検査で、持ち主が GitHub の設定で行う操作（環境 `leak-scan` とその秘密 `LEAK_CHECK_PATTERN`・検証で要ると分かったときの同じ名前の Dependabot の秘密・変数 `LEAK_CHECK_REQUIRE_PATTERN`・`pull_request_target` を許すイベントポリシー・今ある `REF_CHECK_TERMS` の 2 か所の登録）
   - それぞれの検査が、どの実行で秘密を受けるかと、残る経路（決定 9 の代償）
   - `leak-check-secret` を必須にする 2 本目の Pull Request へ進む条件（決定 10）
   - `nd-real-value` に当たったときに、手元で `leak-scan-secret.sh --details` を打って場所を引く手順と、失敗が続く外部の Pull Request を閉じる運用（決定 8）
@@ -310,12 +314,12 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 ### 決定 9: 同じリポジトリに書き込める人のレビュー前の実行からも秘密を読ませないため、実際の値の正規表現を、main の実行だけが使える環境の秘密に置く
 
 - **質問**: 書き込みの権限を持つ人は、`pull_request` のワークフローを Pull Request の中で書き換えて、Actions の秘密を読む手順を足せる。この経路を塞ぐか
-- **選んだ案**: 持ち主が環境 `leak-scan` を作り、使えるブランチ（deployment branch policy）を `main` だけにして、`LEAK_CHECK_PATTERN` をその環境の秘密に登録する。リポジトリの Actions の秘密には置かない（2026-11-24 の時点で未登録。登録していれば消す）。`leak-check-secret` のジョブと、main への push の `leak-check-push` のジョブだけが `environment: leak-scan` を持つ。`pull_request_target` の実行は既定のブランチの文脈で動くので、環境を使える。Pull Request の側の実行は Pull Request のマージの参照（`refs/pull/<番号>/merge`）で動くので、ワークフローを書き換えて環境を指しても使えず、秘密を受けられない。Dependabot が起動した実行では、環境の秘密の代わりに同じ名前の Dependabot の秘密が渡る（決定 2）
+- **選んだ案**: 持ち主が環境 `leak-scan` を作り、使えるブランチ（deployment branch policy）を `main` だけにして、`LEAK_CHECK_PATTERN` をその環境の秘密に登録する。リポジトリの Actions の秘密には置かない（2026-11-24 の時点で未登録。登録していれば消す）。`leak-check-secret` のジョブと、main への push の `leak-check-push` のジョブだけが `environment: leak-scan` を持つ。`pull_request_target` の実行は既定のブランチの文脈で動くので、環境を使える。Pull Request の側の実行は Pull Request のマージの参照（`refs/pull/<番号>/merge`）で動くので、ワークフローを書き換えて環境を指しても使えず、秘密を受けられない。Dependabot が起動した `pull_request_target` の実行に、環境の秘密が渡るか、同じ名前の Dependabot の秘密が渡るかは、文書から決められない推定の段階である。検証用のリポジトリで確かめ、その結果で Dependabot の秘密に登録するかを決める（決定 2・10）
 - 採らなかった案: この経路を範囲の外にする（#96 の目的の「秘密の正規表現が Pull Request の側のコードに渡らない」と両立しない）
 - 採らなかった案: 必須のレビュアーを置いた環境にする（main への push のたびに人を待つ。決定 8 の採らなかった案と同じ理由）
 - **代償**: 次の経路は残る。運用の文書に書く
   - main に直に push できる人は、main の上のワークフローを書き換えて秘密を読める。main にはブランチの保護が無いので、書き込みの権限を持つ人が当たる（決定 11）
-  - Dependabot の秘密は環境に置けない。Dependabot が起動した `pull_request` の実行では、Dependabot の Pull Request のコード（更新した依存の `npm ci` を含む）が Dependabot の秘密を読める。今の `REF_CHECK_TERMS` と同じ経路である。依存の乗っ取りで秘密の正規表現が漏れたときは、持ち主が正規表現を見直す
+  - Dependabot の秘密に登録した場合（決定 2）だけ、次の経路が残る。Dependabot の秘密は環境に置けない。Dependabot が起動した `pull_request` の実行では、Dependabot の Pull Request のコード（更新した依存の `npm ci` を含む）が Dependabot の秘密を読める。今の `REF_CHECK_TERMS` と同じ経路である。依存の乗っ取りで秘密の正規表現が漏れたときは、持ち主が正規表現を見直す
   - 環境の使えるブランチの条件が `pull_request_target` の実行を通し、Pull Request の側の実行を通さないことは、文書を読んでの推定である。検証用のリポジトリで確かめる（決定 10）
 - 根拠: Value 7（MVV バージョン 3）。秘密を Pull Request のコードから隔てる
 
@@ -323,12 +327,12 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 
 - **質問**: 新しいワークフローは、それを足す Pull Request 自身では起動されない（`pull_request_target` は既定のブランチのワークフローを動かすため）。`required_checks` をいつ変え、今の `leak-check` からいつ切り替えるか
 - **選んだ案**: 次の順に進める
-  1. 持ち主が、作り物の値だけを使う検証用の公開リポジトリで、この設計のワークフローを動かして確かめる。確かめる項目: fork の Pull Request の head が取り込めること、結果がどのコミットに付くか、決定 7 の条件で正しい head の成功・失敗・未報告を区別できること、Pull Request の側の同じ名前のジョブを退けられること、base を変えると探し直すこと、環境の秘密を Pull Request の側の実行が受けられないこと（決定 9）
+  1. 持ち主が、作り物の値だけを使う検証用の公開リポジトリで、この設計のワークフローを動かして確かめる。確かめる項目: fork の Pull Request の head が取り込めること、結果がどのコミットに付くか、決定 7 の条件で正しい head の成功・失敗・未報告を区別できること、Pull Request の側の同じ名前のジョブを退けられること、base を変えると探し直すこと、環境の秘密を Pull Request の側の実行が受けられないこと（決定 9）、Dependabot が起動した `pull_request_target` の実行に環境の秘密と Dependabot の秘密のどちらが渡り、同じ名前のときどちらが優先されるか（決定 2 の手順で、2 つの秘密に別の作り物の値を入れて見分ける）
   2. 実装の Pull Request（1 本目）で、ワークフロー・スクリプト・`ci.yml` の変更・テスト・文書を入れる。`.ndf/project.json` の `required_checks` と `ci.workflows` は変えない。Pull Request の側の `leak-check` は、このマージから秘密を受けなくなる。必須のチェックは今の 7 つのままなので、NDF でマージできる
-  3. 持ち主が、環境 `leak-scan` とその秘密・Dependabot の秘密・変数・`pull_request_target` を許すイベントポリシーを設定する
-  4. 1 本目のマージの後の Pull Request で、`leak-check-secret` が今の head を探して成功したことを、持ち主が実行の記録で確かめる
+  3. 持ち主が、環境 `leak-scan` とその秘密・変数・`pull_request_target` を許すイベントポリシーを設定する。手順 1 で Dependabot の秘密が要ると分かったときだけ、承認を受けて同じ名前の Dependabot の秘密も登録する（決定 2）
+  4. 1 本目のマージの後の Pull Request で、`leak-check-secret` が今の head を探して成功したことを、持ち主が実行の記録で確かめる。最初の Dependabot の Pull Request でも、`leak-check-secret` が実際の値の規則で探して成功したことを確かめる（秘密が空なら必ず落ちるので、成功は秘密が渡った証拠になる。決定 3）
   5. NDF に決定 7 の機能が入った後、2 本目の Pull Request で `required_checks` に `leak-check-secret` を出どころの条件つきで足し、`ci.workflows` に新しいワークフローを足す。CI の定義のテストの、必須でなくてよいジョブの一覧から `leak-check-secret` を外す。2 本目の Pull Request では、1 本目で入ったワークフローが起動するので、チェックの欠けで止まらない
-- 2 本目へ進む条件: 手順 1 と 4 の確認が済み、手順 3 の設定があり、NDF が決定 7 の条件で結果を受け入れられる。1 つでも欠ければ 2 本目を出さない
+- 2 本目へ進む条件: 手順 1 と 4 の確認が済み、手順 3 の設定があり、NDF が決定 7 の条件で結果を受け入れられる。手順 4 の確認には、最初の Dependabot の Pull Request で `leak-check-secret` が実際の値の規則で成功したことを含む。1 つでも欠ければ 2 本目を出さない
 - 採らなかった案: 実装の Pull Request で `required_checks` も変える（その Pull Request では `leak-check-secret` が起動されず、NDF のマージがチェックの欠けで止まる）
 - 採らなかった案: 2 本目まで、Pull Request の側の `leak-check` で秘密を受け続ける（その間、同じリポジトリのブランチの Pull Request のコードが秘密の正規表現を読める。#96 が塞ぐ経路を残す）
 - **代償**: 1 本目のマージから 2 本目のマージまで、実際の値の規則での探しはマージを止めない。その間は、`leak-check-secret` の失敗を持ち主が見てマージを止め、main への push の `leak-check-push` が到達できるすべてのコミットを今と同じく探す
@@ -345,7 +349,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 ## 影響と危険
 
 - **働く範囲**: このリポジトリの CI だけ。画面・API・設置のコマンド・利用者のプロジェクトのリポジトリは変わらない
-- **プロジェクトごとに違うもの**: 実際の値の正規表現は環境 `leak-scan` の秘密と Dependabot の秘密（同じ名前）、必須にするかは変数で受け、リポジトリに置かない
+- **プロジェクトごとに違うもの**: 実際の値の正規表現は環境 `leak-scan` の秘密（検証で要ると分かったときは同じ名前の Dependabot の秘密にも）、必須にするかは変数で受け、リポジトリに置かない
 - **当たるモード**: このリポジトリに出るすべての Pull Request（fork・同じリポジトリのブランチ・Dependabot）と main への push
 
 壊れうる箇所と扱い:
@@ -394,7 +398,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 | #101-3: fork の Pull Request は秘密が空でも `leak-check` で実際の値の規則を必須にしない | CI の定義のテストで、`ci.yml` の `leak-check` のジョブが秘密も必須の変数も受けない | `leak-check` に必須の変数を足すと落ちる |
 | #101-4: 人が Dependabot のブランチへ push した実行は Dependabot の実行として扱われない | CI の定義のテストで、漏れの検査の 2 つのワークフローに `github.actor`・`github.triggering_actor`・`dependabot` を使う条件が無い | `if: github.actor != 'dependabot[bot]'` を足すと落ちる |
 | #101-5: Dependabot の Pull Request のコミットが探される時点が設計書に書いてある | この設計の決定 2（Pull Request の時に `leak-check-secret` で探す） | — |
-| #101-6: 持ち主の操作の手順に Dependabot の秘密の登録が書いてある | 運用の文書 `docs/operations/ci-checks.md` と `AGENTS.md`（決定 6）。文書の検査は持たず、レビューで見る | — |
+| #101-6: 持ち主の操作の手順に Dependabot の秘密の登録（検証で要ると分かったとき）が書いてある | 運用の文書 `docs/operations/ci-checks.md` と `AGENTS.md`（決定 6）。文書の検査は持たず、レビューで見る | — |
 | #101-7: CI の定義のテストが受け入れ条件 1〜3 の条件分けを定義から読む | 上の #101-1〜3 の CI の定義のテストの行 | — |
 
 ## 設計の結果
@@ -415,7 +419,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 | 判断 | 当たるレッドライン | なぜ当たるか |
 | --- | --- | --- |
 | 環境 `leak-scan`（使えるブランチは main だけ）を作り、`LEAK_CHECK_PATTERN` をその秘密に登録し、リポジトリの Actions の秘密には置かない（持ち主が GitHub の設定で行う。決定 9） | C1 | 運用する環境の実際の値という秘密の置き場所と、受け取れる実行を変える |
-| Dependabot の秘密 `LEAK_CHECK_PATTERN` を環境の秘密と同じ値で登録する（実装のマージの後に持ち主が GitHub の設定で行う） | C1 | 実際の値という秘密を、もう 1 か所に置く |
+| 検証用のリポジトリで Dependabot の秘密が要ると分かったときだけ、Dependabot の秘密 `LEAK_CHECK_PATTERN` を環境の秘密と同じ値で登録する（実装のマージの後に持ち主が GitHub の設定で行う。決定 2） | C1 | 実際の値という秘密を、もう 1 か所に置く。Dependabot が起動した `pull_request` の実行で、Dependabot の Pull Request のコードと更新した依存がその値を読めるようになる（決定 9 の代償）。承認資料にこの範囲を書く |
 | `pull_request_target` を許す Actions のイベントポリシーを作る（持ち主が GitHub の設定で行う） | C1 | fork から起こせる実行が、環境の秘密を受けられるようになる |
 | devbasex/ai-plugins へ、必須のチェックを出どころ（ワークフローのファイル・起動のイベント）と表示名の head・base で受け入れる機能の依頼を起票する（決定 7） | C5 | 他のリポジトリへ課題を公開する |
 | 2 本目の Pull Request で `.ndf/project.json` の必須のチェックに `leak-check-secret` を足す。実装の Pull Request で `AGENTS.md` の「秘密とインフラの値を置かない」の行を直す | C7 | 利用者の設定と指示書を書き換える |
@@ -435,7 +439,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 
 | 項目 | 内容 |
 | --- | --- |
-| Dependabot が起動した `pull_request_target` の実行が受ける秘密 | GitHub の文書からは、環境の秘密か Dependabot の秘密かを決められない（STD3）。決定 2 はどちらでも同じ値が渡る形にした。最初の Dependabot の Pull Request の `leak-check-secret` が秘密の欠けで落ちないことで分かる（リリース後の確認） |
+| Dependabot が起動した `pull_request_target` の実行が受ける秘密 | GitHub の文書からは、環境の秘密か Dependabot の秘密か、同じ名前のときどちらが優先されるかを決められない（STD3）。実際の値を登録する前に、検証用のリポジトリで作り物の値を使って確かめる（決定 2・10 の手順 1）。このリポジトリでは、最初の Dependabot の Pull Request の `leak-check-secret` が実際の値の規則で成功したことを、2 本目へ進む条件にする（決定 10） |
 | このリポジトリのイベントポリシーの今の状態 | 既定のポリシーが当たっているか、持ち主が作ったポリシーがあるかを、API で確認していない。持ち主が運用の文書の手順を行うときに、設定の画面で分かる |
 | `leak-check-secret` の結果がどのコミットに付くか | STD4 は数えられるイベントを挙げるだけで、付くコミットを書いていない。STD1 では、この実行の `GITHUB_SHA` は既定のブランチの最新のコミットである。決定 7 は付くコミットに頼らない取り方にしたが、検証用のリポジトリで確かめる（決定 10 の手順 1） |
 | 環境の使えるブランチの条件が、`pull_request_target` の実行を通し、Pull Request の側の実行を通さないこと | 文書を読んでの推定。検証用のリポジトリで確かめる（決定 10 の手順 1） |
@@ -455,7 +459,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 | --- | --- | --- | --- | --- |
 | STD1 | GitHub Docs「Events that trigger workflows」の `pull_request_target` と「Securely using pull_request_target」 | `pull_request_target` は既定のブランチの文脈で動き、ワークフローと `ref` なしの `actions/checkout` は既定のブランチのもの。秘密と既定のブランチの `GITHUB_TOKEN` を受ける。既定の起動は `opened`・`synchronize`・`reopened`。Pull Request のコードを（`git fetch` で取ったものも含め）動かすと危険で、取ったコードはデータとして扱う。トークンの権限は最小にする | 決定 1・4（既定のブランチのチェックアウト、取り込んだコミットを動かさない、`contents: read`） | https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows ・ https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target （2026-11-24） |
 | STD2 | 同「Default policy for `pull_request_target`」 | 公開のリポジトリで、既定のイベントポリシーが `pull_request_target` を止める。今は評価のモードで、2026-12-02 から適用する。続けて使うには、明示して許すイベントポリシーを作る | 決定 1 の代償・影響と危険・人へ残す判断（持ち主がポリシーを作る） | https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target （2026-11-24） |
-| STD3 | GitHub Docs「Troubleshooting Dependabot on GitHub Actions」 | Dependabot が起動した `push`・`pull_request` などの実行は fork と同じ扱いで、読み取りだけのトークンを受け、使える秘密は Dependabot の秘密だけ。直し方として `pull_request_target` を含む 2 つのワークフローに分ける形と、同じ名前で Dependabot の秘密を登録する形を挙げる | 決定 2（同じ名前で 2 か所に登録し、起動した人で分けない） | https://docs.github.com/en/code-security/reference/supply-chain-security/troubleshoot-dependabot/dependabot-on-actions （2026-11-24） |
+| STD3 | GitHub Docs「Troubleshooting Dependabot on GitHub Actions」 | Dependabot が起動した `push`・`pull_request` などの実行は fork と同じ扱いで、読み取りだけのトークンを受け、使える秘密は Dependabot の秘密だけ。直し方として `pull_request_target` を含む 2 つのワークフローに分ける形と、同じ名前で Dependabot の秘密を登録する形を挙げる | 決定 2（起動した人で分けない。Dependabot の秘密への登録は検証の結果で決める） | https://docs.github.com/en/code-security/reference/supply-chain-security/troubleshoot-dependabot/dependabot-on-actions （2026-11-24） |
 | STD4 | GitHub Docs「Troubleshooting required status checks」 | 必須のチェックは最新のコミットで通る必要がある。Pull Request で数えられるジョブのチェックは `push`・`pull_request`・`pull_request_review`・`pull_request_target`・`deployment`・`deployment_status` で起動したものだけ（`workflow_run` は入らない）。条件で飛ばしたジョブは成功と報告される | 決定 1（`workflow_run` を採らない）・非機能（`if:` を置かない）・処理の流れ（新しい head で数え直す） | https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks （2026-11-24） |
 
 ### 主要な製品
