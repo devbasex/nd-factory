@@ -17,7 +17,7 @@ flowchart LR
     decl[".ndf/project.json<br/>必須のチェック 4 つ"] -.照らす.- cidef
 ```
 
-全体の設計は、検査で落とす決まりを [プラットフォームの検査](../../design/platform.md#検査)・[API と MCP の照らす検査（I14）](../../design/api.md#照らす検査i14)・[実行の契約の照合の定期の検査](../../design/execution.md#契約の照合の定期の検査) に決めている。今の CI が落とせるのは、そのうち参照の検査（旧いリポジトリの名前・NDF の固定の値の置き方・NDF の版の比べ）と、CI の定義のテスト（`ci.yml` のジョブと必須のチェックの宣言の一致・AWS の資格情報の語）だけである。
+全体の設計は、検査で落とす決まりを [プラットフォームの検査](../../design/platform.md#検査)・[API と MCP の照らす検査（I14）](../../design/api.md#照合する検査i14)・[実行の契約の照合の定期の検査](../../design/execution.md#契約の照合の定期の検査) に決めている。今の CI が落とせるのは、そのうち参照の検査（旧いリポジトリの名前・NDF の固定の値の置き方・NDF の版の比べ）と、CI の定義のテスト（`ci.yml` のジョブと必須のチェックの宣言の一致・AWS の資格情報の語）だけである。
 
 骨組みのコードは、足す検査に今も当たる。`apps/api/src/users-handler.ts`・`apps/api/src/user-store.ts` が AWS SDK を直に使い、引数なしの `new Date()` と `console.log` を使う。`apps/web/src/main.ts` が `fetch` を、`apps/web/src/users-client.ts` と `infra/lib/app-stack.ts` が `/v1/users` を直に書く。#2 が横断の部品（`packages/core`）へ移し、#4 が `PUT /v1/users` を置き換える。
 

@@ -334,6 +334,6 @@ I10（プロジェクトごとに別のデータベースと役割）は [DB の
 
 - [DB の用意の関数](db-prep-function.md)
 - [プラットフォームの文書のインフラ](../design/platform.md#インフラ)・[費用](../design/platform.md#費用)・[反映と設置](../design/platform.md#反映と設置)
-- [データの文書の進行表の DB](../design/data.md#進行表の-db)
+- [データの文書の進行表の DB](../design/data.md#進行テーブルの-db)
 - [設置の手順](../operations/setup.md)・[設定のファイル](../operations/settings.md)
 - [用語集](../glossary.md)

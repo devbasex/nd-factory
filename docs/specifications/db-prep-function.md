@@ -6,7 +6,7 @@ DB の用意の関数は、進行表の DB にプロジェクトごとのデー�
 
 関数は呼び出しが今の用意であることを読み直してから SQL を打ち、別のプロジェクトのデータベースか役割と重なると何も書かずに止まる（I10）。SQL を終えたら、プロジェクトの秘密の器の結んだ版へ `AWSCURRENT` を移し、関数の中から終わりの記録の口を呼んで結果を記す。
 
-順序の正は [データの文書の進行表の DB](../design/data.md#進行表の-db)（用意の手順・パスワードの版・用意と差し替えの順・差し替えの番号）にあり、この文書は関数の実装の振る舞いと値を持つ。資源の置き場は [アプリのスタックのインフラ](app-stack-infrastructure.md) にある。
+順序の正は [データの文書の進行表の DB](../design/data.md#進行テーブルの-db)（用意の手順・パスワードの版・用意と差し替えの順・差し替えの番号）にあり、この文書は関数の実装の振る舞いと値を持つ。資源の置き場は [アプリのスタックのインフラ](app-stack-infrastructure.md) にある。
 
 ## 用語
 
@@ -31,7 +31,7 @@ DB の用意の関数は、進行表の DB にプロジェクトごとのデー�
 
 ## コンテキスト
 
-用語集のプラットフォーム（`platform`）のコンテキストに属する。関数はプロジェクトの集約を直に書かず、プロジェクトのモジュールの操作（終わりの記録の口）を呼んで終わりを記す（[API の文書の「ランナー・手元のマシンの HTTP の経路」](../design/api.md#ランナー手元のマシンの-http-の経路) の DB の用意の関数の段）。
+用語集のプラットフォーム（`platform`）のコンテキストに属する。関数はプロジェクトの集約を直に書かず、プロジェクトのモジュールの操作（終わりの記録の口）を呼んで終わりを記す（[API の文書の「ランナー・手元のマシンの HTTP の経路」](../design/api.md#ランナー手元のマシンの-http-のルート) の DB の用意の関数の段）。
 
 依存の向きは `packages/contracts` ← `apps/api` の一方向である。`apps/api/src/db-prep/` は `packages/contracts` だけに依り、`modules/` を import しない。`db-prep/` を import するのは起点だけである。資源（`infra/lib/db-prep-function.ts`）は起点のパスを `NodejsFunction` に渡すだけで、コードを import しない。
 
@@ -291,7 +291,7 @@ Data API の実装（`createDataApiExecutor`）:
 
 | 相手 | 連携 |
 | --- | --- |
-| 呼ぶ側（API と見回り。#6） | 用意の ID と新しい版の ID を条件つきの書き込みで置き、勝ったときだけ秘密の器のその版へパスワードの URL を入れてから、`dbPrepInvocation` を `Invoke`（`InvocationType: Event`）で渡す（[データの文書のパスワードの版](../design/data.md#パスワードの版)）。呼ぶ権限は `DbPrepFunction` の公開の値 `fn` に #6 が許す |
+| 呼ぶ側（API と見回り。#6） | 用意の ID と新しい版の ID を条件つきの書き込みで置き、勝ったときだけ秘密の器のその版へパスワードの URL を入れてから、`dbPrepInvocation` を `Invoke`（`InvocationType: Event`）で渡す（[データの文書のパスワードの版](../design/data.md#パスワードのバージョン)）。呼ぶ権限は `DbPrepFunction` の公開の値 `fn` に #6 が許す |
 | 終わりの記録の口（`PrepCompletionPort`。実装は #6） | 下の表 |
 | RDS Data API | 管理の役割の秘密の器を渡して SQL を打つ |
 | Secrets Manager | プロジェクトの秘密の器の結んだ版を読み、`AWSCURRENT` を移す |
@@ -302,7 +302,7 @@ Data API の実装（`createDataApiExecutor`）:
 | `readTarget(projectId)` | 同じ読み方の 1 回の読みで、データベースと役割と秘密の器の名前・結んだ版の ID を、同じ行の用意の ID と差し替えの番号（差し替えをまだしていない行は `null`）と一緒に返す |
 | `record(inv, outcome, secretVersion)` | 用意の ID・差し替えの番号・版の ID が今の値と合うときだけ書く条件つきの書き込み。合わなければ書かずに `mismatch` を返す |
 
-口の 3 つの操作は、プロジェクトのモジュールの 3 つの処理（[API の文書](../design/api.md#ランナー手元のマシンの-http-の経路) の DB の用意の関数の処理）で作り、認可の判定と操作の記録の書き手を通す。口が要る DynamoDB の権限は、口をつなぐ同じ変更で `AppStack` から `DbPrepFunction.grantCompletionAccess` を呼んで足す。許すのは、プロジェクトの表の ARN への `dynamodb:GetItem`・`UpdateItem`・`ConditionCheckItem` と、操作の記録の表の ARN への `dynamodb:PutItem` だけで、索引の ARN・`Query`・`Scan`・`DeleteItem`・ほかの表は許さない。
+口の 3 つの操作は、プロジェクトのモジュールの 3 つの処理（[API の文書](../design/api.md#ランナー手元のマシンの-http-のルート) の DB の用意の関数の処理）で作り、認可の判定と操作の記録の書き手を通す。口が要る DynamoDB の権限は、口をつなぐ同じ変更で `AppStack` から `DbPrepFunction.grantCompletionAccess` を呼んで足す。許すのは、プロジェクトの表の ARN への `dynamodb:GetItem`・`UpdateItem`・`ConditionCheckItem` と、操作の記録の表の ARN への `dynamodb:PutItem` だけで、索引の ARN・`Query`・`Scan`・`DeleteItem`・ほかの表は許さない。
 
 ## エラー処理
 
@@ -364,7 +364,7 @@ DB のテストは CI の `check` のジョブで、PostgreSQL 16 のサービ�
 ## 関連リンク
 
 - [アプリのスタックのインフラ](app-stack-infrastructure.md)
-- [データの文書の進行表の DB](../design/data.md#進行表の-db)（[用意の手順](../design/data.md#用意の手順)・[パスワードの版](../design/data.md#パスワードの版)・[用意と差し替えの順](../design/data.md#用意と差し替えの順)・[差し替えの番号](../design/data.md#差し替えの番号)）
+- [データの文書の進行表の DB](../design/data.md#進行テーブルの-db)（[用意の手順](../design/data.md#用意の手順)・[パスワードの版](../design/data.md#パスワードのバージョン)・[用意と差し替えの順](../design/data.md#用意と差し替えの順)・[差し替えの番号](../design/data.md#差し替えの番号)）
 - [全体の設計の不変条件](../design/overview.md#不変条件)（I10・I17・I18・I22）
 - [プラットフォームの文書の決定の記録](../design/platform.md#決定の記録)（決定 83・90・95・96）
 - [設置の手順](../operations/setup.md)

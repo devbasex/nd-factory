@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>スマホ: ログイン</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.login{width:390px;min-height:844px;box-sizing:border-box;display:grid;place-items:center;background:var(--surface);padding:24px 16px}
+.login .box{width:100%;display:flex;flex-direction:column;gap:20px}
+.login .btn{height:44px;width:100%;justify-content:center;font-size:15px}
+.login h1{font-size:20px;margin:0;text-align:center}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="login">
+  <div class="box">
+    <div style="display:grid;place-items:center"><svg class="logo-lg" width="52" height="52" viewBox="0 0 32 32" aria-hidden="true"><rect class="bg" width="32" height="32" rx="7"></rect><path class="ln" d="M9.5 23V9l13 14V9"></path><circle class="fg" cx="9.5" cy="23" r="2.8"></circle><circle class="fg" cx="9.5" cy="9" r="2.8"></circle><circle class="fg" cx="22.5" cy="23" r="2.8"></circle><circle class="fg" cx="22.5" cy="9" r="2.8"></circle></svg></div>
+    <h1>Neural Development Factory にログイン</h1>
+    <p class="sm muted" style="margin:0;text-align:center">エンジニアの開発を AI に任せ、承認だけを人が行う場所です</p>
+    <div class="col" style="gap:12px">
+      <button class="btn primary" type="button">GitHub でログイン</button>
+      <button class="btn" type="button">Google でログイン</button>
+    </div>
+    <div class="alert danger"><span class="grow sm">ログインできませんでした。もう一度お試しください（戻りの失敗のときだけ出る）</span></div>
+    <p class="xs muted" style="margin:0;text-align:center">ログインすると、どちらの手段でも同じ利用者として扱われます（ログインの連携で結び付けたとき）</p>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>

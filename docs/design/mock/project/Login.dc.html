@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ログイン</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.login{min-height:800px;display:grid;place-items:center;background:var(--surface);padding:24px}
+.login .box{width:100%;max-width:400px;display:flex;flex-direction:column;gap:20px}
+.login .btn{height:40px;width:100%;justify-content:center;font-size:15px}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="login">
+  <div class="box">
+    <div class="col" style="align-items:center;gap:10px;text-align:center">
+      <svg class="logo logo-lg" viewBox="0 0 32 32" aria-hidden="true"><rect class="bg" width="32" height="32" rx="7"></rect><path class="ln" d="M9.5 23V9l13 14V9"></path><circle class="fg" cx="9.5" cy="23" r="2.8"></circle><circle class="fg" cx="9.5" cy="9" r="2.8"></circle><circle class="fg" cx="22.5" cy="23" r="2.8"></circle><circle class="fg" cx="22.5" cy="9" r="2.8"></circle></svg>
+      <h1 style="font-size:20px;font-weight:600">Neural Development Factory にログイン</h1>
+      <p class="sm muted">エンジニアの開発を AI に任せ、承認だけを人が行う場所です</p>
+    </div>
+    <section class="card">
+      <div class="card-b" style="gap:10px;padding:20px">
+        <button class="btn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 19c-4 1.5-4-2-6-2.5M15 21v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12 12 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"></path></svg>GitHub でログイン</button>
+        <button class="btn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.2c0-.7-.1-1.3-.2-2H12v3.8h5.1a4.4 4.4 0 0 1-1.9 2.9v2.4h3.1c1.8-1.7 2.7-4.1 2.7-7.1z"></path><path d="M12 21c2.6 0 4.7-.9 6.3-2.3l-3.1-2.4c-.9.6-2 .9-3.2.9-2.5 0-4.6-1.7-5.3-3.9H3.5v2.5A9.5 9.5 0 0 0 12 21z"></path><path d="M6.7 13.3a5.7 5.7 0 0 1 0-3.6V7.2H3.5a9.5 9.5 0 0 0 0 8.6z"></path><path d="M12 6.4c1.4 0 2.6.5 3.6 1.4l2.7-2.7A9.2 9.2 0 0 0 12 2.5a9.5 9.5 0 0 0-8.5 4.7l3.2 2.5C7.4 7.9 9.5 6.4 12 6.4z"></path></svg>Google でログイン</button>
+      </div>
+    </section>
+    <div class="alert danger"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m9 9 6 6M15 9l-6 6"></path></svg><span class="grow sm">ログインできませんでした。もう一度お試しください（戻りの失敗のときだけ出る）</span></div>
+    <p class="xs muted" style="text-align:center">ログインすると、どちらの手段でも同じ利用者として扱われます（ログインの連携で結び付けたとき）</p>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>

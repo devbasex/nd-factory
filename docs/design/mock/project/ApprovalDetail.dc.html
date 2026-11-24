@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>承認の詳細</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="app">
+<nav class="side" aria-label="主な行き先">
+  <div class="brand"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect class="bg" width="32" height="32" rx="7"></rect><path class="ln" d="M9.5 23V9l13 14V9"></path><circle class="fg" cx="9.5" cy="23" r="2.8"></circle><circle class="fg" cx="9.5" cy="9" r="2.8"></circle><circle class="fg" cx="22.5" cy="23" r="2.8"></circle><circle class="fg" cx="22.5" cy="9" r="2.8"></circle></svg>Neural Development Factory</div>
+  <button class="acct" type="button"><span class="av">個</span><span class="col grow" style="gap:0"><span class="b sm">個人のアカウント</span><span class="xs muted">個人・持ち主</span></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m7 9 5-5 5 5M7 15l5 5 5-5"></path></svg></button>
+  <button class="palette-btn" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>移動と操作<span class="kbd">Ctrl K</span></button>
+  <a class="nav" href="Home.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z"></path></svg>ホーム</a>
+  <a class="nav on" href="Approvals.dc.html" aria-current="page"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h5l2 3h4l2-3h5"></path><path d="M5 5h14l2 8v6H3v-6z"></path></svg>承認待ちの一覧<span class="count">2</span></a>
+  <a class="nav" href="Plans.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h7"></path></svg>開発計画</a>
+  <a class="nav" href="Main.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M10 6h10M10 12h10M10 18h10M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"></path></svg>スプリントの一覧</a>
+  <a class="nav" href="Loops.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"></path></svg>ループ</a>
+  <a class="nav" href="Repositories.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="6" cy="6" r="2"></circle><circle cx="6" cy="18" r="2"></circle><circle cx="18" cy="8" r="2"></circle><path d="M6 8v8M18 10c0 4-6 3-12 6"></path></svg>リポジトリ</a>
+  <div class="nav-h">Factory の構成</div>
+  <a class="nav" href="Physical.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1"></rect><rect x="3" y="13" width="18" height="7" rx="1"></rect></svg>マシンと実行</a>
+  <a class="nav" href="Roles.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="12" cy="5" r="2"></circle><circle cx="5" cy="19" r="2"></circle><circle cx="19" cy="19" r="2"></circle><path d="M12 7v8M5 17v-2h14v2"></path></svg>役割の流れ</a>
+  <div class="sep"></div>
+  <a class="nav" href="SettingsGeneral.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"></path></svg>アカウントの設定</a>
+  <a class="nav" href="Account.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg>自分の設定</a>
+  <div class="side-foot"><span class="conn">オンライン</span></div>
+</nav>
+<main class="main">
+  <header class="topbar"><div class="topbar-in">
+    <div>
+      <div class="crumb"><a href="Approvals.dc.html">承認待ちの一覧</a><span class="slash">/</span><span>設計承認ゲート</span></div>
+      <h1 class="title">画面: 版の下限を環境の設定に持つ（#127） <span class="badge approval"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"></path></svg>承認待ち</span></h1><p class="desc">設計を読んで、この設計で実装へ進めてよいかを答えます。答えるまでスプリントは止まります</p>
+      <div class="meta"><span>設計承認ゲート</span><span class="mono">example-org/web</span><span>課題 <a href="#">#127</a></span><span>Pull Request <a href="#">#141</a></span><span>待ち始めた <b>11/10 22:33</b>（42 分前）</span></div>
+    </div>
+    <div class="actions"><a class="btn" href="SprintDetail.dc.html">スプリントの詳細を開く</a></div>
+  </div></header>
+  <div class="content">
+    <div class="split">
+      <div class="stack">
+        <div class="tabs" role="tablist"><a class="on" href="#">資料</a><a href="#">設計文書</a><a href="#">要求と受け入れ条件</a><a href="#">レビューの指摘 <span class="c">6</span></a><a href="#">ファイルと差分 <span class="c">4</span> <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"></path></svg></a></div>
+        <p class="sm muted">資料はすべてこの画面の中で全文を読めます。GitHub へ移るのはコードと差分だけです。</p>
+        <section class="card">
+          <div class="card-h"><h2>開くもの</h2></div>
+          <div class="card-b"><dl class="dl wide">
+            <dt>Pull Request</dt><dd><a href="#" class="mono">#141</a> <span class="muted sm">題・本文はこの画面の「設計文書」で読む</span></dd>
+            <dt>ベースと head</dt><dd class="mono">main ← design/issue-127</dd>
+            <dt>変更量</dt><dd>3 コミット · 4 ファイル · +500 / −0　<a href="#">差分を GitHub で開く <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"></path></svg></a></dd>
+            <dt>レビューの収束</dt><dd><span class="badge done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m8 12 3 3 5-6"></path></svg>2 担当が承認</span> <span class="sm muted">未解決の指摘 0 件</span></dd>
+            <dt>本文との一致</dt><dd><span class="badge done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m8 12 3 3 5-6"></path></svg>一致</span> <span class="sm muted">決定 3 件</span></dd>
+            <dt>MVV 判定</dt><dd><span class="badge done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m8 12 3 3 5-6"></path></svg>従う</span> <span class="sm muted">Value 1・Value 8（版 1）</span></dd>
+          </dl></div>
+        </section>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <section class="card"><div class="card-h"><h3>目的</h3></div><div class="card-b prose"><ul>
+            <li><b>今:</b> 2 つの版の下限が環境の設定に無く、Lambda に届かない</li>
+            <li><b>誰に:</b> dev を立てる運用者と、予算を既定へ戻したい利用者</li>
+            <li><b>変えると:</b> 設定に書いた下限が実行の依存の 4 つの Lambda に届く</li></ul></div></section>
+          <section class="card"><div class="card-h"><h3>適用範囲・あるべき姿の根拠</h3></div><div class="card-b prose"><ul>
+            <li>環境の設定・API のスタック・テスト。サービスのコードは変えない</li>
+            <li>根拠 5 件（実測 3・要求の前提 1・SemVer 2.0.0）</li></ul></div></section>
+        </div>
+        <section class="card">
+          <div class="card-h"><h2>決めたこと</h2><span class="actions xs muted">設計文書の見出しのまま</span></div>
+          <div class="tbl-wrap"><table class="t">
+            <thead><tr><th style="width:48px">番号</th><th>決定</th><th>理由・退けた案</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">1</td><td>空の値を template に残さないため、空の下限は環境変数を名前ごと足さない</td><td class="sm"><b>理由</b> 空の文字列を渡すと、サービスは「下限なし」と「設定の誤り」を区別できない<span class="sub"><b>退けた案</b> 空の文字列を渡し、サービスで空を無視する（サービスのコードを変えることになる）</span></td></tr>
+              <tr><td class="mono">2</td><td>サービスが読めない値で反映しないよう、版の形の検査を標準ライブラリの正規表現で書き、サービスの読み方の部分集合にする</td><td class="sm"><a href="#">理由と退けた案を開く</a></td></tr>
+              <tr><td class="mono">3</td><td>予算の知らせの項目と取り違えないよう、2 つの項目の名前を環境変数の名前の小文字にする</td><td class="sm"><a href="#">理由と退けた案を開く</a></td></tr>
+            </tbody>
+          </table></div>
+        </section>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <section class="card"><div class="card-h"><h3>作るもの</h3></div><div class="card-b"><dl class="dl">
+            <dt>新設</dt><dd>無し</dd><dt>変える</dt><dd><span class="mono sm">config/environments.py</span><br><span class="mono sm">stacks/api.py</span><br>テスト 2 本</dd></dl></div></section>
+          <section class="card"><div class="card-h"><h3>満たすこと</h3></div><div class="card-b"><dl class="dl">
+            <dt>受け入れ条件</dt><dd>7 件 · <a href="#">全文を読む</a></dd></dl></div></section>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <section class="card"><div class="card-h"><h3>未確認のまま残ること（3 件）</h3></div><div class="card-b prose"><ul>
+            <li>dev の 4 つの Lambda に値が届くことは、反映の後にしか確かめられない</li>
+            <li>サービスが将来、版の形を広げたときに検査が追いつくか</li>
+            <li>空の下限で反映したときの既定の版（実装で決める）</li></ul></div></section>
+          <section class="card"><div class="card-h"><h3>起票者の推定（2 件）</h3></div><div class="card-b prose"><ul>
+            <li>下限は環境ごとに 1 つでよく、スタックごとに分けない</li>
+            <li>予算を既定へ戻す操作は画面から行わない</li></ul></div></section>
+        </div>
+        <section class="card hl">
+          <div class="card-h"><h2>承認する人に決めてほしいこと</h2></div>
+          <div class="card-b prose"><ul><li>dev の並行を許す版の下限を空のまま反映してよいか</li></ul></div>
+        </section>
+      </div>
+      <aside class="stack">
+        <section class="card hl">
+          <div class="card-h"><h2>答える</h2></div>
+          <div class="card-b">
+            <div class="alert info"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M11 12h1v4h1"></path></svg><span class="grow sm">承認すると設計の Pull Request をマージし、実装へ進みます。差し戻すと、理由を添えて設計をやり直します</span></div>
+            <div class="field full"><label for="reason">差し戻す理由（差し戻すときは必須）</label><textarea id="reason" class="ta" placeholder="直してほしい点"></textarea></div>
+            <div class="row"><button class="btn approve" type="button" style="flex:1">承認する</button><button class="btn danger" type="button" style="flex:1">差し戻す</button></div>
+            <p class="xs muted">答えは取り消せません。Slack の通知から開いたときも、この画面で答えます。オフラインで押した答えは確定待ちとして控え、つながってから確定します</p>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-h"><h3>概要</h3></div>
+          <div class="card-b"><dl class="dl">
+            <dt>種類</dt><dd>設計承認ゲート</dd>
+            <dt>リポジトリ</dt><dd class="mono sm">example-org/web</dd>
+            <dt>課題</dt><dd><a href="#">#127</a></dd>
+            <dt>スプリント</dt><dd><a href="SprintDetail.dc.html" class="mono sm">sr_01JC8W…</a></dd>
+            <dt>ループ</dt><dd class="muted">—</dd>
+            <dt>実行の場所</dt><dd>手元 作業用の PC<span class="sub xs muted">待つ間もセッションが残る</span></dd>
+          </dl></div>
+        </section>
+      </aside>
+    </div>
+  </div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>

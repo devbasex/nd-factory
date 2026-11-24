@@ -1,0 +1,70 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>転送の表</title><script src="./support.js"></script></head><body><x-dc><helmet><style>body{margin:0;background:#ffffff} a{color:#3451c6;text-decoration:underline;text-underline-offset:2px} a:hover{color:#1f2328}</style></helmet>
+<div style="width:1200px;height:760px;overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;gap:20px;padding:32px;font-family:system-ui,-apple-system,'Hiragino Sans','Noto Sans JP',sans-serif;font-size:14px;line-height:1.5;color:#1f2328;background:#ffffff">
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <h1 style="margin:0;font-size:20px;font-weight:600">経路の転送（地図の組み直しで足す行）</h1>
+    <span style="color:#59636e">消す画面の経路を開くと、枠を描かずに先の経路へ履歴を置き換えて移る</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 56px 1fr 1fr;gap:12px 0;align-items:stretch">
+    <span style="font-size:12px;font-weight:600;color:#59636e;padding:0 0 4px">元の経路</span><span></span><span style="font-size:12px;font-weight:600;color:#59636e;padding:0 0 4px 0">先の経路</span><span style="font-size:12px;font-weight:600;color:#59636e;padding:0 0 4px 16px">理由</span>
+
+    <div style="display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:1px solid #818b98;border-radius:6px;background:#f6f8fa">
+      <span style="font-weight:600">ホーム</span>
+      <code style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#59636e">/accounts/:accountId/home</code>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:center"><svg aria-hidden="true" width="40" height="16" viewBox="0 0 40 16" fill="none" stroke="#3451c6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h34"></path><path d="M30 2l6 6-6 6"></path></svg></div>
+    <div style="display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:1px solid #3451c6;border-radius:6px;background:#e8edfc">
+      <span style="font-weight:600">オーガナイザー（一覧）</span>
+      <code style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#1f2328">/accounts/:accountId/organizers</code>
+    </div>
+    <div style="padding:12px 16px;color:#1f2328">ホームを消す。数のタイルは会話の見出しとナビゲーションの件数が持つ</div>
+
+    <div style="display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:1px solid #818b98;border-radius:6px;background:#f6f8fa">
+      <span style="font-weight:600">タイムライン（リポジトリの詳細のタブ）</span>
+      <code style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#59636e">/accounts/:accountId/repositories/:repositoryId/timeline</code>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:center"><svg aria-hidden="true" width="40" height="16" viewBox="0 0 40 16" fill="none" stroke="#3451c6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h34"></path><path d="M30 2l6 6-6 6"></path></svg></div>
+    <div style="display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid #3451c6;border-radius:6px;background:#e8edfc">
+      <span style="font-weight:600">オーガナイザーの会話</span>
+      <code style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#1f2328">/accounts/:accountId/organizers/:organizerId</code>
+      <span style="font-size:12px;color:#1f2328">そのリポジトリの登録の終わっていないオーガナイザー。無ければ一覧 <code style="font-family:ui-monospace,Menlo,monospace">/organizers</code></span>
+    </div>
+    <div style="padding:12px 16px;color:#1f2328">タイムラインのタブを消す。リポジトリの詳細のタブは 3 つになる</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+    <section aria-labelledby="tabs-title" style="display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid #d1d9e0;border-radius:6px">
+      <h2 id="tabs-title" style="margin:0;font-size:16px;font-weight:600">リポジトリの詳細のタブ</h2>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <span style="font-size:12px;color:#59636e">今</span>
+        <div role="tablist" aria-label="今のタブ" style="display:flex;gap:0;border-bottom:1px solid #d1d9e0">
+          <span style="padding:6px 12px;border-bottom:2px solid #3451c6;font-weight:600">概要</span><span style="padding:6px 12px">バックログ</span><span style="padding:6px 12px">ループ</span><span style="padding:6px 12px;color:#59636e;text-decoration:line-through">タイムライン</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <span style="font-size:12px;color:#59636e">組み直しの後</span>
+        <div role="tablist" aria-label="組み直しの後のタブ" style="display:flex;gap:0;border-bottom:1px solid #d1d9e0">
+          <span style="padding:6px 12px;border-bottom:2px solid #3451c6;font-weight:600">概要</span><span style="padding:6px 12px">バックログ</span><span style="padding:6px 12px">ループ</span>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="move-title" style="display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid #d1d9e0;border-radius:6px">
+      <h2 id="move-title" style="margin:0;font-size:16px;font-weight:600">移す区画と名前</h2>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="padding:8px 12px;border:1px solid #818b98;border-radius:6px;background:#f6f8fa">タイムラインの conductor の出力の区画</span>
+        <svg aria-hidden="true" width="32" height="16" viewBox="0 0 32 16" fill="none" stroke="#3451c6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h26"></path><path d="M22 2l6 6-6 6"></path></svg>
+        <span style="padding:8px 12px;border:1px solid #3451c6;border-radius:6px;background:#e8edfc">レーンの状況（検索の値 <code style="font-family:ui-monospace,Menlo,monospace">lane</code>）</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="padding:8px 12px;border:1px solid #818b98;border-radius:6px;background:#f6f8fa">マシンと実行</span>
+        <svg aria-hidden="true" width="32" height="16" viewBox="0 0 32 16" fill="none" stroke="#3451c6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h26"></path><path d="M22 2l6 6-6 6"></path></svg>
+        <span style="padding:8px 12px;border:1px solid #3451c6;border-radius:6px;background:#e8edfc">名前を「レーンの状況」へ</span>
+      </div>
+      <a href="NavMap.dc.html">レーンの状況のモックを開く</a>
+    </section>
+  </div>
+
+  <p style="margin:0;font-size:13px;color:#59636e">ホームへの入口 <code style="font-family:ui-monospace,Menlo,monospace">/</code> は、端末に控えた最後に開いたオーガナイザーの会話へ、無ければ一覧へ移る（#278 が持つ）。今の転送の 4 行（<code style="font-family:ui-monospace,Menlo,monospace">/account</code> など）は変えない。</p>
+</div>
+</x-dc><script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>class Component extends DCLogic { renderVals() { return {}; } }</script></body></html>
