@@ -12,6 +12,10 @@
     ".ndf/mvv.json",
     ".ndf/runtimes.json",
     ".ndf/pace.json",
+    ".ndf/project.json",
+    ".ndf/review.json",
+    ".ndf/supervise.json",
+    ".ndf/worktree.json",
     "LICENSE",
     "SECURITY.md"
   ]
