@@ -10,6 +10,7 @@
     "@nd-factory/contracts": "*",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
+    "playwright-core": "1.65.1",
     "yaml": "2.9.1",
     "zod": "4.6.7",
     "zod-schema-faker": "3.0.1"

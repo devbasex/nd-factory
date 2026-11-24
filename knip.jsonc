@@ -28,6 +28,8 @@
     },
     // 参照の検査の CLI（ルートのスクリプト ref-check）は knip が拾う
     "tools": {
+      // モックのビューアーの起点。tools/mock-viewer/Dockerfile の CMD が打ち、import では辿れない（Skill mock-viewer）
+      "entry": ["mock-viewer/src/viewer.ts"],
       // 結合のテストが起こす npm の外の実行ファイル。ci.yml の leak-check・workflow-audit が固定の版を置く（#1）
       "ignoreBinaries": ["gitleaks", "zizmor"]
     }

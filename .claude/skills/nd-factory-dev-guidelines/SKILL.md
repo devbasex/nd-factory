@@ -37,4 +37,4 @@ description: nd-factory の開発の指針（持ち主の決めた進め方・�
 ## 検証
 
 - 検証環境での機能の確かめは、devbasex/ai-plugins と devbasex/nd-factory の 2 つをリポジトリとして登録し、実際にスプリントが回ることで確かめる
-- 画面のモックは `docs/design/mock/`。手元では `python3 -m http.server -d docs/design/mock` で `viewer.html` を開く
+- 画面のモックは `docs/design/mock/`。利用者に見せるときはプロジェクト Skill `mock-viewer`（`npm run mock:up` で http://ndf-mock.localhost/）を使う
