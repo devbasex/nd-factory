@@ -92,7 +92,7 @@
 | テスト | CI の `check`（`npm run check`: lint・型検査・生成物の差・単体テスト）・`ref-check`・`leak-check`。このリポジトリはテストを CI に寄せる（`.ndf/project.json` の `test.ci.only`） |
 | 記録の中身（受け入れ条件 2） | `git show 98fafb0:issues/issue-13-design.md \| diff - docs/design-process/issue-13/design.md` を 5 本で打ち、違う行がリンクを含む行だけであることを読む |
 | リンク（受け入れ条件 3） | 6 本から `](` で始まる相対リンクを抜き出し、`#` より前のパスを各ファイルのディレクトリから `test -e` で引く。在らないものが 0 件 |
-| 変更の範囲（受け入れ条件 8） | `git diff --name-only origin/main...HEAD` が `docs/design-process/issue-13/` の 6 本だけを返す |
+| 変更の範囲（受け入れ条件 8） | #104 の実装をまとめた 1 つのコミットを `<C>` として、`git diff --name-only <C>^ <C>` が `docs/design-process/issue-13/` の 6 本だけを返す。スプリントの Pull Request は #13・#105 の変更も含むため、`origin/main...HEAD` では比べない |
 | 手動確認（マージ前） | 設計承認ゲートで、承認する人が README を読み、記録の時点と今の正の保存先が分かることを見る |
 
 ## 前提とする取り決め
