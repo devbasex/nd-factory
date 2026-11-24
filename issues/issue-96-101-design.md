@@ -1,6 +1,10 @@
-# 漏れの検査: 実際の値の規則での探しを Pull Request のコードから隔て、fork と Dependabot の Pull Request もマージの前に探す（#96 #101）
+# 漏れの検査: 実際の値の規則での Pull Request の探しを非公開のリポジトリへ移し、NDF がマージの直前に起動して結果を確かめる（#96 #101）
 
-漏れの検査（CI の `leak-check`）は、実際の値の正規表現（CI の秘密 `LEAK_CHECK_PATTERN`）を Pull Request の側の実行の中で使っている。そのため、fork の Pull Request は探されず、Dependabot の Pull Request は秘密が無いために落ち、同じリポジトリのブランチの Pull Request では秘密が Pull Request のコードから読める。秘密を使う探しを、既定のブランチのワークフロー・スクリプト・設定だけで動く新しいジョブ（`pull_request_target` で起動し、Pull Request のコミットは git のデータとして取るだけにする）へ移し、Pull Request の側の `leak-check` には秘密を渡さない。秘密は既定のブランチの実行だけが読める環境（GitHub Actions の environment）に置く。新しいジョブの結果をマージの判定に使うのは、検証用のリポジトリで振る舞いを確かめ、NDF が結果の出どころを確かめられるようになった後の、2 本目の Pull Request からにする（決定 7・10）。採らなかった起動の形（`workflow_run`・マージキュー・GitHub の secret scanning など）は決定 1・2 に、調べた文書と実測は末尾の「外部の調査」にある。
+漏れの検査（CI の `leak-check`）は、実際の値の正規表現（CI の秘密 `LEAK_CHECK_PATTERN`）を Pull Request の側の実行の中で使っている。そのため、fork の Pull Request は探されず、Dependabot の Pull Request は秘密が無いために落ち、同じリポジトリのブランチの Pull Request では秘密が Pull Request のコードから読める。
+
+この設計では、Pull Request を実際の値の規則で探す処理を、持ち主が用意する検査用の非公開リポジトリへ移す。探しは、NDF（このリポジトリの開発を進めるツール）がマージの直前に起動する。探しの結果と記録は、非公開リポジトリに読み取りの権限を持つ人と NDF にしか見えない。探しのワークフローとスクリプトは公開のリポジトリの既定のブランチにあり、非公開リポジトリはそれを呼ぶだけにする。Pull Request の側の `leak-check` には秘密を渡さない。main への push の探しは、main の実行だけが読める環境（GitHub Actions の environment）の秘密で今と同じく行う。
+
+公開のリポジトリの中で `pull_request_target` を使って探す形は採らない。その形では、探しの成否と件数が誰にでも見え、外部の作者が候補の語を Pull Request に入れて、実際の値の正規表現に当たるかを確かめられるためである（決定 1・8）。
 
 ## 今の姿
 
@@ -35,77 +39,78 @@ flowchart TB
 
 マージの方法は squash である（`.ndf/project.json` の `merge.commit`）。squash では Pull Request の途中のコミットは main に入らないので、Pull Request の時に探さなかったコミットは main への push でも探されない。
 
-**2 つの課題を 1 本にまとめたのは、原因が同じ 1 か所にあるためである。** 秘密を使う探しが Pull Request の側の実行（`pull_request`）の中にあり、秘密を受けられるかと、動くコードを信頼できるかが、Pull Request の出所（fork・Dependabot・同じリポジトリのブランチ）で変わる。#96 は fork で秘密を受けられないことと、同じリポジトリのブランチで秘密が Pull Request のコードに渡ることを、#101 は Dependabot で秘密を受けられないことを扱う。探しを出所に左右されない信頼できる側の実行へ移すと、両方が同じ変更で直る。#96 の要求も「Dependabot が起動した実行で秘密を使う探しがどう動くかは、この課題の仕組みを決めるときに #101 とそろえる」としている。
+**2 つの課題を 1 本にまとめたのは、原因が同じ 1 か所にあるためである。** 秘密を使う探しが Pull Request の側の実行（`pull_request`）の中にあり、秘密を受けられるかと、動くコードを信頼できるかが、Pull Request の出所（fork・Dependabot・同じリポジトリのブランチ）で変わる。#96 は fork で秘密を受けられないことと、同じリポジトリのブランチで秘密が Pull Request のコードに渡ることを、#101 は Dependabot で秘密を受けられないことを扱う。探しを出所に左右されない信頼できる場所へ移すと、両方が同じ変更で直る。#96 の要求も「Dependabot が起動した実行で秘密を使う探しがどう動くかは、この課題の仕組みを決めるときに #101 とそろえる」としている。
 
 ## 文脈と制約
 
 - リポジトリは公開で、fork から誰でも Pull Request を出せる。実際の値の正規表現そのもの（運用する環境の名前などを含む）を、リポジトリ・CI の記録・Pull Request の作者が書いたコードに渡さない（MVV の Value 7）
+- 公開のリポジトリの Actions の実行の記録と、Pull Request に付くチェックの結論は、誰でも見られる。実行の記録を見るには、そのリポジトリへの読み取りの権限が要る（STD10）。非公開のリポジトリの実行の記録は、そのリポジトリに読み取りの権限を持つ人にしか見えない
 - CI は AWS の資格情報を持たない。ワークフローの `permissions` は最上位を `contents: read` だけにし、ジョブで広げない（`tools/test/ci-definition.test.ts` が落とす）
 - 動作（`uses:`）はコミットの SHA で固定し、gitleaks はバージョンと要約値で固定して取る（#1 の決定 3・5）
-- ワークフローの点検（zizmor v1.32.0）は `--offline --no-ignores --config .github/zizmor.yml` で打つ。`--no-ignores` を付けて打つと、行の中の `zizmor: ignore` も設定の `rules.<id>.ignore` も効かない。効くのは、点検を丸ごと外す `rules.<id>.disable` だけである（2026-11-24 に v1.32.0 を手元で打って確認した。外部の調査の LIB2）
-- main にはブランチの保護もルールセットも無い。2026-11-24 に、`gh api repos/devbasex/nd-factory/branches/main/protection` は 404 を返し、`gh api repos/devbasex/nd-factory/rulesets` は空だった。GitHub の画面や API からのマージは、どのチェックが落ちていても止まらない。必須のチェックで止まるのは、NDF（このリポジトリの開発を進めるツール）が行うマージだけである
-- NDF は、マージの前に Pull Request の head のコミットに付いたチェックを名前だけで読み、必須のチェックの一覧と照らす。同じ名前のチェックが複数あれば、最も新しい 1 件だけを数える。チェックを出したワークフローのファイルと起動のイベントは見ない（devbasex/ai-plugins の `plugins/ndf/src/ndf/adapters/ci.py` の `read`・`latest` と、`plugins/ndf/src/ndf/domains/release/land.py` の `_runs`。2026-11-24 に main を読んで確認）
-- Pull Request の作者は、`pull_request` で動くワークフローを Pull Request の中で足せる。そのジョブに `leak-check-secret` と名前を付ければ、同じ名前のチェックを head のコミットに付けられる。名前だけで受け入れると、信頼できる側の探しを通らずにマージできる
-- 公開のリポジトリでは、GitHub の既定のイベントポリシーが `pull_request_target` を止める。今は評価のモード（実行は止めず記録だけ）で、2026-12-02 から適用される（STD2）
-- Dependabot を有効にすること・秘密と変数の登録そのものは範囲の外である（両課題の「含まない」）
+- ワークフローの点検（zizmor v1.32.0）は `--offline --no-ignores --config .github/zizmor.yml` で打つ。`--no-ignores` を付けて打つと、行の中の `zizmor: ignore` も設定の `rules.<id>.ignore` も効かない（2026-11-24 に v1.32.0 を手元で打って確認した。外部の調査の LIB2）
+- main にはブランチの保護もルールセットも無い。2026-11-24 に、`gh api repos/devbasex/nd-factory/branches/main/protection` は 404 を返し、`gh api repos/devbasex/nd-factory/rulesets` は空だった。GitHub の画面や API からのマージは、どのチェックが落ちていても止まらない。必須のチェックで止まるのは、NDF が行うマージだけである
+- NDF は、マージの前に Pull Request の head のコミットに付いたチェックを名前だけで読み、必須のチェックの一覧と照らす。同じ名前のチェックが複数あれば、最も新しい 1 件だけを数える。チェックを出したワークフローのファイルと起動のイベントは見ない（devbasex/ai-plugins の `plugins/ndf/src/ndf/adapters/ci.py` の `read`・`latest` と、`plugins/ndf/src/ndf/domains/release/land.py` の `_runs`。2026-11-24 に main を読んで確認）。そのため、Pull Request の作者が同じ名前のジョブを足すと、名前だけの照合は迂回できる
+- このリポジトリには Dependabot の設定のファイル（`.github/dependabot.yml`）が無く、Dependabot は Pull Request を作らない（2026-11-24 に確認）。Dependabot を有効にすること・秘密と変数の登録そのものは範囲の外である（両課題の「含まない」）
 
 ## 解き方の全体像
 
 ```mermaid
 flowchart TB
-    subgraph PRSIDE["Pull Request の実行（pull_request）"]
-        lc["leak-check: 既定の規則と nd-factory の規則だけで、今の木と分岐点から head までを探す。秘密を受けない"]
+    subgraph PUB["公開のリポジトリ（devbasex/nd-factory）"]
+        lc["leak-check（pull_request）: 既定の規則と nd-factory の規則だけで、今の木と分岐点から head までを探す。秘密を受けない"]
+        lp["leak-check-push（main への push。環境 leak-scan を持つ）: 今の木と到達できるすべてのコミットを、秘密の正規表現を重ねた設定でも探す（今のまま）"]
+        rw["leak-check-secret.yml（workflow_call だけで起動する、再利用できるワークフロー）"]
+        shared["leak-scan-secret.sh（新設）"]
     end
-    subgraph TRUSTED["信頼できる側の実行（pull_request_target。ワークフロー・スクリプト・設定は既定のブランチのもの）"]
-        ls["leak-check-secret: Pull Request の head のコミットを git のデータとして取り、分岐点から head までを、既定の規則と、nd-factory の規則に秘密の正規表現を重ねた設定で探す"]
+    subgraph PRIV["検査用の非公開リポジトリ（持ち主が作る）"]
+        caller["呼び出しのワークフロー（workflow_dispatch）"]
+        psec["秘密 LEAK_CHECK_PATTERN と変数 LEAK_CHECK_GENERATION"]
     end
-    subgraph PUSH["main への push の実行"]
-        lp["leak-check-push（leak-check から分けたジョブ。環境 leak-scan を持つ）: 今の木と到達できるすべてのコミットを、既定の規則と、秘密の正規表現を重ねた設定で探す（今のまま）"]
-    end
-    secA["環境 leak-scan の秘密 LEAK_CHECK_PATTERN（main の実行だけが使える）"] --> ls
-    secA --> lp
-    secD["Dependabot の秘密 LEAK_CHECK_PATTERN（検証で要ると分かったときだけ同じ名前で登録する。決定 2）"] -.->|Dependabot の実行| ls
-    shared["秘密を使う探しのスクリプト（新設）"]
-    ls --> shared
+    ndf["NDF（マージの直前）"]
+    ndf -->|起動し、結果を読む| caller
+    caller -->|呼ぶ| rw
+    psec --> caller
+    rw -->|既定のブランチのスクリプト| shared
     lp --> shared
+    env["環境 leak-scan の秘密 LEAK_CHECK_PATTERN（main の実行だけが使える）"] --> lp
 ```
 
-- Pull Request ごとに、新しいチェック `leak-check-secret` が既定のブランチのコードだけで動く。fork・同じリポジトリのブランチ・Dependabot のどの Pull Request でも、途中のコミットを含む全コミットを、実際の値の規則でマージの前に探す。必須のチェックにするのは導入の 2 本目の Pull Request からである（決定 10）
-- NDF は、`leak-check-secret` の結果を、名前だけでなく、出したワークフローのファイル・起動のイベント・Pull Request の番号・探した head の SHA・base のブランチ・探した分岐点・検査のコードのコミット・検査の設定の世代で確かめてから受け入れる。再実行の結果は受け入れない。マージの直前に確かめ直し、マージの後にマージ先を確かめる。NDF にその機能を足す依頼は、承認を得てから devbasex/ai-plugins へ出す（決定 7）
-- Pull Request の側の `leak-check` は秘密を一切受けない。秘密の正規表現を書いた設定のファイルを、Pull Request のコードが読む経路が無くなる
-- `leak-check-secret` は、Pull Request の出所と起動した人によらず、秘密が空なら必ず落ちる。変数 `LEAK_CHECK_REQUIRE_PATTERN` は main への push の `leak-check-push` だけが読む。Dependabot の実行が秘密の欠けで落ちないことは、環境の秘密と Dependabot の秘密のどちらが渡るかを検証用のリポジトリで確かめてから保証する（決定 2）
-- 実際の値の正規表現は、既定のブランチ（main）の実行だけが読める環境 `leak-scan` の秘密に置く。Pull Request の側のワークフローを書き換えても読めない（決定 9）
-- 秘密を使う探し（`leak-check-secret` と main への push の `leak-check-push`）は、実際の値の規則の当たりを件数だけで出し、ファイル・行・コミットを出さない。公開の Pull Request から、どの行が正規表現に当たるかを試せないようにする（決定 8）
-- 秘密の正規表現を重ねる処理と必須の判定は、新設する 1 本のスクリプトにまとめ、main への push の `leak-check-push` と `leak-check-secret` の両方がそれを呼ぶ
-- 持ち主の操作（環境 `leak-scan` の秘密の登録・検証で要ると分かったときの Dependabot の秘密の登録・`pull_request_target` を許すイベントポリシー）は、新設する運用の文書（`docs/operations/ci-checks.md`）と `AGENTS.md` に書く
+- Pull Request を実際の値の規則で探すのは、検査用の非公開リポジトリの実行である。NDF がマージの直前に、Pull Request の番号・head の SHA・base の SHA・検査のコードのコミット・設定の世代を渡して起動する。fork・同じリポジトリのブランチ・Dependabot のどの Pull Request でも、起動のされ方は同じである（決定 1・2）
+- 非公開リポジトリの実行は、公開のリポジトリの既定のブランチにある再利用できるワークフロー `leak-check-secret.yml` を呼ぶ。そのワークフローは、既定のブランチのスクリプトと設定だけを動かし、Pull Request のコミットはデータとして取り込む。head の木の中身を作業ツリーの外に取り出して探し、分岐点から head までの各コミットの差分も探す（決定 4・5）
+- 探しの成否・件数・当たりの場所は、非公開リポジトリの記録にだけ出る。NDF は結果を公開の Pull Request に書かない。外部の作者は、候補の語が正規表現に当たるかを公開の記録から確かめられない（決定 8）
+- NDF は、自分が起動した 1 回の実行の結果だけを、渡した値と一致するかで確かめて受け入れる。前の実行の成功は使わない。マージの直前に条件を読み直し、マージの後にマージ先を確かめる。NDF にその機能を足す依頼は、承認を得てから devbasex/ai-plugins へ出す（決定 7）
+- Pull Request の側の `leak-check` は秘密を一切受けない。秘密の正規表現を書いた設定のファイルを、Pull Request のコードが読む経路が無くなる（決定 3）
+- Dependabot の秘密には、実際の値を登録しない。非公開リポジトリの実行は Dependabot が起動しないので、Dependabot の秘密は要らない（決定 2）
+- 実際の値の正規表現は 2 か所に置く。Pull Request の探しのための非公開リポジトリの秘密と、main への push の探しのための公開のリポジトリの環境 `leak-scan` の秘密（使えるブランチは main だけ）である（決定 9）
+- 持ち主の操作（非公開リポジトリの用意・秘密と変数の登録・NDF の権限の付与・秘密の切り替え）は、新設する運用の文書（`docs/operations/ci-checks.md`）と `AGENTS.md` に書く
 
 ## 構成要素
 
 | 要素 | 責務 |
 | --- | --- |
-| 信頼できる側の漏れの検査のワークフロー（`.github/workflows/leak-check-secret.yml`、新設） | `pull_request_target`（`opened`・`synchronize`・`reopened`・`edited`）だけで起動し、環境 `leak-scan` の秘密を受け、既定のブランチをチェックアウトする。Pull Request の head を `refs/pull/<番号>/head` から git の参照として取り、event の head の SHA と一致することを確認してから、秘密を使う探しのスクリプトに分岐点から head までの範囲と、必須の指定（常に `1`）を渡す。ジョブの表示名に、Pull Request の番号・探した head の SHA・base のブランチと SHA・実行したワークフローのコミット（`github.workflow_sha`）・設定の世代（変数 `LEAK_CHECK_GENERATION`）を入れ、分岐点は表示名と同じ base の SHA から求める。変数が空か `0` なら探す前に失敗する（決定 7）。Pull Request のコミットのファイルを動かさず、依存を入れない（`npm ci`・`setup-node` を持たない） |
-| 秘密を使う探しのスクリプト（`tools/checks/leak-scan-secret.sh`、新設） | 探す対象（`dir` か `git`）を引数で、秘密の正規表現と必須の指定を環境変数で受ける。秘密があれば、一時の設定のファイルを、探す作業ツリーの外に作る。その設定は `.gitleaks.toml` を `[extend] path` で読み、規則 `nd-real-value` を足す。秘密が空のとき、必須なら失敗する。必須でなければ、「秘密が空なので `.gitleaks.toml` だけで探す」行を記録に出して `.gitleaks.toml` だけで進む（main への push で、持ち主が変数を設定する前だけ起きる。決定 10 の手順 4 で、この行が出ていないことを確かめる）。続けて `leak-scan.sh` を、受けた対象で 2 回打つ。1 回目は既定の規則で、2 回目はその設定で探す。`git` で範囲を受ければその範囲、受けなければ到達できるすべてのコミットを探す。`nd-real-value` の当たりは件数だけを出す（決定 8）。正規表現を記録に出さない |
-| 今の木と履歴の探しのスクリプト（`tools/checks/leak-scan.sh`） | 変えない。gitleaks の 1 回の探しと、当たりを規則・ファイル・行・コミットだけで出す |
+| 再利用できる漏れの検査のワークフロー（`.github/workflows/leak-check-secret.yml`、新設） | `workflow_call` だけで起動する。入力で Pull Request の番号・head の SHA・base の SHA・検査のコードのコミット・設定の世代を、秘密で `LEAK_CHECK_PATTERN` を受ける。入力の形（番号は数字、SHA は 40 桁の 16 進数、世代は 1 以上の整数）を検査し、外れれば探す前に失敗する。公開のリポジトリを、入力の検査のコードのコミットで `persist-credentials: false` でチェックアウトする。Pull Request の head を `refs/pull/<番号>/head` から git の参照として取り、入力の head の SHA と一致することを確かめる。head の木を、作業ツリーの外のディレクトリへ `git archive` で取り出す。秘密を使う探しのスクリプトに、取り出した木（`dir`）と、分岐点から head までの範囲（`git --range`）を渡し、必須の指定は常に `1` にする。分岐点は入力の base の SHA と head の SHA から求める。ジョブの表示名に、入力の 5 つの値を入れる（決定 7）。取り出した木のファイルを動かさず、依存を入れない（`npm ci`・`setup-node` を持たない） |
+| 呼び出しのワークフローの見本（`docs/operations/leak-check-caller.yml`、新設） | 持ち主が検査用の非公開リポジトリの `.github/workflows/` に置く呼び出しのワークフローの正本。`workflow_dispatch` だけで起動し、入力をそのまま `devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main` に渡し、非公開リポジトリの秘密 `LEAK_CHECK_PATTERN` を名前で渡す。非公開リポジトリの変数 `LEAK_CHECK_GENERATION` が入力の世代と違うか、`0` か空なら、呼ぶ前に失敗する。公開のリポジトリの `.github/workflows/` の外に置くので、公開のリポジトリでは動かない |
+| 秘密を使う探しのスクリプト（`tools/checks/leak-scan-secret.sh`、新設） | 探す対象（`dir` か `git`）を引数で、秘密の正規表現と必須の指定を環境変数で受ける。秘密があれば、一時の設定のファイルを、探す木の外に作る。その設定は `.gitleaks.toml` を `[extend] path` で読み、規則 `nd-real-value` を足す。秘密が空のとき、必須なら失敗する。必須でなければ、「秘密が空なので `.gitleaks.toml` だけで探す」行を記録に出して `.gitleaks.toml` だけで進む（main への push で、持ち主が変数を設定する前だけ起きる。決定 10 の手順 4 で、この行が出ていないことを確かめる）。続けて `leak-scan.sh` を、受けた対象で 2 回打つ。1 回目は既定の規則で、2 回目はその設定で探す。設定のファイルは、スクリプトと同じチェックアウトのものを絶対パスで渡す。`git` で範囲を受ければその範囲、受けなければ到達できるすべてのコミットを探す。`dir` では、探す木のディレクトリを引数で受けられる。秘密があれば、`nd-real-value` の当たりが 0 件でも、件数の行（`nd-real-value: <件数> 件`）を必ず出す。当たりの出し方は、件数だけにするか今の `leak-scan.sh` の形にするかを引数で受ける（決定 8）。正規表現を記録に出さない |
+| 今の木と履歴の探しのスクリプト（`tools/checks/leak-scan.sh`） | 変えない。gitleaks の 1 回の探しと、当たりを規則・ファイル・行・コミットだけで出す。探す木の根に `.gitleaksignore` があれば終了コード 2 で失敗する |
 | CI の `leak-check` のジョブ（`.github/workflows/ci.yml`） | Pull Request の実行だけで動く（`if: github.event_name == 'pull_request'`）。必須のチェックの名前 `leak-check` は変えない。環境を持たず、秘密を受けない。`leak-scan.sh` を直に呼び、既定の規則と `.gitleaks.toml` だけで今の木（`dir`）と分岐点から head まで（`git --range`）を探す（今の既定の規則と nd-factory の規則の探しのまま） |
-| CI の `leak-check-push` のジョブ（`.github/workflows/ci.yml`、`leak-check` から分けて新設） | main への push の実行だけで動く（`if: github.event_name == 'push'`）。`environment: leak-scan` を持ち、環境の秘密と変数を受け、秘密を使う探しのスクリプトを `dir` と `git`（範囲なし）で 1 回ずつ呼ぶ。今と同じく、今の木と到達できるすべてのコミットを、それぞれ 2 つの設定で探す。Pull Request の実行では飛ばされ、必須のチェックにもしない |
-| ワークフローの点検の設定（`.github/zizmor.yml`） | `dangerous-triggers` の点検を外し、理由と課題の番号を注に書く。外した点検の代わりは CI の定義のテストが持つ |
-| CI の定義のテスト（`tools/test/ci-definition.test.ts`） | 必須のチェックの宣言と、Pull Request で起動するジョブ（`pull_request` と `pull_request_target`）の集合の一致を見る。集合の一致の数え方は、導入の 2 本の Pull Request で次のように変える（決定 10）。<br>・1 本目: 必須でなくてよいジョブの一覧をテストに持つ。一覧に入れるのは `leak-check-secret` と、`if: github.event_name == 'push'` で Pull Request では飛ばされる `leak-check-push` だけにする。一覧の外のジョブが必須のチェックの宣言に無ければ落とす<br>・2 本目: 一覧から `leak-check-secret` を外す。`leak-check-secret` の表示名は head の SHA などで実行ごとに変わるので、宣言とは表示名ではなく、ワークフローのファイル（`.github/workflows/leak-check-secret.yml`）とジョブの ID（`leak-check-secret`）で照らす<br>ワークフローごとに許す起動のイベントの一覧を持ち、一覧の外のイベントがあれば落とす。信頼できる側の漏れの検査の形（決定 4）と、秘密を受ける手順と必須の条件の分け方（決定 3）を、ワークフローの定義から読んで落とす |
+| CI の `leak-check-push` のジョブ（`.github/workflows/ci.yml`、`leak-check` から分けて新設） | main への push の実行だけで動く（`if: github.event_name == 'push'`）。`environment: leak-scan` を持ち、環境の秘密と変数を受け、秘密を使う探しのスクリプトを `dir` と `git`（範囲なし）で 1 回ずつ呼ぶ。今と同じく、今の木と到達できるすべてのコミットを、それぞれ 2 つの設定で探す。`nd-real-value` の当たりは件数だけを出す。Pull Request の実行では飛ばされ、必須のチェックにもしない |
+| CI の定義のテスト（`tools/test/ci-definition.test.ts`） | 必須のチェックの宣言と、Pull Request で起動するジョブの集合の一致を見る。必須でなくてよいジョブの一覧には `leak-check-push` だけを入れる。ワークフローごとに許す起動のイベントの一覧を持ち、一覧の外のイベントがあれば落とす。再利用できる漏れの検査のワークフローと呼び出しのワークフローの見本の形（決定 4）と、秘密を受ける手順と必須の条件の分け方（決定 3）を、定義から読んで落とす |
 | 漏れの検査の結合のテスト（`tools/test/leak-scan.integration.test.ts`） | 秘密を使う探しのスクリプトを、作り物の正規表現と、途中のコミットで足して後で消した作り物のリポジトリで動かす |
-| ワークフローの点検の結合のテスト（`tools/test/workflow-audit.integration.test.ts`） | `dangerous-triggers` 以外の点検が今の設定で外れていないことを保つ |
-| 必須のチェックの宣言（`.ndf/project.json`） | 導入の 2 本目の Pull Request で、`required_checks` に `leak-check-secret` を、NDF が出どころを確かめる形で足し、`ci.workflows` に新しいワークフローを足す。1 本目（実装の Pull Request）では変えない（決定 10） |
-| NDF のマージの判定（devbasex/ai-plugins、このリポジトリの外） | 必須のチェックを、名前に加えて、出したワークフローのファイル・起動のイベント・表示名の番号・head の SHA・base のブランチ・探した分岐点・検査のコードのコミット・設定の世代で受け入れ、再実行の結果と世代が `0` の間のマージを退ける機能と、マージの直前の読み直しとマージの後のマージ先の確認。この変更では作らず、依頼を出す（決定 7） |
-| 運用の文書（`docs/operations/ci-checks.md`、新設）と指示書（`AGENTS.md`） | 持ち主が秘密を登録して検査を必須にする手順（環境 `leak-scan` の作成と、その秘密・検証で要ると分かったときの同じ名前の Dependabot の秘密・変数・`pull_request_target` を許すイベントポリシー・導入の 2 本目の Pull Request へ進む条件）と、秘密を使う探しがどこで動くか。環境と秘密を 1 本目のマージの前に用意する順序と、1 本目のマージで起きた push で実際の値の規則が有効だったことの確かめ方（決定 10）。秘密か環境の設定を変えるときに設定の世代 `LEAK_CHECK_GENERATION` を `0` にしてから上げる手順と、結果が失効したときに Pull Request を閉じて開き直す手順（決定 7）。`nd-real-value` に当たったときに、持ち主が手元で当たりの場所を引く手順 |
-| プラットフォームの設計（`docs/design/platform.md` の「設計の決まりを縛る検査」） | 漏れの検査の行に、実際の値の規則での探しが Pull Request ごとに信頼できる側で動くことを足す |
+| NDF のマージの前の非公開の検査（devbasex/ai-plugins、このリポジトリの外） | マージの直前に非公開リポジトリの呼び出しのワークフローを起動し、その 1 回の実行の結果を渡した値で確かめ、設定の世代と時間の上限を守ってマージし、マージの後にマージ先を確かめる機能。この変更では作らず、依頼を出す（決定 7） |
+| NDF の設定（`.ndf/project.json`） | 導入の 2 本目の Pull Request で、NDF のマージの前の非公開の検査を有効にする項目を足す。項目の形は NDF の依頼で決める。非公開リポジトリの名前は公開のリポジトリに書かず、NDF の利用者の設定（リポジトリの外）に持つ。1 本目（実装の Pull Request）では変えない（決定 10） |
+| 運用の文書（`docs/operations/ci-checks.md`、新設）と指示書（`AGENTS.md`） | 持ち主が行う操作の手順（決定 6）と、秘密を使う探しがどこで動き、誰に結果が見えるか |
+| プラットフォームの設計（`docs/design/platform.md` の「設計の決まりを縛る検査」） | 漏れの検査の行に、実際の値の規則での Pull Request の探しが、NDF のマージの直前に非公開リポジトリで動くことを足す |
 
 ```mermaid
 flowchart LR
-    subgraph EVENTS["GitHub のイベント"]
-        prt["pull_request_target"]
+    subgraph EVENTS["起動"]
+        disp["NDF の workflow_dispatch（非公開リポジトリ）"]
         pr["pull_request"]
         push["main への push"]
     end
-    subgraph WF["ワークフロー（.github/workflows/）"]
-        wls["leak-check-secret（新設）"]
+    subgraph WF["ワークフロー"]
+        wcaller["呼び出しのワークフロー（非公開リポジトリ）"]
+        wls["leak-check-secret.yml（新設。workflow_call）"]
         wlc["ci.yml の leak-check（Pull Request のとき）"]
         wlp["ci.yml の leak-check-push（push のとき）"]
     end
@@ -117,7 +122,8 @@ flowchart LR
         nd[".gitleaks.toml"]
         def["gitleaks-default.toml"]
     end
-    prt --> wls
+    disp --> wcaller
+    wcaller --> wls
     pr --> wlc
     push --> wlp
     wls --> sec
@@ -128,56 +134,51 @@ flowchart LR
     scan --> def
 ```
 
-図には CI の中で動くものだけを描き、テスト・点検の設定・宣言・文書の行は含めない。`leak-check-secret` が読む `.gitleaks.toml`・`gitleaks-default.toml`・2 本のスクリプトは、どれも既定のブランチのチェックアウトにあるものである。Pull Request のコミットは git の参照としてだけ取り込まれ、作業ツリーに出ない。
+図には CI の中で動くものだけを描き、テスト・宣言・文書の行は含めない。`leak-check-secret.yml` が使う `.gitleaks.toml`・`gitleaks-default.toml`・2 本のスクリプトは、どれも NDF が渡した検査のコードのコミット（公開のリポジトリの main のコミット）のチェックアウトにあるものである。Pull Request のコミットは git の参照として取り込まれ、head の木はチェックアウトの外のディレクトリへデータとして取り出される。
 
 ## 処理の流れ
 
 ```mermaid
 sequenceDiagram
-    participant A as Pull Request の作者
-    participant G as GitHub
-    participant J as leak-check-secret（既定のブランチのワークフロー）
-    participant S as leak-scan-secret.sh（既定のブランチ）
-    participant L as leak-scan.sh と gitleaks
-    A->>G: Pull Request を出す・push する
-    G->>J: pull_request_target（opened・synchronize・reopened・edited）
-    Note over J: 同じ Pull Request の前の実行はキャンセルする
-    J->>J: 既定のブランチをチェックアウトし、gitleaks をバージョンと要約値で置く
-    J->>G: refs/pull/番号/head を取る（ファイルは出さない）
-    alt 取れない・head の SHA が event と違う
-        J-->>G: 失敗（チェックは通らない）
+    participant N as NDF
+    participant P as 非公開リポジトリの呼び出しのワークフロー
+    participant J as leak-check-secret.yml（公開の main）
+    participant S as leak-scan-secret.sh と leak-scan.sh
+    N->>N: Pull Request の head・base の先頭・main の先頭・非公開リポジトリの世代を読む
+    alt 世代が 0 か空
+        N-->>N: マージせずに人へ戻す
     end
-    J->>S: 分岐点..head の範囲と、環境 leak-scan の秘密・必須の指定（常に 1）
-    alt 秘密が空
-        S-->>J: 終了コード 1
+    N->>P: workflow_dispatch（番号・head・base の SHA・検査のコードのコミット・世代）
+    P-->>N: 実行の ID（workflow_run_id）
+    P->>P: 変数の世代が入力と同じで 1 以上かを確かめる
+    P->>J: 入力と秘密を渡して呼ぶ
+    J->>J: 検査のコードのコミットをチェックアウトし、gitleaks を置く
+    J->>J: refs/pull/番号/head を取り、head の SHA を確かめ、head の木を外へ取り出す
+    alt 取れない・head の SHA が違う・秘密が空
+        J-->>P: 失敗
     end
-    S->>L: 既定の規則で範囲を探す
-    S->>L: 秘密の正規表現を重ねた設定で範囲を探す
-    L-->>S: 当たりは規則・ファイル・行・コミット
-    Note over S: nd-real-value の当たりは件数だけを記録に出す
-    S-->>J: 当たり・失敗なら 1、当たり無しなら 0
-    J-->>G: ジョブ「leak-check-secret（番号・head の SHA・base のブランチと SHA・検査のコードのコミット・設定の世代）」の結果
-    Note over G: 結果が付くコミットは未確認（決定 7）
+    J->>S: 取り出した木（dir）と分岐点..head（git）を、既定の規則と秘密を重ねた設定で探す
+    S-->>J: 当たり・失敗なら 1、当たり無しなら 0。当たりの場所は非公開の記録にだけ出る
+    J-->>P: ジョブの結果
+    N->>P: 実行の ID でジョブを読み、表示名と結論を確かめる
+    N->>N: 世代・head・base・main をもう一度読み直してからマージする。マージの後にマージ先を確かめる
 ```
 
-NDF が受け入れるのは、信頼できる側の実行の結果のうち、今の head・今の base・今の検査の設定で探した範囲を覆うものだけである。その条件と、条件を満たさない結果を失効させる仕組みは決定 7 にある。
+NDF が受け入れるのは、自分がこのマージのために起動した 1 回の実行の結果だけである。その条件と、時間の上限・世代の扱いは決定 7 にある。
 
-- 新しいコミットが push されると、GitHub が `synchronize` で同じワークフローを起こし、新しい head で探しをやり直す。ジョブの表示名の head の SHA が変わるので、前の head の結果は今の head の結果として数えられない
-- Pull Request のマージ先（base のブランチ）を変えると、GitHub が `edited` で同じワークフローを起こし、新しい base との分岐点から head までを探し直す。表示名の base のブランチが変わるので、前の base の結果は数えられない。`edited` は題や本文を直したときにも起きるので、そのときも探し直す
-- base のブランチの先頭が進むと、分岐点が変わることがある。別の Pull Request が対象の head の祖先を base に取り込むと、分岐点は head の側へ進み、探す範囲は狭くなる。base のブランチが書き換えられると、分岐点は探した範囲の外へ動きうる。そのため、表示名には base のブランチの名前に加えて、探したときの base の SHA を入れる。NDF は、探した分岐点が今の分岐点と同じかその祖先であるときだけ結果を受け入れる
-- 探しの設定とコードを変える Pull Request が main にマージされると、それより前の検査のコードで探した結果は数えられない。持ち主が秘密を変えるときは、検査の設定の世代（変数 `LEAK_CHECK_GENERATION`）を `0` にしてから変え、変えた後に上げる。前の世代の結果は数えられない。分岐点の外れ・検査のコードの変更・世代の変更では GitHub が自動で探し直さないので、持ち主が Pull Request を閉じて開き直す。前の実行の再実行の結果は数えない（決定 7）
-
-GitHub が `pull_request_target` の実行の結果をどのコミットに付けるかは、文書から決められなかった（GitHub のイベントの文書では、この実行の `GITHUB_SHA` は既定のブランチの最新のコミットである。STD1）。必須のチェックの文書（STD4）は数えられるイベントを挙げるだけで、Pull Request の head に付くことの根拠にはならない。そのため、結果の取り方を head のコミットに付くことに頼らない形にし（決定 7）、採用の前に検証用のリポジトリで確かめる（決定 10）。
+- 作者が新しいコミットを push しても、探し直しの起動は要らない。NDF はマージのたびに今の head で起動し直す
+- マージ先（base のブランチ）を変えても、NDF がマージの直前に今の base で起動するので、前の base の結果は使われない
+- 探しの設定とコードを変える Pull Request が main にマージされても、NDF はマージのたびに今の main の先頭を検査のコードのコミットとして渡す
+- 持ち主が秘密を変えるときは、非公開リポジトリの変数 `LEAK_CHECK_GENERATION` を `0` にし、NDF の時間の上限が過ぎるのを待ってから変える（決定 7）
 
 ## 非機能の実現方式
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
-| セキュリティ | 秘密の正規表現と書き込みの権限が、Pull Request の作者が書いたコードに渡らない（#96 の受け入れ条件 3・4） | 秘密は環境 `leak-scan` の秘密に置き、その環境を使えるブランチを main だけにする（決定 9）。秘密は `leak-check-secret`（既定のブランチのワークフロー）と main への push の `leak-check-push` の、秘密を使う探しの手順の環境変数だけで受ける。`leak-check-secret` は既定のブランチをチェックアウトし、Pull Request の head は git の参照として取るだけで、依存を入れずにファイルを動かさない。Pull Request から来る値（番号・SHA）は環境変数で渡し、形を検査してから使う。`permissions` は `contents: read` だけ | CI の定義のテスト（決定 3・4 の行） |
-| セキュリティ | 秘密を使う探しが失敗したときは通さない側に倒す（#96 の受け入れ条件 6） | `leak-check-secret` のジョブと手順に `if:` と `continue-on-error` を置かない（条件で飛ばしたジョブは成功と報告されるため。STD4）。取り込み・SHA の一致・範囲の読み取り・gitleaks のどこで失敗しても、終了コード 0 以外で終える | CI の定義のテストと、結合のテストの失敗の経路の行 |
-| セキュリティ | 実際の値の正規表現は、Dependabot の秘密に登録する場合も、リポジトリ・CI の記録・課題に出ない（#101） | 正規表現は探す木の外の一時の設定のファイルにだけ書き、終了時に消す。出力は、`nd-real-value` の当たりは件数だけ、ほかの規則の当たりは今の `leak-scan.sh` の形（規則・ファイル・行・コミット）にする（決定 8） | 結合のテスト（出力に作り物の正規表現・当たった値・`nd-real-value` の当たりのファイルと行が現れない） |
-| セキュリティ | 公開の記録には、実際の値の規則に当たった箇所を出さない（要求には無く、設計で足した条件。決定 8） | 当たりのファイル・行・コミットを出さない。ただし、公開する成否と件数から、候補の語が正規表現に当たるかは推測できる。このリポジトリは公開なので、成否と件数は誰でも見られる。この閲覧の範囲と推測の危険（決定 8 の代償）を受け入れることを、設計の承認の条件にする（人へ残す判断）。正規表現に含む語そのものを外部の作者から隠すことは、この設計の条件にしない | 結合のテスト（上の行と同じ） |
-| 運用・保守性 | 当たりの出力は今の `leak-scan.sh` の形（規則・ファイル・行・コミット）のままにし、持ち主が当たりの場所を引ける（#96） | 既定の規則と nd-factory の規則の当たりは今の形で出す。`nd-real-value` の当たりは、持ち主が手元で秘密を渡して `leak-scan-secret.sh --details` を打ち、場所を引く（運用の文書に手順を書く。`--details` はワークフローで使わず、CI の定義のテストが落とす）。#96 の要求の文から外れるので、要求の変更として承認を受ける（人へ残す判断） | 結合のテスト |
+| セキュリティ | 秘密の正規表現と書き込みの権限が、Pull Request の作者が書いたコードに渡らない（#96 の受け入れ条件 3・4） | Pull Request の探しの秘密は非公開リポジトリの秘密に置き、呼び出しのワークフローから名前で渡す。探しのワークフローは公開のリポジトリの main のスクリプトと設定だけを動かし、Pull Request の head は git の参照として取り、木をデータとして取り出すだけにする。依存を入れない。入力の値は環境変数で渡し、形を検査してから使う。`permissions` は `contents: read` だけ。main への push の探しの秘密は、使えるブランチを main だけにした環境 `leak-scan` に置く（決定 9） | CI の定義のテスト（決定 3・4 の行）と、検証用のリポジトリでの確認（決定 10 の手順 1） |
+| セキュリティ | 秘密を使う探しが失敗したときは通さない側に倒す（#96 の受け入れ条件 6） | 探しのワークフローのジョブと手順に `if:` と `continue-on-error` を置かない（条件で飛ばしたジョブは成功と報告されるため。STD4）。入力の検査・取り込み・SHA の一致・木の取り出し・範囲の読み取り・gitleaks のどこで失敗しても、終了コード 0 以外で終える。NDF は、成功の結論を確かめられない限りマージしない | CI の定義のテストと、結合のテストの失敗の経路の行 |
+| セキュリティ | 実際の値の正規表現と、それに当たる語が正規表現に含まれるかどうかが、公開の記録・チェック・通知から分からない（Value 7。決定 8） | Pull Request の探しの成否・件数・当たりの場所は、非公開リポジトリの記録にだけ出る。NDF は結果を公開の Pull Request のコメントやチェックに書かない。公開の main への push の探しは、`nd-real-value` の当たりを件数だけで出す | 結合のテスト（出力に作り物の正規表現と当たった値が現れない）と、検証用のリポジトリでの確認（非公開の記録が外から見えない） |
+| 運用・保守性 | 当たりの出力は今の `leak-scan.sh` の形（規則・ファイル・行・コミット）のままにし、持ち主が当たりの場所を引ける（#96） | Pull Request の探しは、非公開の記録に今の形で出す。main への push の探しの `nd-real-value` の当たりは件数だけを出し、持ち主が手元で秘密を渡して `leak-scan-secret.sh --details` を打って場所を引く（決定 8） | 結合のテスト |
 
 ## 決定の記録
 
@@ -185,355 +186,341 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 
 | 項目 | 要約 | この設計との関係 |
 | --- | --- | --- |
-| Value 7 | リポジトリは公開なので、運用する環境の名前などの実際の値と秘密の値を、リポジトリ・課題・PR・CI の記録に置かない。混入は検査で機械的に止める | 実際の値の正規表現を Pull Request のコードと記録から隔て、全コミットをマージの前に探す |
+| Value 7 | リポジトリは公開なので、運用する環境の名前などの実際の値と秘密の値を、リポジトリ・課題・PR・CI の記録に置かない。混入は検査で機械的に止める | 実際の値の正規表現と、それに当たる語の手がかりを、公開の記録と Pull Request のコードから隔て、全コミットをマージの前に探す |
 | Value 8 | CI は GitHub のワークフローで検査だけを行い、AWS の資格情報を持たない | 新しいワークフローにも AWS の資格情報と書き込みの権限を持たせない |
-| Value 13 | 同じ規則・処理は 1 か所に置き、ほかから参照する | 秘密を重ねる処理を 1 本のスクリプトにまとめる |
-| Value 14 | 変更のたびに自動のテストと静的解析を通す。依存を新しく保ち、脆弱性の知らせに早く応じる。設計の判断は理由と採らなかった案とともに残す | Dependabot の Pull Request を通せるようにする。点検を外す範囲と、それを補う自動のテストを設計に記録する |
-| Value 17 | 目先の手間より、堅牢で長く保守しやすい形を選ぶ | 持ち主の手順と NDF への依頼が増えても、秘密を隔てる形を選ぶ |
+| Value 13 | 同じ規則・処理は 1 か所に置き、ほかから参照する | 探しのワークフローとスクリプトを公開のリポジトリの 1 か所に置き、非公開リポジトリからはそれを呼ぶ |
+| Value 14 | 変更のたびに自動のテストと静的解析を通す。依存を新しく保ち、脆弱性の知らせに早く応じる。設計の判断は理由と採らなかった案とともに残す | Dependabot の Pull Request を、ほかの Pull Request と同じ探しで通せるようにする |
+| Value 17 | 目先の手間より、堅牢で長く保守しやすい形を選ぶ。今ある実装や設計を書き換える手間は、選ばない理由にしない | 持ち主の手順と NDF への依頼が増えても、結果を公開しない形を選ぶ |
 
-### 決定 1: 秘密の正規表現を Pull Request のコードから隔てたままマージの前に全コミットを探すため、`pull_request_target` の新しいジョブで、既定のブランチのコードだけを動かし、Pull Request のコミットは git のデータとして取る
+### 決定 1: 実際の値の正規表現に当たる語を外部の作者に確かめさせないため、Pull Request の探しを検査用の非公開リポジトリで行い、NDF がマージの直前に起動する
 
-- **質問**: fork の Pull Request でも秘密を受け、同じリポジトリのブランチの Pull Request でも秘密を Pull Request のコードに渡さずに、途中のコミットを含む全コミットをマージの前に探すには、どの起動の形を使うか
-- **選んだ案**: ワークフロー `.github/workflows/leak-check-secret.yml` を新設し、`pull_request_target`（`opened`・`synchronize`・`reopened` と、base の変更を受ける `edited`。決定 7）で起動する。ジョブ `leak-check-secret` は `actions/checkout` を `ref` なし（既定のブランチ）・`fetch-depth: 0`・`persist-credentials: false` で打つ。続けて `git fetch` で `refs/pull/<番号>/head` を参照として取り込む。取り込んだ head が event の head の SHA と一致することを確かめてから、分岐点から head までを、既定のブランチの `tools/checks/leak-scan-secret.sh` で探す。分岐点は `git merge-base <base.sha> <head.sha>` で求める。`concurrency` は Pull Request の番号ごとにし、前の実行をキャンセルする
-- 採らなかった案: `workflow_run` で Pull Request の CI の後に信頼できる側で探す（`workflow_run` のチェックは、Pull Request の必須のチェックとして数えられない（STD4）。結果を Pull Request に付けるには `statuses: write` の権限が要り、#96 の受け入れ条件 4 に反する。zizmor の `dangerous-triggers` にも当たる）
+- **質問**: fork・同じリポジトリのブランチ・Dependabot のどの Pull Request でも、途中のコミットを含む全コミットを実際の値の規則でマージの前に探し、その秘密と結果を Pull Request の作者に渡さないには、探しをどこで、何をきっかけに動かすか
+- **選んだ案**: 持ち主が検査用の非公開リポジトリを作り、呼び出しのワークフローの見本（`docs/operations/leak-check-caller.yml`）を置く。NDF は、Pull Request をマージする直前に、ワークフローの起動の API（`POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches`）で呼び出しのワークフローを起動する。呼び出しのワークフローは、公開のリポジトリの `leak-check-secret.yml` を `workflow_call` で呼ぶ。公開のリポジトリの再利用できるワークフローは、どのリポジトリからも呼べ、その実行は呼んだ側のリポジトリのものになる（STD8）。そのため、実行の記録は非公開リポジトリにだけ残り、非公開リポジトリに読み取りの権限を持つ人と NDF にしか見えない（STD10）
+- 採らなかった案: 公開のリポジトリで `pull_request_target` の新しいジョブを動かし、Pull Request のコミットを git のデータとして取る（成否と件数が公開の記録とチェックに出る。外部の作者は候補の語を 1 本ずつ Pull Request に入れて、当たるかを確かめられる。件数を伏せても成否から分かる。Pull Request を閉じても、出た結果は回収できない。Value 7 が記録に置かないと定めた運用する環境の名前などを、外部の作者が確かめられる）
+- 採らなかった案: 公開のリポジトリで、必須のレビュアーを置いた環境を使い、人の承認の後にだけ `pull_request_target` の探しを動かす（承認の後の成否は公開の記録に出るので、承認した Pull Request からは同じく確かめられる。すべての Pull Request が人を待つ）
+- 採らなかった案: `workflow_run` で Pull Request の CI の後に信頼できる側で探す（結果は公開の記録に出る。`workflow_run` のチェックは、Pull Request の必須のチェックとして数えられない（STD4）。zizmor の `dangerous-triggers` にも当たる）
 - 採らなかった案: マージキュー（`merge_group`）で探す（マージキューの実行は Pull Request のコードを秘密つきで動かすので、#96 の受け入れ条件 3 に反する。squash のキューでは途中のコミットが残らない）
 - 採らなかった案: GitHub の secret scanning の独自のパターンと push protection に正規表現を置く（fork への push は fork のリポジトリで受けるので、このリポジトリの push protection が掛からない。当たりは警告で、マージの前のチェックにならない。PRD1）
 - 採らなかった案: マージの方法を rebase かマージのコミットに変え、途中のコミットを main への push で探す（マージの前に止めるという #96 の目的を満たさない。同じリポジトリのブランチで、秘密が Pull Request のコードに渡る経路も残る）
-- **代償**: zizmor が「ほぼ常に危険」とする起動のきっかけを 1 つ持つ。Pull Request のファイルを動かさなくても、引数や環境変数への注入でコードを動かされる経路があり得る（LIB2）。そのため、決定 4 の形を CI の定義のテストで縛り続ける。2026-12-02 に既定のイベントポリシーが適用された後は、持ち主が `pull_request_target` を許すイベントポリシーを作るまで、このチェックは起動されず、結果が無い。必須のチェックにした後（決定 10）は、そのためにマージが止まる
+- **代償**: Pull Request の作者は、実際の値の規則の結果を見られない。当たったときは、持ち主が非公開の記録を見て、理由を伏せて直しを頼むか Pull Request を閉じる。探しは Pull Request ごとに自動では動かず、NDF のマージの直前か、持ち主が手で起動したときに動く。持ち主は非公開リポジトリを 1 つ持ち、呼び出しのワークフローを置き、NDF の認証に非公開リポジトリの権限を与える（決定 7）。NDF に機能が要り、入るまで実際の値の規則での探しはマージを止めない（決定 10）。外部の作者は、Pull Request がマージされないことからも推測できる。どの Pull Request をどう扱うかは持ち主の判断に残る
 - 作り方: 標準に倣う・自前で作る
-- 比べた候補: STD1 / STD2 / STD4 / PRD1 / PRD2 / LIB1
-- 根拠: Value 7 / Value 17（MVV バージョン 3）。混入は検査で機械的に止める（Value 7）。手順が増えても、秘密を隔てる堅牢な形を選ぶ（Value 17）。外部の調査は STD1・STD2
+- 比べた候補: STD1 / STD2 / STD4 / STD8 / STD9 / STD10 / PRD1 / PRD2 / LIB1
+- 根拠: Value 7 / Value 17（MVV バージョン 3）。実際の値と、その手がかりを公開の記録に置かない（Value 7）。手順と設計の書き換えが増えても、結果を公開しない堅牢な形を選ぶ（Value 17）
 
-### 決定 2: Dependabot の Pull Request も同じ探しを通してマージできるよう、起動した人で分ける条件を置かず、Dependabot の秘密への登録は検証用のリポジトリで要ると分かったときだけにする
+### 決定 2: Dependabot の Pull Request もほかと同じ探しを通すため、起動した人で分ける条件を置かず、Dependabot の秘密には実際の値を登録しない
 
-- **質問**: Dependabot が起動した実行で、実際の値の規則をどう扱うか（Dependabot の秘密に登録して探すか、fork と同じく必須にしないか）
-- **選んだ案**: ワークフローは `secrets.LEAK_CHECK_PATTERN` を 1 か所で読み、`github.actor` や `dependabot[bot]` で分ける条件を持たない。Dependabot の Pull Request の全コミットは、ほかの Pull Request と同じく Pull Request の時（`leak-check-secret`）に探す。Dependabot が起動した `pull_request_target` の実行に、環境 `leak-scan` の秘密と Dependabot の秘密のどちらが渡るかは、GitHub の文書から決められない（STD3）。そのため、実際の値を登録する前に、検証用のリポジトリで作り物の値を使って確かめ（決定 10 の手順 1）、結果で登録先を決める
-  - どちらの値が渡ったかを `nd-real-value` の件数で見分けるため、渡った値によって件数が変わる検査用のコミットを用意する。環境の秘密に作り物の正規表現 A を、Dependabot の秘密に別の作り物の正規表現 B を使う。Dependabot の Pull Request に、A だけに当たる行を 1 つ足すコミットと、B だけに当たる行を 2 つ足すコミットを入れる。A が使われれば件数は 1、B が使われれば件数は 2 になる
-  - 次の 3 つの実行について、期待する件数と終了の結果を検証の記録に先に書き、実際の件数・終了の結果と照らす。登録を変えた後の実行は、Pull Request を閉じて開き直して起こす（再実行は使わない。決定 7）
-
-    | 実行 | 登録する秘密 | 環境の秘密が渡るときの期待 | Dependabot の秘密が渡るときの期待 |
-    | --- | --- | --- | --- |
-    | 1 | 環境の秘密 A と Dependabot の秘密 B の両方 | 件数 1・終了コード 1（当たりがあるため） | 件数 2・終了コード 1 |
-    | 2 | 環境の秘密 A だけ | 件数 1・終了コード 1 | 秘密が空なので探す前に終了コード 1（件数は出ない） |
-    | 3 | どちらも登録しない | 秘密が空なので探す前に終了コード 1 | 同じ |
-
-    実行 3 は、秘密が無いときに通さない側に倒れることを確かめる。実測がどの列とも合わなければ、Dependabot の秘密を登録せず、この決定を作り直す
-  - 環境の秘密だけで探せた場合（実行 2 で件数 1 が出た場合）: Dependabot の秘密に `LEAK_CHECK_PATTERN` を登録しない。登録してあれば消す
-  - Dependabot の秘密が要る場合（実行 2 が探す前に落ち、実行 1 で件数 2 が出た場合）: 環境の秘密と同じ名前・同じ値で Dependabot の秘密に登録する。そのときは、Dependabot が起動した `pull_request` の実行で Pull Request のコードがその値を読めること（決定 9 の代償）を承認資料に書き、持ち主の承認を受けてから登録する
-  - どちらでも探せない場合: 2 本目の Pull Request へ進まず、この決定を作り直す
+- **質問**: Dependabot が作った Pull Request で、実際の値の規則をどう扱うか（Dependabot の秘密に登録して探すか、fork と同じく必須にしないか）
+- **選んだ案**: Pull Request の探しは、NDF が非公開リポジトリで起動する。起動するのは Dependabot ではなく NDF なので、Pull Request を誰が作ったかによらず、非公開リポジトリの秘密が渡る。ワークフローとスクリプトは `github.actor` や `dependabot[bot]` で分ける条件を持たない。Dependabot の Pull Request の全コミットは、ほかの Pull Request と同じくマージの直前に探す。Dependabot の秘密には `LEAK_CHECK_PATTERN` を登録しない。Pull Request の側の `leak-check` は秘密を受けないので、Dependabot の Pull Request でも秘密の欠けで落ちない（決定 3）
+- 採らなかった案: 実際の値を Dependabot の秘密に登録する（Dependabot の秘密は、Dependabot が起動した `pull_request` の実行で、Dependabot の Pull Request のコードと更新した依存から読める。秘密を信頼できるワークフローに限るという #96 の受け入れ条件 3 と両立しない）
 - 採らなかった案: `github.actor == 'dependabot[bot]'` の実行を fork と同じく必須にしない（Dependabot の Pull Request の途中のコミットがマージの前に探されず、squash の後は main からも辿れない。起動した人での判定は、人が同じブランチへ push すると外れる）
-- 採らなかった案: 確かめずに、環境の秘密と Dependabot の秘密の両方に同じ値を登録する（成功しても、どちらの登録が要ったのかが分からない。要らなかった場合も、Dependabot の Pull Request のコードと依存が実際の値の正規表現を読める経路が残る）
-- **代償**: 検証用のリポジトリで Dependabot の Pull Request を起こす手間が増える。Dependabot の秘密が要る場合は、持ち主が同じ値を 2 か所に登録し、値を変えるときも 2 か所を直す（参照の検査の秘密 `REF_CHECK_TERMS` と同じ運用）
-- 根拠: Value 7 / Value 14（MVV バージョン 3）。Dependabot の Pull Request も実際の値の規則で探す（Value 7）。依存の更新の Pull Request を止めない（Value 14）。外部の調査は STD3
+- **代償**: 無い。今の `REF_CHECK_TERMS` は Dependabot の秘密にも登録したままで、この変更では変えない
+- 根拠: Value 7 / Value 14（MVV バージョン 3）。Dependabot の Pull Request も実際の値の規則で探し、実際の値を Pull Request のコードに渡さない（Value 7）。依存の更新の Pull Request を止めない（Value 14）
 
 ### 決定 3: Pull Request のコードが秘密を読めないよう、Pull Request の側の `leak-check` には秘密を渡さず、必須にする条件は出所で分けない
 
-- **質問**: 今の `leak-check` の、秘密を受ける手順と必須にする条件を、新しいジョブとどう分けるか
+- **質問**: 今の `leak-check` の、秘密を受ける手順と必須にする条件を、どう分けるか
 - **選んだ案**: `ci.yml` の `leak-check` を、ジョブの単位で 2 つに分ける。環境（`environment:`）はジョブにしか付けられず、1 つのジョブを push と Pull Request で共有したまま環境を付けると、Pull Request の実行も環境の使えるブランチの条件を受けて `leak-check` が動かなくなるためである。
   - `leak-check`（`if: github.event_name == 'pull_request'`）: 必須のチェックの名前をそのまま保つ。環境を持たず、秘密を受けない。既定の規則と `.gitleaks.toml` で今の木と分岐点から head までを探す
-  - `leak-check-push`（`if: github.event_name == 'push'`）: `environment: leak-scan` を持ち、秘密と必須の変数を受け、秘密を使う探しのスクリプトで到達できるすべてのコミットを探す。必須のチェックにはしない（main への push の結果で、Pull Request のマージは決まらない）
+  - `leak-check-push`（`if: github.event_name == 'push'`）: `environment: leak-scan` を持ち、秘密と必須の変数を受け、秘密を使う探しのスクリプトで今の木と到達できるすべてのコミットを探す。必須のチェックにはしない（main への push の結果で、Pull Request のマージは決まらない）
 
-  ジョブの `if:` で飛ばしたジョブは成功と報告される（STD4）。`leak-check` が飛ばされるのは push の実行だけで、NDF が読む Pull Request の head の結果には当たらない。今の式の `github.event.pull_request.head.repo.full_name == github.repository` の条件は消す。`leak-check-secret` は変数 `LEAK_CHECK_REQUIRE_PATTERN` を読まず、必須の指定を常に `1` にしてスクリプトに渡す。秘密が空なら、Pull Request の出所によらず終了コード 1 で落ちる。`pull_request_target` では fork の Pull Request も秘密を受けるので、秘密が空なのは持ち主が登録していないときだけである。変数は main への push の `leak-check-push` だけが読む
+  ジョブの `if:` で飛ばしたジョブは成功と報告される（STD4）。`leak-check` が飛ばされるのは push の実行だけで、NDF が読む Pull Request の head の結果には当たらない。今の式の `github.event.pull_request.head.repo.full_name == github.repository` の条件は消す。`leak-check-secret.yml` は変数 `LEAK_CHECK_REQUIRE_PATTERN` を読まず、必須の指定を常に `1` にしてスクリプトに渡す。秘密が空なら、Pull Request の出所によらず終了コード 1 で落ちる。変数は main への push の `leak-check-push` だけが読む
 - 採らなかった案: 同じリポジトリのブランチの Pull Request では、今の手順で秘密を受け続ける（Pull Request のチェックアウトのスクリプトが秘密の正規表現を読め、#96 の受け入れ条件 3 に反する）
-- 採らなかった案: `leak-check-secret` でも fork の Pull Request は必須にしない（fork も秘密を受けられるので分ける理由が無く、登録を忘れたときに fork の Pull Request だけが探されずに通る。#96 の受け入れ条件 6 の、通さない側に倒す約束に反する）
-- 採らなかった案: `leak-check-secret` も変数で必須にするかを決め、変数が空なら `.gitleaks.toml` だけで成功させる（必須のチェックにした後に変数が空だと、実際の値の規則が走らないまま成功と数えられ、#96 の受け入れ条件 1・2 を満たさない。持ち主が秘密を登録する前は失敗が続くが、必須のチェックにする前なのでマージは止まらない。決定 10）
-- **代償**: 秘密が空で必須のときに落ちるチェックが、同じリポジトリのブランチの Pull Request では `leak-check` から `leak-check-secret` に移る。`ci.yml` のジョブが 1 つ増え、ジョブの `if:` で起動のイベントを分ける箇所が 2 つ増える。分けたジョブの `if:` は、CI の定義のテストが形を縛る
+- 採らなかった案: `leak-check-secret.yml` も変数で必須にするかを決め、変数が空なら `.gitleaks.toml` だけで成功させる（NDF の検査を有効にした後に変数が空だと、実際の値の規則が走らないまま成功と数えられ、#96 の受け入れ条件 1・2 を満たさない）
+- **代償**: 同じリポジトリのブランチの Pull Request で秘密が空のときに落ちるのが、`leak-check` から NDF の非公開の検査に移る。`ci.yml` のジョブが 1 つ増え、ジョブの `if:` で起動のイベントを分ける箇所が 2 つ増える。分けたジョブの `if:` は、CI の定義のテストが形を縛る
 - 根拠: Value 7（MVV バージョン 3）。秘密を Pull Request のコードに渡さず、探しの欠けを成功と数えない
 
-### 決定 4: 危険な起動のきっかけの点検を外しても同じ危険を止めるため、zizmor の `dangerous-triggers` を設定で外し、使える場所と形を CI の定義のテストで縛る
+### 決定 4: 秘密を受けるワークフローが信頼できるコードだけを動かすよう、`leak-check-secret.yml` と呼び出しのワークフローの見本の形を CI の定義のテストで縛る
 
-- **質問**: `pull_request_target` は zizmor の `dangerous-triggers` に当たる（v1.32.0 で終了コード 14。LIB2）。ワークフローの点検（#96 の受け入れ条件 10）を通すために、点検をどう扱うか
-- **選んだ案**: `.github/zizmor.yml` で `dangerous-triggers` を `disable: true` にし、理由と課題の番号（#96）を注に書く。代わりに、CI の定義のテストが、許す起動のイベントを一覧で持ち、次のどれかに当たれば落とす。禁止の起動を挙げるのではなく、許す起動を挙げるので、点検していない起動（`workflow_run`・`issue_comment` など）を足すと落ちる
-  - `leak-check-secret.yml` の `on` に `pull_request_target` のほかの起動がある。または `types` に `opened`・`synchronize`・`reopened`・`edited` のほかがある
+- **質問**: 再利用できるワークフローは、呼んだ側の秘密を受けて、Pull Request のコミットを扱う。どの形を許すか
+- **選んだ案**: CI の定義のテストが、許す起動のイベントを一覧で持ち、次のどれかに当たれば落とす。禁止の起動を挙げるのではなく、許す起動を挙げるので、点検していない起動（`pull_request_target`・`workflow_run`・`issue_comment` など）を足すと落ちる。`workflow_call` は zizmor の `dangerous-triggers` の対象ではない（LIB2）ので、`.github/zizmor.yml` は変えない
+  - `leak-check-secret.yml` の `on` に `workflow_call` のほかの起動がある
+  - 呼び出しのワークフローの見本の `on` に `workflow_dispatch` のほかの起動がある。`uses:` が `devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main` でない。秘密を `secrets: inherit` で渡す。世代を確かめる手順が無い
   - ほかのワークフローの `on` に、`push`・`pull_request`・`schedule`・`workflow_dispatch` のほかの起動がある（2026-11-24 の `ci.yml` と `ndf-contract.yml` が使う起動だけを許す）
   - `leak-check-secret.yml` が、次のどれかに当たる
     - `uses:` に、SHA で固定した `actions/checkout` のほかの動作がある
-    - `run:` で、gitleaks を置く手順・`git`・既定のブランチのチェックアウトの `tools/checks/leak-scan-secret.sh` のほかを動かす。`--details` を渡す
-    - `actions/checkout` に `ref`・`repository`・`allow-unsafe-pr-checkout` を渡す
+    - `run:` で、gitleaks を置く手順・`git`・`tar`・チェックアウトの `tools/checks/leak-scan-secret.sh` のほかを動かす。`--details` を渡す
+    - `actions/checkout` の `repository` が `devbasex/nd-factory` でない。`ref` が入力の検査のコードのコミットでない。`allow-unsafe-pr-checkout` を渡す
     - `persist-credentials` が偽でない
     - `setup-node`・`npm`・`npx` を使う
     - `GITHUB_ENV`・`GITHUB_OUTPUT` に書く
     - gitleaks を置く手順を除いて、`GITHUB_PATH` に書く
-    - `${{ github.event.* }}` を `run:` の中に直に書く
+    - `${{ inputs.* }}` を `run:` の中に直に書く
     - `if:` か `continue-on-error` がある
     - `permissions` が `contents: read` だけでない
-    - 秘密を受ける手順が探しの手順のほかにある。ジョブが環境 `leak-scan` を使わない
-    - ジョブの表示名に、event の Pull Request の番号・head の SHA・base のブランチ・base の SHA・`github.workflow_sha` と、変数 `LEAK_CHECK_GENERATION` が入っていない。分岐点を表示名と違う base の SHA から求める（決定 7）
-- 採らなかった案: `--no-ignores` をやめ、`rules.dangerous-triggers.ignore` でこの 1 本だけを外す（行の中の `zizmor: ignore` も効くようになり、#1 の決定 5 が `--no-ignores` で塞いだ、点検を行の注で外す経路が戻る）
-- 採らなかった案: 点検の当たりを残したまま通す（`workflow-audit` が落ち、#96 の受け入れ条件 10 に反する）
-- **代償**: zizmor が `dangerous-triggers` で当てる起動のきっかけを将来増やしても（v1.31.0 では `issue_comment` が増えた）、CI の定義のテストに手で足すまでは落ちない。zizmor のバージョンを上げるときは、zizmor の文書にある点検の対象の一覧と、テストの一覧を見比べる
-- 作り方: ライブラリやサービスを使う・自前で作る
-- 比べた候補: LIB2 / STD1
-- 根拠: Value 8 / Value 14（MVV バージョン 3）。CI に AWS の資格情報を持たせない（Value 8）。点検を外す範囲と、それを補う自動のテストを設計に記録する（Value 14）。外部の調査は LIB2
+    - 秘密を受ける手順が探しの手順のほかにある
+    - ジョブの表示名に、入力の Pull Request の番号・head の SHA・base の SHA・検査のコードのコミット・世代が入っていない。分岐点を表示名と違う base の SHA から求める（決定 7）
+- 採らなかった案: 呼び出しのワークフローを非公開リポジトリにだけ置き、公開のリポジトリに見本を置かない（形をテストで縛れず、持ち主の手元の写しが正本になる）
+- 採らなかった案: 呼び出しのワークフローから `leak-check-secret.yml` をコミットの SHA で固定して呼ぶ（検査のコードを変えるたびに、持ち主が非公開リポジトリを直す。NDF は入力で検査のコードのコミットを渡し、その版のスクリプトと設定をチェックアウトするので、呼ぶ版のずれはその比べ方で扱う。決定 7）
+- **代償**: 呼び出しのワークフローは、持ち主が見本から非公開リポジトリへ写す。見本を変えたときは、持ち主が写し直す。写しが見本と違っても、公開のリポジトリのテストでは見つからない。運用の文書に、見本を変えたら写し直す手順を書く
+- 作り方: 標準に倣う・自前で作る
+- 比べた候補: LIB2 / STD8
+- 根拠: Value 8 / Value 13 / Value 14（MVV バージョン 3）。CI に AWS の資格情報を持たせない（Value 8）。呼び出しのワークフローの正本を 1 か所に置く（Value 13）。許す形を自動のテストで縛る（Value 14）
 
-### 決定 5: 秘密を重ねる処理を 1 か所に置くため、重ねた設定を組んで探す処理を新しいスクリプトにまとめ、push と `leak-check-secret` の両方から呼ぶ
+### 決定 5: 今の `dir` の探しと同じ保証を残すため、Pull Request の head の木を作業ツリーの外へデータとして取り出して探し、分岐点から head までの差分も探す
 
-- **質問**: 秘密の正規表現を重ねた一時の設定を組む処理と必須の判定（今は `ci.yml` の手順の中のシェル）を、2 つのジョブでどう持つか
-- **選んだ案**: `tools/checks/leak-scan-secret.sh` を新設し、今の手順の中のシェル（`'''` を含む正規表現を拒む・重ねた設定を組む・必須の判定・一時のファイルを消す）を移す。最初の引数で探す対象を受け、既定の規則と重ねた設定（秘密が無く必須でなければ `.gitleaks.toml`）の 2 回で探す。呼び分けは次のとおり。
+- **質問**: 秘密の正規表現を重ねた一時の設定を組む処理と必須の判定（今は `ci.yml` の手順の中のシェル）を、2 つのジョブでどう持つか。Pull Request の探しで、何を探すか
+- **選んだ案**: `tools/checks/leak-scan-secret.sh` を新設し、今の手順の中のシェル（`'''` を含む正規表現を拒む・重ねた設定を組む・必須の判定・一時のファイルを消す）を移す。最初の引数で探す対象を受け、既定の規則と重ねた設定（秘密が無く必須でなければ `.gitleaks.toml`）の 2 回で探す。
+
+  gitleaks の `git` の探しは、`git log -p` のパッチを探す（LIB1）。パッチには変えた行とその前後しか入らないので、head の木の全体は探されない。今の `leak-check` は Pull Request のマージコミットの木を `dir` でも探している。同じ保証を残すため、Pull Request の探しでは head の木も探す。呼び分けは次のとおり。
 
   | 呼ぶ所 | 呼び方 | 探すもの |
   | --- | --- | --- |
   | main への push の `leak-check-push` | `leak-scan-secret.sh dir` の後に `leak-scan-secret.sh git` | 今の木と、到達できるすべてのコミット（今の `dir` 2 回・`git` 2 回と同じ） |
-  | `leak-check-secret` | `leak-scan-secret.sh git --range <分岐点>..<head>` だけ | 分岐点から head までのコミット。作業ツリーは既定のブランチのものなので `dir` は打たない。head の木の中身は、範囲のコミットの差分として探される |
+  | `leak-check-secret.yml` | `leak-scan-secret.sh dir <取り出した木>` の後に `leak-scan-secret.sh git --range <分岐点>..<head>` | head の木のすべてのファイルと、分岐点から head までの各コミットのパッチ |
 
-  `leak-check-secret` も既定の規則と nd-factory の規則で範囲を探すので、Pull Request が `.gitleaks.toml` の許可を書き換えても、既定のブランチの設定で探される
+  head の木は、`git archive <head>` をチェックアウトの外の空のディレクトリへ `tar` で展開して取り出す。取り出したファイルは読むだけで、動かさない。設定のファイルは、検査のコードのコミットのチェックアウトにある `.gitleaks.toml` と `tools/checks/gitleaks-default.toml` を絶対パスで渡す。取り出した木に `.gitleaksignore` があれば、`leak-scan.sh` が終了コード 2 で落とす。Pull Request が `.gitleaks.toml` の許可を書き換えても、取り出した木の設定は読まれない。
+
+  Pull Request のマージコミットではなく head の木を探すのは、マージコミットの木が head の木と base の木を合わせたもので、base の側は main への push の探しが既に探しているためである
 - 採らなかった案: 2 つのワークフローの手順に同じシェルをコピーする（同じ処理を 2 か所に持ち、片方だけを直す食い違いが起きる。Value 13）
-- 採らなかった案: `leak-check-secret` では秘密の正規表現の規則だけで探す（Pull Request が `.gitleaks.toml` に足した許可で nd-factory の規則の当たりを外したとき、マージの前に既定のブランチの設定で探す実行が無くなる）
-- **代償**: スクリプトが 1 本増え、結合のテストの対象が増える
-- 根拠: Value 13 / Value 7（MVV バージョン 3）。同じ処理を 1 か所に置く（Value 13）。既定のブランチの設定で探す実行を残す（Value 7）
+- 採らなかった案: Pull Request の探しを、分岐点から head までのパッチだけにする（今の `dir` の探しが見るファイル全体のうち、範囲のコミットで変わらなかった行が探されない。パッチの前後の行で切れた値も見落としうる）
+- 採らなかった案: `leak-check-secret.yml` では秘密の正規表現の規則だけで探す（Pull Request が `.gitleaks.toml` に足した許可で nd-factory の規則の当たりを外したとき、マージの前に既定のブランチの設定で探す実行が無くなる）
+- **代償**: スクリプトが 1 本増え、結合のテストの対象が増える。Pull Request の探しは、gitleaks を 4 回打つ
+- 根拠: Value 13 / Value 7（MVV バージョン 3）。同じ処理を 1 か所に置く（Value 13）。今の探しと同じ範囲を、既定のブランチの設定で探す（Value 7）
 
 ### 決定 6: 持ち主の操作の手順を今の設定と一緒に読めるよう、運用の文書 `docs/operations/ci-checks.md` を新設し、`AGENTS.md` の行を直す
 
 - **質問**: 秘密を登録して検査を必須にする持ち主の操作（#101 の受け入れ条件 6）を、どこに書くか
 - **選んだ案**: `docs/operations/ci-checks.md` を新設し、次のことを書く。
-  - 参照の検査と漏れの検査で、持ち主が GitHub の設定で行う操作（環境 `leak-scan` とその秘密 `LEAK_CHECK_PATTERN`・検証で要ると分かったときの同じ名前の Dependabot の秘密・変数 `LEAK_CHECK_REQUIRE_PATTERN`・設定の世代の変数 `LEAK_CHECK_GENERATION`・`pull_request_target` を許すイベントポリシー・今ある `REF_CHECK_TERMS` の 2 か所の登録）
-  - 秘密か環境の設定を変えるときに、設定の世代を `0` にしてから変え、変えた後に上げる手順と、検査のコードを変えた後と世代を上げた後に、開いている Pull Request を閉じて開き直して探し直させる手順。探し直しに再実行を使わないこと（決定 7）
-  - それぞれの検査が、どの実行で秘密を受けるかと、残る経路（決定 9 の代償）
+  - 参照の検査と漏れの検査で、持ち主が GitHub の設定で行う操作。検査用の非公開リポジトリの作成と、呼び出しのワークフローの見本の写し・その秘密 `LEAK_CHECK_PATTERN`・変数 `LEAK_CHECK_GENERATION`。公開のリポジトリの環境 `leak-scan` とその秘密 `LEAK_CHECK_PATTERN`・変数 `LEAK_CHECK_REQUIRE_PATTERN`。今ある `REF_CHECK_TERMS` の 2 か所の登録
+  - Dependabot の Pull Request で必要な操作は無く、Dependabot の秘密に `LEAK_CHECK_PATTERN` を登録しないこと（#101 の受け入れ条件 6。決定 2）
+  - NDF の認証に与える非公開リポジトリの権限と、非公開リポジトリに読み取りの権限を持つ人を最小にすること（決定 7）
+  - 秘密を変えるときに、世代を `0` にし、NDF の時間の上限を待ってから変え、変えた後に世代を上げる手順（決定 7）
+  - それぞれの検査が、どの実行で秘密を受け、誰に結果が見えるかと、残る経路（決定 9 の代償）
   - 環境 `leak-scan` と秘密を 1 本目のマージの前に用意し、1 本目のマージで起きた push の `leak-check-push` が実際の値の規則で探したことを確かめてから、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする順序（決定 10）
-  - `leak-check-secret` を必須にする 2 本目の Pull Request へ進む条件と、それまでの間に NDF のマージを起動する前に成功を確かめる手順（決定 10）
-  - `nd-real-value` に当たったときに、手元で `leak-scan-secret.sh --details` を打って場所を引く手順と、失敗が続く外部の Pull Request を閉じる運用（決定 8）
+  - NDF の非公開の検査を有効にする 2 本目の Pull Request へ進む条件と、それまでの間に、NDF のマージを起動する前に持ち主が非公開リポジトリで手で探しを起動して成功を確かめる手順（決定 10）
+  - 当たりが出たときに、非公開の記録で場所を見る手順と、main への push の当たりを手元で `leak-scan-secret.sh --details` を打って引く手順。当たりの理由を公開の Pull Request に書かないこと（決定 8）
+  - 呼び出しのワークフローの見本を変えたら、非公開リポジトリへ写し直すこと（決定 4）
 
-  あわせて、`AGENTS.md` の「秘密とインフラの値を置かない」の行を、秘密を使う探しが `leak-check-secret` と main への push で動くことに直し、運用の文書へリンクする
+  あわせて、`AGENTS.md` の「秘密とインフラの値を置かない」の行を、秘密を使う探しが NDF のマージの直前の非公開の検査と main への push で動くことに直し、運用の文書へリンクする
 - 採らなかった案: #1 の設計（`docs/design-process/issue-1/design.md`）の「人へ残す判断」の行を直す（その文書は経緯の記録である。`docs/design-process/issue-1/README.md` は、検査を足した後はその文書を更新しない、と決めている）
-- **代償**: `docs/operations/` の文書が 1 本増える
+- **代償**: `docs/operations/` の文書が 2 本増える（運用の文書と呼び出しのワークフローの見本）
 - 根拠: Value 7 / Value 13（MVV バージョン 3）。秘密の置き場所と渡し方を持ち主が迷わず行える（Value 7）。手順を 1 か所に書く（Value 13）
 
-### 決定 7: 同じ名前のチェックや、今の範囲・今の設定で探していない結果でマージさせないため、NDF は信頼できる側の実行の結果だけを、出どころ・探した範囲・設定の世代で確かめて受け入れる
+### 決定 7: 前の実行の成功や、秘密の切り替え中の結果でマージさせないため、NDF はマージのたびに非公開の検査を起動し、その 1 回の結果だけを、渡した値と設定の世代で確かめて受け入れる
 
-- **質問**: `leak-check-secret` の結果を、どういう条件で受け入れるか。Pull Request の側の同じ名前のチェックと、前の head・前の base・前の検査の設定の結果をどう退けるか。マージの直前に base が変わったときにどう扱うか
-- **選んだ案**: 結果は、対象の Pull Request の番号・探した head の SHA・探した分岐点・検査のコードのコミット・検査の設定の世代に結び付けて受け入れる。NDF は、対象のリポジトリの `leak-check-secret.yml` の実行を列挙し、各実行に GitHub が紐付けたジョブの名前・状態・結論を合否の正本にする。head のコミットに付いたチェック（check run）からは探し始めない。手順は次のとおり
-  1. ワークフローの実行の一覧の API（`GET /repos/{owner}/{repo}/actions/workflows/leak-check-secret.yml/runs`）を、`event=pull_request_target`・`created=>=<Pull Request を作った日時>`・`per_page=100` で呼ぶ。`{owner}/{repo}` は NDF の設定の対象のリポジトリで、Pull Request の head のリポジトリ（fork）ではない。応答の `Link` ヘッダーの `next` を辿って最後のページまで読む。この API は、絞り込みの指定があると 1,000 件までしか返さない（[workflow runs API](https://docs.github.com/en/rest/actions/workflow-runs)）ので、`total_count` が 1,000 以上なら読み切れないとみなして「未報告」として止める
-  2. 各実行について、実行の `path` が `.github/workflows/leak-check-secret.yml`、`event` が `pull_request_target`、`repository.full_name` が対象のリポジトリであることを確かめる。外れる実行は捨てる
-  3. 残った実行ごとに、ジョブの一覧の API（`GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs`。[workflow jobs API](https://docs.github.com/en/rest/actions/workflow-jobs)）でジョブを取り、`name` が下の表示名の形に合うジョブだけを候補にする。check run を併せて読む場合は、check suite が同じというだけで関連付けず、ジョブの `check_run_url` と check run の URL が一致するものだけを同じ結果として扱う
-  4. 候補のうち、下の条件をすべて満たすジョブを集める。その中で、属する実行の `created_at` が最も新しいジョブを 1 つ選ぶ。`created_at` が同じなら `run_id` の大きいほうを選ぶ。新旧は成否を見る前に決め、古い成功で新しい失敗を覆さない
-  5. 選んだジョブの `status` が `completed` で `conclusion` が `success` なら、`leak-check-secret` が通ったと数える。`completed` でなければ「未報告」として待ち、時間を過ぎたら止める。`success` 以外の結論なら失敗として止める。条件を満たすジョブが 1 つも無ければ「未報告」として待つ
+- **質問**: NDF は、どの実行の結果を、どういう条件で受け入れるか。持ち主が秘密を変えるとき、進行中のマージをどう扱うか。マージの直前に base が変わったときにどう扱うか
+- **選んだ案**: NDF は、マージのたびに非公開リポジトリの探しを起動し、その起動で作られた実行の結果だけを使う。前の実行の成功は、同じ head に対するものでも使わない。そのため、同じ Pull Request の別の実行が未完了か失敗のときに、古い成功が選ばれることは起きない。実行の一覧を検索しないので、一覧の API の 1,000 件の上限にも当たらない。
 
-  手順 4 の条件は次のとおり。
-  - ジョブの表示名にある Pull Request の番号が、対象の Pull Request の番号と一致する。fork の Pull Request では workflow run の `pull_requests` が空になりうるので、番号は表示名で照らす
-  - 表示名にある head の SHA が、今の head の SHA と一致する
-  - 表示名にある base のブランチが、今の base のブランチと一致する
-  - 表示名にある base の SHA から求めた分岐点（探した範囲の起点）が、今の base のブランチの先頭から求めた分岐点と同じか、その祖先である。どちらの分岐点も、GitHub の比較の API（`GET /repos/{owner}/{repo}/compare/{base}...{head}`）の `merge_base_commit` で求め、2 つの分岐点の関係も同じ API で `<探した分岐点>...<今の分岐点>` を比べ、`status` が `identical` か `ahead` であることで確かめる。これを満たせば、今の分岐点から head までのコミットは、すべて探した範囲に入っている
-  - 表示名にある検査のコードのコミットから、今の既定のブランチの先頭までの間に、探しの設定とコード（`.github/workflows/leak-check-secret.yml`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml`）が変わっていない。比較の API で `<検査のコードのコミット>...<既定のブランチの先頭>` を比べ、`status` が `identical` か `ahead` で、`files` にこの 5 つのパスが無いことで確かめる。比較の API の `files` は 300 件で切られる（[compare API](https://docs.github.com/en/rest/commits/commits#compare-two-commits)）ので、300 件あれば変わったとみなす
-  - 表示名にある設定の世代が、リポジトリの変数 `LEAK_CHECK_GENERATION` の今の値と一致し、その値が 1 以上である
-  - ジョブの `run_attempt` が 1 である。再実行（re-run）の結果は、どの世代の表示名を持っていても受け入れない（STD5・STD7）
+  NDF の手順は次のとおり。NDF は、手順 1 で世代を読んだ時から時間の上限 T 以内に、手順 6 のマージの API の呼び出しを終える。T を過ぎたら、マージせずに人へ戻す。T は NDF の設定で持ち、既定の値は NDF の依頼で決める（例えば 30 分）。
+  1. 非公開リポジトリの変数 `LEAK_CHECK_GENERATION` を、変数の取得の API（`GET /repos/{owner}/{repo}/actions/variables/LEAK_CHECK_GENERATION`。STD9）で読む。`0` か空か、読めなければ、マージせずに人へ戻す
+  2. Pull Request の番号・head の SHA・base のブランチと先頭の SHA と、公開のリポジトリの main の先頭の SHA を読む
+  3. 呼び出しのワークフローを、ワークフローの起動の API で、`ref` を非公開リポジトリの既定のブランチにして起動する。入力は、番号・head の SHA・base の先頭の SHA・main の先頭の SHA（検査のコードのコミット）・手順 1 の世代である。応答の `workflow_run_id`（STD9）を、この起動の実行として控える。応答に実行の ID が無ければ、マージせずに人へ戻す
+  4. 控えた実行のジョブを、ジョブの一覧の API（`GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs`。STD7）で読む。実行の `run_attempt` が 1 で、ジョブの表示名が手順 3 で渡した 5 つの値と一致することを確かめる。`status` が `completed` になるまで待つ。`conclusion` が `success` でなければ、マージせずに人へ戻す。人へ戻す知らせには、非公開リポジトリの実行の URL だけを書き、結果の中身を公開の場所に書かない
+  5. 世代・Pull Request・base・main を読み直し、次の条件をすべて確かめる。外れていれば、マージせずに人へ戻す
+     - 世代が手順 1 と同じである
+     - head の SHA が手順 2 と同じである
+     - base のブランチが手順 2 と同じである
+     - 手順 3 で渡した base の先頭から求めた分岐点（探した範囲の起点）が、今の base の先頭から求めた分岐点と同じか、その祖先である。どちらの分岐点も、GitHub の比較の API（`GET /repos/{owner}/{repo}/compare/{base}...{head}`）の `merge_base_commit` で求め、2 つの分岐点の関係も同じ API で `<探した分岐点>...<今の分岐点>` を比べ、`status` が `identical` か `ahead` であることで確かめる
+     - 検査のコードのコミットから今の main の先頭までの間に、探しの設定とコード（`.github/workflows/leak-check-secret.yml`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml`）が変わっていない。比較の API で `<検査のコードのコミット>...<main の先頭>` を比べ、`status` が `identical` か `ahead` で、`files` にこの 5 つのパスが無いことで確かめる。`files` は 300 件で切られる（compare API）ので、300 件あれば変わったとみなす。呼び出しのワークフローは `leak-check-secret.yml@main` を呼ぶので、起動の後に main のこのファイルが変わった場合も、この比べ方で退ける
+     - 手順 1 から T を過ぎていない
+  6. 確かめた head の SHA を `sha` に渡してマージの API を呼ぶ。head が変わっていれば GitHub がマージを断る。API の呼び出しには、T の残りを超えない時間切れを掛ける
+  7. マージの後に Pull Request を読み、マージ先のブランチが確かめた base のブランチと同じかを確かめる。マージでできたコミット（`merge_commit_sha`）の最初の親を読む。squash でも、このコミットの最初の親は、マージが成り立った時の base の先頭である。親が手順 5 で読んだ base の先頭と違えば、その親と head から分岐点を求め直し、探した分岐点が同じかその祖先であるかを、手順 5 と同じ比べ方で確かめる
+  8. 世代をもう一度読み、手順 1 と同じかを確かめる
+  9. 手順 7 か 8 で外れれば、人へ戻す。人へ戻す知らせには、マージ先のブランチ・マージでできたコミット・探していない範囲（求め直した分岐点から head までのうち、探した範囲に入っていないコミット）か、世代が変わったことを書く
 
-  表示名は `leak-check-secret (#<番号> head <head の SHA> / base <base のブランチ>@<base の SHA> / code <検査のコードのコミット> / gen <世代>)` の形で、信頼できる側のワークフローが event の `pull_request.number`・`pull_request.head.sha`・`pull_request.base.ref`・`pull_request.base.sha`、実行したワークフローのコミット `github.workflow_sha`、変数 `LEAK_CHECK_GENERATION` から組む。ワークフローは、分岐点を同じ `pull_request.base.sha` と head から求めるので、表示名の base の SHA と探した範囲は食い違わない。変数が空か `0` なら、ワークフローは探す前に失敗する
+  ジョブの表示名は `leak-check-secret (#<番号> head <head の SHA> / base <base の SHA> / code <検査のコードのコミット> / gen <世代>)` の形で、`leak-check-secret.yml` が入力から組む。呼び出しのジョブを経るので、ジョブの一覧の API では呼び出しのジョブの名前が前に付く。ワークフローは、分岐点を同じ入力の base の SHA と head から求めるので、表示名の base の SHA と探した範囲は食い違わない。ワークフローは入力の head の SHA と取り込んだ `refs/pull/<番号>/head` が一致しなければ失敗するので、作者が起動の後に push すると、その実行は失敗し、NDF はマージしない
 
-  **検査の結果は、実行が実際に使った検査のコードと秘密に結び付ける。** 検査のコードの変更は、表示名の `code` の比較で NDF が自動で見分ける。探しの設定とコードを変える Pull Request を main にマージすると、それより前の実行の結果は、持ち主の操作を待たずに失効する。秘密の変更は GitHub の記録から見分けられないので、持ち主が設定の世代（`LEAK_CHECK_GENERATION`）で表す。設定の世代は持ち主が管理する整数のリポジトリの変数で、秘密の値に由来しないので公開してよい。`0` は「切り替え中」を表し、NDF は変数が `0` か空の間、どの Pull Request もマージせずに人へ戻す。
+  **秘密を変えるときは、進行中のマージを終わらせるか止めてから変え、新しいマージは世代 `0` で締め出す。** 秘密の変更は GitHub の記録から見分けられないので、持ち主が非公開リポジトリの変数 `LEAK_CHECK_GENERATION` で表す。世代は持ち主が管理する整数で、秘密の値に由来しない。`0` は「切り替え中」を表す。持ち主は、非公開リポジトリの秘密 `LEAK_CHECK_PATTERN` の値か、呼び出しのワークフローを変えるときに、次の順で切り替える。
+  1. 今の世代の値を控え、変数を `0` にする。この後に手順 1 か 5 か 8 を通る NDF は、マージしないか人へ戻す。呼び出しのワークフローも、入力の世代と変数が違うので、探す前に失敗する
+  2. 変数を `0` にした時から、NDF の時間の上限 T が過ぎるのを待つ。`0` にする前に手順 1 を通った NDF は、T 以内にマージを終えるか、T を過ぎて止まる。待つ間に終わったマージは、変える前の秘密で探した結果によるもので、その時点で正しい
+  3. 秘密か呼び出しのワークフローを変える
+  4. 変数を、控えた値に 1 を足した値にする。この後に手順 1 を通る NDF だけが、新しい世代で探す
 
-  持ち主は、次のどれかを変えるときに、下の順で世代を切り替える。
-  - 環境 `leak-scan` の秘密 `LEAK_CHECK_PATTERN` の値
-  - Dependabot の秘密 `LEAK_CHECK_PATTERN` の登録・値の変更・削除
-  - 環境 `leak-scan` の設定（使えるブランチの条件など）
+  公開のリポジトリの環境 `leak-scan` の秘密（main への push の探しだけが使う）を変えるときは、この切り替えは要らない。main への push の探しは、push のたびに今の秘密で動き、マージを決めないためである。
 
-  1. 今の世代の値を控え、変数を `0` にする。この時点から、NDF はマージを止め、新しく始まる実行は探す前に失敗する
-  2. 秘密か環境の設定を変える
-  3. 変数を、控えた値に 1 を足した値にする。この後に始まる実行だけが、新しい世代の表示名と変えた後の秘密を持つ
-  4. 開いているすべての Pull Request を閉じて開き直し、新しい世代で探し直させる
+  **NDF の認証は、非公開リポジトリに対して、実行の起動・実行とジョブの読み取り・変数の読み取りの権限を持つ必要がある。** ワークフローの起動の API と変数の取得の API は、そのリポジトリの協力者（collaborator）としての権限を求める。個人のアクセストークン（classic）なら `repo` の範囲が要る（STD9）。非公開リポジトリの実行の記録を読むにも、読み取りの権限が要る（STD10）。NDF がマージに使う今の認証で、これらの API が呼べることを、2 本目の Pull Request の前に確かめる（決定 10 の手順 5）。認証に権限を足すか、非公開リポジトリの協力者を足すのは、認証と認可の変更（C2）なので、人の承認を受けてから行う
 
-  切り替え中に始まった実行は世代 `0` で失敗し、切り替えの前に始まった実行は古い世代を持つので、どちらも新しい世代の結果として数えられない。
+  **NDF のマージは、検査したマージ先と範囲をマージが成り立つ時まで固定できない。保証するのは、マージの直前の読み直しで条件を外れた結果ではマージしないことと、読み直しの後に base が変わってマージされたことをマージの後に必ず検出して人へ戻すことである。** GitHub のマージの API は、head の SHA の指定（`sha`）は受けるが、base のブランチや base の先頭の指定は受けない（STD6）。手順 5 と 6 の間に base のブランチを変えられるか、base の先頭を書き換えられると、検査していないコミットを含んだままマージされうる。マージは取り消せないので、NDF にできるのは手順 7・9 での検出までである。base の先頭が head と関わらないコミットで進んだだけなら、分岐点は変わらず、手順 7 で受け入れる。別の Pull Request が対象の head の祖先を base に取り込むと、分岐点は head の側へ進む。そのときは今の範囲が探した範囲より狭くなるだけなので、受け入れる。
 
-  結果が条件を外れたとき（失効）の扱いと、探し直しを起こすきっかけは次のとおり。
-
-  | 外れた条件 | 起きる場面 | 探し直しのきっかけ |
-  | --- | --- | --- |
-  | head の SHA | 作者が新しいコミットを push した | GitHub が `synchronize` で自動で起こす |
-  | base のブランチ | マージ先を変えた | GitHub が `edited` で自動で起こす |
-  | 分岐点 | base のブランチが書き換えられ（force push など）、今の分岐点が探した範囲の外へ動いた | 自動では起きない。NDF は失効として止め、人へ戻す。持ち主が Pull Request を閉じて開き直し、`reopened` で探し直させる |
-  | 検査のコード | 探しの設定とコードを変える Pull Request が main にマージされた | 自動では起きない。NDF は失効として止め、人へ戻す。持ち主は、開いているすべての Pull Request を閉じて開き直す |
-  | 設定の世代 | 持ち主が世代を切り替えた | 自動では起きない。NDF は失効として止め、人へ戻す。持ち主は切り替えの手順 4 で、開いているすべての Pull Request を閉じて開き直す |
-  | 再実行 | 誰かが前の実行を再実行した | 受け入れない。持ち主が Pull Request を閉じて開き直す |
-
-  base のブランチに、Pull Request とは関わらないコミットが増えるだけなら、分岐点は変わらない。別の Pull Request が対象の head の祖先を base に取り込むと、分岐点は head の側へ進む。そのときは今の範囲が探した範囲より狭くなるだけなので、結果は失効させない。再実行の結果を受け入れないのは、再実行が元の event と既定のブランチの元のコミットで動き、今の base・今の検査のコードで探したことにならないためである（STD5）
-
-  上の手順は、結果が付くコミットに頼らない。結果が付くのが既定のブランチの最新のコミットでも、Pull Request の head でも、同じ手順で引ける。Pull Request の側のワークフローは `pull_request_target` で起動されず、既定のブランチの `leak-check-secret.yml` も書き換えられないので、この条件を満たす結果を作れない
-
-  **NDF のマージは、検査したマージ先と範囲をマージが成り立つ時まで固定できない。保証するのは、マージの直前の読み直しで条件を外れた結果ではマージしないことと、読み直しの後に base が変わってマージされたことをマージの後に必ず検出して人へ戻すことである。** GitHub のマージの API は、head の SHA の指定（`sha`）は受けるが、base のブランチや base の先頭の指定は受けない（STD6）。そのため、NDF は次の順に進める。
-  1. マージの API を呼ぶ直前に、Pull Request の head の SHA・base のブランチ・base の先頭を読み直し、上の条件をすべて確かめ直す。外れていれば、マージしない
-  2. 確かめた head の SHA を `sha` に渡してマージの API を呼ぶ。head が変わっていれば GitHub がマージを断る
-  3. マージの後に Pull Request を読み、マージ先のブランチが確かめた base のブランチと同じかを確かめる
-  4. マージでできたコミット（`merge_commit_sha`）の最初の親を読む。squash でも、このコミットの最初の親は、マージが成り立った時の base の先頭である。親が手順 1 で読んだ base の先頭と違えば、その親と head から分岐点を求め直し、探した分岐点が同じかその祖先であるかを、上の条件と同じ比べ方で確かめる
-  5. 手順 3 か 4 で外れれば、止めて人へ戻す。人へ戻す知らせには、マージ先のブランチ・マージでできたコミット・探していない範囲（求め直した分岐点から head までのうち、探した範囲に入っていないコミット）を書く
-
-  手順 1 と 2 の間に base のブランチを変えられるか、base の先頭を書き換えられると、検査していないコミットを含んだままマージされうる。マージは取り消せないので、NDF にできるのは手順 3〜5 での検出までである。base のブランチの名前だけでなく、同じ名前の base の先頭だけが変わった場合も、手順 4 で検出する。base の先頭が head と関わらないコミットで進んだだけなら、分岐点は変わらず、手順 4 で受け入れる。
-
-  検出した後は、持ち主が手元で `leak-scan-secret.sh --details` を探していない範囲に打ち、当たりがあればマージを戻すかを判断する。base を変えられるのは、Pull Request の作者と書き込みの権限を持つ人である。マージ先が main でなければ、そのコミットが main に入るには、そのブランチから main への Pull Request を通るか、main への push を通る。前者はマージの前に `leak-check-secret` が探し、後者は main に入った後に `leak-check-push` が探す。#96 の受け入れ条件 5 は前の head の結果でマージできないことだけを求めている。この設計は条件を base の変更へ広げたうえで、防げない間を残すので、保証の範囲を要求の変更として承認を受ける（人へ残す判断）
-- 採らなかった案: `required_checks` に名前だけで足す（今の NDF の読み方では、Pull Request の作者が足した同じ名前のジョブの結果が、最も新しい 1 件として数えられる。文脈と制約の 2・3 行目）
-- 採らなかった案: 信頼できる側のジョブが commit status か check run を Pull Request の head に書く（`statuses: write` か `checks: write` の権限が要り、#96 の受け入れ条件 4 に反する）
-- 採らなかった案: GitHub のルールセットで必須のチェックの発行元を GitHub Actions に限る（Pull Request の側のワークフローも GitHub Actions が出すので、区別できない）
-- **代償**: 持ち主が秘密か環境の設定を変えるときは、世代を `0` にしてから変え、変えた後に世代を上げ、開いている Pull Request を閉じて開き直す。切り替えの間は NDF のマージが止まる。世代の切り替えを忘れて秘密だけを変えると、前の秘密で成功した結果が通る。検査のコードを変えた後も、開いている Pull Request を閉じて開き直す手間がある。NDF のマージの経路では、マージの直前の読み直しから API の呼び出しまでの間の base のブランチと先頭の変更は止められず、マージの後に検出して人へ戻すことしかできない。NDF（devbasex/ai-plugins）に、必須のチェックを出どころで確かめる機能が要る。依頼の起票は他のリポジトリへの公開（C5）なので、設計の承認の後に人の承認を得て出す。機能が入るまで、`leak-check-secret` を必須のチェックにしない（決定 10）。その間、実際の値の規則での探しはマージを止めない（今の fork の Pull Request と同じ状態が、同じリポジトリのブランチにも広がる）
+  検出した後は、持ち主が手元で `leak-scan-secret.sh --details` を探していない範囲に打ち、当たりがあればマージを戻すかを判断する。base を変えられるのは、Pull Request の作者と書き込みの権限を持つ人である。マージ先が main でなければ、そのコミットが main に入るには、そのブランチから main への Pull Request を通るか、main への push を通る。前者はマージの前に NDF の非公開の検査が探し、後者は main に入った後に `leak-check-push` が探す。#96 の受け入れ条件 5 は前の head の結果でマージできないことだけを求めている。この設計は条件を base の変更へ広げたうえで、防げない間を残すので、保証の範囲を要求の変更として承認を受ける（人へ残す判断）
+- 採らなかった案: Pull Request ごとに自動で探し、NDF は実行の一覧から最も新しい結果を選ぶ（同じ Pull Request の新しい実行がキューに入った直後や、ジョブを作る前に失敗した実行は、ジョブの名前から Pull Request と結び付けられず、古い成功が選ばれる。一覧の API は絞り込みの指定があると 1,000 件までしか返さず、長く開いている Pull Request の最新の実行を確かめられなくなる。STD7）
+- 採らなかった案: 実行の一覧を検索し、入力に含めた相関の ID で実行を見分ける（起動の API が実行の ID を返す（STD9）ので、検索は要らない）
+- 採らなかった案: `required_checks` に名前だけで足す（今の NDF の読み方では、Pull Request の作者が足した同じ名前のジョブの結果が、最も新しい 1 件として数えられる。文脈と制約の 7 行目）
+- 採らなかった案: 世代を `0` にした直後に秘密を変える（`0` にする前に手順 5 を通った NDF は、その後のマージの API の呼び出しを止められず、変える前の秘密の結果でマージする。変えた後もその結果でマージが続きうる）
+- **代償**: マージのたびに非公開の検査を 1 回待つので、NDF のマージが探しの時間だけ遅れる。持ち主が秘密を変えるときは、T を待つ間、NDF のマージが止まる。世代の切り替えを忘れて秘密だけを変えると、変える前に起動した探しの結果で、変えた後にマージされうる。NDF のマージの経路では、マージの直前の読み直しから API の呼び出しまでの間の base のブランチと先頭の変更は止められず、マージの後に検出して人へ戻すことしかできない。NDF（devbasex/ai-plugins）に、この機能が要る。依頼の起票は他のリポジトリへの公開（C5）なので、設計の承認の後に人の承認を得て出す。機能が入るまで、NDF の非公開の検査を有効にしない（決定 10）
 - 作り方: 自前で作る（NDF の機能として）
-- 根拠: Value 7（MVV バージョン 3）。検査を名前の偽装や古い結果で迂回させない。外部の調査は STD1・STD4・STD5・STD6・STD7
+- 根拠: Value 7（MVV バージョン 3）。検査を名前の偽装・古い結果・切り替え中の結果で迂回させない。外部の調査は STD5・STD6・STD7・STD9・STD10
 
-### 決定 8: 公開の Pull Request から実際の値の正規表現の中身を探らせないため、`nd-real-value` の当たりは件数だけを出し、探しは誰の Pull Request でも承認なしに動かす
+### 決定 8: 実際の値の正規表現に当たる語を公開の記録から確かめさせないため、Pull Request の探しの結果は非公開の記録にだけ出し、公開の main への push の探しは件数だけを出す
 
-- **質問**: 誰でも出せる fork の Pull Request で秘密の正規表現を使って探すとき、結果のどこまでを公開の記録・チェック・通知に出すか。探しを起こせる人を限るか
-- **選んだ案**: `leak-scan-secret.sh` は `leak-scan.sh` の標準出力を記録に出さず、`--report` の JSON を探す木の外に受けて整形する。`nd-real-value` の当たりは件数だけを出し、ファイル・行・コミットを出さない。既定の規則と nd-factory の規則（中身は公開の `.gitleaks.toml` と `gitleaks-default.toml`）の当たりは、今の形で出す。CI の記録・チェックの結論・GitHub の通知に出るのは、成功か失敗かと、この件数だけである。持ち主は手元で秘密を渡して `leak-scan-secret.sh --details` を打ち、当たりの場所を引く。探しは、fork・同じリポジトリのブランチ・Dependabot のどの Pull Request でも、承認なしに起動する
-- 採らなかった案: 当たりを今の形（規則・ファイル・行・コミット）で出す（候補の語を 1 行ずつ並べたコミットを含む Pull Request を 1 本出すだけで、どの行が当たったかから正規表現に含まれる語を読み取れる）
-- 採らなかった案: 必須のレビュアーを置いた環境で、外部の作者の Pull Request の探しを人の承認の後にだけ動かす（Dependabot と同じリポジトリのブランチの Pull Request も含めて、すべての Pull Request が人を待つ。外部の作者だけを分けるには起動した人で分ける条件が要り、決定 2 と #101 の受け入れ条件 4 に反する）
-- **代償**: 1 本の Pull Request で「当たりがあるか」と件数は分かる。候補の語を 1 本ずつ Pull Request にして出せば、推した語が正規表現に当たるかを確かめられる。1 本で試せる語の数は件数から推せる範囲に限られ、Pull Request は持ち主に見える。この危険は残し、持ち主が失敗の続く外部の Pull Request を見たら閉じる運用を運用の文書に書く。当たりの場所を CI で引けなくなり、持ち主が手元で打つ手間が増える。#96 の前提 1 と非機能の条件（規則・ファイル・行・コミットで出す）から外れるので、要求の変更として承認を受ける
-- 根拠: Value 7（MVV バージョン 3）。実際の値を CI の記録と公開の Pull Request から読ませない
+- **質問**: 秘密の正規表現を使って探すとき、結果のどこまでを、誰に見える場所へ出すか
+- **選んだ案**: 出す場所ごとに次のとおりにする。どちらも、実際の値の正規表現と当たった値は出さない
+  - Pull Request の探し（非公開リポジトリの実行）: 当たりを今の `leak-scan.sh` の形（規則・ファイル・行・コミット）で出す。記録は非公開リポジトリに読み取りの権限を持つ人と NDF にしか見えない。NDF は、成否・件数・当たりの場所を、公開の Pull Request のコメント・チェック・通知に書かない
+  - main への push の探し（公開のリポジトリの `leak-check-push`）: `leak-scan-secret.sh` は `leak-scan.sh` の標準出力を記録に出さず、`--report` の JSON を探す木の外に受けて整形する。`nd-real-value` の当たりは件数だけを出し、ファイル・行・コミットを出さない。当たりが 0 件でも、`nd-real-value: 0 件` の行を必ず出す。持ち主が決定 10 の手順 4 で、実際の値の規則が走ったことを記録から確かめるためである。既定の規則と nd-factory の規則（中身は公開の `.gitleaks.toml` と `gitleaks-default.toml`）の当たりは、今の形で出す
 
-### 決定 9: 同じリポジトリに書き込める人のレビュー前の実行からも秘密を読ませないため、実際の値の正規表現を、main の実行だけが使える環境の秘密に置く
+  main への push の結果は公開されるが、main の中身はマージを経て入るので、外部の作者が候補の語を入れて試すことはできない。main の中身が当たるなら、その値は既に公開されている。当たった行の場所を出すと、公開の main のどの行が実際の値かが分かるので、件数だけにする
+- 採らなかった案: 公開のリポジトリで Pull Request を探し、`nd-real-value` の当たりを件数だけで出す（件数を伏せても、成否から候補の語が当たるかが分かる。決定 1）
+- 採らなかった案: main への push の探しでも、当たりを今の形（規則・ファイル・行・コミット）で出す（公開の main のどの行が実際の値の正規表現に当たるかが、誰にでも分かる）
+- 採らなかった案: 当たりが 0 件のときは件数の行を出さない（当たりの無い main では、実際の値の規則が走ったことを記録から確かめられない）
+- **代償**: Pull Request の作者は、実際の値の規則の当たりを見られない。持ち主が非公開の記録を見て対応する。main への push の当たりの場所を CI で引けなくなり、持ち主が手元で打つ手間が増える。main への push の探しについて、#96 の前提 1 と非機能の条件（規則・ファイル・行・コミットで出す）から外れるので、要求の変更として承認を受ける
+- 根拠: Value 7（MVV バージョン 3）。実際の値と、その手がかりを公開の記録に置かない
+
+### 決定 9: 同じリポジトリに書き込める人のレビュー前の実行からも秘密を読ませないため、Pull Request の探しの秘密は非公開リポジトリに、main への push の探しの秘密は main の実行だけが使える環境に置く
 
 - **質問**: 書き込みの権限を持つ人は、`pull_request` のワークフローを Pull Request の中で書き換えて、Actions の秘密を読む手順を足せる。この経路を塞ぐか
-- **選んだ案**: 持ち主が環境 `leak-scan` を作り、使えるブランチ（deployment branch policy）を `main` だけにして、`LEAK_CHECK_PATTERN` をその環境の秘密に登録する。リポジトリの Actions の秘密には置かない（2026-11-24 の時点で未登録。登録していれば消す）。`leak-check-secret` のジョブと、main への push の `leak-check-push` のジョブだけが `environment: leak-scan` を持つ。`pull_request_target` の実行は既定のブランチの文脈で動くので、環境を使える。Pull Request の側の実行は Pull Request のマージの参照（`refs/pull/<番号>/merge`）で動くので、ワークフローを書き換えて環境を指しても使えず、秘密を受けられない。Dependabot が起動した `pull_request_target` の実行に、環境の秘密が渡るか、同じ名前の Dependabot の秘密が渡るかは、文書から決められず、まだ推定にとどまる。検証用のリポジトリで確かめ、その結果で Dependabot の秘密に登録するかを決める（決定 2・10）
+- **選んだ案**: 実際の値の正規表現を、次の 2 か所に置く。公開のリポジトリの Actions の秘密には置かない（2026-11-24 の時点で未登録。登録していれば消す）。Dependabot の秘密にも置かない（決定 2）
+  - 検査用の非公開リポジトリの Actions の秘密 `LEAK_CHECK_PATTERN`: Pull Request の探しが使う。公開のリポジトリのどの実行からも読めない
+  - 公開のリポジトリの環境 `leak-scan` の秘密 `LEAK_CHECK_PATTERN`: 持ち主が環境を作り、使えるブランチ（deployment branch policy）を `main` だけにする。main への push の `leak-check-push` だけが `environment: leak-scan` を持つ。Pull Request の側の実行は Pull Request のマージの参照（`refs/pull/<番号>/merge`）で動くので、ワークフローを書き換えて環境を指しても使えず、秘密を受けられない
 - 採らなかった案: この経路を範囲の外にする（#96 の目的の「秘密の正規表現が Pull Request の側のコードに渡らない」と両立しない）
-- 採らなかった案: 必須のレビュアーを置いた環境にする（main への push のたびに人を待つ。決定 8 の採らなかった案と同じ理由）
-- **代償**: 次の経路は残る。運用の文書に書く
-  - main に直に push できる人は、main の上のワークフローを書き換えて秘密を読める。main にはブランチの保護が無いので、書き込みの権限を持つ人が当たる（決定 11）
-  - Dependabot の秘密に登録した場合（決定 2）だけ、次の経路が残る。Dependabot の秘密は環境に置けない。Dependabot が起動した `pull_request` の実行では、Dependabot の Pull Request のコード（更新した依存の `npm ci` を含む）が Dependabot の秘密を読める。今の `REF_CHECK_TERMS` と同じ経路である。依存の乗っ取りで秘密の正規表現が漏れたときは、持ち主が正規表現を見直す
-  - 環境の使えるブランチの条件が `pull_request_target` の実行を通し、Pull Request の側の実行を通さないことは、文書を読んでの推定である。検証用のリポジトリで確かめる（決定 10）
+- 採らなかった案: main への push の探しも非公開リポジトリで行い、秘密を 1 か所にする（push のたびに非公開リポジトリを起動する仕組みには、公開のリポジトリに非公開リポジトリを起動できる資格情報が要る。今の main への push の探しの振る舞いも変わる）
+- **代償**: 持ち主は同じ値を 2 か所に登録し、値を変えるときも 2 か所を直す。次の経路は残る。運用の文書に書く
+  - main に直に push できる人は、main の上のワークフローを書き換えて環境の秘密を読める。main にはブランチの保護が無いので、書き込みの権限を持つ人が当たる（決定 11）
+  - 非公開リポジトリに書き込みの権限を持つ人は、呼び出しのワークフローを書き換えて秘密を読める。持ち主はその人数を最小にする
+  - 環境の使えるブランチの条件が Pull Request の側の実行を通さないことは、文書を読んでの推定である。検証用のリポジトリで確かめる（決定 10）
 - 根拠: Value 7（MVV バージョン 3）。秘密を Pull Request のコードから隔てる
 
-### 決定 10: 実装の Pull Request を NDF でマージできるよう、導入を 2 本の Pull Request に分け、必須のチェックへの追加は確認の後にする
+### 決定 10: 実装の Pull Request を NDF でマージできるよう、導入を 2 本の Pull Request に分け、NDF の非公開の検査を有効にするのは確認の後にする
 
-- **質問**: 新しいワークフローは、それを足す Pull Request 自身では起動されない（`pull_request_target` は既定のブランチのワークフローを動かすため）。`required_checks` をいつ変え、今の `leak-check` からいつ切り替えるか
+- **質問**: NDF の非公開の検査はまだ無く、新しいワークフローは 1 本目のマージまで main に無い。NDF の設定をいつ変え、今の `leak-check` からいつ切り替えるか
 - **選んだ案**: 次の順に進める
-  1. 持ち主が、作り物の値だけを使う検証用の公開リポジトリで、この設計のワークフローを動かして確かめる。確かめる項目: fork の Pull Request の head が取り込めること、結果がどのコミットに付くか、決定 7 の条件で正しい head の成功・失敗・未報告を区別できること、成功の後に base を書き換える・設定の世代を切り替える・検査のコードを変える・マージ先を変えると結果が失効すること、再実行の結果を退けられること、閉じて開き直すと今の main の設定で探し直すこと、Pull Request の側の同じ名前のジョブを退けられること、base を変えると探し直すこと、環境の秘密を Pull Request の側の実行が受けられないこと（決定 9）、Dependabot が起動した `pull_request_target` の実行に環境の秘密と Dependabot の秘密のどちらが渡り、同じ名前のときどちらが優先されるか（決定 2 の手順で、2 つの秘密に別の作り物の値を入れて見分ける）
-  2. 1 本目をマージする前に、持ち主が環境 `leak-scan`（使えるブランチは main だけ）とその秘密 `LEAK_CHECK_PATTERN`、変数 `LEAK_CHECK_GENERATION`（値は `1`）、`pull_request_target` を許すイベントポリシーを設定する。手順 1 で Dependabot の秘密が要ると分かったときだけ、承認を受けて同じ名前の Dependabot の秘密も登録する（決定 2）。1 本目のマージで起きる main への push で、`leak-check-push` が最初から実際の値の規則で探せるようにするためである。この時点では環境を使うジョブがまだ無いので、環境の秘密を読む実行は無い。変数 `LEAK_CHECK_REQUIRE_PATTERN` は、この時点では `1` にしない。今の `leak-check` はリポジトリの Actions の秘密を読み、環境の秘密を読めないので、`1` にすると 1 本目の Pull Request 自身の `leak-check` が落ちる
-  3. 実装の Pull Request（1 本目）で、ワークフロー・スクリプト・`ci.yml` の変更・テスト・文書を入れる。`.ndf/project.json` の `required_checks` と `ci.workflows` は変えない。Pull Request の側の `leak-check` は、このマージから秘密を受けなくなる。必須のチェックは今の 7 つのままなので、NDF でマージできる
-  4. 1 本目のマージで起きた main への push の `leak-check-push` について、`dir` と `git` の両方の探しで `nd-real-value` の件数の行が記録に出ており、「秘密が空なので `.gitleaks.toml` だけで探す」行が出ていないことを、持ち主が実行の記録で確かめる。確かめられなければ、持ち主が手順 2 の設定を直し、手元で秘密を渡して `leak-scan-secret.sh git` を打ち、main の到達できるすべてのコミットを探す。確かめた後に、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする
-  5. 1 本目のマージの後の Pull Request で、`leak-check-secret` が今の head を探して成功したことを、持ち主が実行の記録で確かめる。最初の Dependabot の Pull Request でも、`leak-check-secret` が実際の値の規則で探して成功したことを確かめる（秘密が空なら必ず落ちるので、成功は秘密が渡った証拠になる。決定 3）
-  6. NDF に決定 7 の機能が入った後、2 本目の Pull Request で `required_checks` に `leak-check-secret` を出どころの条件つきで足し、`ci.workflows` に新しいワークフローを足す。CI の定義のテストの、必須でなくてよいジョブの一覧から `leak-check-secret` を外す。2 本目の Pull Request では、1 本目で入ったワークフローが起動するので、チェックの欠けで止まらない
-- 2 本目へ進む条件: 手順 1・4・5 の確認が済み、手順 2 の設定があり、手順 4 の後に変数 `LEAK_CHECK_REQUIRE_PATTERN` が `1` で、NDF が決定 7 の条件で結果を受け入れられる。手順 5 の確認には、最初の Dependabot の Pull Request で `leak-check-secret` が実際の値の規則で成功したことを含む。1 つでも欠ければ 2 本目を出さない
-- 採らなかった案: 実装の Pull Request で `required_checks` も変える（その Pull Request では `leak-check-secret` が起動されず、NDF のマージがチェックの欠けで止まる）
+  1. 持ち主が、作り物の値だけを使う検証用の公開リポジトリと検証用の非公開リポジトリで、この設計のワークフローを動かして確かめる。確かめる項目: 非公開リポジトリから公開のリポジトリの再利用できるワークフローを呼べ、秘密が名前で渡ること。非公開リポジトリの実行の記録が、権限の無い利用者から画面でも API でも見えないこと。起動の API が実行の ID を返すこと。fork の Pull Request の `refs/pull/<番号>/head` を、資格情報を残さないチェックアウトから取り込めること。head の木を取り出して `dir` で探し、`.gitleaksignore` を足した Pull Request が落ちること。決定 7 の手順で、成功・失敗・未完了を区別し、起動の後の push・base の書き換え・世代の切り替え・検査のコードの変更・マージ先の変更・再実行の結果を退けられること。呼び出しのワークフローが、世代が `0` か入力と違うときに探す前に失敗すること。環境 `leak-scan` の秘密を Pull Request の側の実行が受けられないこと（決定 9）
+  2. 1 本目をマージする前に、持ち主が公開のリポジトリの環境 `leak-scan`（使えるブランチは main だけ）とその秘密 `LEAK_CHECK_PATTERN` を設定する。1 本目のマージで起きる main への push で、`leak-check-push` が最初から実際の値の規則で探せるようにするためである。この時点では環境を使うジョブがまだ無いので、環境の秘密を読む実行は無い。変数 `LEAK_CHECK_REQUIRE_PATTERN` は、この時点では `1` にしない。今の `leak-check` はリポジトリの Actions の秘密を読み、環境の秘密を読めないので、`1` にすると 1 本目の Pull Request 自身の `leak-check` が落ちる
+  3. 実装の Pull Request（1 本目）で、ワークフロー・呼び出しのワークフローの見本・スクリプト・`ci.yml` の変更・テスト・文書を入れる。`.ndf/project.json` は変えない。Pull Request の側の `leak-check` は、このマージから秘密を受けなくなる。必須のチェックは今の 7 つのままなので、NDF でマージできる
+  4. 1 本目のマージで起きた main への push の `leak-check-push` について、`dir` と `git` の両方の探しで `nd-real-value` の件数の行（当たりが無ければ `nd-real-value: 0 件`）が記録に出ており、「秘密が空なので `.gitleaks.toml` だけで探す」行が出ていないことを、持ち主が実行の記録で確かめる。確かめられなければ、持ち主が手順 2 の設定を直し、手元で秘密を渡して `leak-scan-secret.sh git` を打ち、main の到達できるすべてのコミットを探す。確かめた後に、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする
+  5. 持ち主が検査用の非公開リポジトリを作り、呼び出しのワークフローの見本を写し、秘密 `LEAK_CHECK_PATTERN` と変数 `LEAK_CHECK_GENERATION`（値は `1`）を登録する。NDF がマージに使う今の認証で、非公開リポジトリの変数の取得・ワークフローの起動・ジョブの読み取りの API が呼べることを確かめる。呼べなければ、人の承認を受けてから権限を足す（C2）。開いている Pull Request の 1 本で、持ち主が手で探しを起動し、今の head を探して成功したことを非公開の記録で確かめる
+  6. NDF に決定 7 の機能が入った後、2 本目の Pull Request で、`.ndf/project.json` に NDF の非公開の検査を有効にする項目を足す。2 本目の Pull Request 自身も、NDF のマージの直前に非公開の検査を通る
+- 2 本目へ進む条件: 手順 1・4・5 の確認が済み、手順 2 の設定があり、手順 4 の後に変数 `LEAK_CHECK_REQUIRE_PATTERN` が `1` で、NDF が決定 7 の手順で結果を受け入れられる。1 つでも欠ければ 2 本目を出さない。Dependabot の Pull Request での確認は、2 本目へ進む条件にしない。このリポジトリは今 Dependabot の Pull Request を作らず、有効にするのは範囲の外である。非公開の検査は Pull Request を誰が作ったかで振る舞いが変わらない（決定 2）ので、Dependabot を有効にした後に、最初の Dependabot の Pull Request で確かめる（リリース後の確認）
+- 採らなかった案: 実装の Pull Request で `.ndf/project.json` も変える（NDF に機能が入る前に有効にすると、NDF のマージが止まる）
 - 採らなかった案: 2 本目まで、Pull Request の側の `leak-check` で秘密を受け続ける（その間、同じリポジトリのブランチの Pull Request のコードが秘密の正規表現を読める。#96 が塞ぐ経路を残す）
-- **代償**: 1 本目のマージから 2 本目のマージまで、実際の値の規則での探しはマージを止めない。その間は、持ち主が NDF のマージを起動する前に、対象の Pull Request の今の head とマージ先に対応する `leak-check-secret` の成功を、実行の記録で確かめる（決定 7 の条件で読む）。未起動・実行中・失敗のどれかなら、成功するまでマージを保留する。main への push の `leak-check-push` は、到達できるすべてのコミットを今と同じく探す。この手順は運用の文書に書く
+- 採らなかった案: 最初の Dependabot の Pull Request での成功を 2 本目へ進む条件にする（Dependabot を有効にしない限り条件を満たせず、2 本目へ進めない）
+- **代償**: 1 本目のマージから 2 本目のマージまで、実際の値の規則での探しはマージを止めない。その間は、持ち主が NDF のマージを起動する前に、非公開リポジトリで対象の Pull Request の今の head と今の base を入力にして探しを手で起動し、成功を確かめる。失敗か未完了なら、マージを保留する。main への push の `leak-check-push` は、到達できるすべてのコミットを今と同じく探す。この手順は運用の文書に書く
 - 根拠: Value 7 / Value 14（MVV バージョン 3）。秘密を隔てることを先に行い（Value 7）、マージを止める検査は確かめてから入れる（Value 14）
 
 ### 決定 11: この変更が保証するのは NDF が行うマージだけにし、GitHub のブランチの保護とルールセットは作らない
 
 - **質問**: #96 は、必須のチェックが変わるときは「`.ndf/project.json` の `required_checks` と GitHub のブランチの保護」を同じ変更で直すとしている。GitHub の画面や API からのマージも止めるか
-- **選んだ案**: 止めるのは NDF が行うマージだけにする。このリポジトリのマージは NDF が行う（`.ndf/project.json` の `merge.actor` が `ndf`）。main にはブランチの保護もルールセットも無いので、#96 の「GitHub のブランチの保護」の側に直す設定は無く、この変更でも作らない。書き込みの権限を持つ人が GitHub の画面からマージすると、今のほかの必須のチェックと同じく、`leak-check-secret` が落ちていてもマージできる
-- 採らなかった案: ルールセットで main に `leak-check-secret` を必須にする（決定 7 のとおり、ルールセットは同じ名前のチェックを出どころで区別できず、偽のチェックで通る。ほかの 7 つの必須のチェックも GitHub では必須でなく、この検査だけを足すのは、リポジトリ全体のマージの経路の決定になる）
+- **選んだ案**: 止めるのは NDF が行うマージだけにする。このリポジトリのマージは NDF が行う（`.ndf/project.json` の `merge.actor` が `ndf`）。main にはブランチの保護もルールセットも無いので、#96 の「GitHub のブランチの保護」の側に直す設定は無く、この変更でも作らない。書き込みの権限を持つ人が GitHub の画面からマージすると、今のほかの必須のチェックと同じく、非公開の検査を通らずにマージできる
+- 採らなかった案: ルールセットで main に必須のチェックを足す（Pull Request の探しの結果は公開のリポジトリのチェックにならないので、ルールセットからは参照できない。ほかの 7 つの必須のチェックも GitHub では必須でなく、この検査だけを足すのは、リポジトリ全体のマージの経路の決定になる）
 - **代償**: GitHub の画面からのマージと、main への直の push は止まらない。どちらも書き込みの権限を持つ人だけが行え、今と同じである。#96 の要求の文と食い違うので、要求の変更として承認を受ける（人へ残す判断）
 - 根拠: Value 7（MVV バージョン 3）。検査で止める範囲を、実際にマージを行う経路で定める
 
 ## 影響と危険
 
-- **働く範囲**: このリポジトリの CI だけ。画面・API・設置のコマンド・利用者のプロジェクトのリポジトリは変わらない
-- **プロジェクトごとに違うもの**: 実際の値の正規表現は環境 `leak-scan` の秘密（検証で要ると分かったときは同じ名前の Dependabot の秘密にも）、必須にするかは変数で受け、リポジトリに置かない
-- **当たるモード**: このリポジトリに出るすべての Pull Request（fork・同じリポジトリのブランチ・Dependabot）と main への push
+- **働く範囲**: このリポジトリの CI と、持ち主が用意する検査用の非公開リポジトリ。画面・API・設置のコマンド・利用者のプロジェクトのリポジトリは変わらない
+- **プロジェクトごとに違うもの**: 実際の値の正規表現は非公開リポジトリの秘密と環境 `leak-scan` の秘密で、必須にするかは変数で、非公開リポジトリの名前は NDF の利用者の設定で受け、公開のリポジトリに置かない
+- **当たるモード**: このリポジトリに出るすべての Pull Request（fork・同じリポジトリのブランチ・Dependabot）の NDF によるマージと、main への push
 
 壊れうる箇所と扱い:
 
 | 箇所 | 起きること | 扱い |
 | --- | --- | --- |
-| 実装の Pull Request 自身 | `pull_request_target` は既定のブランチのワークフローを動かすので、新しいワークフローを足す Pull Request ではまだ `leak-check-secret` が起動されない | 実装の Pull Request では `required_checks` を変えず、今の 7 つの必須のチェックで NDF がマージする。`leak-check-secret` を必須にするのは、持ち主が信頼できる側の結果を確かめた後の 2 本目の Pull Request である（決定 10） |
-| 1 本目と 2 本目の Pull Request の間 | 実際の値の規則での探しがマージを止めない | 持ち主が NDF のマージを起動する前に、対象の Pull Request の今の head とマージ先に対応する `leak-check-secret` の成功を確かめる。未起動・実行中・失敗なら、成功するまでマージを保留する。main への push の `leak-check-push` は今と同じく探す（決定 10） |
-| Pull Request の側に足した同じ名前のジョブ | 作者が `pull_request` のワークフローに `leak-check-secret` という名前のジョブを足すと、同じ名前のチェックが head に付く | NDF は出どころ（ワークフローのファイルと `pull_request_target`）と表示名の番号・head・base・検査のコード・世代で確かめるので、数えない（決定 7）。NDF にその機能が入るまで必須にしない |
-| base のブランチの変更 | head が同じでも、分岐点と探す範囲が変わる | `edited` で探し直し、表示名の base のブランチで照らす（決定 7） |
-| base のブランチの先頭の変化 | 別の Pull Request の取り込みや書き換えで、分岐点が変わる | 探した分岐点が今の分岐点と同じかその祖先なら受け入れ、そうでなければ失効させる。持ち主が閉じて開き直して探し直させる（決定 7） |
-| 検査の設定の変更 | 正規表現や探しの設定を変えても、前の設定で成功した結果が残る | 検査のコードの変更は、表示名の検査のコードのコミットと今の main の比較で失効させる。秘密と環境の設定の変更は、持ち主が世代を `0` にして NDF のマージを止めてから変え、変えた後に世代を上げて前の世代の結果を失効させる。どちらの後も、開いている Pull Request を閉じて開き直す。世代の切り替えを忘れて秘密だけを変えると、前の秘密の結果が通る（決定 7 の代償） |
-| 前の実行の再実行 | 再実行は元の event と元の検査のコードで動くので、今の設定で探したことにならない | ジョブの `run_attempt` が 1 でない結果は受け入れない（決定 7） |
-| 結果の照会の後のマージ先の変更 | マージの API は base を確かめないので、変更後のマージ先や書き換えた base の先頭へ、検査していないコミットを含んだままマージされうる | マージの直前に読み直して確かめ直す。読み直しと API の呼び出しの間の変更は防げないので、マージの後にマージ先のブランチと、マージでできたコミットの親から求めた分岐点を確かめ、外れれば人へ戻す。持ち主が探していない範囲を手元で探す（決定 7） |
-| 外部の作者が当たりの有無で正規表現を探る | 候補の語を入れた Pull Request を出し、成功か失敗かで語が当たるかを試す | 当たりの場所は出さない。1 本ずつ試す経路は残る（決定 8） |
-| イベントポリシーの適用（2026-12-02） | 持ち主が `pull_request_target` を許すポリシーを作らないと、`leak-check-secret` が起動されない。必須のチェックにした後は、未報告のまま、すべての Pull Request のマージが止まる | 通さない側に倒れるので漏れは起きない。運用の文書の手順の最初に置く |
-| 同じリポジトリのブランチで `ci.yml` を書き換える Pull Request | 書き込みの権限を持つ人は、`pull_request` のワークフローを書き換えて秘密を読む手順を足せる | 秘密を main だけが使える環境に置くので、Pull Request の側の実行では読めない（決定 9）。main に直に push できる人の経路は残る（決定 9・11） |
-| `refs/pull/<番号>/head` の取り込みの間の push | event の後に作者が push すると、取り込んだ head が event の SHA と違う | その実行は失敗し、新しい push の `synchronize` の実行が新しい head で探す |
-| 既定の規則と nd-factory の規則の探し | `leak-check` は今と同じ範囲を探し、`leak-check-secret` も既定のブランチの設定で同じ範囲を探すので、同じ当たりが 2 つのチェックに出る | 二重に出ても通さない側なので残す（決定 5） |
+| 1 本目と 2 本目の Pull Request の間 | 実際の値の規則での探しがマージを止めない | 持ち主が NDF のマージを起動する前に、非公開リポジトリで探しを手で起動して成功を確かめる。失敗か未完了なら、マージを保留する。main への push の `leak-check-push` は今と同じく探す（決定 10） |
+| Pull Request の側に足した同じ名前のジョブ | 作者が `pull_request` のワークフローに `leak-check-secret` という名前のジョブを足すと、同じ名前のチェックが head に付く | NDF は自分が起動した非公開リポジトリの実行だけを読むので、公開のリポジトリのチェックは使わない（決定 7） |
+| 起動の後の push・base の変更・base の先頭の書き換え | 探した head や範囲が、マージの時の head や範囲と違う | ワークフローが head の SHA の不一致で失敗する。NDF がマージの直前に読み直し、外れれば止める。読み直しとマージの API の呼び出しの間の変更は、マージの後に検出して人へ戻す（決定 7） |
+| 検査のコードの変更 | 起動の後に、探しの設定とコードを変える Pull Request が main にマージされる | マージの直前の比べ方で退け、人へ戻す。次のマージでは今の main で探す（決定 7） |
+| 秘密の切り替え | 確認を済ませた NDF が、切り替えの後に前の秘密の結果でマージする | 持ち主が世代を `0` にし、NDF の時間の上限 T を待ってから秘密を変える。T を過ぎた NDF はマージせずに止まる（決定 7） |
+| NDF の認証の権限 | NDF の認証が非公開リポジトリの変数・起動・ジョブを読めないと、どの Pull Request もマージできない | 通さない側に倒れるので漏れは起きない。2 本目の前に確かめ、権限を足すときは人の承認を受ける（決定 7・10） |
+| 外部の作者が成否で正規表現を探る | 候補の語を入れた Pull Request を出し、当たるかを試す | Pull Request の探しの結果は非公開の記録にだけ出し、NDF も公開の場所に書かない。マージされないことからの推測は残り、持ち主の対応に任せる（決定 1・8） |
+| 呼び出しのワークフローの写しのずれ | 持ち主が見本を写し直さないと、非公開リポジトリの呼び出しが古い形のまま動く | 呼ぶのは main の `leak-check-secret.yml` で、入力と世代の確認は見本の役目である。運用の文書に写し直す手順を書く（決定 4） |
+| 同じリポジトリのブランチで `ci.yml` を書き換える Pull Request | 書き込みの権限を持つ人は、`pull_request` のワークフローを書き換えて秘密を読む手順を足せる | Pull Request の側の実行は、非公開リポジトリの秘密も、main だけが使える環境の秘密も読めない（決定 9）。main に直に push できる人の経路は残る（決定 9・11） |
+| 既定の規則と nd-factory の規則の探し | `leak-check` と非公開の検査が同じ範囲を探すので、同じ当たりが 2 か所に出る | 二重に出ても通さない側なので残す（決定 5） |
 
 受け入れ条件の読み方を書く。どれも条件の文そのものは変えない。文を変える必要があるものは、下の「人へ残す判断」に要求の変更として挙げる。
 
-- #96 の受け入れ条件 1・2 の「必須のチェックが落ちる」は、2 本目の Pull Request で `leak-check-secret` を必須にした後に満たす（決定 10）。保証が始まるのは、持ち主が環境の秘密を登録し、2 本目の Pull Request がマージされた時である。必須にした後は、秘密が空なら `leak-check-secret` が必ず落ちるので、秘密なしで成功と数えられる期間は無い（決定 3）
+- #96 の受け入れ条件 1・2・6 の「必須のチェックが落ちる」「必須のチェックは通らない」は、2 本目の Pull Request で NDF の非公開の検査を有効にした後に、「NDF の非公開の検査が失敗し、NDF がマージしない」で満たす（決定 10）。有効にした後は、秘密が空なら探しが必ず落ちるので、秘密なしで成功と数えられる期間は無い（決定 3）
+- #96 の受け入れ条件 3 の「CI の定義のテストが確認する」は、公開のリポジトリの `leak-check-secret.yml` と呼び出しのワークフローの見本についての確認で満たす。非公開リポジトリに置いた写しは、検証用のリポジトリでの確認と運用の文書の手順で扱う（決定 4）
 - #96 の「今の利用者への影響と互換」の「GitHub のブランチの保護」は、main に保護が無いので直す設定が無い。この変更でも作らない（決定 11）
-- #101 の受け入れ条件 2 の「今と同じく…落ちる」は、同じリポジトリのブランチの Pull Request では `leak-check-secret` が落ちることで満たす（決定 3）。main への push では、`leak-check` から分けた `leak-check-push` が今と同じく落ちる
-- #101 の受け入れ条件 3 の「fork からの Pull Request は、秘密が空でも実際の値の規則を必須にしない」は、Pull Request の側の `leak-check` についての条件として読む。`leak-check` はどの出所でも秘密を受けず、実際の値の規則を必須にしない。`leak-check-secret` は fork の Pull Request も秘密を受けるので、秘密が空なら落とす（#96 の受け入れ条件 6、決定 3）。Pull Request 全体の合否の条件ではない
+- #101 の受け入れ条件 1 は、Pull Request の側の `leak-check` が秘密を受けないことで満たす
+- #101 の受け入れ条件 2 の「今と同じく…落ちる」は、同じリポジトリのブランチの Pull Request では NDF の非公開の検査が落ちることで満たす（決定 3）。main への push では、`leak-check` から分けた `leak-check-push` が今と同じく落ちる
+- #101 の受け入れ条件 3 の「fork からの Pull Request は、秘密が空でも実際の値の規則を必須にしない」は、Pull Request の側の `leak-check` についての条件として読む。`leak-check` はどの出所でも秘密を受けず、実際の値の規則を必須にしない。NDF の非公開の検査は fork の Pull Request でも秘密を受けるので、秘密が空なら落とす（#96 の受け入れ条件 6、決定 3）
 - #101 の受け入れ条件 4 は「Dependabot の実行を見分ける条件を使う場合」の条件で、決定 2 はその条件を使わない。CI の定義のテストは、漏れの検査のワークフローに起動した人で処理を分ける条件があれば失敗する
-- #101 の検証手段とリリース後の確認の「最初の Dependabot の Pull Request で `leak-check` が通ることを見る」は、`leak-check-secret` について確かめる。`leak-check` は秘密を受けないので、通っても秘密を使う探しが動いた証拠にならない。最初の Dependabot の Pull Request で、`leak-check-secret` が対象の head の履歴を実際の値の規則で探して成功したことを、実行の記録で確かめる
+- #101 の受け入れ条件 6 は、運用の文書に「Dependabot の Pull Request で必要な操作は無く、Dependabot の秘密に登録しない」と書くことで満たす（決定 2・6）
+- #101 の検証手段とリリース後の確認の「最初の Dependabot の Pull Request で `leak-check` が通ることを見る」は、Dependabot を有効にした後に行う。あわせて、その Pull Request の NDF のマージで非公開の検査が成功したことを、非公開の記録で確かめる
 
 ## テスト設計
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| #96-1・#96-2: 途中のコミットで足して後で消した、秘密の正規表現にだけ当たる値がマージの前に落ちる | 結合のテストで、作り物の正規表現と、その値を足すコミットと消すコミットを持つ作り物のリポジトリを作り、秘密を使う探しのスクリプトに分岐点から head の範囲を渡すと、終了コード 1 で当たりが出る。CI の定義のテストで、`leak-check-secret` が `pull_request_target` で起動し、分岐点から head の範囲をそのスクリプトに渡し、出所で分ける条件を持たない | 範囲を head の木だけにする・`-m`（`leak-scan.sh` が gitleaks に渡す、マージのコミットの差分も出す指定）を外す・fork の Pull Request を飛ばす条件を足すと落ちる |
-| #96-3: 秘密を使う手順は既定のブランチのワークフロー・スクリプト・設定だけを動かす | CI の定義のテストで、決定 4 の形（`checkout` の `ref` なし・`setup-node` と `npm` なし・Pull Request の値を `run:` に直に書かない・危険な起動のきっかけはこの 1 本だけ）と、`ci.yml` の `leak-check` のジョブが環境を持たず、`secrets.LEAK_CHECK_PATTERN` を受けないこと | `checkout` に `ref: ${{ github.event.pull_request.head.sha }}` を足す・`npm ci` を足す・`leak-check` に秘密か `environment` を戻すと落ちる |
-| #96-4: 秘密を使うジョブのトークンは書き込みの権限を持たない | CI の定義のテストの、最上位とジョブの `permissions` が `contents: read` だけの検査が、新しいワークフローにも掛かる | `pull-requests: write` を足すと落ちる |
-| #96-5: 新しい push と base の変更で探しがやり直され、マージの直前の読み直しで条件を外れた、前の head・前の base の結果ではマージしない（読み直しの後の base の変更は、マージの後に検出して人へ戻す。人へ残す判断の要求の変更） | CI の定義のテストで、`pull_request_target` の `types` が `opened`・`synchronize`・`reopened`・`edited` のちょうど 4 つであること、`concurrency` が Pull Request の番号ごとであること、ジョブの表示名に event の番号・head の SHA・base のブランチと SHA・`github.workflow_sha`・設定の世代が入ること。結果を受け入れる条件とマージの後の検出（決定 7）は、検証用のリポジトリで確かめ（決定 10 の手順 1）、NDF の側のテストで縛る | `types` から `synchronize` か `edited` を外す・表示名から head の SHA・base の SHA・`github.workflow_sha`・世代を外すと落ちる |
-| 決定 7: 今の範囲・今の設定で探していない結果ではマージせず、読み直しの後の base の変更はマージの後に検出する | NDF の側のテストで、次の場合に受け入れない・マージしないこと。分岐点が探した範囲の外へ動いた（base の書き換え）、設定の世代が変わった、変数の世代が `0` か空である（どの Pull Request もマージしない）、表示名の検査のコードのコミットの後に探しの設定とコードが main で変わった、条件を満たす結果が再実行（`run_attempt` が 2 以上）のものしか無い、新しい実行が失敗で古い実行が成功である、結果の照会の後にマージ先を変えた（マージの直前の読み直しで止まる）。次の場合はマージの後に人へ戻すこと。読み直しの後にマージ先のブランチを変えた、読み直しの後に同じ名前の base の先頭を書き換えて分岐点が探した範囲の外へ動いた（マージでできたコミットの親から検出する）。次の場合は受け入れること。分岐点が head の側へ進んだだけ、読み直しの後に base の先頭が head と関わらないコミットで進んだだけ、条件を満たす実行が一覧の 2 ページ目以降にある。検証用のリポジトリでも、成功の後に base を書き換える・世代を切り替える・検査のコードを変える・マージ先を変える・前の実行を再実行するの 5 つを確かめる（決定 10 の手順 1） | — |
-| 決定 7: Pull Request の側の同じ名前のチェックではマージできない | 検証用のリポジトリで、Pull Request の側に `leak-check-secret` という名前の成功するジョブを足した Pull Request を作り、NDF が未報告か失敗として止めることを確かめる（決定 10 の手順 1） | — |
-| 決定 10: 1 本目では `leak-check-secret` を必須にせず、2 本目で必須にする | CI の定義のテストで、必須のチェックの宣言と Pull Request で起動するジョブの集合を、必須でなくてよいジョブの一覧を除いて比べる。1 本目の一覧は `leak-check-secret` と `leak-check-push`、2 本目の一覧は `leak-check-push` だけ。2 本目では、宣言の `leak-check-secret` をワークフローのファイルとジョブの ID で照らす | 必須の宣言に無い Pull Request のジョブを `ci.yml` に足す・2 本目で宣言から `leak-check-secret` を消す・宣言のワークフローのファイルを別のファイルにすると落ちる |
-| 決定 4: 秘密を受けるワークフローは `pull_request_target` だけで起動し、信頼できるコードだけを動かす | CI の定義のテストで、ワークフローごとの起動の許可の一覧と、`leak-check-secret.yml` の `uses:`・`run:` の許可の一覧に当たらないものが無いこと | `leak-check-secret.yml` に `workflow_run` か `issue_comment` を足す・ほかのワークフローに `pull_request_target` を足す・`actions/setup-node` を足すと落ちる |
-| 決定 8: `nd-real-value` の当たりは件数だけを出す | 結合のテストで、作り物の正規表現に当たるリポジトリを探すと、出力に `nd-real-value` の件数が出て、当たりのファイル・行・コミットが出ない。`--details` を渡したときだけ場所が出る。CI の定義のテストで、ワークフローが `--details` を渡さない | 整形を外して `leak-scan.sh` の出力をそのまま出す・ワークフローに `--details` を足すと落ちる |
-| 決定 9: 秘密は環境 `leak-scan` から受ける | CI の定義のテストで、`secrets.LEAK_CHECK_PATTERN` を読むジョブが `environment: leak-scan` を持ち、それが `leak-check-secret` と main への push の `leak-check-push` だけであること。Pull Request の側の実行で環境の秘密が空になることは検証用のリポジトリで確かめる | `environment` を外す・`leak-check` で秘密を読む・`leak-check` に `environment` を付けると落ちる |
-| #96-6: コミットを取れない・探しが途中で失敗すると通らない | 結合のテストで、読めない範囲・gitleaks の失敗で終了コードが 0 以外。CI の定義のテストで、ジョブと手順に `if:` と `continue-on-error` が無く、head の SHA の一致を確認する手順がある | `continue-on-error: true` を足す・範囲の読み取りの失敗を 0 で終えると落ちる |
+| #96-1・#96-2: 途中のコミットで足して後で消した、秘密の正規表現にだけ当たる値がマージの前に落ちる | 結合のテストで、作り物の正規表現と、その値を足すコミットと消すコミットを持つ作り物のリポジトリを作り、秘密を使う探しのスクリプトに分岐点から head の範囲を渡すと、終了コード 1 で当たりが出る。CI の定義のテストで、`leak-check-secret.yml` が分岐点から head の範囲と取り出した head の木をそのスクリプトに渡し、出所で分ける条件を持たない。NDF がマージしないことは NDF の側のテストで縛る | 範囲を head の木だけにする・`-m`（`leak-scan.sh` が gitleaks に渡す、マージのコミットの差分も出す指定）を外す・fork の Pull Request を飛ばす条件を足すと落ちる |
+| 決定 5: head の木のファイル全体を探す | 結合のテストで、分岐点より前のコミットから在るファイルの、範囲のコミットで変えていない行にだけ当たる値を置き、`dir` に取り出した木を渡すと終了コード 1 になる。取り出した木に `.gitleaksignore` があると終了コード 2 になる。CI の定義のテストで、`leak-check-secret.yml` が `dir` と `git --range` の両方を呼ぶ | `dir` の呼び出しを外す・設定を取り出した木の `.gitleaks.toml` にすると落ちる |
+| #96-3: 秘密を使う手順は既定のブランチのワークフロー・スクリプト・設定だけを動かす | CI の定義のテストで、決定 4 の形（`checkout` の `repository` と `ref`・`setup-node` と `npm` なし・入力を `run:` に直に書かない・起動は `workflow_call` だけ）と、`ci.yml` の `leak-check` のジョブが環境を持たず、`secrets.LEAK_CHECK_PATTERN` を受けないこと | `checkout` の `ref` を Pull Request の head にする・`npm ci` を足す・`leak-check` に秘密か `environment` を戻すと落ちる |
+| #96-4: 秘密を使うジョブのトークンは書き込みの権限を持たない | CI の定義のテストの、最上位とジョブの `permissions` が `contents: read` だけの検査が、新しいワークフローと呼び出しのワークフローの見本にも掛かる | `pull-requests: write` を足すと落ちる |
+| #96-5・決定 7: 今の head・今の範囲・今の設定で探していない結果ではマージしない | CI の定義のテストで、ジョブの表示名に入力の番号・head の SHA・base の SHA・検査のコードのコミット・世代が入ること。NDF の側のテストで、次の場合にマージしないこと。起動の API が実行の ID を返さない、ジョブの表示名が渡した値と違う、`run_attempt` が 2 以上、結論が成功でない、未完了のまま T を過ぎた、世代が `0` か空か読めない、手順 1 と手順 5 の世代が違う、head・base のブランチが変わった、分岐点が探した範囲の外へ動いた、検査のコードのコミットの後に探しの設定とコードが main で変わった。同じ Pull Request の前の実行が成功でも、今回の実行が失敗ならマージしないこと。次の場合はマージの後に人へ戻すこと。読み直しの後にマージ先のブランチを変えた、読み直しの後に base の先頭を書き換えて分岐点が探した範囲の外へ動いた、マージの後の世代が手順 1 と違う。次の場合は受け入れること。分岐点が head の側へ進んだだけ、読み直しの後に base の先頭が head と関わらないコミットで進んだだけ。検証用のリポジトリでも確かめる（決定 10 の手順 1） | 表示名から head の SHA・base の SHA・検査のコードのコミット・世代を外すと落ちる |
+| 決定 7: 秘密の切り替えの間にマージしない | NDF の側のテストで、手順 1 の後に T を過ぎたらマージの API を呼ばないこと。CI の定義のテストで、呼び出しのワークフローの見本が、変数の世代と入力の世代が違うか `0` か空なら呼ぶ前に失敗すること | 見本から世代の確認を外すと落ちる |
+| 決定 4: 秘密を受けるワークフローは決まった起動だけを持ち、信頼できるコードだけを動かす | CI の定義のテストで、ワークフローごとの起動の許可の一覧と、`leak-check-secret.yml` の `uses:`・`run:` の許可の一覧と、呼び出しのワークフローの見本の形に当たらないものが無いこと | `leak-check-secret.yml` に `pull_request_target` か `workflow_run` を足す・ほかのワークフローに `pull_request_target` を足す・`actions/setup-node` を足す・見本で `secrets: inherit` を使うと落ちる |
+| 決定 8: 公開の main への push の探しは `nd-real-value` の当たりを件数だけで出し、0 件でも件数の行を出す | 結合のテストで、件数だけを出す指定で、作り物の正規表現に当たるリポジトリを探すと、出力に `nd-real-value` の件数が出て、当たりのファイル・行・コミットが出ない。当たらないリポジトリを探すと、`nd-real-value: 0 件` の行が出る。`--details` を渡したときだけ場所が出る。CI の定義のテストで、`leak-check-push` が件数だけを出す指定で呼び、どのワークフローも `--details` を渡さない | 整形を外して `leak-scan.sh` の出力をそのまま出す・0 件のときに件数の行を出さない・ワークフローに `--details` を足すと落ちる |
+| 決定 9: main への push の探しの秘密は環境 `leak-scan` から受ける | CI の定義のテストで、公開のリポジトリで `secrets.LEAK_CHECK_PATTERN` を読むジョブが `environment: leak-scan` を持つ `leak-check-push` だけであること。`leak-check-secret.yml` は秘密を `workflow_call` の秘密としてだけ受けること。Pull Request の側の実行で環境の秘密が空になることは検証用のリポジトリで確かめる | `environment` を外す・`leak-check` で秘密を読む・`leak-check` に `environment` を付けると落ちる |
+| #96-6: コミットを取れない・探しが途中で失敗すると通らない | 結合のテストで、読めない範囲・gitleaks の失敗で終了コードが 0 以外。CI の定義のテストで、ジョブと手順に `if:` と `continue-on-error` が無く、入力の形の検査と head の SHA の一致を確認する手順がある | `continue-on-error: true` を足す・範囲の読み取りの失敗を 0 で終えると落ちる |
 | #96-7・#101 の非機能: 出力に秘密の正規表現と当たった値が出ない | 結合のテストで、秘密を使う探しのスクリプトの標準出力と標準エラーに、作り物の正規表現の文字列と当たった値が現れない | 重ねた設定のファイルの中身を出す・`--paths` を渡すと落ちる |
 | #96-8: 既定の規則と nd-factory の規則で fork の Pull Request の全コミットを探す | CI の定義のテストで、`ci.yml` の `leak-check` のジョブが、出所の条件なしに分岐点から head の範囲を既定の規則と `.gitleaks.toml` で探す。今の結合のテストを残す | 範囲を外す・fork で飛ばす条件を足すと落ちる |
-| #96-9: main への push は今の木と到達できるすべてのコミットを両方の規則で探す | CI の定義のテストで、`leak-check-push` のジョブが `if: github.event_name == 'push'` だけで動き、秘密を使う探しのスクリプトを `dir` と、範囲なしの `git` で呼ぶ。結合のテストで、`dir` で今の木を、範囲なしの `git` で履歴のすべてを探す。秘密あり・必須でない組では `nd-real-value` の件数の行が出て、秘密が空・必須でない組では「秘密が空なので `.gitleaks.toml` だけで探す」行が出る（決定 10 の手順 4 の確かめに使う） | `leak-check-push` から `dir` の呼び出しを外す・`before..after` の範囲を渡すと落ちる |
-| #96-10: ワークフローの点検が当たり無しで通る | `workflow-audit` のジョブ。ワークフローの点検の結合のテストで、`dangerous-triggers` のほかの点検（`unpinned-uses` など）が今の設定で当たる | `.github/zizmor.yml` でほかの点検を外すと落ちる |
-| #101-1: Dependabot の Pull Request で `秘密 LEAK_CHECK_PATTERN が無い` の誤りで落ちない | 結合のテストで、秘密あり・必須の組では落ちずに探しへ進む。CI の定義のテストで、秘密の名前が `LEAK_CHECK_PATTERN` の 1 つだけ（Dependabot の秘密と同じ名前）。実際の Dependabot の Pull Request ではリリース後に確認する | 秘密の名前を Dependabot 用に分ける・Pull Request の側の `leak-check` に秘密と必須の判定を戻すと落ちる |
-| #101-2: Dependabot 以外の同じリポジトリのブランチの Pull Request と main への push は、必須で秘密が空なら終了コード 1 | 結合のテストで、秘密が空・必須の組で終了コード 1 と誤りの行。CI の定義のテストで、`leak-check-push` が必須の変数を受け、`leak-check-secret` が必須の指定を固定の `1` で渡す | 必須の判定を外す・`leak-check-push` から必須の変数を外す・`leak-check-secret` の必須の指定を変数にすると落ちる |
+| #96-9: main への push は今の木と到達できるすべてのコミットを両方の規則で探す | CI の定義のテストで、`leak-check-push` のジョブが `if: github.event_name == 'push'` だけで動き、秘密を使う探しのスクリプトを `dir` と、範囲なしの `git` で呼ぶ。結合のテストで、`dir` で今の木を、範囲なしの `git` で履歴のすべてを探す。秘密あり・必須でない組では、当たりがあれば件数の行が、当たりが無ければ `nd-real-value: 0 件` の行が出る。秘密が空・必須でない組では「秘密が空なので `.gitleaks.toml` だけで探す」行が出る（決定 10 の手順 4 の確かめに使う） | `leak-check-push` から `dir` の呼び出しを外す・`before..after` の範囲を渡すと落ちる |
+| #96-10: ワークフローの点検が当たり無しで通る | `workflow-audit` のジョブ。`.github/zizmor.yml` は変えない | — |
+| 決定 10: 1 本目では NDF の設定を変えない | CI の定義のテストで、必須のチェックの宣言と Pull Request で起動するジョブの集合を、必須でなくてよいジョブの一覧（`leak-check-push` だけ）を除いて比べる | 必須の宣言に無い Pull Request のジョブを `ci.yml` に足すと落ちる |
+| #101-1: Dependabot の Pull Request で `秘密 LEAK_CHECK_PATTERN が無い` の誤りで落ちない | CI の定義のテストで、`ci.yml` の `leak-check` が秘密も必須の変数も受けない。実際の Dependabot の Pull Request では、Dependabot を有効にした後に確かめる | Pull Request の側の `leak-check` に秘密と必須の判定を戻すと落ちる |
+| #101-2: Dependabot 以外の同じリポジトリのブランチの Pull Request と main への push は、必須で秘密が空なら終了コード 1 | 結合のテストで、秘密が空・必須の組で終了コード 1 と誤りの行。CI の定義のテストで、`leak-check-push` が必須の変数を受け、`leak-check-secret.yml` が必須の指定を固定の `1` で渡す | 必須の判定を外す・`leak-check-push` から必須の変数を外す・`leak-check-secret.yml` の必須の指定を変数にすると落ちる |
 | #101-3: fork の Pull Request は秘密が空でも `leak-check` で実際の値の規則を必須にしない | CI の定義のテストで、`ci.yml` の `leak-check` のジョブが秘密も必須の変数も受けない | `leak-check` に必須の変数を足すと落ちる |
-| #101-4: 人が Dependabot のブランチへ push した実行は Dependabot の実行として扱われない | CI の定義のテストで、漏れの検査の 2 つのワークフローに `github.actor`・`github.triggering_actor`・`dependabot` を使う条件が無い | `if: github.actor != 'dependabot[bot]'` を足すと落ちる |
-| #101-5: Dependabot の Pull Request のコミットが探される時点が設計書に書いてある | この設計の決定 2（Pull Request の時に `leak-check-secret` で探す） | — |
-| #101-6: 持ち主の操作の手順に Dependabot の秘密の登録（検証で要ると分かったとき）が書いてある | 運用の文書 `docs/operations/ci-checks.md` と `AGENTS.md`（決定 6）。文書の検査は持たず、レビューで見る | — |
+| #101-4: 人が Dependabot のブランチへ push した実行は Dependabot の実行として扱われない | CI の定義のテストで、漏れの検査のワークフローと呼び出しのワークフローの見本に `github.actor`・`github.triggering_actor`・`dependabot` を使う条件が無い | `if: github.actor != 'dependabot[bot]'` を足すと落ちる |
+| #101-5: Dependabot の Pull Request のコミットが探される時点が設計書に書いてある | この設計の決定 2（NDF のマージの直前に非公開リポジトリで探す） | — |
+| #101-6: 持ち主の操作の手順に、Dependabot の Pull Request で要る操作が書いてある | 運用の文書 `docs/operations/ci-checks.md` と `AGENTS.md`（決定 6）。文書の検査は持たず、レビューで見る | — |
 | #101-7: CI の定義のテストが受け入れ条件 1〜3 の条件分けを定義から読む | 上の #101-1〜3 の CI の定義のテストの行 | — |
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #96 | 実装する | — | 1 本目（実装）: `.github/workflows/leak-check-secret.yml`（新設）、`.github/workflows/ci.yml`、`.github/zizmor.yml`、`tools/checks/leak-scan-secret.sh`（新設）、`tools/test/ci-definition.test.ts`、`tools/test/leak-scan.integration.test.ts`、`tools/test/workflow-audit.integration.test.ts`、`AGENTS.md`、`docs/operations/ci-checks.md`（新設）、`docs/design/platform.md`。2 本目: `.ndf/project.json`、`tools/test/ci-definition.test.ts`（決定 10） |
+| #96 | 実装する | — | 1 本目（実装）: `.github/workflows/leak-check-secret.yml`（新設）、`.github/workflows/ci.yml`、`tools/checks/leak-scan-secret.sh`（新設）、`tools/test/ci-definition.test.ts`、`tools/test/leak-scan.integration.test.ts`、`AGENTS.md`、`docs/operations/ci-checks.md`（新設）、`docs/operations/leak-check-caller.yml`（新設）、`docs/design/platform.md`。2 本目: `.ndf/project.json`（決定 10） |
 | #101 | マージする | #96 | — |
 
 ## 人へ残す判断
 
-次の操作は、NDF の共通原則が「AI が自分で進めずに必ず人の承認を求める操作」と定めるレッドラインに当たる（一覧は [全体の設計のレッドラインの表](../docs/design/overview.md)）。この設計で当たるのは次の 3 つである。
+次の操作は、NDF の共通原則が「AI が自分で進めずに必ず人の承認を求める操作」と定めるレッドラインに当たる（一覧は [全体の設計のレッドラインの表](../docs/design/overview.md)）。この設計で当たるのは次の 4 つである。
 
 - C1: 秘密（トークン・キー・資格情報）に触れる。漏れると取り消せないため
+- C2: 認証・認可を変える。誰が何をできるかが変わるため
 - C5: 他のリポジトリへ公開する（課題を起こすことを含む）。他者が読む内容を外へ出すため
 - C7: 利用者の設定（`.ndf/`）と指示書（`AGENTS.md`）を書き換える。設定には書き手の意図が入っているため
 
 | 判断 | 当たるレッドライン | なぜ当たるか |
 | --- | --- | --- |
-| 環境 `leak-scan`（使えるブランチは main だけ）を作り、`LEAK_CHECK_PATTERN` をその秘密に登録し、リポジトリの Actions の秘密には置かない（持ち主が GitHub の設定で行う。決定 9） | C1 | 運用する環境の実際の値という秘密の置き場所と、受け取れる実行を変える |
-| 検証用のリポジトリで Dependabot の秘密が要ると分かったときだけ、Dependabot の秘密 `LEAK_CHECK_PATTERN` を環境の秘密と同じ値で登録する（実装の Pull Request をマージする前に持ち主が GitHub の設定で行う。決定 2・10 の手順 2） | C1 | 実際の値という秘密を、もう 1 か所に置く。Dependabot が起動した `pull_request` の実行で、Dependabot の Pull Request のコードと更新した依存がその値を読めるようになる（決定 9 の代償）。承認資料にこの範囲を書く |
-| `pull_request_target` を許す Actions のイベントポリシーを作る（持ち主が GitHub の設定で行う） | C1 | fork から起こせる実行が、環境の秘密を受けられるようになる |
-| devbasex/ai-plugins へ、必須のチェックを出どころ（ワークフローのファイル・起動のイベント）と表示名の番号・head・base・分岐点・検査のコードのコミット・設定の世代で受け入れ、再実行の結果と世代が `0` の間のマージを退け、マージの直前とマージの後にマージ先を確かめる機能の依頼を起票する（決定 7） | C5 | 他のリポジトリへ課題を公開する |
-| 2 本目の Pull Request で `.ndf/project.json` の必須のチェックに `leak-check-secret` を足す。実装の Pull Request で `AGENTS.md` の「秘密とインフラの値を置かない」の行を直す | C7 | 利用者の設定と指示書を書き換える |
+| 検査用の非公開リポジトリを作り、`LEAK_CHECK_PATTERN` をその秘密に登録する。公開のリポジトリの環境 `leak-scan`（使えるブランチは main だけ）を作り、同じ値をその秘密に登録する。公開のリポジトリの Actions の秘密と Dependabot の秘密には置かない（持ち主が GitHub の設定で行う。決定 9） | C1 | 運用する環境の実際の値という秘密の置き場所と、受け取れる実行を変える |
+| NDF がマージに使う認証に、非公開リポジトリの変数の読み取り・ワークフローの起動・実行とジョブの読み取りの権限を与える。非公開リポジトリに読み取りか書き込みの権限を持つ人を決める（決定 7・9） | C2 | 誰が秘密を使う探しを起動でき、その結果と当たりの場所を見られ、秘密を読めるかが変わる |
+| devbasex/ai-plugins へ、マージの直前に非公開リポジトリの探しを起動し、その 1 回の結果を渡した値・設定の世代・時間の上限で確かめてマージし、マージの後にマージ先と世代を確かめる機能の依頼を起票する（決定 7） | C5 | 他のリポジトリへ課題を公開する |
+| 2 本目の Pull Request で `.ndf/project.json` に NDF の非公開の検査を有効にする項目を足す。実装の Pull Request で `AGENTS.md` の「秘密とインフラの値を置かない」の行を直す | C7 | 利用者の設定と指示書を書き換える |
 
 次は要求の変更である。設計の承認のときに、要求を出した人の承認を受ける。承認されたら #96・#101 の本文と、このリポジトリの写し（`issues/issue-96-requirements.md`・`issues/issue-101-requirements.md`）に同じ変更を入れる。
 
 | 要求 | 今の文 | 変える案 | 理由 |
 | --- | --- | --- | --- |
-| #96 の前提 1 と非機能の条件（運用・保守性） | 当たりは規則・ファイル・行・コミットだけで出す | 実際の値の規則の当たりは件数だけを CI に出し、場所は持ち主が手元で引く。公開する成否と件数は誰でも見られ、そこから候補の語が当たるかを推測できることを受け入れる | 決定 8 |
-| #96 の「今の利用者への影響と互換」 | `required_checks` と GitHub のブランチの保護を同じ変更で直す | `required_checks` を直す。マージを止めるのは NDF が行うマージで、GitHub のブランチの保護とルールセットは作らない | 決定 11 |
-| #96 の受け入れ条件 1・2 | マージの前に必須のチェックが落ちる | 持ち主が環境の秘密を登録し、`leak-check-secret` を必須にする 2 本目の Pull Request をマージした後、マージの前に必須のチェックが落ちる | 決定 10 |
-| #96 の目的と非機能の条件（セキュリティ） | 秘密の正規表現が Pull Request の側のコードに渡らない | 加えて、残る経路（main に直に push できる人・Dependabot の Pull Request のコード）を明記する | 決定 9 |
-| #96 の受け入れ条件 5 | Pull Request に新しいコミットを push すると、秘密を使う探しがその head でやり直され、前の head の結果でマージできない | 加えて、マージ先（base のブランチ）を変えたときと、base の先頭の書き換えで分岐点が探した範囲の外へ動いたときも、前の結果では NDF がマージしない。ただし、NDF がマージの直前に条件を確かめ直してからマージが成り立つまでの間の base のブランチと先頭の変更は防げない。その場合は、マージの後にマージ先のブランチとマージでできたコミットの親から必ず検出し、人へ戻す。検出したマージは取り消せず、持ち主が探していない範囲を手元で探す | 決定 7 |
-| #101 の受け入れ条件 3 | fork からの Pull Request は、今と同じく、秘密が空でも実際の値の規則を必須にしない | Pull Request の側の `leak-check` は fork でも秘密を要求しない。信頼できる側の検査に秘密が必要な場合の合否は、#96 と統合した受け入れ条件で定める | 受け入れ条件の読み方の 4 行目 |
-| #101 の検証手段とリリース後の確認の計画 | 最初の Dependabot の Pull Request で `leak-check` が通ることを見る | 最初の Dependabot の Pull Request で、`leak-check-secret` が対象の head の履歴を実際の値の規則で探して成功したことを確かめる | 受け入れ条件の読み方の 6 行目 |
+| #96 の前提 1 と非機能の条件（運用・保守性） | 当たりは規則・ファイル・行・コミットだけで出す | Pull Request の探しは、非公開リポジトリの記録に今の形で出す。公開の main への push の探しは、実際の値の規則の当たりを件数だけで出し、場所は持ち主が手元で引く | 決定 8 |
+| #96 の「今の利用者への影響と互換」 | `required_checks` と GitHub のブランチの保護を同じ変更で直す | NDF の設定を直す。マージを止めるのは NDF が行うマージで、GitHub のブランチの保護とルールセットは作らない | 決定 11 |
+| #96 の受け入れ条件 1・2・6 | マージの前に必須のチェックが落ちる／必須のチェックは通らない | 持ち主が秘密を登録し、NDF の非公開の検査を有効にする 2 本目の Pull Request をマージした後、NDF がマージの直前に起動する非公開の検査が落ち、NDF がマージしない | 決定 1・10 |
+| #96 の受け入れ条件 5 | Pull Request に新しいコミットを push すると、秘密を使う探しがその head でやり直され、前の head の結果でマージできない | NDF はマージのたびに今の head・今の base・今の main で探しを起動し、その結果だけで判定する。マージ先を変えたときと、base の先頭の書き換えで分岐点が探した範囲の外へ動いたときも、前の結果ではマージしない。ただし、NDF がマージの直前に条件を確かめ直してからマージが成り立つまでの間の base のブランチと先頭の変更は防げない。その場合は、マージの後にマージ先のブランチとマージでできたコミットの親から必ず検出し、人へ戻す。検出したマージは取り消せず、持ち主が探していない範囲を手元で探す | 決定 7 |
+| #96 の目的と非機能の条件（セキュリティ） | 秘密の正規表現が Pull Request の側のコードに渡らない | 加えて、実際の値の規則での Pull Request の探しの成否と当たりを、公開の記録に出さない。残る経路（main に直に push できる人・非公開リポジトリに書き込める人）を明記する | 決定 1・8・9 |
+| #96 の検証手段の手動確認 | 秘密を使う探しが動いて当たり無しで通り、Pull Request の側のジョブに秘密が渡っていないことを CI の記録で見る | 秘密を使う探しが動いて当たり無しで通ったことは、非公開リポジトリの記録で見る | 決定 1 |
+| #101 の受け入れ条件 3 | fork からの Pull Request は、今と同じく、秘密が空でも実際の値の規則を必須にしない | Pull Request の側の `leak-check` は fork でも秘密を要求しない。NDF の非公開の検査に秘密が必要な場合の合否は、#96 と統合した受け入れ条件で定める | 受け入れ条件の読み方の 6 行目 |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| Dependabot が起動した `pull_request_target` の実行が受ける秘密 | GitHub の文書からは、環境の秘密か Dependabot の秘密か、同じ名前のときどちらが優先されるかを決められない（STD3）。実際の値を登録する前に、検証用のリポジトリで作り物の値を使って確かめる（決定 2・10 の手順 1）。このリポジトリでは、最初の Dependabot の Pull Request の `leak-check-secret` が実際の値の規則で成功したことを、2 本目へ進む条件にする（決定 10） |
-| このリポジトリのイベントポリシーの今の状態 | 既定のポリシーが当たっているか、持ち主が作ったポリシーがあるかを、API で確認していない。持ち主が運用の文書の手順を行うときに、設定の画面で分かる |
-| `leak-check-secret` の結果がどのコミットに付くか | STD4 は数えられるイベントを挙げるだけで、付くコミットを書いていない。STD1 では、この実行の `GITHUB_SHA` は既定のブランチの最新のコミットである。決定 7 は付くコミットに頼らない取り方にしたが、検証用のリポジトリで確かめる（決定 10 の手順 1） |
-| 環境の使えるブランチの条件が、`pull_request_target` の実行を通し、Pull Request の側の実行を通さないこと | 文書を読んでの推定。検証用のリポジトリで確かめる（決定 10 の手順 1） |
-| fork の Pull Request の `refs/pull/<番号>/head` を、資格情報を残さないチェックアウトから取り込めること | 公開のリポジトリなので取り込めると見ているが、実行していない。検証用のリポジトリで確かめる（決定 10 の手順 1） |
+| 非公開リポジトリの実行の記録が外から見えないこと | 文書では、実行の記録を見るにはリポジトリへの読み取りの権限が要る（STD10）。画面と API の両方で、権限の無い利用者から見えないことを、検証用のリポジトリで確かめる（決定 10 の手順 1） |
+| 非公開リポジトリから、公開のリポジトリの再利用できるワークフローを呼び、秘密を名前で渡せること | 文書では、公開のリポジトリの再利用できるワークフローは呼べ、秘密は名前で渡せる（STD8）。持ち主のアカウントか組織の Actions の設定が公開の再利用できるワークフローを許すかは、確かめていない。検証用のリポジトリで確かめる |
+| NDF がマージに使う今の認証で、非公開リポジトリの変数・起動・ジョブの API が呼べること | 文書では、協力者としての権限と、classic のトークンなら `repo` の範囲が要る（STD9）。NDF の今の認証が何かと、その権限は確かめていない。2 本目の前に確かめる（決定 10 の手順 5） |
+| 環境の使えるブランチの条件が、Pull Request の側の実行を通さないこと | 文書を読んでの推定。検証用のリポジトリで確かめる（決定 10 の手順 1） |
+| fork の Pull Request の `refs/pull/<番号>/head` を、別のリポジトリの実行の資格情報を残さないチェックアウトから取り込めること | 公開のリポジトリなので取り込めると見ているが、実行していない。検証用のリポジトリで確かめる（決定 10 の手順 1） |
 
 ## 外部の調査
 
 | 種類 | 調べるか | 理由 |
 | --- | --- | --- |
-| 標準・仕様 | 調べる | GitHub Actions の `pull_request_target`・Dependabot の実行・必須のチェックの数え方は、GitHub の文書が決める |
+| 標準・仕様 | 調べる | GitHub Actions の起動のきっかけ・再利用できるワークフロー・実行の記録の見え方・API の権限は、GitHub の文書が決める |
 | 主要な製品 | 調べる | 秘密のパターンでの探しを GitHub と GitLab がマージの前にどう掛けているかを比べる |
-| ライブラリとサービス | 調べる | 今使う gitleaks と zizmor が、この起動の形で使えるか・点検がどう当たるかを決める |
+| ライブラリとサービス | 調べる | 今使う gitleaks と zizmor が、この形で使えるか・点検がどう当たるかを決める |
 
 ### 標準・仕様
 
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
-| STD1 | GitHub Docs「Events that trigger workflows」の `pull_request_target` と「Securely using pull_request_target」 | `pull_request_target` は既定のブランチの文脈で動き、ワークフローと `ref` なしの `actions/checkout` は既定のブランチのもの。秘密と既定のブランチの `GITHUB_TOKEN` を受ける。既定の起動は `opened`・`synchronize`・`reopened`。Pull Request のコードを（`git fetch` で取ったものも含め）動かすと危険で、取ったコードはデータとして扱う。トークンの権限は最小にする | 決定 1・4（既定のブランチのチェックアウト、取り込んだコミットを動かさない、`contents: read`） | https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows ・ https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target （2026-11-24） |
-| STD2 | 同「Default policy for `pull_request_target`」 | 公開のリポジトリで、既定のイベントポリシーが `pull_request_target` を止める。今は評価のモードで、2026-12-02 から適用する。続けて使うには、明示して許すイベントポリシーを作る | 決定 1 の代償・影響と危険・人へ残す判断（持ち主がポリシーを作る） | https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target （2026-11-24） |
-| STD3 | GitHub Docs「Troubleshooting Dependabot on GitHub Actions」 | Dependabot が起動した `push`・`pull_request` などの実行は fork と同じ扱いで、読み取りだけのトークンを受け、使える秘密は Dependabot の秘密だけ。直し方として `pull_request_target` を含む 2 つのワークフローに分ける形と、同じ名前で Dependabot の秘密を登録する形を挙げる | 決定 2（起動した人で分けない。Dependabot の秘密への登録は検証の結果で決める） | https://docs.github.com/en/code-security/reference/supply-chain-security/troubleshoot-dependabot/dependabot-on-actions （2026-11-24） |
-| STD4 | GitHub Docs「Troubleshooting required status checks」 | 必須のチェックは最新のコミットで通る必要がある。Pull Request で数えられるジョブのチェックは `push`・`pull_request`・`pull_request_review`・`pull_request_target`・`deployment`・`deployment_status` で起動したものだけ（`workflow_run` は入らない）。条件で飛ばしたジョブは成功と報告される | 決定 1（`workflow_run` を採らない）・非機能（`if:` を置かない）・処理の流れ（新しい head で数え直す） | https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks （2026-11-24） |
-| STD5 | GitHub Docs「Re-running workflows and jobs」 | 再実行は、元の event の `GITHUB_SHA` と `GITHUB_REF` で動く | 決定 7（探し直しに再実行を使わず、閉じて開き直す） | https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs （2026-11-24） |
+| STD1 | GitHub Docs「Events that trigger workflows」の `pull_request_target` と「Securely using pull_request_target」 | `pull_request_target` は既定のブランチの文脈で動き、秘密を受ける。Pull Request のコードを動かすと危険で、取ったコードはデータとして扱う。トークンの権限は最小にする | 決定 1（採らなかった案）・決定 4（取ったコードをデータとして扱う） | https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows ・ https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target （2026-11-24） |
+| STD2 | 同「Default policy for `pull_request_target`」 | 公開のリポジトリで、既定のイベントポリシーが `pull_request_target` を止める。今は評価のモードで、2026-12-02 から適用する | 決定 1（`pull_request_target` を使わないので、ポリシーの設定は要らない） | https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target （2026-11-24） |
+| STD3 | GitHub Docs「Troubleshooting Dependabot on GitHub Actions」 | Dependabot が起動した `push`・`pull_request` などの実行は fork と同じ扱いで、使える秘密は Dependabot の秘密だけ | 決定 2（Dependabot が起動しない実行で探し、Dependabot の秘密に登録しない） | https://docs.github.com/en/code-security/reference/supply-chain-security/troubleshoot-dependabot/dependabot-on-actions （2026-11-24） |
+| STD4 | GitHub Docs「Troubleshooting required status checks」 | Pull Request で数えられるジョブのチェックの起動のきっかけ（`workflow_run` は入らない）。条件で飛ばしたジョブは成功と報告される | 決定 1（`workflow_run` を採らない）・非機能（`if:` を置かない） | https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks （2026-11-24） |
+| STD5 | GitHub Docs「Re-running workflows and jobs」 | 再実行は、元の event の `GITHUB_SHA` と `GITHUB_REF` で動く | 決定 7（`run_attempt` が 1 の実行だけを受け入れる） | https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs （2026-11-24） |
 | STD6 | GitHub Docs「REST API endpoints for pull requests」の「Merge a pull request」 | マージの API は、head が一致すべき SHA（`sha`）を受ける。base を指定する項目は無い | 決定 7（マージの直前の読み直しと、マージの後の確認） | https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request （2026-11-24） |
-| STD7 | GitHub Docs「REST API endpoints for workflow runs」と「REST API endpoints for workflow jobs」 | ワークフローごとに実行を列挙でき、`event`・`created` で絞れる。絞り込みの指定があると 1,000 件までしか返さない。実行ごとにジョブを取れ、ジョブは `name`・`status`・`conclusion`・`run_attempt`・`check_run_url` を持つ | 決定 7（実行を列挙し、紐付いたジョブを合否の正本にする手順・ページング・再実行を退ける条件） | https://docs.github.com/en/rest/actions/workflow-runs ・ https://docs.github.com/en/rest/actions/workflow-jobs （2026-11-24） |
+| STD7 | GitHub Docs「REST API endpoints for workflow runs」と「REST API endpoints for workflow jobs」 | 実行の一覧は、絞り込みの指定があると 1,000 件までしか返さない。実行ごとにジョブを取れ、ジョブは `name`・`status`・`conclusion`・`run_attempt` を持つ | 決定 7（一覧を検索せず、起動した実行のジョブを読む。採らなかった案の理由） | https://docs.github.com/en/rest/actions/workflow-runs ・ https://docs.github.com/en/rest/actions/workflow-jobs （2026-11-24） |
+| STD8 | GitHub Docs「Reuse workflows」と「Reusing workflow configurations」 | 公開のリポジトリにある再利用できるワークフローは、組織の設定が許せば呼べる。参照は `{owner}/{repo}/.github/workflows/{filename}@{ref}` で、ブランチの名前も使える。呼んだ側は秘密を名前で渡すか `secrets: inherit` で渡す。`github` の文脈は呼んだ側のワークフローのものになる | 決定 1・4（非公開リポジトリから呼び、秘密を名前で渡す） | https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows ・ https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations （2026-11-24） |
+| STD9 | GitHub Docs「REST API endpoints for workflows」の「Create a workflow dispatch event」と「REST API endpoints for GitHub Actions variables」の「Get a repository variable」 | 起動の API は、応答に `workflow_run_id`・`run_url`・`html_url` を返す。変数の取得は、認証した利用者がそのリポジトリの協力者である必要があり、OAuth アプリのトークンと classic の個人のアクセストークンには `repo` の範囲が要る | 決定 7（起動した実行の ID で結果を読む。NDF の認証の権限） | https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event ・ https://docs.github.com/en/rest/actions/variables#get-a-repository-variable （2026-11-24） |
+| STD10 | GitHub Docs「Using workflow run logs」 | 実行の記録を見る・検索する・取得するには、リポジトリへの読み取りの権限が要る | 決定 1・8（非公開リポジトリの記録は、読み取りの権限を持つ人にしか見えない） | https://docs.github.com/en/actions/how-tos/monitor-workflows/use-workflow-run-logs （2026-11-24） |
 
 ### 主要な製品
 
@@ -546,14 +533,13 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 
 | # | 候補 | バージョン | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | gitleaks（CLI） | v8.30.1 | MIT | 2026-03-21 | 無し | 満たす。`gitleaks git --log-opts` は git の履歴を読むだけで、探す範囲のコミットのファイルを動かさない。取り込んだ参照の範囲をそのまま渡せる | #1 の設計の外部の調査の LIB1（2026-11-21）・`tools/checks/leak-scan.sh` |
-| LIB2 | zizmor | v1.32.0 | MIT | 2026-11-02 | 無し | 使い続ける。`dangerous-triggers` は `pull_request_target`・`workflow_run`・`issue_comment`（v1.31.0 から）を当て、Pull Request のコードを動かさないだけでは安全と言えない（引数・環境変数への注入）と書く。点検に設定の項目は無い。v1.32.0 を要約値で照合して取り、`pull_request_target` の作り物のワークフローを `--offline --no-ignores --config .github/zizmor.yml` で打つと終了コード 14。`rules.dangerous-triggers.ignore` は `--no-ignores` の下で効かず（14）、`--no-ignores` なしでは効いた（0）。`rules.dangerous-triggers.disable: true` は `--no-ignores` の下でも効いた（0） | https://github.com/zizmorcore/zizmor/blob/main/docs/audits.md ・ https://github.com/zizmorcore/zizmor/blob/main/docs/configuration.md ・ https://github.com/zizmorcore/zizmor/blob/main/docs/usage.md （2026-11-24）。配布の v1.32.0 を手元で打った（2026-11-24） |
+| LIB1 | gitleaks（CLI） | v8.30.1 | MIT | 2026-03-21 | 無し | 満たす。`gitleaks git` は `git log -p` のパッチを探すので、コミットで変わらなかった行は探さない。`gitleaks dir` は渡したディレクトリのファイルを探す。どちらも探す対象のファイルを動かさない | #1 の設計の外部の調査の LIB1（2026-11-21）・`tools/checks/leak-scan.sh`・ https://github.com/gitleaks/gitleaks#git |
+| LIB2 | zizmor | v1.32.0 | MIT | 2026-11-02 | 無し | 使い続ける。`dangerous-triggers` は `pull_request_target`・`workflow_run`・`issue_comment`（v1.31.0 から）を当てる。この設計は `workflow_call` と `workflow_dispatch` だけを足すので当たらない。`rules.dangerous-triggers.ignore` は `--no-ignores` の下で効かない | https://github.com/zizmorcore/zizmor/blob/main/docs/audits.md ・ https://github.com/zizmorcore/zizmor/blob/main/docs/configuration.md ・ https://github.com/zizmorcore/zizmor/blob/main/docs/usage.md （2026-11-24）。配布の v1.32.0 を手元で打った（2026-11-24） |
 
 ### 確かめられなかったこと
 
 | 対象 | 試した手段 | 結果と理由 |
 | --- | --- | --- |
-| Dependabot が起動した `pull_request_target` の実行が受ける秘密 | STD3 の文書と、検索の語 `GitHub Actions Dependabot pull_request_target secrets "base ref" created by Dependabot GITHUB_TOKEN` | 今の文書は、Dependabot の実行で使える秘密は Dependabot の秘密だけと書く一方、`pull_request_target` はこの制限を持たないとも書く。古いバージョンの文書は「Pull Request の基のブランチを Dependabot が作ったとき」に限っていた。どちらが今当たるかを文書から決められない |
-| `pull_request_target` のチェックが付くコミット | 検索の語 `pull_request_target workflow check run attached to pull request head commit required status check branch protection` と STD4 | Pull Request で数えられることは STD4 にあるが、付くコミットを直に書いた文書は見つからなかった |
+| 非公開リポジトリから公開のリポジトリの再利用できるワークフローを呼ぶときの、持ち主のアカウントの Actions の設定 | STD8 の文書 | 組織の設定が公開の再利用できるワークフローを許す必要があると書くが、持ち主のアカウントの今の設定は読んでいない。検証用のリポジトリで確かめる |
 
-調べた量: 候補 8 件・取得の試み 10 回。
+調べた量: 候補 11 件・取得の試み 14 回。
