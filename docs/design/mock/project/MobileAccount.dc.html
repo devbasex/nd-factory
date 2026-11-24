@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>スマホ: 自分の設定（プロフィール）</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.m .check{min-height:44px;align-items:center}
+.m .check input{margin-top:0}
+.m .seg{height:44px;width:100%;display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.m .seg button{justify-content:center;font-size:13px;padding:0 4px}
+.m .tabs a{min-height:44px;display:inline-flex;align-items:center}
+.m .btn.sm{height:44px;font-size:15px}
+.m-row{display:flex;flex-direction:column;gap:12px}
+.m .m-item .acts{display:flex;gap:8px;flex-wrap:wrap}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="m">
+  <header class="m-top">
+    <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect class="bg" width="32" height="32" rx="7"></rect><path class="ln" d="M9.5 23V9l13 14V9"></path><circle class="fg" cx="9.5" cy="23" r="2.8"></circle><circle class="fg" cx="9.5" cy="9" r="2.8"></circle><circle class="fg" cx="22.5" cy="23" r="2.8"></circle><circle class="fg" cx="22.5" cy="9" r="2.8"></circle></svg><span class="t">自分の設定</span>
+    <button class="m-icon" type="button" aria-label="移動と操作"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></button>
+    <button class="m-icon" type="button" aria-label="メニュー"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+  </header><p class="m-desc">あなたの利用者 ID とログインの手段です。アカウントをまたいで使います</p>
+  <div class="m-body">
+    <nav class="m-nav" aria-label="自分の設定の項目" style="border:1px solid var(--border);border-radius:6px;overflow:hidden"><a href="MobileMeLoginLinks.dc.html">ログインの連携<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></a><a href="MobileMeTeams.dc.html">所属チーム<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></a><a href="MobileMeDelegations.dc.html">エージェントへの委任<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></a><a href="MobileMeKeyboard.dc.html">キーボード<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></a></nav>
+    <section class="card"><div class="card-h"><h3>あなた</h3></div>
+      <div class="card-b"><dl class="dl"><dt>利用者の ID</dt><dd><span class="mono">usr_7f3a9c21e4</span></dd><dt>ログインの手段</dt><dd>GitHub</dd><dt>個人のアカウント</dt><dd>acc_02b81d・Free</dd><dt>所属チーム</dt><dd>example-team（持ち主）、platform-guild（席）</dd></dl><button class="btn" type="button">利用者の ID をコピー</button></div>
+    </section>
+    <section class="card"><div class="card-h"><h3>ログアウト</h3></div>
+      <div class="card-b"><span class="sm muted">この端末のログインを終えます。ほかの端末には影響しません</span><button class="btn danger" type="button">ログアウト</button></div>
+    </section>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>

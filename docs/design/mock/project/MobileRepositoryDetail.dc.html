@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>スマホ: リポジトリの詳細</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.m .check{min-height:44px;align-items:center}
+.m .check input{margin-top:0}
+.m .seg{height:44px;width:100%;display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.m .seg button{justify-content:center;font-size:13px;padding:0 4px}
+.m .tabs a{min-height:44px;display:inline-flex;align-items:center}
+.m .btn.sm{height:44px;font-size:15px}
+.m-row{display:flex;flex-direction:column;gap:12px}
+.m .m-item .acts{display:flex;gap:8px;flex-wrap:wrap}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="m">
+  <header class="m-top">
+    <a class="m-icon" href="MobileRepositories.dc.html" aria-label="リポジトリへ戻る"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg></a>
+    <span class="t">example-org/api</span>
+    <button class="m-icon" type="button" aria-label="メニュー"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+  </header><p class="m-desc">このリポジトリの実行の状況です</p>
+  <div class="m-body">
+    <div class="col" style="gap:4px"><span class="b mono">example-org/api</span><span class="xs muted">登録 2026/11/11・手元のマシン（どの 1 台でも）</span></div>
+    <nav class="tabs" aria-label="リポジトリの詳細"><a class="on" aria-current="page" href="MobileRepositoryDetail.dc.html">概要</a><a href="MobileRepositoryBacklog.dc.html">バックログ 12</a><a href="MobileRepositoryLoops.dc.html">ループ 0</a></nav>
+    <div class="tiles"><div class="tile attn"><span class="k">動いている実行</span><span class="v">1</span><span class="d">承認待ち 1</span></div><div class="tile"><span class="k">同時の実行の数の宣言</span><span class="v">—</span><span class="d">料金プランの値（1）</span></div></div>
+    <section class="card"><div class="card-h"><h2>最近の実行</h2><a class="sm" href="Mobile.dc.html" style="margin-left:auto">スプリントの一覧へ</a></div>
+      <div class="m-list" style="border:0;border-radius:0">
+        <a class="m-item" href="MobileSprintDetail.dc.html"><span class="row between"><span class="b">#1</span><span class="badge approval">承認待ち</span></span><span class="xs muted">11/13 15:29・2 分前</span></a>
+        <a class="m-item" href="MobileSprintDetail.dc.html"><span class="row between"><span class="b">#1</span><span class="badge danger">失敗</span></span><span class="xs muted">ジョブの失敗・11/13 15:30</span></a>
+        <a class="m-item" href="MobileSprintDetail.dc.html"><span class="row between"><span class="b">#1</span><span class="badge neutral">取り消し</span></span><span class="xs muted">11/11 07:58</span></a>
+      </div>
+    </section>
+  </div>
+  <div class="m-bar"><a class="btn primary" href="MobileNewSprint.dc.html">スプリントを始める</a></div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>

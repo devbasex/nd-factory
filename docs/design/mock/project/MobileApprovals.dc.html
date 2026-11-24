@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>スマホ: 承認待ちの一覧</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.m .check{min-height:44px;align-items:center}
+.m .check input{margin-top:0}
+.m .seg{height:44px;width:100%;display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.m .seg button{justify-content:center;font-size:13px;padding:0 4px}
+.m .tabs a{min-height:44px;display:inline-flex;align-items:center}
+.m .btn.sm{height:44px;font-size:15px}
+.m-row{display:flex;flex-direction:column;gap:12px}
+.m .m-item .acts{display:flex;gap:8px;flex-wrap:wrap}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="m">
+  <header class="m-top">
+    <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect class="bg" width="32" height="32" rx="7"></rect><path class="ln" d="M9.5 23V9l13 14V9"></path><circle class="fg" cx="9.5" cy="23" r="2.8"></circle><circle class="fg" cx="9.5" cy="9" r="2.8"></circle><circle class="fg" cx="22.5" cy="23" r="2.8"></circle><circle class="fg" cx="22.5" cy="9" r="2.8"></circle></svg><span class="t">承認待ちの一覧</span>
+    <button class="m-icon" type="button" aria-label="移動と操作"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></button>
+    <button class="m-icon" type="button" aria-label="メニュー"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+  </header><p class="m-desc">AI が人の判断を待っている依頼です。開いて、承認するか差し戻すかを答えます</p>
+  <div class="m-body">
+    <div class="seg" role="group" aria-label="種類で絞る"><button class="on" type="button">すべて 2</button><button type="button">設計 1</button><button type="button">リリース 1</button><button type="button">判断 0</button></div>
+      <div class="m-list">
+        <a class="m-item" href="MobileApprovalDetail.dc.html"><span class="row between"><span class="badge approval">設計承認ゲート</span><span class="xs muted">3 時間 2 分</span></span><span class="b sm">#1 画面から形態 local の実行を始める</span><span class="mono xs muted">example-org/api・11/13 12:04 から</span></a>
+        <a class="m-item" href="MobileApprovalDetail.dc.html"><span class="row between"><span class="badge approval">リリース承認ゲート</span><span class="xs muted">25 分</span></span><span class="b sm">#3 通知の文言をそろえる</span><span class="mono xs muted">example-org/web・m02-backlog 周回 4</span></a>
+      </div>
+    <p class="xs muted" style="margin:0">古い順。行を開くと承認の詳細で答えます。一覧では答えません</p>
+    <section class="card"><div class="card-h"><h2>知らせ</h2><span class="xs muted">表示した分まで既読</span></div>
+      <a class="m-item" style="border-left:0;border-right:0" href="MobileSprintDetail.dc.html"><span class="row between"><span class="badge warning">注意</span><span class="xs muted">14:12</span></span><span class="sm">取り込みで解けない衝突があります（docs/glossary.md）</span><span class="mono xs muted">example-org/web #3</span></a>
+      <a class="m-item" style="border-left:0;border-right:0" href="MobileSprintDetail.dc.html"><span class="row between"><span class="badge neutral">起票の下書き</span><span class="xs muted">11:50</span></span><span class="sm">範囲外の課題の起票の下書きがあります</span><span class="mono xs muted">example-org/api #1</span></a>
+    </section>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>

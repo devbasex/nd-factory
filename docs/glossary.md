@@ -12,3 +12,4 @@
 | 使える量と費用（`usage`） | 料金プラン・使える量・月の上限額・費用の記録 | 0 | `docs/glossary/usage.md` |
 | 操作の記録（`audit`） | 操作の記録・主体・入口 | 1 | `docs/glossary/audit.md` |
 | プラットフォーム（`platform`） | 画面・状態の置き場・形の正本など、コンテキストをまたいで使う共通の仕組み | 8 | `docs/glossary/platform.md` |
+| オーガナイザー（`organizer`） | AI のオーガナイザー・オーガナイザーのレーン・会話の項目・付属の画面 | 4 | `docs/glossary/organizer.md` |

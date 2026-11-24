@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>スマホ: バックログ</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.m .check{min-height:44px;align-items:center}
+.m .check input{margin-top:0}
+.m .seg{height:44px;width:100%;display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.m .seg button{justify-content:center;font-size:13px;padding:0 4px}
+.m .tabs a{min-height:44px;display:inline-flex;align-items:center}
+.m .btn.sm{height:44px;font-size:15px}
+.m-row{display:flex;flex-direction:column;gap:12px}
+.m .m-item .acts{display:flex;gap:8px;flex-wrap:wrap}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="m">
+  <header class="m-top">
+    <a class="m-icon" href="MobileRepositories.dc.html" aria-label="リポジトリへ戻る"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg></a>
+    <span class="t">バックログ</span>
+    <button class="m-icon" type="button" aria-label="メニュー"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+  </header><p class="m-desc">AI が棚卸しで付けた、課題の着手の順位です（読むだけ）</p>
+  <div class="m-body">
+    <div class="col" style="gap:4px"><span class="b mono">example-org/api</span></div>
+    <nav class="tabs" aria-label="リポジトリの詳細"><a href="MobileRepositoryDetail.dc.html">概要</a><a class="on" aria-current="page" href="MobileRepositoryBacklog.dc.html">バックログ 12</a><a href="MobileRepositoryLoops.dc.html">ループ 0</a></nav>
+    <section class="card"><div class="card-h"><h2>順位の表</h2><span class="xs muted">棚卸しが付けた順。読むだけ</span></div>
+      <div class="m-list" style="border:0;border-radius:0">
+        <div class="m-item"><span class="row between"><span class="b sm">1. #12 承認の資料に差分の要約を載せる</span><span class="xs muted">02</span></span><span class="xs muted">承認ゲートの判断に直接効く</span></div>
+        <div class="m-item"><span class="row between"><span class="b sm">2. #15 失敗の理由を一覧に出す</span><span class="xs muted">02</span></span><span class="xs muted">失敗の調べ直しが減る</span></div>
+        <div class="m-item"><span class="row between"><span class="b sm">3. #18 予算の残りを周回ごとに記録する</span><span class="xs muted">02</span></span><span class="xs muted">ループの止まり方を説明できる</span></div>
+        <div class="m-item"><span class="row between"><span class="b sm">4. #21 ダークの札のコントラストを上げる</span><span class="xs muted">03</span></span><span class="xs muted">アクセシビリティの基準</span></div>
+        <div class="m-item"><span class="row between"><span class="b sm">5. #22 キーボードで行を選ぶ</span><span class="xs muted">03</span></span><span class="xs muted">—</span></div>
+      </div>
+    </section>
+    <section class="card"><div class="card-h"><h3>棚卸しの記録</h3></div>
+      <div class="card-b"><span class="sm">2026/11/13 04:10・差分　直した 6 件・持ち越し 31 件</span><span class="sm">2026/11/12 22:10・見直し　閉じた 3 件・マイルストーンを変えた 2 件</span></div>
+    </section>
+  </div>
+  <div class="m-bar"><a class="btn primary" href="MobileNewSprint.dc.html">スプリントを始める</a></div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>
