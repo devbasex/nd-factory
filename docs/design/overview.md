@@ -511,3 +511,4 @@ NDF 11.0.32 への移行に合わせて全体の設計を見直し、設計の�
 | #136 | 固定の点が 11.0.12 のままで、照合が空振り | [execution.md](execution.md) の決定 104・`ndf-pin.json` |
 | #137 | Value 12・14・16 の受け先が無い | [platform.md](platform.md)・[decisions.md](decisions.md) |
 | #138 | 費用の見込みに推論が無い | [platform.md](platform.md) |
+| #140 | 旧い側で承認・実装したオーガナイザーの会話を主にする画面の地図を、決定 4・5 が比べずにホーム（いま）へ戻している | [decisions.md](decisions.md) の決定 4・5・[screens.md](screens.md)・この文書の機能一覧 |
