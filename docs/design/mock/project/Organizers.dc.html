@@ -1,0 +1,164 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>オーガナイザーの一覧と会話</title><script src="./support.js"></script></head><body><x-dc><helmet><style>body{margin:0;background:#ffffff} a{color:#3451c6;text-decoration:underline;text-underline-offset:2px} a:hover{color:#1f2328}</style></helmet>
+<div style="font-family:system-ui,-apple-system,'Hiragino Sans','Noto Sans JP',sans-serif;font-size:0.875rem;line-height:1.5;color:#1f2328;background:#ffffff;min-height:100vh;width:100%;max-width:100%;display:grid;grid-template-columns:15rem minmax(17rem,22rem) 1fr">
+
+<nav aria-label="ナビゲーション" style="background:#f6f8fa;border-right:1px solid #d1d9e0;display:flex;flex-direction:column;gap:1rem;padding:1rem 0.75rem">
+  <div style="font-weight:600;font-size:0.9375rem;padding:0 0.5rem">Neural Development Factory</div>
+  <button type="button" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;min-height:2.5rem;padding:0 0.75rem;border:1px solid #818b98;border-radius:6px;background:#ffffff;color:#1f2328;font:inherit;cursor:pointer"><span>個人のアカウント</span><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></button>
+  <button type="button" style="display:flex;align-items:center;gap:0.5rem;min-height:2rem;padding:0 0.75rem;border:1px solid #d1d9e0;border-radius:6px;background:#ffffff;color:#59636e;font:inherit;cursor:pointer"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path></svg><span>コマンドパレット</span><span style="margin-left:auto;font-family:ui-monospace,Menlo,monospace;font-size:0.75rem">Ctrl K</span></button>
+  <div style="display:flex;flex-direction:column;gap:0.125rem">
+    <div style="font-size:0.75rem;font-weight:600;color:#59636e;padding:0.25rem 0.5rem">会話</div>
+    <a href="Organizers.dc.html" aria-current="page" style="display:flex;align-items:center;min-height:2rem;padding:0 0.5rem;border-radius:6px;background:#e8edfc;color:#1f2328;font-weight:600;text-decoration:none">オーガナイザー</a>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:0.125rem">
+    <div style="font-size:0.75rem;font-weight:600;color:#59636e;padding:0.25rem 0.5rem">付属</div>
+    <a href="#" style="display:flex;align-items:center;justify-content:space-between;min-height:2rem;padding:0 0.5rem;border-radius:6px;color:#1f2328;text-decoration:none"><span>承認待ちの一覧</span><span style="min-width:1.25rem;text-align:center;padding:0 0.375rem;border-radius:999px;background:#1a7f37;color:#ffffff;font-size:0.75rem;font-weight:600">1</span></a>
+    <a href="NavMap.dc.html" style="display:flex;align-items:center;min-height:2rem;padding:0 0.5rem;border-radius:6px;color:#1f2328;text-decoration:none">レーンの状況</a>
+    <a href="#" style="display:flex;align-items:center;min-height:2rem;padding:0 0.5rem;border-radius:6px;color:#1f2328;text-decoration:none">スプリントの一覧</a>
+    <a href="#" style="display:flex;align-items:center;min-height:2rem;padding:0 0.5rem;border-radius:6px;color:#1f2328;text-decoration:none">開発計画</a>
+    <a href="#" style="display:flex;align-items:center;min-height:2rem;padding:0 0.5rem;border-radius:6px;color:#1f2328;text-decoration:none">ループ</a>
+    <a href="#" style="display:flex;align-items:center;min-height:2rem;padding:0 0.5rem;border-radius:6px;color:#1f2328;text-decoration:none">リポジトリ</a>
+    <a href="#" style="display:flex;align-items:center;min-height:2rem;padding:0 0.5rem;border-radius:6px;color:#1f2328;text-decoration:none">役割の流れ</a>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:0.125rem">
+    <div style="font-size:0.75rem;font-weight:600;color:#59636e;padding:0.25rem 0.5rem">設定</div>
+    <a href="#" style="display:flex;align-items:center;min-height:2rem;padding:0 0.5rem;border-radius:6px;color:#1f2328;text-decoration:none">アカウントの設定</a>
+    <a href="#" style="display:flex;align-items:center;min-height:2rem;padding:0 0.5rem;border-radius:6px;color:#1f2328;text-decoration:none">自分の設定</a>
+  </div>
+  <div style="margin-top:auto;display:flex;align-items:center;gap:0.5rem;padding:0 0.5rem;color:#59636e;font-size:0.8125rem"><svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#1a7f37"></circle></svg><span>つながっています</span></div>
+</nav>
+
+<section aria-labelledby="org-list-title" style="border-right:1px solid #d1d9e0;display:flex;flex-direction:column;min-width:0">
+  <header style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;padding:1rem;border-bottom:1px solid #d1d9e0">
+    <h1 id="org-list-title" style="margin:0;font-size:1.25rem;font-weight:600">オーガナイザー</h1>
+    <button type="button" style="min-height:2rem;padding:0 0.75rem;border:1px solid #3451c6;border-radius:6px;background:#3451c6;color:#ffffff;font:inherit;font-weight:600;cursor:pointer">オーガナイザーを立てる</button>
+  </header>
+  <div style="display:flex;flex-direction:column;gap:1rem;padding:1rem;overflow:auto">
+    <div style="display:flex;flex-direction:column;gap:0.5rem">
+      <h2 style="margin:0;font-size:0.8125rem;font-weight:600;color:#59636e">動いているもの（2）</h2>
+      <a href="#" style="display:flex;flex-direction:column;gap:0.25rem;padding:0.75rem;border:1px solid #d1d9e0;border-radius:6px;color:#1f2328;text-decoration:none">
+        <span style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem"><span style="font-weight:600">example/api</span><span style="padding:0 0.5rem;border-radius:999px;background:#ddf4ff;color:#0969da;font-size:0.75rem;font-weight:600">応答中</span></span>
+        <span style="color:#59636e;font-size:0.8125rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">#205 の実装を lane-2 で始めました（見本）</span>
+      </a>
+      <a href="#" style="display:flex;flex-direction:column;gap:0.25rem;padding:0.75rem;border:1px solid #d1d9e0;border-radius:6px;color:#1f2328;text-decoration:none">
+        <span style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem"><span style="font-weight:600">example/docs</span><span style="padding:0 0.5rem;border-radius:999px;background:#f0f1f3;color:#59636e;font-size:0.75rem;font-weight:600">休止中</span></span>
+        <span style="color:#59636e;font-size:0.8125rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">次の入力で起こし直します（見本）</span>
+      </a>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:0.5rem">
+      <h2 style="margin:0;font-size:0.8125rem;font-weight:600;color:#59636e">止まったもの（1）</h2>
+      <a href="Organizers.dc.html" aria-current="page" style="display:flex;flex-direction:column;gap:0.25rem;padding:0.75rem;border:1px solid #3451c6;border-radius:6px;background:#e8edfc;color:#1f2328;text-decoration:none">
+        <span style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem"><span style="font-weight:600">example/app</span><span style="display:flex;gap:0.25rem"><span style="padding:0 0.5rem;border-radius:999px;background:#fff8c5;color:#9a6700;font-size:0.75rem;font-weight:600">止まった</span><span style="padding:0 0.5rem;border-radius:999px;background:#1a7f37;color:#ffffff;font-size:0.75rem;font-weight:600">承認待ち 1</span></span></span>
+        <span style="color:#59636e;font-size:0.8125rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">手元のマシンが止まっています（見本）</span>
+      </a>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:0.5rem">
+      <h2 style="margin:0;font-size:0.8125rem;font-weight:600;color:#59636e">終わったもの（1）</h2>
+      <a href="#" style="display:flex;flex-direction:column;gap:0.25rem;padding:0.75rem;border:1px solid #d1d9e0;border-radius:6px;color:#1f2328;text-decoration:none">
+        <span style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem"><span style="font-weight:600">example/legacy</span><span style="padding:0 0.5rem;border-radius:999px;background:#fbefff;color:#8250df;font-size:0.75rem;font-weight:600">終わった</span></span>
+        <span style="color:#59636e;font-size:0.8125rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">終えました（見本）</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<main style="display:flex;flex-direction:column;min-width:0;min-height:100vh">
+  <header style="display:flex;flex-wrap:wrap;align-items:center;gap:0.75rem 1rem;padding:1rem 1.5rem;border-bottom:1px solid #d1d9e0">
+    <h2 style="margin:0;font-size:1.25rem;font-weight:600">example/app</h2>
+    <span style="padding:0 0.5rem;border-radius:999px;background:#fff8c5;color:#9a6700;font-size:0.75rem;font-weight:600">止まった</span>
+    <span style="color:#59636e">実行の手段: 手元のマシン</span>
+    <a href="#">承認待ち 1 件（承認待ちの一覧）</a>
+    <button type="button" style="margin-left:auto;min-height:2rem;padding:0 0.75rem;border:1px solid #818b98;border-radius:6px;background:#ffffff;color:#1f2328;font:inherit;cursor:pointer">終える</button>
+  </header>
+  <div role="status" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 1.5rem;background:#fff8c5;color:#1f2328;border-bottom:1px solid #d1d9e0"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9a6700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.3 3.9L2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg><span>手元のマシンが止まっています。マシンが戻ると、控えた入力を送った順に届けます。</span></div>
+
+  <div role="log" aria-label="会話" style="flex:1;display:flex;flex-direction:column;gap:0.75rem;padding:1rem 1.5rem;overflow:auto">
+    <button type="button" style="align-self:center;min-height:1.75rem;padding:0 0.75rem;border:1px solid #d1d9e0;border-radius:999px;background:#ffffff;color:#59636e;font:inherit;font-size:0.8125rem;cursor:pointer">古い分を読む</button>
+
+    <div style="align-self:flex-end;max-width:36rem;display:flex;flex-direction:column;gap:0.25rem;align-items:flex-end">
+      <span style="font-size:0.75rem;color:#59636e">あなた・指示・10:02</span>
+      <div style="padding:0.625rem 0.875rem;border-radius:6px;background:#e8edfc">#101 と #102 を並列で進めてください。</div>
+    </div>
+
+    <div style="align-self:flex-start;max-width:40rem;display:flex;flex-direction:column;gap:0.25rem">
+      <span style="font-size:0.75rem;color:#59636e">オーガナイザー・10:03</span>
+      <div style="padding:0.625rem 0.875rem;border:1px solid #d1d9e0;border-radius:6px;background:#ffffff;display:flex;flex-direction:column;gap:0.375rem">
+        <span>開発計画を作り、2 つのレーンで始めました。割り振りは <a href="#">開発計画の詳細</a> にあります。レーンごとの動きは <a href="NavMap.dc.html">レーンの状況</a> で見られます。</span>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;border:1px solid #d1d9e0;border-radius:6px;background:#f6f8fa">
+      <span style="padding:0 0.5rem;border-radius:999px;background:#f0f1f3;color:#59636e;font-size:0.75rem;font-weight:600;border:1px solid #d1d9e0">フェーズの報告</span>
+      <span>#101: 設計 → 実装へ進みました</span>
+      <span style="margin-left:auto;font-size:0.75rem;color:#59636e">10:20</span>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;border:1px solid #d1d9e0;border-radius:6px;background:#f6f8fa">
+      <span style="padding:0 0.5rem;border-radius:999px;background:#ddf4ff;color:#0969da;font-size:0.75rem;font-weight:600">レーンの動き</span>
+      <span>lane-1 が #101 の実装を始めました</span>
+      <a href="NavMap.dc.html" style="font-size:0.8125rem">レーンの状況で見る</a>
+      <span style="margin-left:auto;font-size:0.75rem;color:#59636e">10:21</span>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:0.5rem;padding:0.75rem 1rem;border:2px solid #1a7f37;border-radius:6px;background:#ffffff">
+      <div style="display:flex;align-items:center;gap:0.5rem">
+        <span style="padding:0 0.5rem;border-radius:999px;background:#1a7f37;color:#ffffff;font-size:0.75rem;font-weight:600">承認待ち</span>
+        <span style="font-weight:600">設計承認ゲート・#102</span>
+        <span style="margin-left:auto;font-size:0.75rem;color:#59636e">10:34</span>
+      </div>
+      <span>#102 の設計ができました。設計の決定と未決の答えを承認の画面で確かめてください。</span>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:0.75rem">
+        <a href="#" style="display:inline-flex;align-items:center;gap:0.375rem;min-height:2rem;padding:0 0.75rem;border-radius:6px;background:#1f883d;color:#ffffff;font-weight:600;text-decoration:none">承認の画面を開く<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M13 6l6 6-6 6"></path></svg></a>
+        <span style="font-size:0.8125rem;color:#59636e">承認は承認の画面のボタンで行います。ここで「承認します」と送っても、承認の依頼は変わりません。</span>
+      </div>
+    </div>
+
+    <div style="align-self:flex-start;max-width:40rem;display:flex;flex-direction:column;gap:0.25rem">
+      <span style="font-size:0.75rem;color:#59636e">オーガナイザー・10:40</span>
+      <div style="padding:0.625rem 0.875rem;border:1px solid #d1d9e0;border-radius:6px;background:#ffffff">
+        #101 の Pull Request を開きました: <a href="#" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:0.25rem">example/app#12<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"></path><path d="M20 4l-9 9"></path><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg></a> <span style="color:#59636e;font-size:0.8125rem">（github.com・外部のリンク）</span>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;border:1px solid #d1d9e0;border-radius:6px;background:#f6f8fa">
+      <span style="padding:0 0.5rem;border-radius:999px;background:#fff8c5;color:#9a6700;font-size:0.75rem;font-weight:600">レーンの動き</span>
+      <span>手元のマシンが止まり、オーガナイザーのレーンが終わりました</span>
+      <span style="margin-left:auto;font-size:0.75rem;color:#59636e">10:52</span>
+    </div>
+
+    <div style="align-self:flex-end;max-width:36rem;display:flex;flex-direction:column;gap:0.25rem;align-items:flex-end">
+      <span style="font-size:0.75rem;color:#59636e">あなた・起票の依頼・10:58</span>
+      <div style="display:flex;flex-direction:column;gap:0.5rem;padding:0.625rem 0.875rem;border:1px dashed #9a6700;border-radius:6px;background:#ffffff">
+        <span>ログインの画面の文言の揺れを課題にしてください。</span>
+        <div style="display:flex;align-items:center;gap:0.75rem;justify-content:flex-end">
+          <span style="padding:0 0.5rem;border-radius:999px;background:#fff8c5;color:#9a6700;font-size:0.75rem;font-weight:600">控え中（手元のマシンが止まっています）</span>
+          <button type="button" style="min-height:1.75rem;padding:0 0.625rem;border:1px solid #818b98;border-radius:6px;background:#ffffff;color:#1f2328;font:inherit;font-size:0.8125rem;cursor:pointer">取り下げる</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="align-self:flex-end;max-width:36rem;display:flex;flex-direction:column;gap:0.25rem;align-items:flex-end">
+      <span style="font-size:0.75rem;color:#59636e">あなた・質問・11:05</span>
+      <div style="display:flex;flex-direction:column;gap:0.5rem;padding:0.625rem 0.875rem;border:1px dashed #818b98;border-radius:6px;background:#f6f8fa">
+        <span>#101 のテストは今どこまで通っていますか。</span>
+        <span style="align-self:flex-end;padding:0 0.5rem;border-radius:999px;background:#f0f1f3;color:#59636e;font-size:0.75rem;font-weight:600;border:1px solid #d1d9e0">未送信（この端末に控えています。つながると送ります）</span>
+      </div>
+    </div>
+  </div>
+
+  <form style="display:flex;flex-direction:column;gap:0.5rem;padding:0.75rem 1.5rem 1rem;border-top:1px solid #d1d9e0;background:#ffffff">
+    <fieldset style="display:flex;flex-wrap:wrap;align-items:center;gap:0.25rem 1rem;margin:0;padding:0;border:0">
+      <legend style="float:left;margin-right:0.5rem;font-size:0.8125rem;color:#59636e">送る種類</legend>
+      <label style="display:inline-flex;align-items:center;gap:0.25rem;cursor:pointer"><input type="radio" name="kind" value="instruction" checked="checked"></input>指示</label>
+      <label style="display:inline-flex;align-items:center;gap:0.25rem;cursor:pointer"><input type="radio" name="kind" value="question"></input>質問</label>
+      <label style="display:inline-flex;align-items:center;gap:0.25rem;cursor:pointer"><input type="radio" name="kind" value="issue_request"></input>起票の依頼</label>
+    </fieldset>
+    <label for="conv-input" style="font-size:0.8125rem;color:#59636e">オーガナイザーへの入力</label>
+    <div style="display:flex;gap:0.5rem;align-items:flex-end">
+      <textarea id="conv-input" rows="2" placeholder="指示・質問・起票の依頼を書く" style="flex:1;min-height:3.5rem;padding:0.5rem 0.75rem;border:1px solid #818b98;border-radius:6px;font:inherit;color:#1f2328;background:#ffffff;resize:vertical"></textarea>
+      <button type="submit" style="display:inline-flex;align-items:center;gap:0.375rem;min-height:2.5rem;padding:0 1rem;border:1px solid #3451c6;border-radius:6px;background:#3451c6;color:#ffffff;font:inherit;font-weight:600;cursor:pointer"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"></path><path d="M22 2l-7 20-4-9-9-4 20-7z"></path></svg>送る</button>
+    </div>
+    <span style="font-size:0.75rem;color:#59636e">止まっている間に送った入力は控え、マシンが戻ってから届けます。承認は承認の画面で行います。</span>
+  </form>
+</main>
+</div>
+</x-dc><script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>class Component extends DCLogic { renderVals() { return {}; } }</script></body></html>

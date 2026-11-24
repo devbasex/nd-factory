@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config";
 
-// ワークスペースごとのテストを 1 回の `vitest run` で打つ。画面だけ DOM の環境で動かす
+// ワークスペースごとのテストを 1 回の `vitest run` で打つ。画面だけ DOM の環境で動かす。
+// 結合のテスト（`*.integration.test.ts`）は実行ファイルを起こすので、vitest.integration.config.ts で別に打つ
 export default defineConfig({
   test: {
     projects: [
@@ -17,7 +18,14 @@ export default defineConfig({
           hookTimeout: 120_000,
         },
       },
-      { test: { name: "tools", include: ["tools/test/**/*.test.ts"], environment: "node" } },
+      {
+        test: {
+          name: "tools",
+          include: ["tools/test/**/*.test.ts"],
+          exclude: ["tools/test/**/*.integration.test.ts"],
+          environment: "node",
+        },
+      },
     ],
   },
 });

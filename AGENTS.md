@@ -15,7 +15,12 @@
 | `docs/operations/` | 設置・設定のファイル・反映の承認・IdP のクライアントと App の作り方 |
 | `docs/design/` | nd-factory の承認済みの設計（全体・画面・API と MCP・実行・プラットフォーム・決定の記録・詳細設計）。入口は `overview.md`。子の課題はここを引いて詳細設計を書く |
 | `docs/design-process/` | 設計を作った経緯・作り方・開発の計画（設計そのものは持たない） |
+| `docs/specifications/` | 実装した機能の確定仕様（今のコードと一致する仕様。課題の設計と実装計画を、実装の後にここへ書き直す） |
 | `ndf-pin.json` | NDF の固定の値（キー `ndf_ref`）。このキーはこのファイルの 1 か所だけに置く |
+
+## 開発の指針
+
+進め方・判断の基準・書き方の指針は、プロジェクト Skill [`nd-factory-dev-guidelines`](.claude/skills/nd-factory-dev-guidelines/SKILL.md) にある。設計・レビュー・承認を求めるとき・文書を書くときに読む。AI のメモリと引継ぎ文書には指針を書かず、この Skill か設計書か `.ndf/` に書く。
 
 ## コードの決まり
 
@@ -40,3 +45,4 @@
 - 例・テスト・見本には作り物の値だけを使う（アカウント `123456789012`・リージョン `us-west-2`・接頭辞 `acme`・メール `ops@example.com`）
 - CI は AWS の資格情報を持たない。ワークフローに資格情報を足さない（`tools/test/ci-definition.test.ts` が落とす）
 - 照合の語（参照の検査が探す旧い側の名前）はリポジトリに書かない。CI の秘密 `REF_CHECK_TERMS` から受ける
+- 実際の値（アカウント・profile・環境の名前）を探す正規表現はリポジトリに書かない。CI の秘密 `LEAK_CHECK_PATTERN` から受け、`leak-check` のジョブが `.gitleaks.toml` に重ねて探す。gitleaks の当たりは値の行の `gitleaks:allow` と `.gitleaksignore` では外せない。正当な当たりは当てた規則の `[[rules.allowlists]]`（`.gitleaks.toml` か `tools/checks/gitleaks-default.toml`）に理由を添えて足す

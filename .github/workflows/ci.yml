@@ -17,6 +17,27 @@ jobs:
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    services:
+      # DB の用意の手順を pg の実装で打つテストの相手。イメージは要約値で固定する
+      postgres:
+        image: postgres:16@sha256:3950ad7c3148ca2175ef1b6c36c9efbf78957ae8fbe8b3a5d7c35af50500382f
+        env:
+          # 使い捨てのコンテナの作り物の値
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # 値が無いと、CI では DB のテストが落ちる
+      ND_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+      # このジョブだけの使い捨てのコンテナ。クラスタ全体の権限を変える DB のテストを許す
+      ND_TEST_PG_DISPOSABLE_CLUSTER: "1"
+      # 認証の時間切れを短くして起こした、認証の時間切れのテストだけが使うコンテナ（下の手順で起こす）
+      ND_TEST_PG_AUTH_TIMEOUT_URL: postgres://postgres:postgres@localhost:5433/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -26,8 +47,24 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
+      # サーバーの設定を起動の引数で決める（サービスコンテナは起動の引数を渡せない）。ほかのテストが使うクラスタの設定を
+      # ALTER SYSTEM で変えないため、別のコンテナにする。値はテストの PG_AUTH_TIMEOUT_S と同じ
+      - name: 認証の時間切れを短くした PostgreSQL を起こす
+        run: |
+          docker run -d --name pg-auth-timeout -p 5433:5432 -e POSTGRES_PASSWORD=postgres \
+            postgres:16@sha256:3950ad7c3148ca2175ef1b6c36c9efbf78957ae8fbe8b3a5d7c35af50500382f -c authentication_timeout=3s
+          for _ in $(seq 60); do
+            docker exec pg-auth-timeout pg_isready -U postgres -h localhost && exit 0
+            sleep 1
+          done
+          docker logs pg-auth-timeout
+          exit 1
       - name: lint・型検査・生成物の差・単体テストとスタックのテスト
         run: npm run check
+      - name: 置き場の間の依存の向き
+        run: npm run deps-check
+      - name: 使っていないファイル・書き出し・依存
+        run: npm run knip
 
   synth:
     runs-on: ubuntu-24.04
@@ -83,3 +120,103 @@ jobs:
           # 語を必須にするのは、変数で有効にした正本のリポジトリの中の実行（main への push と同じリポジトリの枝からの PR）だけ
           REF_CHECK_REQUIRE_TERMS: ${{ (vars.REF_CHECK_REQUIRE_TERMS == '1' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)) && '1' || '' }}
         run: npm run ref-check
+
+  leak-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # 版と要約値は手で上げる。要約値は配布の資産を取って sha256sum で求めた値（配布元のチェックサムのファイルと比べない）
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks を固定の版と要約値で置く
+        run: |
+          dir="$RUNNER_TEMP/gitleaks"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/gitleaks.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $dir/gitleaks.tar.gz" | sha256sum --check --strict -
+          tar -xzf "$dir/gitleaks.tar.gz" -C "$dir" gitleaks
+          echo "$dir" >> "$GITHUB_PATH"
+      # 依存を入れる前に探す（追跡していないファイルは木に無い）。既定の規則と nd-factory の規則（実際の値の規則を重ねた設定）の 2 回
+      - name: 今の木と履歴のコミットを探す
+        env:
+          # 実際の値の正規表現は秘密から受ける。リポジトリのファイルに置かない
+          LEAK_CHECK_PATTERN: ${{ secrets.LEAK_CHECK_PATTERN }}
+          # 必須にするのは、変数で有効にした正本のリポジトリの中の実行（main への push と同じリポジトリの枝からの PR）だけ
+          LEAK_CHECK_REQUIRE_PATTERN: ${{ (vars.LEAK_CHECK_REQUIRE_PATTERN == '1' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)) && '1' || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          config=".gitleaks.toml"
+          if [[ -n "$LEAK_CHECK_PATTERN" ]]; then
+            if [[ "$LEAK_CHECK_PATTERN" == *"'''"* ]]; then
+              echo "::error::秘密 LEAK_CHECK_PATTERN に ''' を含めない（TOML の文字列を閉じるため）"
+              exit 1
+            fi
+            overlay_dir="$(mktemp -d)"
+            trap 'rm -rf "$overlay_dir"' EXIT
+            config="$overlay_dir/gitleaks.toml"
+            printf '[extend]\npath = "%s"\n\n[[rules]]\nid = "nd-real-value"\ndescription = "CI の秘密 LEAK_CHECK_PATTERN の実際の値"\nregex = '"'''%s'''"'\n' \
+              "$GITHUB_WORKSPACE/.gitleaks.toml" "$LEAK_CHECK_PATTERN" > "$config"
+          elif [[ "$LEAK_CHECK_REQUIRE_PATTERN" == 1 ]]; then
+            echo "::error::秘密 LEAK_CHECK_PATTERN が無い（変数 LEAK_CHECK_REQUIRE_PATTERN で必須にしている）"
+            exit 1
+          fi
+          unset LEAK_CHECK_PATTERN
+          tools/checks/leak-scan.sh dir tools/checks/gitleaks-default.toml
+          tools/checks/leak-scan.sh dir "$config"
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            fork_point="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+            tools/checks/leak-scan.sh git tools/checks/gitleaks-default.toml --range "$fork_point..$HEAD_SHA"
+            tools/checks/leak-scan.sh git "$config" --range "$fork_point..$HEAD_SHA"
+          else
+            # main への push は、取り込んだ fork のコミット（秘密の規則を受けずに検査した PR のもの）を含む、
+            # 到達できるすべてのコミットを探す。push の前後（before..after）に絞らない: 打ち消された実行・
+            # 強制の push・同じ並びの待ちの打ち切りで飛ばした push の間のコミットも漏らさないため
+            tools/checks/leak-scan.sh git tools/checks/gitleaks-default.toml
+            tools/checks/leak-scan.sh git "$config"
+          fi
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: gitleaks の設定の結合のテスト
+        run: npm run test:integration -- leak-scan
+
+  workflow-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      # 版と要約値は手で上げる。要約値は配布の資産を取って sha256sum で求めた値（配布元は要約値のファイルを出さない）
+      ZIZMOR_VERSION: 1.32.0
+      ZIZMOR_SHA256: bb110cc765eca9cd7efb2e284a956be5974c60027b0970f16397d86208a9957b
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: zizmor を固定の版と要約値で置く
+        run: |
+          dir="$RUNNER_TEMP/zizmor"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/zizmor.tar.gz" \
+            "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${ZIZMOR_SHA256}  $dir/zizmor.tar.gz" | sha256sum --check --strict -
+          tar -xzf "$dir/zizmor.tar.gz" -C "$dir" zizmor
+          echo "$dir" >> "$GITHUB_PATH"
+      # tools/test/workflow-audit.integration.test.ts がこの手順の run を読んで同じ引数で打つ
+      - name: ワークフローの点検
+        run: zizmor --offline --no-ignores --config .github/zizmor.yml .github/workflows
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: zizmor の設定の結合のテスト
+        run: npm run test:integration -- workflow-audit

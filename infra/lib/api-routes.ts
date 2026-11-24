@@ -35,6 +35,7 @@ export function loadRoutes(raw: unknown): readonly ApiRoute[] {
   return raw.map((entry: unknown, i): ApiRoute => {
     const r = (entry ?? {}) as Record<string, unknown>;
     if (r["method"] !== "POST") throw new Error(`routes.json の ${i} 番目の method は POST にする`);
+    // eslint-disable-next-line no-restricted-syntax -- 経路を書かず、書き出しから読んだ経路の頭を照らすだけ
     if (typeof r["path"] !== "string" || !r["path"].startsWith("/v1/")) throw new Error(`routes.json の ${i} 番目の path は /v1/ で始める`);
     if (typeof r["operation"] !== "string") throw new Error(`routes.json の ${i} 番目に operation が無い`);
     if (!isEndpoint(r["endpoint"])) throw new Error(`routes.json の ${i} 番目の受け口を知らない: ${JSON.stringify(r["endpoint"])}`);

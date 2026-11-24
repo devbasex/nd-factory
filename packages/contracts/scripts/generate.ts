@@ -20,7 +20,16 @@ export const EXIT_BEGIN = "<!-- exit-codes:begin -->";
 export const EXIT_END = "<!-- exit-codes:end -->";
 
 // 見本は作り物の値だけにする。client_id は人が秘密の器へ値を入れた後に足すキーなので、見本に入れない
-const EXAMPLE: Settings = { prefix: "acme", environment: "test", login: { google: {} } };
+// インフラのキーは既定と同じ値で書き、どのキーを書けるかを見本で示す
+const EXAMPLE: Settings = {
+  prefix: "acme",
+  environment: "test",
+  login: { google: {} },
+  network: { vpc_cidr: "10.80.0.0/16" },
+  progress_db: { max_acu: 2 },
+  budget: { monthly_usd: 30, scope: "tags" },
+  ops: { notify_emails: [] },
+};
 
 export class GenerateError extends Error {
   override name = "GenerateError";

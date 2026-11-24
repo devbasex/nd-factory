@@ -5,14 +5,19 @@
     {
       "name": "typescript",
       "frameworks": [],
-      "files": 49,
+      "files": 95,
       "version": "24"
     },
     {
       "name": "javascript",
       "frameworks": [],
-      "files": 1,
+      "files": 2,
       "version": "24"
+    },
+    {
+      "name": "shell",
+      "frameworks": [],
+      "files": 1
     }
   ],
   "test": {
@@ -21,7 +26,7 @@
       {
         "name": "vitest",
         "runner": "vitest",
-        "command": "npx vitest run",
+        "command": "npm run test",
         "scope_command": "npx vitest run {paths}",
         "needs": [],
         "paths": [
@@ -46,7 +51,37 @@
         "needs": [],
         "paths": [
           "*.ts",
-          "*.js"
+          "*.js",
+          "*.cjs",
+          "*.mjs"
+        ],
+        "ci_jobs": [
+          ".github/workflows/ci.yml#check"
+        ]
+      },
+      {
+        "name": "typecheck",
+        "runner": "tsc",
+        "kind": "lint",
+        "command": "npm run typecheck",
+        "needs": [],
+        "paths": [
+          "*.ts",
+          "tsconfig.base.json",
+          "package.json"
+        ],
+        "ci_jobs": [
+          ".github/workflows/ci.yml#check"
+        ]
+      },
+      {
+        "name": "contracts-generated",
+        "runner": "node",
+        "kind": "lint",
+        "command": "npm run generate:check",
+        "needs": [],
+        "paths": [
+          "packages/contracts"
         ],
         "ci_jobs": [
           ".github/workflows/ci.yml#check"
@@ -70,28 +105,34 @@
       "only": true
     }
   },
-  "test_duration": {
-    "unknown": "CI に JUnit もテストの step も無く、NDF の実行の記録も無い"
-  },
   "ci": {
     "provider": "github-actions",
     "workflows": [
       {
         "path": ".github/workflows/ci.yml",
-        "jobs": 4
+        "jobs": 6
+      },
+      {
+        "path": ".github/workflows/ndf-contract.yml",
+        "jobs": 1
       }
     ],
     "required_checks": [
       "check",
       "synth",
       "e2e",
-      "ref-check"
+      "ref-check",
+      "leak-check",
+      "workflow-audit",
+      "ndf-contract"
     ]
   },
   "services": {
     "container": false,
     "compose_files": [],
-    "databases": []
+    "databases": [
+      "postgres"
+    ]
   },
   "issues": {
     "primary": "github",
@@ -117,7 +158,7 @@
     "notes": []
   },
   "materials": {
-    "unknown": "答えが形に合わない: materials: 不明は答えの unknown で渡す"
+    "unknown": "公開前で利用の記録が無く、市場と競合・調べる依存は棚卸しで人が決める（#16 の公開の前）"
   },
   "branch_strategy": {
     "kind": "custom",
@@ -168,14 +209,15 @@
   },
   "analysis": {
     "analyzer": 3,
-    "at": "2026-11-17T22:51:56+00:00",
+    "at": "2026-11-24T11:23:01+00:00",
     "inputs": {
-      ".github/workflows/ci.yml": "62b26d5f76c07f919a0de3fe05e32a76e81637e4",
-      "AGENTS.md": "1d5657bbccbf944f9dcad05a6be632c786b73139",
-      "infra/package.json": "6a1c10f6add4d103bc5785bd1cde4f68108fbd5d",
-      "package.json": "8d78ae6400727428dc2816f8eecfb3a7b87df7f0",
-      "tools/package.json": "0a38cf9cd27005edcc8a5272b1721f4903e2aba6",
-      "vitest.config.ts": "bd31b76b81a6f6710cd58ab04194dd107a2a3ab9"
+      ".github/workflows/ci.yml": "6878a21fbd9391cb99afcbecd84334e98fb10a7c",
+      ".github/workflows/ndf-contract.yml": "ae5996c99fec1bfd67decf9b6a2c15f966ceb8f6",
+      "AGENTS.md": "a49bc3920e5b9ff1b9506a78e8d7c1bbce5dab73",
+      "infra/package.json": "c990116f162015290bfe6ec9c36818935c227a85",
+      "package.json": "b1c8b4fca17fac9878bf965604e99900c017087e",
+      "tools/package.json": "65e5c02c5976e4370bf39cf8aefc89570d792d85",
+      "vitest.config.ts": "2c8e674b1a52820591fcddf25fe9fda88d7e0399"
     },
     "branches": {
       "head": "main",
@@ -184,15 +226,14 @@
       ]
     },
     "written": {
-      "languages": "3f5b223d9f9b61f1699693e3270186198eda3f0943595a4407185b6d6d0811a7",
-      "test": "cec1ee7f3c3d33b073c25f331438ddca39db9b5d8262e093e9eb60fabbfeef37",
-      "test_duration": "e2eba697a0673ad54c2257dd9f16cc59b075e64aca974937b97b1637abf2ae4e",
-      "services": "53f4e4c15a04bde773f9d0d89be06cd65f1a9248c0603b06b78bfa8a5f8a0771",
+      "languages": "9cd18015158a1c5bb4e003eea6032339120ebfc170e020c52e3e5fd7b6c08f0b",
+      "test": "4fc8724e51bbb06136e7c9cfeb66992027d1cbfb94918899b59c4ddc9f6cf7b3",
+      "services": "283d32fc6975c1c9d01b4e84b80dc09c45c0c50455c400cbf8aff9cd28f8ae77",
       "issues": "770eb2c07170f7f7045b8622672b738f90843daad5d23c26178e25195a3fd60e",
       "checks": "9490de709202cf2422b43d4a75177e3a3dd5b3688ee6d8c6a001d9e6ce219e26",
       "ndf_policies": "81c1c2e31df60254dfd66878f3c3b3190c87a2a0b78a2275e13cde3a199e9fa1",
       "instructions": "95b8dcd9f882416b410b0686c1adb76fa373f37de2acc2d6aa3c6d28556642a5",
-      "materials": "a8f502db7b3c20fa8bb8b6ad2781f3f2a1231970da9309006e2e918e9265b8d1",
+      "materials": "6d79216cb382077e887285363f2234639c095f818c29cee47c595b2e0f1e4af9",
       "test.ci.only": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
     }
   }

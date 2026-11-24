@@ -1,0 +1,12 @@
+# gitleaks の既定の規則で探す設定（#1 の決定 3）。nd-factory の規則は .gitleaks.toml に置き、別の 1 回の実行で探す。
+# 既定の規則の正当な当たりを外すときだけ、その規則の id の [[rules]]（正規表現は書かず、既定から引き継ぐ）を置き、
+# その中の [[rules.allowlists]] に理由と課題の番号の注を添えて足す
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "DB の用意のテストの作り物の秘密の版とパスワード（apps/api/test/db-prep/handler.test.ts・rotate.test.ts。#13 が足し、main の履歴に残る）"
+regexes = ['''^1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f$''', '''^acme-Rotated-0123456789abcdefghijklmnopqrstu$''']

@@ -1,6 +1,6 @@
 # 人の認証: Cognito の access token から利用者を引き、ログインをつなぐ・外す流れを安全に通す（#2）
 
-承認済みの設計では、人の要求が持つ Cognito の access token が IdP の主体を持たないため、認証が利用者を引けず、ログインをつなぐ・外す流れにも別の利用者へ結べる隙が残っていた。Cognito の `sub` ごとに利用者を引く行（Cognito の主体の対応の行）を置き、ログインをつなぐ流れをサーバーが今の利用者とそのセッション（IdP でのサインイン 1 回ごとに Cognito が作る、refresh token を持つ単位）に結ぶ。ログインを外すときは、その Cognito の利用者をサインアウトさせてから消し、対応の行も消して `sub` を使い捨てにする。1 人に複数の IdP を結ぶ方法は、Cognito の組み込みの連携（`AdminLinkProviderForUser`）と比べて自前の対応の行を採った（決定 1）。決めたことは下の 4 つの決定に、行と手順の細部は全体の設計（[データの文書](../docs/design/data.md#cognito-の主体の対応の行)・[API の文書](../docs/design/api.md#冪等の鍵)・[詳細設計](../docs/design/detail.md#関数の仕様)・[画面の文書](../docs/design/screens.md)・[プラットフォームの文書](../docs/design/platform.md#資源ごとの形)）と [#2 の詳細設計](./issue-2-design-detail.md) にある。公式文書に無く確かめていない 2 つは「未確認のこと」に、実装の前に確かめる手順とともに置く。
+承認済みの設計では、人の要求が持つ Cognito の access token が IdP の主体を持たないため、認証が利用者を引けず、ログインをつなぐ・外す流れにも別の利用者へ結べる隙が残っていた。Cognito の `sub` ごとに利用者を引く行（Cognito の主体の対応の行）を置き、ログインをつなぐ流れをサーバーが今の利用者とそのセッション（IdP でのサインイン 1 回ごとに Cognito が作る、refresh token を持つ単位）に結ぶ。ログインを外すときは、その Cognito の利用者をサインアウトさせてから消し、対応の行も消して `sub` を使い捨てにする。1 人に複数の IdP を結ぶ方法は、Cognito の組み込みの連携（`AdminLinkProviderForUser`）と比べて自前の対応の行を採った（決定 1）。決めたことは下の 4 つの決定に、行と手順の細部は全体の設計（[データの文書](../docs/design/data.md#cognito-の主体の対応の行)・[API の文書](../docs/design/api.md#冪等キー)・[詳細設計](../docs/design/detail.md#関数の仕様)・[画面の文書](../docs/design/screens.md)・[プラットフォームの文書](../docs/design/platform.md#資源ごとの形)）と [#2 の詳細設計](./issue-2-design-detail.md) にある。公式文書に無く確かめていない 2 つは「未確認のこと」に、実装の前に確かめる手順とともに置く。
 
 ## 今の姿
 

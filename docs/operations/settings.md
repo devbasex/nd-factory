@@ -16,6 +16,11 @@
 | `pipeline.repository` | `pipeline` があれば必須 | 起点のリポジトリ（`<組織>/<名前>`） | 同上 |
 | `pipeline.branch` | `pipeline` があれば必須 | 起点のブランチ | 同上 |
 | `pipeline.notify_emails` | 任意 | 承認の依頼と失敗の知らせの宛先 | 同上 |
+| `network.vpc_cidr` | 任意 | VPC の IPv4 の CIDR。接頭辞の長さは 16〜20 で、ホストの部分を 0 にする。無ければ `10.80.0.0/16` | アプリのスタック（ネットワーク） |
+| `progress_db.max_acu` | 任意 | 進行表の DB（Aurora Serverless v2）の最大 ACU。1〜16 の 0.5 刻み。無ければ `2` | アプリのスタック（進行表の DB） |
+| `budget.monthly_usd` | 任意 | 月の予算の額（ドル）。1〜100,000 の整数。無ければ `30` | アプリのスタック（費用の見張り） |
+| `budget.scope` | 任意 | 予算が数える範囲。`tags` は資源のタグ `app-prefix` と `app-env` で絞り、`account` はアカウント全体を数える。無ければ `tags`。`tags` は 2 つのタグがアカウントのコスト配分タグとして有効なことが前提で、有効でない間は予算が費用を 0 と数え、知らせが来ない。有効にするのは組織に入っていないアカウントか組織の管理のアカウントで、請求の画面の「コスト配分タグ」で `app-prefix`・`app-env` を有効にする（タグの付いた資源ができた後でないと一覧に出ない） | アプリのスタック（費用の見張り）・設置のコマンド（足りない設定の一覧） |
+| `ops.notify_emails` | 任意 | 運用の知らせ（予算の超えなど）の宛先。0〜10 件。無ければ空で、メールの購読を作らない | アプリのスタック（費用の見張り） |
 
 未知のキーは誤りになる。読み手の無いキーを先に足さない。キーを足すときは、それを読む構成要素と同じ変更で足す。
 
@@ -32,7 +37,11 @@
     "repository": "example-org/example-app",
     "branch": "main",
     "notify_emails": ["ops@example.com"]
-  }
+  },
+  "network": { "vpc_cidr": "10.80.0.0/16" },
+  "progress_db": { "max_acu": 2 },
+  "budget": { "monthly_usd": 30, "scope": "tags" },
+  "ops": { "notify_emails": ["ops@example.com"] }
 }
 ```
 

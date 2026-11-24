@@ -10,7 +10,7 @@
 
 形の正本（`packages/contracts/`）は、設定のファイルの形・終了コード・画面の設定の値と、骨組みの 1 本の HTTP の経路（`PUT /v1/users`、`src/users-api.ts`）の形だけを持つ。生成のスクリプト（`scripts/generate.ts`）は設定のファイルの JSON Schema・見本・設置の手順の終了コードの表の 3 つを作る。操作の表・値の形（UTC の日時・通貨つきの金額・ID）・OpenAPI・MCP の道具・HTTP の経路の登録・画面のダミーデータは無い。
 
-横断の部品のパッケージ（`packages/core/`）は無い。時計・ログ・条件つきの書き込み・失敗の分類・要求の読みは、骨組みの API の関数（`apps/api/src/users-handler.ts`・`user-store.ts`）の中にその場の形で書かれている。サービスの表は利用者の表 1 つだけで、全体の設計（[データの表と鍵](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#表と鍵)）の 10 の表のうち 19 の行と 3 つの索引には列の定義が無い。
+横断の部品のパッケージ（`packages/core/`）は無い。時計・ログ・条件つきの書き込み・失敗の分類・要求の読みは、骨組みの API の関数（`apps/api/src/users-handler.ts`・`user-store.ts`）の中にその場の形で書かれている。サービスの表は利用者の表 1 つだけで、全体の設計（[データの表と鍵](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#テーブルとキー)）の 10 の表のうち 19 の行と 3 つの索引には列の定義が無い。
 
 ## 誰が・どんな場面で困るか
 
@@ -142,10 +142,10 @@
 ## 設計への参照
 
 - [全体の設計: 不変条件](https://github.com/devbasex/nd-factory/blob/main/docs/design/overview.md#不変条件)・[テスト設計](https://github.com/devbasex/nd-factory/blob/main/docs/design/overview.md#テスト設計)
-- [API と MCP: 呼び出しの規約](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#呼び出しの規約)・[値の形](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#値の形)・[操作の一覧](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#操作の一覧)・[認可](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#認可)・[操作の記録](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#操作の記録)・[形の正本](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#形の正本)
+- [API と MCP: 呼び出しの規約](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#呼び出しの規約)・[値の形](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#値の形)・[操作の一覧](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#操作の一覧)・[認可](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#認可)・[操作の記録](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#操作の記録)・[形の正本](https://github.com/devbasex/nd-factory/blob/main/docs/design/api.md#スキーマの正本)
 - [詳細設計: 関数の仕様](https://github.com/devbasex/nd-factory/blob/main/docs/design/detail.md#関数の仕様)・[異常系の処理](https://github.com/devbasex/nd-factory/blob/main/docs/design/detail.md#異常系の処理)・[既存の部品の再利用](https://github.com/devbasex/nd-factory/blob/main/docs/design/detail.md#既存の部品の再利用)
 - [プラットフォーム: 状態の置き場](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#状態の置き場)・[横断の部品と定数の置き場](https://github.com/devbasex/nd-factory/blob/main/docs/design/platform.md#横断の部品と定数の置き場)
-- [データ: 表と鍵](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#表と鍵)・[テーブル定義](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#テーブル定義)・[形の版と移し方](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#形の版と移し方)
+- [データ: 表と鍵](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#テーブルとキー)・[テーブル定義](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#テーブル定義)・[形の版と移し方](https://github.com/devbasex/nd-factory/blob/main/docs/design/data.md#形の版と移し方)
 - [画面: ダミーデータで作り切る段](https://github.com/devbasex/nd-factory/blob/main/docs/design/screens.md#ダミーデータで作り切る段)
 - [開発の計画: 子の一覧（K2）](https://github.com/devbasex/nd-factory/blob/main/docs/design-process/issue-24/plan.md#子の一覧)・[横断の部品が引き継ぐもの](https://github.com/devbasex/nd-factory/blob/main/docs/design-process/issue-24/plan.md#横断の部品が引き継ぐもの)
 - NDF との契約: #41 の設計（PR #42 の `issues/issue-41-design.md` の決定 104〜108）

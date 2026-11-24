@@ -223,7 +223,7 @@ infra/
 | 結果の和の組み方 | 決まり | `operation.ts` | 成功と失敗を合わせる外側の和は `ok` を判別の鍵にし、失敗の側には `itemFailure` の和（`reason` が判別の鍵）をそのまま 1 つの要素として入れる（zod 4 の `discriminatedUnion` は、要素の和の各分岐が外側の鍵を `z.literal` で持てば入れ子にできる）。失敗の分岐はどれも `ok: false` を持つが、外側の和から見ると失敗の側は 1 つの要素のため、鍵の値は重ならない。理由ごとの分岐を外側の和へ平らに並べない（`ok: false` が重なって組めない） |
 | 全部か無かの上限 | 操作の定義の値 | `projects.ts` | `projects.create` は 19（要素 1 つでプロジェクト・主リポジトリ・割り当ての 3 件と記録の行・冪等の済みの行の 5 件。主体が人の書く操作のため、トランザクションに 1 回入る要求元の照らしの 2 件（[データの文書の人の書き込みの要求元の照らし](../docs/design/data.md#人の書き込みの要求元の照らし)）を残す → (100 − 2) ÷ 5 の切り捨て）、`repositories.add` は 24（リポジトリの行・プロジェクトの行の照らし・記録の行・冪等の済みの行の 4 件。委任からも呼べるが、人が呼ぶと要求元の照らしの 2 件が入るため残す → (100 − 2) ÷ 4 の切り捨て） |
 
-`allOrNothing.maxItems` の値は、受け持つ子（#5）が要素 1 つの書き込みの件の数を決めたときに直す。この課題は全体の設計の行（プロジェクト・主リポジトリ・割り当て）と、新しいものを作る操作が持つ冪等の鍵（[冪等の鍵](../docs/design/api.md#冪等の鍵)）から見積もった値を置く。
+`allOrNothing.maxItems` の値は、受け持つ子（#5）が要素 1 つの書き込みの件の数を決めたときに直す。この課題は全体の設計の行（プロジェクト・主リポジトリ・割り当て）と、新しいものを作る操作が持つ冪等の鍵（[冪等の鍵](../docs/design/api.md#冪等キー)）から見積もった値を置く。
 
 要求ごとの記録の要約の行は、この 100 件に数えない。要約は状態の `writeAtomically` に入れず、その確定の後に `appendAudit` で別に 1 行書く（[detail.md の `appendAudit`](../docs/design/detail.md#関数の仕様) と `dispatch` の異常系）。同じトランザクションに入れないのは、要素の記録の行が状態と同じトランザクションにあるため I9 は要約なしで満たされ、要約まで入れると全部か無かの上限が 1 件ずつ減るからである。要約の書き込みが外れたときは次のとおりにする。
 
@@ -471,7 +471,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | `Db` | `db.ts` | `get(table, key, consistent)`・`query(table, keyCond, opts)`・`queryIndex(table, index, keyCond, opts)`・`scan(table, opts)`（足す。[表の移し](#表の移し)）・`transactWrite(items)`・`update(table, key, update, condition)` |
 | `Principal` | `auth/authenticate.ts` | 判別の鍵 `kind` を先頭に。`{kind: "human", userId, cognitoSub, sessionId, boundAuthTime, authTime}`（`sessionId` は署名を検証した token の空でない `origin_jti`、`boundAuthTime` は対応の行の `bound_auth_time`、`authTime` は署名を検証した要求の token の `auth_time`。`sessions.create` の冪等の鍵の主体の部分は `authTime` で組む）・`{kind: "newcomer", login: CognitoLogin}`（`sessions.create` だけに渡る）・`{kind: "delegation", userId, delegationId, scope: {projectIds, operations}, clientName}`・`{kind: "runner", laneId, projectId, generation}`・`{kind: "machine", teamId, machineId}`・`{kind: "github"}`・`{kind: "db_prep", projectId, prepId}`・`{kind: "patrol"}` |
 | `InboundRequest` | `auth/authenticate.ts` | `endpoint`（受け口。受けた HTTP の経路の頭で決まる）・`operation`（`OperationName`。`dispatch` が受けた HTTP の経路を形の正本の操作の表で引いた操作の名前で、表に無い経路は `authenticate` を呼ぶ前に 404。要求の本文や頭書きから採らない）・`path`（受けた経路。ランナーと DB の用意の引き換えと報告の経路の見分けに使う）・`headers`・`rawBody`（受けたままのバイト列。`github` の HMAC に使う） |
-| `AuthResult` | `auth/authenticate.ts` | `{ ok: true; principal: Principal; sessionRevokedAt: string \| null }`・`{ ok: false; reason: "unauthorized" \| "session_ended" \| "unavailable" }`（`session_ended` は署名・claim・期限を通した人の token のセッションが既に断たれているときだけ。断たれているとは、取り消しの行がある・対応の行が無い（`sessions.create` を除く）・`auth_time` が対応の行の `bound_auth_time` より前のどれか。[API の文書の 401 の本文](../docs/design/api.md#誤りの形)）。`principal` は `Principal` のどれか（まだ結んでいない人の `{kind: "newcomer", login: CognitoLogin}` を含み、これを返すのは `operation` が `sessions.create` のときだけ）。`sessionRevokedAt` は、`operation` が `sessions.delete` で要求のセッションの取り消しの行があったときだけその `revoked_at`、ほかは `null`（`sessions.delete` 以外の操作では取り消しの行があれば `session_ended`） |
+| `AuthResult` | `auth/authenticate.ts` | `{ ok: true; principal: Principal; sessionRevokedAt: string \| null }`・`{ ok: false; reason: "unauthorized" \| "session_ended" \| "unavailable" }`（`session_ended` は署名・claim・期限を通した人の token のセッションが既に断たれているときだけ。断たれているとは、取り消しの行がある・対応の行が無い（`sessions.create` を除く）・`auth_time` が対応の行の `bound_auth_time` より前のどれか。[API の文書の 401 の本文](../docs/design/api.md#エラーの形)）。`principal` は `Principal` のどれか（まだ結んでいない人の `{kind: "newcomer", login: CognitoLogin}` を含み、これを返すのは `operation` が `sessions.create` のときだけ）。`sessionRevokedAt` は、`operation` が `sessions.delete` で要求のセッションの取り消しの行があったときだけその `revoked_at`、ほかは `null`（`sessions.delete` 以外の操作では取り消しの行があれば `session_ended`） |
 | `ScopeReader` | `authorize.ts` | `seatsOf`・`projectsOfTeams`・`projectOfTarget`・`laneOf`・`transferTargetOf`・`isHumanOnlyItem` |
 | `ItemAuthz` | `authorize.ts` | `{decision: "allow", projectId, role}`・`{decision: "deny", status: 404 \| 403, reason}` |
 | `AuditEntry` | `audit.ts` | `auditId`・`requestId`・`at`・`actor`・`channel`・`operation`・`targetIds`・`projectId`・`result`・`itemIndex`。`actor` は主体の種類と当たる ID だけを持つ記録の主体で、`Principal` から作る。`newcomer` は `{kind: "newcomer"}`（ID も `CognitoLogin` の値も持たない）にし、`sessions.create` の初回で利用者を作った要素と要約は `{kind: "human", userId: <作った利用者の ID>}` に入れ替える（[detail.md の `auditItem`](../docs/design/detail.md#関数の仕様)） |
@@ -521,7 +521,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 
 満たす決定: 決定 8・14、受け入れ条件 8
 
-共通の列（`pk`・`sk`・`schema_version`・上書きの行の `version`）は [データの共通の列](../docs/design/data.md#共通の列) のとおりで、ここでは書かない。全体の設計が列を決めた行（プロジェクト・割り当て・レーン・承認の依頼・答えの `ndf_event_seqs`・操作の記録）もそのまま形の正本へ写し、ここでは書かない。閉じた語の集まりは英小文字の識別子で持ち、画面の文言は翻訳のファイルが識別子から作る。
+共通の列（`pk`・`sk`・`schema_version`・上書きの行の `version`）は [データの共通の列](../docs/design/data.md#共通のカラム) のとおりで、ここでは書かない。全体の設計が列を決めた行（プロジェクト・割り当て・レーン・承認の依頼・答えの `ndf_event_seqs`・操作の記録）もそのまま形の正本へ写し、ここでは書かない。閉じた語の集まりは英小文字の識別子で持ち、画面の文言は翻訳のファイルが識別子から作る。
 
 ### 関数の仕様
 
@@ -586,7 +586,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | 費用の記録（`db-usage` / `COST#<時刻>#<区間の ID>`） | `project_id`・`sprint_id`・`lane_id`・`segment_id`・`kind`・`quantity`（`{unit: seconds・tokens_in・tokens_out・tokens_cache, value}` の配列）・`amount`（`money`。量だけのものは 0）・`occurred_at` | 追記だけ |
 | 冪等の鍵（`db-idempotency`） | `principal_key`・`operation`・`key`・`fingerprint`・`state`（`leased`・`settled`）・`owner_request_id`・`lease_until`・`result?`・`expire_at` | 上書き（借りから済みへの書き換えと、借りの取り直し）（[行の書き手の設計](./issue-2-design-row-writers.md) の決定 2 で `version` を持つ） |
 
-全体の設計の版の列の一覧（[共通の列](../docs/design/data.md#共通の列)）に載らない行のうち、招待・区間・ログインの組・ログインをつなぐ流れ・委任の使った時刻は書き換えるため `version` を持つ（作った後に書き換える行の種類はどれも `version` と行の世代 `incarnation` を持つ。[行の書き手の設計](./issue-2-design-row-writers.md) の決定 2）。持ち込みのキー（`model_keys.*`）と GitHub App の導入（`github_installations.*`）の行は 19 の行に入っていない。置き場と列は、それぞれ #6 と #5 の詳細設計が決める。
+全体の設計の版の列の一覧（[共通の列](../docs/design/data.md#共通のカラム)）に載らない行のうち、招待・区間・ログインの組・ログインをつなぐ流れ・委任の使った時刻は書き換えるため `version` を持つ（作った後に書き換える行の種類はどれも `version` と行の世代 `incarnation` を持つ。[行の書き手の設計](./issue-2-design-row-writers.md) の決定 2）。持ち込みのキー（`model_keys.*`）と GitHub App の導入（`github_installations.*`）の行は 19 の行に入っていない。置き場と列は、それぞれ #6 と #5 の詳細設計が決める。
 
 ### 索引
 
@@ -817,6 +817,6 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | --- | --- | --- |
 | 操作の一覧と画面と MCP の対応・HTTP の経路の登録の照らし | `generated/mcp-tools.json`・`generated/routes.json`・`OPERATIONS` の `features` | 生成物を読んで対応の検査を作り、CI の必須のチェックへ載せる |
 | 形の往復 | `operations-roundtrip.test.ts`（CI の `check` で走る） | 必須のチェックに `check` が載っていることを CI の定義のテストで照らす（今のまま） |
-| 境界の検査 | `packages/core` の `exports` のエントリポイントの一覧と、置き場の外で直に使わないもの（[プラットフォームの表](../docs/design/platform.md#横断の部品の置き場の基準)） | `apps/` の実行の時のコードを探す検査を作る。画面が import してよいエントリポイントは `clock`・`ids`・`redact`・`log` |
+| 境界の検査 | `packages/core` の `exports` のエントリポイントの一覧と、置き場の外で直に使わないもの（[プラットフォームの表](../docs/design/platform.md#横断の部品の保存先の基準)） | `apps/` の実行の時のコードを探す検査を作る。画面が import してよいエントリポイントは `clock`・`ids`・`redact`・`log` |
 | 漏れの検査 | `data/secret-shapes.json` | 同じデータを読む |
 | 骨組みの経路 | `PUT /v1/users` は操作の表に無い | #4 が消すまで、経路の登録の照らしでこの 1 本を受け持つ子 #4 の印つきで外す |

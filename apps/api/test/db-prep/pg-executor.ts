@@ -1,0 +1,362 @@
+import { randomBytes, randomUUID } from "node:crypto";
+import { Client, type ClientConfig, escapeIdentifier, escapeLiteral } from "pg";
+import { parseIntoClientConfig } from "pg-connection-string";
+import { describe, it } from "vitest";
+import { ADMIN_DATABASE, type Row, type SqlExecutor, type SqlParam, type SqlValue, toRow } from "../../src/db-prep/sql-executor.ts";
+
+// テストで使う SqlExecutor の pg の実装。Data API の実装と同じ文（:name の引数）を受け、同じ形の行を返す
+export type PgExecutor = SqlExecutor & { close(): Promise<void> };
+
+// :name の引数を pg の $n へ変える。文字列・引用した識別子・注釈・型の決め（::）の中の : は引数にしない
+export function toPositional(sql: string, params: SqlParam[] | undefined): { text: string; values: SqlValue[] } {
+  const byName = new Map<string, SqlValue>();
+  for (const p of params ?? []) {
+    if (byName.has(p.name)) throw new Error(`引数の名前が重なる: ${p.name}`);
+    byName.set(p.name, p.value);
+  }
+  const order: string[] = [];
+  let text = "";
+  let i = 0;
+  while (i < sql.length) {
+    const c = sql[i];
+    if (c === "'" || c === '"') {
+      const end = endOfQuoted(sql, i, c);
+      text += sql.slice(i, end);
+      i = end;
+    } else if (c === "-" && sql[i + 1] === "-") {
+      const nl = sql.indexOf("\n", i);
+      const end = nl === -1 ? sql.length : nl;
+      text += sql.slice(i, end);
+      i = end;
+    } else if (c === "/" && sql[i + 1] === "*") {
+      const close = sql.indexOf("*/", i + 2);
+      if (close === -1) throw new Error("閉じない注釈");
+      text += sql.slice(i, close + 2);
+      i = close + 2;
+    } else if (c === ":" && sql[i + 1] === ":") {
+      text += "::";
+      i += 2;
+    } else if (c === ":" && /[A-Za-z_]/.test(sql[i + 1] ?? "")) {
+      const name = /^[A-Za-z_][A-Za-z0-9_]*/.exec(sql.slice(i + 1))?.[0] ?? "";
+      if (!byName.has(name)) throw new Error(`引数が渡されていない: ${name}`);
+      let n = order.indexOf(name);
+      if (n === -1) n = order.push(name) - 1;
+      // 整数は Data API が longValue（bigint）で渡すのに合わせて型を決める。型の無い引数で送ると、Data API でだけ落ちる文を見逃す
+      text += Number.isInteger(byName.get(name)) ? `$${n + 1}::bigint` : `$${n + 1}`;
+      i += 1 + name.length;
+    } else {
+      text += c;
+      i += 1;
+    }
+  }
+  return { text, values: order.map((name) => byName.get(name) ?? null) };
+}
+
+// 引用の終わりの次の位置。引用の文字を 2 つ重ねたものは中身として読む
+function endOfQuoted(sql: string, start: number, quote: string): number {
+  let j = start + 1;
+  while (j < sql.length) {
+    if (sql[j] === quote) {
+      if (sql[j + 1] === quote) {
+        j += 2;
+        continue;
+      }
+      return j + 1;
+    }
+    j += 1;
+  }
+  throw new Error("閉じない引用");
+}
+
+export function createPgExecutor(connect: (database: string) => Promise<Client>): PgExecutor {
+  // 自動の確定で打つ文は、データベースごとに 1 本の接続を使い回す
+  const shared = new Map<string, Promise<Client>>();
+  // トランザクションごとに専用の接続を結ぶ
+  const txs = new Map<string, { database: string; client: Client }>();
+
+  function sharedClient(database: string): Promise<Client> {
+    let c = shared.get(database);
+    if (!c) {
+      c = connect(database);
+      shared.set(database, c);
+    }
+    return c;
+  }
+
+  function take(transactionId: string): { database: string; client: Client } {
+    const tx = txs.get(transactionId);
+    if (!tx) throw new Error("知らないトランザクション");
+    txs.delete(transactionId);
+    return tx;
+  }
+
+  return {
+    async execute(sql, params, opts) {
+      const { text, values } = toPositional(sql, params);
+      let client: Client;
+      if (opts.transactionId === undefined) {
+        client = await sharedClient(opts.database);
+      } else {
+        const tx = txs.get(opts.transactionId);
+        if (!tx) throw new Error("知らないトランザクション");
+        if (tx.database !== opts.database) throw new Error("トランザクションのデータベースと違う");
+        client = tx.client;
+      }
+      // トランザクションの中の文が失敗しても接続は txs に残す（呼ぶ側の rollback か close() が閉じる）
+      const res = await client.query<Record<string, unknown>>({ text, values });
+      return res.rows.map((r): Row => toRow(r));
+    },
+
+    async begin(opts) {
+      const client = await connect(opts.database);
+      try {
+        await client.query("BEGIN");
+      } catch (e) {
+        await client.end();
+        throw e;
+      }
+      const id = randomUUID();
+      txs.set(id, { database: opts.database, client });
+      return id;
+    },
+
+    async commit(transactionId) {
+      const tx = take(transactionId);
+      try {
+        const res = await tx.client.query("COMMIT");
+        // 失敗した文の後の COMMIT を PostgreSQL は ROLLBACK として受ける。確定しなかったことを投げて知らせる
+        if (res.command !== "COMMIT") throw new Error("トランザクションが確定せずに巻き戻った");
+      } finally {
+        await tx.client.end();
+      }
+    },
+
+    async rollback(transactionId) {
+      const tx = take(transactionId);
+      try {
+        await tx.client.query("ROLLBACK");
+      } finally {
+        await tx.client.end();
+      }
+    },
+
+    // 後始末の経路: commit か rollback を呼ばれたトランザクションは、その場で接続を閉じて txs から外す。
+    // 文が失敗しても rollback を呼ばれなければ、接続は txs に残り、確定しないトランザクションが DB に残る。
+    // close() がそれらの接続も閉じ（閉じた接続のトランザクションは PostgreSQL が巻き戻す）、
+    // withTestDatabase は最後に close() を呼んでから DROP DATABASE … WITH (FORCE) で消す
+    async close() {
+      const clients = [...(await Promise.allSettled(shared.values()))].flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+      clients.push(...[...txs.values()].map((t) => t.client));
+      shared.clear();
+      txs.clear();
+      await Promise.allSettled(clients.map((c) => c.end()));
+    },
+  };
+}
+
+// --- テストの接続の共通の道具 ---
+
+const PG_URL = process.env.ND_TEST_PG_URL;
+// 接続先が使い捨てのクラスタだと示す印。クラスタ全体の権限（postgres・template1 の PUBLIC など）を変えるテストは、
+// これが CI の渡す "1" と完全に一致するときだけ打つ（off・no・打ち間違いでは打たない）。
+// 手元の既存のクラスタを ND_TEST_PG_URL で指しても、その利用者の権限を変えない
+const PG_DISPOSABLE = process.env.ND_TEST_PG_DISPOSABLE_CLUSTER === "1";
+// 認証の時間切れを短くして起こした、そのテストの組だけが使うクラスタの接続の値。クラスタ全体の設定を変えるテストを、
+// ほかのテストが使うクラスタで打たない（ALTER SYSTEM は並んで走るテストの新しい接続にも効き、前の値を戻せない）
+const PG_AUTH_TIMEOUT_URL = process.env.ND_TEST_PG_AUTH_TIMEOUT_URL;
+// そのクラスタを起こすときの認証の時間切れ（秒）。テストはこの値で起きていることを読んで確かめ、変えない
+export const PG_AUTH_TIMEOUT_S = 3;
+
+function truthy(raw: string | undefined): boolean {
+  const v = raw?.trim().toLowerCase();
+  return v !== undefined && v !== "" && v !== "0" && v !== "false";
+}
+
+function isCi(): boolean {
+  return truthy(process.env.CI);
+}
+
+// PostgreSQL を使うテストの組。接続の値が無ければ、CI では落とし、手元では飛ばす
+export function describePg(name: string, fn: () => void): void {
+  if (PG_URL) {
+    describe(name, { timeout: 60_000 }, fn);
+  } else if (isCi()) {
+    describe(name, () => {
+      it("ND_TEST_PG_URL が要る", () => {
+        throw new Error("CI では PostgreSQL のサービスコンテナの接続の値 ND_TEST_PG_URL を渡す");
+      });
+    });
+  } else {
+    describe.skip(name, fn);
+  }
+}
+
+// クラスタ全体の権限を変える、PostgreSQL を使うテストの組。接続の値に加えて ND_TEST_PG_DISPOSABLE_CLUSTER が要る。
+// 無ければ CI では落とし、手元では飛ばす
+export function describePgDisposable(name: string, fn: () => void): void {
+  if (PG_URL && PG_DISPOSABLE) {
+    describe(name, { timeout: 60_000 }, fn);
+  } else if (isCi()) {
+    describe(name, () => {
+      it("ND_TEST_PG_URL と ND_TEST_PG_DISPOSABLE_CLUSTER が要る", () => {
+        throw new Error("CI では使い捨てのサービスコンテナを指し、ND_TEST_PG_DISPOSABLE_CLUSTER を 1 にする");
+      });
+    });
+  } else {
+    describe.skip(name, fn);
+  }
+}
+
+// 認証の時間切れを短くした専用のクラスタを使う、PostgreSQL を使うテストの組。ND_TEST_PG_AUTH_TIMEOUT_URL が要る。
+// 無ければ CI では落とし、手元では飛ばす。組の中では withTestDatabase に { url: authTimeoutClusterUrl() } を渡す
+export function describePgAuthTimeout(name: string, fn: () => void): void {
+  if (PG_AUTH_TIMEOUT_URL) {
+    describe(name, { timeout: 60_000 }, fn);
+  } else if (isCi()) {
+    describe(name, () => {
+      it("ND_TEST_PG_AUTH_TIMEOUT_URL が要る", () => {
+        throw new Error(`CI では authentication_timeout を ${PG_AUTH_TIMEOUT_S}s で起こした専用のコンテナを指す`);
+      });
+    });
+  } else {
+    describe.skip(name, fn);
+  }
+}
+
+export function authTimeoutClusterUrl(): string {
+  if (!PG_AUTH_TIMEOUT_URL) throw new Error("ND_TEST_PG_AUTH_TIMEOUT_URL が無い");
+  return PG_AUTH_TIMEOUT_URL;
+}
+
+type Credentials = { user: string; password: string };
+
+export type TestDatabase = {
+  // 使い捨てのデータベースの名前
+  name: string;
+  // 接続を開く。既定は使い捨てのデータベースへ、接続の値の役割で
+  connect(database?: string, credentials?: Credentials): Promise<Client>;
+  // 使い捨てのデータベースへ user で接続を始める。サーバーがパスワードを求めると password を呼び、その戻りを待つ間は
+  // 認証の途中で止まる（SCRAM ではサーバーが検証子を読んだ後）。connected は接続が成り立つか落ちると決まる
+  connectGated(user: string, password: () => Promise<string>): { client: Client; connected: Promise<void> };
+  // 管理のデータベース（postgres）を使い捨てのデータベースへ読み替える SqlExecutor
+  executor(): PgExecutor;
+  // superuser でない管理の役割（CREATEDB・CREATEROLE・pg_signal_backend。Aurora の管理の役割に似せる）で打つ SqlExecutor。
+  // 手順の 1 と 4 で外す権限の持ち主（接続の値の役割）の権限を受け継ぐ所属だけを持ち、superuser の属性は持たない。
+  // inheritOwner が偽なら、その所属も持たない（取り消す権限の無い管理の役割）。
+  // 引数の値を記録しない設定（log_parameter_max_length。SUSET）を置く権限は与えない（Aurora の管理の役割と同じ）
+  nonSuperuserExecutor(opts?: { inheritOwner?: boolean }): Promise<PgExecutor>;
+  // 後始末で消す役割（役割はデータベースの外に残るため）
+  dropRoleLater(role: string): void;
+  // 後始末で消すデータベース（用意の手順が作るもの）。役割より先に消す（役割の持つスキーマと権限が中にあるため）
+  dropDatabaseLater(database: string): void;
+};
+
+function baseUrl(): string {
+  if (!PG_URL) throw new Error("ND_TEST_PG_URL が無い");
+  return PG_URL;
+}
+
+function urlFor(base: string, database: string, credentials?: Credentials): string {
+  const url = new URL(base);
+  url.pathname = `/${encodeURIComponent(database)}`;
+  if (credentials) {
+    url.username = encodeURIComponent(credentials.user);
+    url.password = encodeURIComponent(credentials.password);
+  }
+  return url.toString();
+}
+
+// 通常の接続と同じ URL を pg と同じ読み方で読み（sslmode などの接続の設定を残す）、役割とパスワードの取り方だけを差し替える。
+// connectionString のまま渡すと、URL の役割とパスワードが渡した値を上書きする
+export function gatedClientConfig(connectionString: string, user: string, password: () => Promise<string>): ClientConfig {
+  return { ...parseIntoClientConfig(connectionString), user, password };
+}
+
+function adminDatabaseOfUrl(base: string): string {
+  return decodeURIComponent(new URL(base).pathname.replace(/^\//, "")) || "postgres";
+}
+
+async function open(base: string, database: string, credentials?: Credentials): Promise<Client> {
+  const client = new Client({ connectionString: urlFor(base, database, credentials) });
+  // 切られた接続の誤りは打った文の失敗で受ける。出来事のまま放ると処理が落ちる
+  client.on("error", () => undefined);
+  await client.connect();
+  return client;
+}
+
+// テストごとに使い捨てのデータベースを作り、終えたら接続ごと消す。PUBLIC は接続できない（接続の値の役割と、
+// 明示して CONNECT を与えた役割だけが繋げる）。url を渡せば、ND_TEST_PG_URL の代わりにそのクラスタで作る
+export async function withTestDatabase<T>(fn: (db: TestDatabase) => Promise<T>, options: { url?: string } = {}): Promise<T> {
+  const base = options.url ?? baseUrl();
+  const name = `nd_test_${randomBytes(6).toString("hex")}`;
+  const admin = await open(base, adminDatabaseOfUrl(base));
+  const clients: Client[] = [];
+  const executors: PgExecutor[] = [];
+  const roles: string[] = [];
+  const databases: string[] = [];
+  // 管理の役割は、作った役割より後に消す
+  const admins: string[] = [];
+  try {
+    // 用意の手順は、接続を許すほかのデータベースで PUBLIC が CONNECT を持つと止まる。並んで走るほかのテストの
+    // 使い捨てのデータベースも PUBLIC へ接続を開かないように、接続を許さずに作って外してから許す
+    await admin.query(`CREATE DATABASE ${escapeIdentifier(name)} WITH ALLOW_CONNECTIONS false`);
+    await admin.query(`REVOKE CONNECT, TEMPORARY ON DATABASE ${escapeIdentifier(name)} FROM PUBLIC`);
+    // スタックがクラスタのパラメータで置く、引数の値を記録しない設定に揃える（infra/lib/progress-db.ts）
+    await admin.query(`ALTER DATABASE ${escapeIdentifier(name)} SET log_parameter_max_length = 0`);
+    await admin.query(`ALTER DATABASE ${escapeIdentifier(name)} WITH ALLOW_CONNECTIONS true`);
+    const connect = async (database: string = name, credentials?: Credentials): Promise<Client> => {
+      const c = await open(base, database, credentials);
+      clients.push(c);
+      return c;
+    };
+    const db: TestDatabase = {
+      name,
+      connect,
+      connectGated(user, password) {
+        const client = new Client(gatedClientConfig(urlFor(base, name), user, password));
+        client.on("error", () => undefined);
+        clients.push(client);
+        return { client, connected: client.connect().then(() => undefined) };
+      },
+      executor() {
+        const ex = createPgExecutor((database) => connect(database === ADMIN_DATABASE ? name : database));
+        executors.push(ex);
+        return ex;
+      },
+      async nonSuperuserExecutor(opts = {}) {
+        const user = `nd_test_admin_${randomBytes(6).toString("hex")}`;
+        const password = randomBytes(24).toString("base64url");
+        admins.push(user);
+        await admin.query(`CREATE ROLE ${escapeIdentifier(user)} LOGIN CREATEDB CREATEROLE PASSWORD ${escapeLiteral(password)}`);
+        await admin.query(`GRANT pg_signal_backend TO ${escapeIdentifier(user)}`);
+        // 管理のデータベースに読み替える使い捨てのデータベースで、nd_prep を作れるようにする
+        await admin.query(`GRANT ALL ON DATABASE ${escapeIdentifier(name)} TO ${escapeIdentifier(user)}`);
+        if (opts.inheritOwner !== false) {
+          const owner = (await admin.query<{ u: string }>("SELECT current_user::text AS u")).rows[0]?.u;
+          if (owner === undefined) throw new Error("接続の値の役割を読めない");
+          await admin.query(`GRANT ${escapeIdentifier(owner)} TO ${escapeIdentifier(user)} WITH INHERIT TRUE, SET FALSE`);
+        }
+        const ex = createPgExecutor((database) => connect(database === ADMIN_DATABASE ? name : database, { user, password }));
+        executors.push(ex);
+        return ex;
+      },
+      dropRoleLater(role) {
+        roles.push(role);
+      },
+      dropDatabaseLater(database) {
+        databases.push(database);
+      },
+    };
+    return await fn(db);
+  } finally {
+    await Promise.allSettled(executors.map((e) => e.close()));
+    await Promise.allSettled(clients.map((c) => c.end()));
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS ${escapeIdentifier(name)} WITH (FORCE)`);
+      for (const database of databases) await admin.query(`DROP DATABASE IF EXISTS ${escapeIdentifier(database)} WITH (FORCE)`);
+      for (const role of [...roles, ...admins]) await admin.query(`DROP ROLE IF EXISTS ${escapeIdentifier(role)}`);
+    } finally {
+      await admin.end();
+    }
+  }
+}

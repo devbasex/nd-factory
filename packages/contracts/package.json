@@ -19,7 +19,8 @@
     "./row-codec": "./src/row-codec.ts",
     "./rows/*": "./src/rows/*.ts",
     "./tables": "./src/tables.ts",
-    "./generated/routes.json": "./generated/routes.json"
+    "./generated/routes.json": "./generated/routes.json",
+    "./db-prep": "./src/db-prep.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."
