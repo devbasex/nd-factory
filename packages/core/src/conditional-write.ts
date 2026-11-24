@@ -1,5 +1,5 @@
 import { RETRY_POLICIES } from "@nd-factory/contracts/data";
-import { writeRow, type RowCodec, type Stored } from "@nd-factory/contracts/row-codec";
+import { writeRow, type RowCodec, type Stored, type StoredIdentity } from "@nd-factory/contracts/row-codec";
 import pRetry from "p-retry";
 import { v4 } from "uuid";
 import type { Db, Row, RowKey, TableName } from "./db.ts";
@@ -87,31 +87,6 @@ export const cond = {
   or: (...of: Condition[]): Condition => ({ kind: "or", of }),
 };
 
-// 鍵と版の列。set と remove はこれらを書き換えない
-const KEY_COLUMNS = ["pk", "sk", "version"] as const;
-
-// set に鍵と版の列を書けない形（型で弾く）
-export type SetColumns = { readonly [column: string]: unknown } & { readonly pk?: never; readonly sk?: never; readonly version?: never };
-
-function checkSetAndRemove(what: string, set: Readonly<Record<string, unknown>>, remove: readonly string[], forbiddenInRemove: readonly string[]): void {
-  for (const column of KEY_COLUMNS) {
-    if (Object.hasOwn(set, column)) throw new WriteSpecError(`${what}: set に ${column} を含めない`);
-  }
-  for (const column of remove) {
-    if (forbiddenInRemove.includes(column)) throw new WriteSpecError(`${what}: remove に ${column} を含めない`);
-    if (Object.hasOwn(set, column)) throw new WriteSpecError(`${what}: remove が set の列と重なる: ${column}`);
-  }
-  if (new Set(remove).size !== remove.length) throw new WriteSpecError(`${what}: remove の列が重なる`);
-}
-
-function setActions(set: Readonly<Record<string, unknown>>): UpdateAction[] {
-  return Object.entries(set).map(([path, value]) => ({ kind: "set", path, value }));
-}
-
-function removeActions(remove: readonly string[]): UpdateAction[] {
-  return remove.map((path) => ({ kind: "remove", path }));
-}
-
 // 記録の表を除く行の世代（incarnation）を持つ表。記録の表の行は追記だけで表の移しも書き直さないため持たない（決定 8・9）
 function hasIncarnation(table: TableName): boolean {
   return table !== "audit";
@@ -153,16 +128,15 @@ export function rowToCreate<L extends { readonly incarnation: string; readonly s
 // 読んだ行に保存してあった version と incarnation。readRow の stored の値（列が無ければ absent）
 export type StoredVersion = { readonly version: Stored; readonly incarnation: Stored };
 
-function storedCondition(column: "version" | "incarnation", stored: Stored): Condition {
+function storedCondition(column: "schema_version" | "version" | "incarnation", stored: Stored): Condition {
   return stored.kind === "absent" ? cond.notExists(column) : cond.eq(column, stored.value);
 }
 
 // expect は保存してあった値そのもの（決定 3・8）。repair が形を外れた version や incarnation（文字列の version・0 など）を直した行でも、
 // 条件は修復の前の値で組み、書く値（version と incarnation の引数）だけを読み手の見る形で照らす。そのため値の形は照らさず、
 // 条件に載せられない値（undefined）だけを拒む（readRow の stored は undefined を absent にするため、届くのは呼び手の誤り）
-function checkExpect(what: string, expect: StoredVersion): void {
-  for (const column of ["version", "incarnation"] as const) {
-    const stored = expect[column];
+function checkExpect(what: string, expect: StoredVersion | StoredIdentity): void {
+  for (const [column, stored] of Object.entries(expect) as [string, Stored][]) {
     if (stored.kind === "value" && stored.value === undefined) throw new WriteSpecError(`${what}: expect の ${column} の value は undefined にしない（列が無ければ absent）`);
   }
 }
@@ -208,29 +182,17 @@ export function deleteIfVersion(spec: { table: TableName; key: RowKey; expect: S
   return out;
 }
 
-// 行の形の版が from のときだけ書き換える（表の移しと、version を持たない行の書き換え）。version を上げない
-export function updateIfSchemaVersion(spec: {
-  table: TableName;
-  key: RowKey;
-  from: number;
-  set: SetColumns;
-  remove: readonly string[];
-  version: number | null;
-  onConflict: ConflictRule;
-}): TransactItem {
-  const to = spec.set["schema_version"];
-  if (typeof to !== "number" || !Number.isInteger(to) || to <= spec.from) throw new WriteSpecError("updateIfSchemaVersion: set の schema_version は from より大きい整数");
-  checkSetAndRemove("updateIfSchemaVersion", spec.set, spec.remove, ["pk", "sk", "version", "schema_version"]);
-  const conditions = [cond.exists("pk"), cond.eq("schema_version", spec.from)];
-  if (spec.version !== null) conditions.push(cond.eq("version", spec.version));
-  return {
-    table: spec.table,
-    op: "update",
-    key: spec.key,
-    update: [...setActions(spec.set), ...removeActions(spec.remove)],
-    condition: cond.and(...conditions),
-    onConflict: spec.onConflict,
-  };
+// 表の移しの置き換え（issues/issue-2-design-detail.md の「表の移し」）。item は書く行全体（rowReplaceOf の戻り値に、行の種類が持てば
+// 読み手の見る形の version と incarnation を足したもの）。expect は読んだ行に保存してあった schema_version・version・incarnation の値そのもの
+// （列が無ければ absent、形を外れた値もそのまま）。保存の値から行が変わっていないときだけ置き換え、version を上げない
+// （読み手の見る中身を変えない書き換えのため、並んで読んだ書き手の replaceIfVersion を外さない）。行が消えていれば外れ、作り直さない。記録の表は拒む
+export function replaceIfUnchanged(spec: { table: TableName; item: Row; expect: StoredIdentity; onConflict: ConflictRule }): TransactItem {
+  checkSchemaVersion("replaceIfUnchanged", spec.item);
+  checkExpect("replaceIfUnchanged", spec.expect);
+  const of = [cond.exists("pk"), storedCondition("schema_version", spec.expect.schema_version), storedCondition("version", spec.expect.version), storedCondition("incarnation", spec.expect.incarnation)];
+  const out: TransactItem = { table: spec.table, op: "put", key: keyOfItem(spec.item), item: spec.item, condition: cond.and(...of), onConflict: spec.onConflict };
+  checkAuditAppendOnly([out]);
+  return out;
 }
 
 // 式の書き出し。プレースホルダは 1 件の中で通し番号にし、条件と更新で重ならない

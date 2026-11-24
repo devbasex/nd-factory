@@ -8,10 +8,10 @@ import {
   expressionsOf,
   deleteIfVersion,
   putIfAbsent,
+  replaceIfUnchanged,
   replaceIfVersion,
   rowToCreate,
   TRANSACT_MAX_ITEMS,
-  updateIfSchemaVersion,
   WriteSpecError,
   WriteUnavailableError,
   writeAtomically,
@@ -257,46 +257,52 @@ describe("deleteIfVersion", () => {
   });
 });
 
-describe("updateIfSchemaVersion", () => {
+describe("replaceIfUnchanged（表の移しだけが使う）", () => {
   const key = { pk: "USER#u", sk: "LOGIN#google#s" };
+  const item = { pk: key.pk, sk: key.sk, schema_version: 2, version: 3, incarnation: INCARNATION, idp: "google" };
+  const expect3 = { schema_version: value(1), version: value(3), incarnation: value(INCARNATION) };
 
-  it("schema_version の条件と attribute_exists(pk) を持ち、remove の列が REMOVE 句に並ぶ", () => {
-    const item = updateIfSchemaVersion({ table: "users", key, from: 1, set: { schema_version: 2, idp: "google" }, remove: ["old_column"], version: null, onConflict: "fail" });
-    const ex = expressionsOf(item.condition, item.update);
-    expect(ex.ConditionExpression).toBe("(attribute_exists(#n0) AND #n1 = :v0)");
-    expect(ex.UpdateExpression).toBe("SET #n1 = :v1, #n2 = :v2 REMOVE #n3");
-    expect(ex.ExpressionAttributeNames).toEqual({ "#n0": "pk", "#n1": "schema_version", "#n2": "idp", "#n3": "old_column" });
+  it("op は put で、行は item のまま（version を上げない）、条件は attribute_exists(pk) と 3 つの列の保存の値の一致", () => {
+    const out = replaceIfUnchanged({ table: "users", item, expect: expect3, onConflict: "fail" });
+    expect(out.op).toBe("put");
+    expect(out.key).toEqual(key);
+    expect(out.item).toEqual(item);
+    const ex = expressionsOf(out.condition);
+    expect(ex.ConditionExpression).toBe("(attribute_exists(#n0) AND #n1 = :v0 AND #n2 = :v1 AND #n3 = :v2)");
+    expect(ex.ExpressionAttributeNames).toEqual({ "#n0": "pk", "#n1": "schema_version", "#n2": "version", "#n3": "incarnation" });
+    expect(ex.ExpressionAttributeValues).toEqual({ ":v0": 1, ":v1": 3, ":v2": INCARNATION });
   });
 
-  it("version があれば版も条件にし、version を上げない", () => {
-    const item = updateIfSchemaVersion({ table: "teams", key: { pk: "TEAM#t", sk: "TEAM" }, from: 1, set: { schema_version: 2 }, remove: [], version: 4, onConflict: "fail" });
-    const ex = expressionsOf(item.condition, item.update);
-    expect(ex.ConditionExpression).toBe("(attribute_exists(#n0) AND #n1 = :v0 AND #n2 = :v1)");
-    expect(ex.UpdateExpression).toBe("SET #n1 = :v2");
+  it("expect の absent は attribute_not_exists にする", () => {
+    const out = replaceIfUnchanged({ table: "users", item, expect: { schema_version: value(1), version: ABSENT, incarnation: ABSENT }, onConflict: "fail" });
+    expect(expressionsOf(out.condition).ConditionExpression).toBe("(attribute_exists(#n0) AND #n1 = :v0 AND attribute_not_exists(#n2) AND attribute_not_exists(#n3))");
   });
 
-  it("remove が空なら REMOVE 句を持たない", () => {
-    const item = updateIfSchemaVersion({ table: "users", key, from: 1, set: { schema_version: 2 }, remove: [], version: null, onConflict: "fail" });
-    expect(expressionsOf(item.condition, item.update).UpdateExpression).toBe("SET #n1 = :v1");
-  });
-
-  it("remove が set の鍵か pk・sk・version・schema_version を含むと投げる", () => {
-    for (const remove of [["idp"], ["pk"], ["sk"], ["version"], ["schema_version"]]) {
-      expect(() => updateIfSchemaVersion({ table: "users", key, from: 1, set: { schema_version: 2, idp: "x" }, remove, version: null, onConflict: "fail" })).toThrow(WriteSpecError);
-    }
-  });
-
-  it("set の schema_version が from より大きくないと投げる。set に version を含むと型で弾く", () => {
-    expect(() => updateIfSchemaVersion({ table: "users", key, from: 2, set: { schema_version: 2 }, remove: [], version: null, onConflict: "fail" })).toThrow(WriteSpecError);
-    // @ts-expect-error set に version を書けない
-    expect(() => updateIfSchemaVersion({ table: "users", key, from: 1, set: { schema_version: 2, version: 3 }, remove: [], version: null, onConflict: "fail" })).toThrow(WriteSpecError);
-  });
-
-  it("行が消えていれば条件が外れ、行を作り直さない", async () => {
+  it("保存の version が文字列 \"1\" の行を、条件はその文字列で、書く行は直した数の 1 で組む", async () => {
     const table = fakeTable();
-    const outcome = await writeAtomically(table.db, [updateIfSchemaVersion({ table: "users", key, from: 1, set: { schema_version: 2 }, remove: [], version: null, onConflict: "fail" })]);
-    expect(outcome.ok).toBe(false);
+    table.seed("users", { pk: key.pk, sk: key.sk, schema_version: 1, version: "1", incarnation: INCARNATION, idp: "google" });
+    const fixed = { ...item, version: 1 };
+    const out = replaceIfUnchanged({ table: "users", item: fixed, expect: { schema_version: value(1), version: value("1"), incarnation: value(INCARNATION) }, onConflict: "fail" });
+    expect(expressionsOf(out.condition).ExpressionAttributeValues).toMatchObject({ ":v1": "1" });
+    expect((await writeAtomically(table.db, [out])).ok).toBe(true);
+    expect(table.row("users", key)).toEqual(fixed);
+  });
+
+  it("保存の値が変わった行（書き手が先に確定した・消して作り直した）と消えた行では外れ、行を作り直さない", async () => {
+    const table = fakeTable();
+    table.seed("users", { pk: key.pk, sk: key.sk, schema_version: 1, version: 4, incarnation: INCARNATION, idp: "google" });
+    expect((await writeAtomically(table.db, [replaceIfUnchanged({ table: "users", item, expect: expect3, onConflict: "fail" })])).ok).toBe(false);
+    table.seed("users", { pk: key.pk, sk: key.sk, schema_version: 1, version: 3, incarnation: OTHER_INCARNATION, idp: "google" });
+    expect((await writeAtomically(table.db, [replaceIfUnchanged({ table: "users", item, expect: expect3, onConflict: "fail" })])).ok).toBe(false);
+    table.remove("users", key);
+    expect((await writeAtomically(table.db, [replaceIfUnchanged({ table: "users", item, expect: { schema_version: value(1), version: ABSENT, incarnation: ABSENT }, onConflict: "fail" })])).ok).toBe(false);
     expect(table.rows("users")).toEqual([]);
+  });
+
+  it("記録の表を指すと投げる。pk・schema_version の無い行と、value が undefined の expect で投げる", () => {
+    expect(() => replaceIfUnchanged({ table: "audit", item: { pk: "AUDIT#a", sk: "AUDIT", schema_version: 1 }, expect: { schema_version: value(1), version: ABSENT, incarnation: ABSENT }, onConflict: "fail" })).toThrow(AuditAppendOnlyError);
+    expect(() => replaceIfUnchanged({ table: "users", item: { ...item, schema_version: 0 }, expect: expect3, onConflict: "fail" })).toThrow(WriteSpecError);
+    expect(() => replaceIfUnchanged({ table: "users", item, expect: { ...expect3, schema_version: { kind: "value", value: undefined } }, onConflict: "fail" })).toThrow(WriteSpecError);
   });
 });
 

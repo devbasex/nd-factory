@@ -719,3 +719,65 @@ describe("表の行の種類の RowCodec", () => {
     expect(Object.keys((codec.latest.schema as z.ZodObject).shape)).not.toContain("incarnation");
   });
 });
+
+describe("rowCodec の narrow（版を上げる子の手順の 4a・3b）", () => {
+  // 版 2 だけが tags を持てる（版 1 で表せない値）。narrow は tags を外して前の版で表せる値へ狭める
+  const v2t = v2.extend({ tags: z.array(z.string()).optional() });
+  type V2t = z.infer<typeof v2t>;
+  const narrowTags = (row: V2t): V2t => {
+    const { tags: _tags, ...rest } = row;
+    return rest;
+  };
+  const previous = { version: 1, schema: v1, upgrade: (r: V1): V2t => upgrade(r), downgrade: (r: V2t) => downgrade(r) };
+  const narrowed = (writeVersion: number, narrow: (row: V2t) => V2t = narrowTags) => rowCodec({ latest: { version: 2, schema: v2t }, previous, writeVersion, narrow, keyOf });
+  const taggedV2 = { ...rowV2, tags: ["x"] };
+
+  it("narrow を持たない行の種類は narrow が null、持つ種類は渡した関数を持つ", () => {
+    expect(stage2.narrow).toBeNull();
+    expect(narrowed(2).narrow).not.toBeNull();
+  });
+
+  it("4a の組（narrow あり・writeVersion が次の版）で、次の版だけの値を持つ行を狭めた値で読み、書き手はそのまま書ける", () => {
+    const codec = narrowed(2);
+    const read = readRow(codec, taggedV2);
+    expect(read).toMatchObject({ ok: true, from: 2, stored: storedOf(2) });
+    if (!read.ok) throw new Error("読めない");
+    expect(read.row).toEqual(asV2);
+    expect(rowReplaceOf(codec, taggedV2, read.row)).toEqual({ pk: "ITEM#a", sk: "ITEM", schema_version: 2, item_id: "a", display_name: "acme" });
+  });
+
+  it("3b の組（4a の組から writeVersion だけを前の版へ戻した）が投げずに作れ、読み手は狭めた値を見て、writeRow は前の版の行を出す", () => {
+    const codec = narrowed(1);
+    const read = readRow(codec, taggedV2);
+    if (!read.ok) throw new Error("読めない");
+    expect(read.row).toEqual(asV2);
+    expect(writeRow(codec, read.row)).toEqual(rowV1);
+  });
+
+  it("前の版の行も upgrade の後に narrow を通す", () => {
+    const tagging = rowCodec({ latest: { version: 2, schema: v2t }, previous: { ...previous, upgrade: (r: V1): V2t => ({ ...upgrade(r), tags: ["from-v1"] }) }, writeVersion: 2, narrow: narrowTags, keyOf });
+    const read = readRow(tagging, rowV1);
+    expect(read).toMatchObject({ ok: true, from: 1, row: asV2 });
+  });
+
+  it("narrow が引数をその場で変えても、読んだ行は変わらない", () => {
+    const codec = narrowed(2, (row) => {
+      delete (row as Record<string, unknown>)["tags"];
+      return row;
+    });
+    const raw = structuredClone(taggedV2);
+    expect(readRow(codec, raw)).toMatchObject({ ok: true, row: asV2 });
+    expect(raw).toEqual(taggedV2);
+  });
+
+  it("narrow が投げた行・latest の形を通らない値を返した行は shape_invalid", () => {
+    expect(readRow(narrowed(2, () => { throw new Error("x"); }), taggedV2)).toEqual({ ok: false, reason: "shape_invalid" });
+    expect(readRow(narrowed(2, (row) => ({ ...row, display_name: 1 }) as unknown as V2t), taggedV2)).toEqual({ ok: false, reason: "shape_invalid" });
+  });
+
+  it("narrow があって downgradable が false の組・previous の無い組・narrow が関数でない組で投げる", () => {
+    expect(() => rowCodec({ latest: { version: 2, schema: v2t }, previous, writeVersion: 2, downgradable: false, narrow: narrowTags, keyOf })).toThrow(/narrow があれば downgradable/);
+    expect(() => rowCodec({ latest: { version: 1, schema: v1 }, writeVersion: 1, narrow: (r: V1) => r, keyOf })).toThrow(RowCodecError);
+    expect(() => rowCodec({ latest: { version: 2, schema: v2t }, previous, writeVersion: 2, narrow: 1 as unknown as (r: V2t) => V2t, keyOf })).toThrow(RowCodecError);
+  });
+});

@@ -19,11 +19,17 @@ export type PreviousVersion<L> = {
 // 保存の形がその版の形を通らない行を、通る行へ直す関数。直せない行は null を返す。直した行は schema_version を持ち、その版の形で読む
 export type RowRepair = (raw: Readonly<Record<string, unknown>>) => Record<string, unknown> | null;
 
+// 次の版だけの値を、前の版で表せる値へ狭める関数（版を上げる子の手順の 4a で足す）。latest の形を受けて latest の形を返す
+// メソッドの形で書き、引数を双変にする（行の種類を問わない AnyRowCodec へ入れるため。keyOf と同じ）
+export type RowNarrow<L> = { narrow(row: L): L }["narrow"];
+
 export type RowCodec<L> = {
   readonly latest: { readonly version: number; readonly schema: z.ZodType<L> };
   readonly previous: PreviousVersion<L> | null;
   // 形を通らない行だけに当てる直し（版を上げる子の手順の 2c と、U3b の旧形式の補い repairIdentity）。無ければ null
   readonly repair: RowRepair | null;
+  // 読み手が latest の形へそろえた後に通す狭め（手順の 4a）。無ければ null。あれば downgradable は true
+  readonly narrow: RowNarrow<L> | null;
   readonly writeVersion: number;
   // 書き手を前の版へ戻せる間（版を上げる子の手順の 1 から 4 の前まで）は true。true の間、writeRow は writeVersion によらず、
   // 前の版へ下げて失う値を書かずに投げる。previous が無ければ false
@@ -88,11 +94,16 @@ export function rowCodec<L, P>(spec: {
   downgradable?: boolean;
   // 形を通らない行だけに当てる直し。省けば直さない
   repair?: RowRepair;
+  // 次の版だけの値を狭める読み手の直し（手順の 4a から）。writeVersion はどちらの版でもよい（3b で writeVersion だけを前の版へ戻し、narrow は残す）
+  narrow?: (row: L) => L;
   keyOf: (row: L) => RowKey;
 }): RowCodec<L> {
   const { latest, previous, writeVersion, keyOf } = spec;
   if (spec.repair !== undefined && typeof spec.repair !== "function") throw new RowCodecError("codec_invalid", "repair は関数");
+  if (spec.narrow !== undefined && typeof spec.narrow !== "function") throw new RowCodecError("codec_invalid", "narrow は関数");
   const downgradable = previous !== undefined && spec.downgradable !== false;
+  // 狭めた値が前の版で表せることを writeRow に確かめさせるため（downgradable の間だけ writeRow が下げて上げ直す）
+  if (spec.narrow !== undefined && !downgradable) throw new RowCodecError("codec_invalid", "narrow があれば downgradable は true（previous が要る）");
   if (!isVersion(latest.version)) throw new RowCodecError("codec_invalid", `latest.version は 1 以上の整数: ${latest.version}`);
   assertSchemaVersion("latest", latest.schema, latest.version);
   if (previous !== undefined) {
@@ -116,6 +127,7 @@ export function rowCodec<L, P>(spec: {
             downgrade: (row) => previous.downgrade(row),
           },
     repair: spec.repair ?? null,
+    narrow: spec.narrow ?? null,
     writeVersion,
     downgradable,
     keyOf,
@@ -141,8 +153,9 @@ function bytesOf(v: object): Uint8Array | null {
 }
 
 // 値が undefined の列は無い列と同じに見る（writeRow は undefined の列を書かない）。
-// DynamoDB の集合（文字列・数・バイナリの集合）は Set で表すため、Set は要素まで比べる（Object.entries は Set の中身を並べない）
-function sameValue(a: unknown, b: unknown): boolean {
+// DynamoDB の集合（文字列・数・バイナリの集合）は Set で表すため、Set は要素まで比べる（Object.entries は Set の中身を並べない）。
+// 表の移しが書く行と保存の行を比べるときも同じ比べを使う
+export function sameValue(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
   if (a instanceof Set || b instanceof Set) {
@@ -274,25 +287,27 @@ function storedOf(raw: Readonly<Record<string, unknown>>): StoredIdentity {
   return { schema_version: storedColumn(raw, "schema_version"), version: storedColumn(raw, "version"), incarnation: storedColumn(raw, "incarnation") };
 }
 
-// 処理の順: (1) raw の schema_version の版の形で読む (2) 通らず repair があれば、直した行を (1) と同じく読む (3) 前の版なら upgrade で今の形にする。
-// ほかの版を拒む。writeVersion によらず同じ結果を返す。stored は raw に保存してあった値（repair の前の値）。
-// upgrade が投げたときは、前の版の行を latest の形へそろえられなかったものとして shape_invalid を返す（読み手は投げない）
+// 処理の順: (1) raw の schema_version の版の形で読む (2) 通らず repair があれば、直した行を (1) と同じく読む (3) 前の版なら upgrade で今の形にする
+// (4) narrow があれば通し、latest の形で照らす。ほかの版を拒む。writeVersion によらず同じ結果を返す。stored は raw に保存してあった値（repair の前の値）。
+// upgrade か narrow が投げたときは、行を latest の形へそろえられなかったものとして shape_invalid を返す（読み手は投げない）
 export function readRow<L>(codec: RowCodec<L>, raw: unknown): ReadRowResult<L> {
   if (!isRecord(raw)) return { ok: false, reason: "shape_invalid" };
   const { parsed } = seenStored(codec, raw);
   if (!parsed.ok) return parsed;
   const stored = storedOf(raw);
   const previous = codec.previous;
-  if (!parsed.previous || previous === null) return { ok: true, row: parsed.data as L, from: parsed.from, stored };
-  let upgradedRow: L;
+  const narrow = codec.narrow;
+  if ((!parsed.previous || previous === null) && narrow === null) return { ok: true, row: parsed.data as L, from: parsed.from, stored };
+  let row: L;
   try {
-    // 写しを渡す。z.looseObject の下の Set などは raw と同じ物を指すため、upgrade がその場で変えると、呼び出し元が rowReplaceOf に渡す raw まで変わる
-    upgradedRow = previous.upgrade(copyOf(parsed.data));
+    // 写しを渡す。z.looseObject の下の Set などは raw と同じ物を指すため、upgrade と narrow がその場で変えると、呼び出し元が rowReplaceOf に渡す raw まで変わる
+    const latestRow = parsed.previous && previous !== null ? previous.upgrade(copyOf(parsed.data)) : copyOf(parsed.data as L);
+    row = narrow === null ? latestRow : narrow(copyOf(latestRow));
   } catch {
     return { ok: false, reason: "shape_invalid" };
   }
-  const upgraded = codec.latest.schema.safeParse(upgradedRow);
-  return upgraded.success ? { ok: true, row: upgraded.data, from: parsed.from, stored } : { ok: false, reason: "shape_invalid" };
+  const checked = codec.latest.schema.safeParse(row);
+  return checked.success ? { ok: true, row: checked.data, from: parsed.from, stored } : { ok: false, reason: "shape_invalid" };
 }
 
 // writeVersion の形の行（schema_version と鍵の列を含む）を返す。writeVersion が previous.version なら downgrade を通す。
