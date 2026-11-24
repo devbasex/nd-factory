@@ -89,7 +89,7 @@ flowchart TB
 | CI の `leak-check` のジョブ（`.github/workflows/ci.yml`） | Pull Request の実行だけで動く（`if: github.event_name == 'pull_request'`）。必須のチェックの名前 `leak-check` は変えない。環境を持たず、秘密を受けない。`leak-scan.sh` を直に呼び、既定の規則と `.gitleaks.toml` だけで今の木（`dir`）と分岐点から head まで（`git --range`）を探す（今の既定の規則と nd-factory の規則の探しのまま） |
 | CI の `leak-check-push` のジョブ（`.github/workflows/ci.yml`、`leak-check` から分けて新設） | main への push の実行だけで動く（`if: github.event_name == 'push'`）。`environment: leak-scan` を持ち、環境の秘密と変数を受け、秘密を使う探しのスクリプトを `dir` と `git`（範囲なし）で 1 回ずつ呼ぶ。今と同じく、今の木と到達できるすべてのコミットを、それぞれ 2 つの設定で探す。Pull Request の実行では飛ばされ、必須のチェックにもしない |
 | ワークフローの点検の設定（`.github/zizmor.yml`） | `dangerous-triggers` の点検を外し、理由と課題の番号を注に書く。外した点検の代わりは CI の定義のテストが持つ |
-| CI の定義のテスト（`tools/test/ci-definition.test.ts`） | 必須のチェックの宣言と、Pull Request で起動するジョブ（`pull_request` と `pull_request_target`）の集合の一致を見る。ワークフローごとに許す起動のイベントの一覧を持ち、一覧の外のイベントがあれば落とす。信頼できる側の漏れの検査の形（決定 4）と、秘密を受ける手順と必須の条件の分け方（決定 3）を、ワークフローの定義から読んで落とす |
+| CI の定義のテスト（`tools/test/ci-definition.test.ts`） | 必須のチェックの宣言と、Pull Request で起動するジョブ（`pull_request` と `pull_request_target`）の集合の一致を見る。集合の一致の数え方は、導入の 2 本の Pull Request で次のように変える（決定 10）。<br>・1 本目: 必須でなくてよいジョブの一覧をテストに持つ。一覧に入れるのは `leak-check-secret` と、`if: github.event_name == 'push'` で Pull Request では飛ばされる `leak-check-push` だけにする。一覧の外のジョブが必須のチェックの宣言に無ければ落とす<br>・2 本目: 一覧から `leak-check-secret` を外す。`leak-check-secret` の表示名は head の SHA などで実行ごとに変わるので、宣言とは表示名ではなく、ワークフローのファイル（`.github/workflows/leak-check-secret.yml`）とジョブの ID（`leak-check-secret`）で照らす<br>ワークフローごとに許す起動のイベントの一覧を持ち、一覧の外のイベントがあれば落とす。信頼できる側の漏れの検査の形（決定 4）と、秘密を受ける手順と必須の条件の分け方（決定 3）を、ワークフローの定義から読んで落とす |
 | 漏れの検査の結合のテスト（`tools/test/leak-scan.integration.test.ts`） | 秘密を使う探しのスクリプトを、作り物の正規表現と、途中のコミットで足して後で消した作り物のリポジトリで動かす |
 | ワークフローの点検の結合のテスト（`tools/test/workflow-audit.integration.test.ts`） | `dangerous-triggers` 以外の点検が今の設定で外れていないことを保つ |
 | 必須のチェックの宣言（`.ndf/project.json`） | 導入の 2 本目の Pull Request で、`required_checks` に `leak-check-secret` を、NDF が出どころを確かめる形で足し、`ci.workflows` に新しいワークフローを足す。1 本目（実装の Pull Request）では変えない（決定 10） |
@@ -327,7 +327,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
   2. 実装の Pull Request（1 本目）で、ワークフロー・スクリプト・`ci.yml` の変更・テスト・文書を入れる。`.ndf/project.json` の `required_checks` と `ci.workflows` は変えない。Pull Request の側の `leak-check` は、このマージから秘密を受けなくなる。必須のチェックは今の 7 つのままなので、NDF でマージできる
   3. 持ち主が、環境 `leak-scan` とその秘密・Dependabot の秘密・変数・`pull_request_target` を許すイベントポリシーを設定する
   4. 1 本目のマージの後の Pull Request で、`leak-check-secret` が今の head を探して成功したことを、持ち主が実行の記録で確かめる
-  5. NDF に決定 7 の機能が入った後、2 本目の Pull Request で `required_checks` に `leak-check-secret` を出どころの条件つきで足し、`ci.workflows` に新しいワークフローを足す。2 本目の Pull Request では、1 本目で入ったワークフローが起動するので、チェックの欠けで止まらない
+  5. NDF に決定 7 の機能が入った後、2 本目の Pull Request で `required_checks` に `leak-check-secret` を出どころの条件つきで足し、`ci.workflows` に新しいワークフローを足す。CI の定義のテストの、必須でなくてよいジョブの一覧から `leak-check-secret` を外す。2 本目の Pull Request では、1 本目で入ったワークフローが起動するので、チェックの欠けで止まらない
 - 2 本目へ進む条件: 手順 1 と 4 の確認が済み、手順 3 の設定があり、NDF が決定 7 の条件で結果を受け入れられる。1 つでも欠ければ 2 本目を出さない
 - 採らなかった案: 実装の Pull Request で `required_checks` も変える（その Pull Request では `leak-check-secret` が起動されず、NDF のマージがチェックの欠けで止まる）
 - 採らなかった案: 2 本目まで、Pull Request の側の `leak-check` で秘密を受け続ける（その間、同じリポジトリのブランチの Pull Request のコードが秘密の正規表現を読める。#96 が塞ぐ経路を残す）
@@ -380,6 +380,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 | #96-4: 秘密を使うジョブのトークンは書き込みの権限を持たない | CI の定義のテストの、最上位とジョブの `permissions` が `contents: read` だけの検査が、新しいワークフローにも掛かる | `pull-requests: write` を足すと落ちる |
 | #96-5: 新しい push と base の変更で探しがやり直され、前の head・前の base の結果でマージできない | CI の定義のテストで、`pull_request_target` の `types` が `opened`・`synchronize`・`reopened`・`edited` のちょうど 4 つであること、`concurrency` が Pull Request の番号ごとであること、ジョブの表示名に event の head の SHA と base のブランチが入ること。結果を受け入れる条件（決定 7）は、検証用のリポジトリで確かめ（決定 10 の手順 1）、NDF の側のテストで縛る | `types` から `synchronize` か `edited` を外す・表示名から head の SHA を外すと落ちる |
 | 決定 7: Pull Request の側の同じ名前のチェックではマージできない | 検証用のリポジトリで、Pull Request の側に `leak-check-secret` という名前の成功するジョブを足した Pull Request を作り、NDF が未報告か失敗として止めることを確かめる（決定 10 の手順 1） | — |
+| 決定 10: 1 本目では `leak-check-secret` を必須にせず、2 本目で必須にする | CI の定義のテストで、必須のチェックの宣言と Pull Request で起動するジョブの集合を、必須でなくてよいジョブの一覧を除いて比べる。1 本目の一覧は `leak-check-secret` と `leak-check-push`、2 本目の一覧は `leak-check-push` だけ。2 本目では、宣言の `leak-check-secret` をワークフローのファイルとジョブの ID で照らす | 必須の宣言に無い Pull Request のジョブを `ci.yml` に足す・2 本目で宣言から `leak-check-secret` を消す・宣言のワークフローのファイルを別のファイルにすると落ちる |
 | 決定 4: 秘密を受けるワークフローは `pull_request_target` だけで起動し、信頼できるコードだけを動かす | CI の定義のテストで、ワークフローごとの起動の許可の一覧と、`leak-check-secret.yml` の `uses:`・`run:` の許可の一覧に当たらないものが無いこと | `leak-check-secret.yml` に `workflow_run` か `issue_comment` を足す・ほかのワークフローに `pull_request_target` を足す・`actions/setup-node` を足すと落ちる |
 | 決定 8: `nd-real-value` の当たりは件数だけを出す | 結合のテストで、作り物の正規表現に当たるリポジトリを探すと、出力に `nd-real-value` の件数が出て、当たりのファイル・行・コミットが出ない。`--details` を渡したときだけ場所が出る。CI の定義のテストで、ワークフローが `--details` を渡さない | 整形を外して `leak-scan.sh` の出力をそのまま出す・ワークフローに `--details` を足すと落ちる |
 | 決定 9: 秘密は環境 `leak-scan` から受ける | CI の定義のテストで、`secrets.LEAK_CHECK_PATTERN` を読むジョブが `environment: leak-scan` を持ち、それが `leak-check-secret` と main への push の `leak-check-push` だけであること。Pull Request の側の実行で環境の秘密が空になることは検証用のリポジトリで確かめる | `environment` を外す・`leak-check` で秘密を読む・`leak-check` に `environment` を付けると落ちる |
@@ -400,7 +401,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #96 | 実装する | — | 1 本目（実装）: `.github/workflows/leak-check-secret.yml`（新設）、`.github/workflows/ci.yml`、`.github/zizmor.yml`、`tools/checks/leak-scan-secret.sh`（新設）、`tools/test/ci-definition.test.ts`、`tools/test/leak-scan.integration.test.ts`、`tools/test/workflow-audit.integration.test.ts`、`AGENTS.md`、`docs/operations/ci-checks.md`（新設）、`docs/design/platform.md`。2 本目: `.ndf/project.json`（決定 10） |
+| #96 | 実装する | — | 1 本目（実装）: `.github/workflows/leak-check-secret.yml`（新設）、`.github/workflows/ci.yml`、`.github/zizmor.yml`、`tools/checks/leak-scan-secret.sh`（新設）、`tools/test/ci-definition.test.ts`、`tools/test/leak-scan.integration.test.ts`、`tools/test/workflow-audit.integration.test.ts`、`AGENTS.md`、`docs/operations/ci-checks.md`（新設）、`docs/design/platform.md`。2 本目: `.ndf/project.json`、`tools/test/ci-definition.test.ts`（決定 10） |
 | #101 | マージする | #96 | — |
 
 ## 人へ残す判断
