@@ -160,9 +160,12 @@ graph LR
 | --- | --- | --- |
 | 次の項目を渡す（`/v1/runner/organizer_inputs/list`） | オーガナイザーの行の `inflight_message_id` をその項目の ID にする・項目の `delivered_at` と `delivered_generation` | オーガナイザーの行が `active` で、`generation` が token の世代と同じで、`inflight_message_id` が空。項目の `delivered_at` と `withdrawn_at` がどちらも空 |
 | 渡し直す（`/v1/runner/organizer_inputs/list`） | 項目の `delivered_generation` を token の世代にする | オーガナイザーの行が `active` で、`generation` が token の世代と同じで、`inflight_message_id` がその項目の ID。項目の `received_at` が空 |
-| 受け取る（`/v1/runner/organizer_receipts/create`） | 項目の `received_at`・オーガナイザーの行の `inflight_message_id` を空にする | オーガナイザーの行の `inflight_message_id` がその項目の ID。下の答えの条件 |
+| 答えを追記する（`/v1/runner/organizer_replies/create`） | 答えの項目・オーガナイザーの行の `ConditionCheck` | オーガナイザーの行が `active` で、`generation` が token の世代と同じ。応えた項目がそのオーガナイザーのもので、`delivered_generation` が token の世代と同じ |
+| 受け取る（`/v1/runner/organizer_receipts/create`） | 項目の `received_at`・オーガナイザーの行の `inflight_message_id` を空にする | オーガナイザーの行が `active` で、`generation` が token の世代と同じで、`inflight_message_id` がその項目の ID。項目の `delivered_generation` が token の世代と同じ。下の答えの条件 |
 
 渡す・渡し直すの書き込みに、オーガナイザーの状態と世代を条件として入れるのは、古い世代の要求が新しい世代の配信の記録を書き換えないようにするためである。認証を通った後に止まっていた前の世代のランナーの要求が、再開の後に届くことがある。この要求が `delivered_generation` を前の世代へ戻すと、新しい世代のランナーの答えと受け取りが 404 になり、利用者の次の指示が渡らなくなる。
+
+答えの追記と受け取りにも、同じ状態と世代の条件を入れる。項目の `delivered_generation` だけを照らすと、止める前に認証を通った要求は、次のランナーが渡し直しを受けるまで条件を満たす。そのため、利用者がオーガナイザーを止めた後に、前のランナーが会話へ答えを足したり、指示を処理済みにしたりできてしまう。
 
 `/v1/runner/organizer_inputs/list` は、オーガナイザーの行を読み、次の順で返すものを決める。
 
@@ -184,7 +187,7 @@ graph LR
 - 照らしの後、元の組の済みの行があれば、項目の処理が終わっていても 1 回目の結果を返す。済みの行が無いときだけ新しく書く。新しく書けるのは、その項目がオーガナイザーの行の `inflight_message_id` と同じで、`delivered_generation` が token の世代と同じときだけである。この 2 つは書き込みと同じトランザクションの条件にし、外れたら 409 `state_mismatch` で断る。終わった項目のための書き込みが、後から新しく通ることはない
 - この組の済みの行は、オーガナイザーの会話の項目と同じ `db-organizers` の表に置き、オーガナイザーの会話を消すまで残す。委任を替えても、期間が過ぎても、同じ組の 2 回目は 1 回目の結果を返す。中身が違えば 422 `idempotency_key_reused` にする
 
-**ランナーの経路の対象は、要素でなくレーンの token から決める。** `/v1/runner/organizer_inputs/list`・`/v1/runner/organizer_replies/create`・`/v1/runner/organizer_receipts/create` は、オーガナイザーの ID を要素から受けず、レーンの token のオーガナイザーと世代を使う。答えと受け取りの書き込みは、項目がそのオーガナイザーのもので、`delivered_generation` が token の世代と同じことを条件にする。外れたら 404 を返して書かない。
+**ランナーの経路の対象は、要素でなくレーンの token から決める。** `/v1/runner/organizer_inputs/list`・`/v1/runner/organizer_replies/create`・`/v1/runner/organizer_receipts/create` は、オーガナイザーの ID を要素から受けず、レーンの token のオーガナイザーと世代を使う。答えと受け取りの書き込みは、オーガナイザーの行が `active` で `generation` が token の世代と同じこと、項目がそのオーガナイザーのもので `delivered_generation` が token の世代と同じことを、同じトランザクションの条件にする。オーガナイザーの行の条件が外れたら 401、項目の条件が外れたら 404 を返して書かない。
 
 ## 動く場所と休止
 
