@@ -300,14 +300,19 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 ### 決定 7: 同じ名前のチェックや、今の範囲・今の設定で探していない結果でマージさせないため、NDF は信頼できる側の実行の結果だけを、出どころ・探した範囲・設定の世代で確かめて受け入れる
 
 - **質問**: `leak-check-secret` の結果を、どういう条件で受け入れるか。Pull Request の側の同じ名前のチェックと、前の head・前の base・前の検査の設定の結果をどう退けるか。マージの直前に base が変わったときにどう扱うか
-- **選んだ案**: 結果は、対象の Pull Request の番号・探した head の SHA・探した分岐点・検査の設定の世代に結び付けて受け入れる。NDF は次のすべてを満たす結果だけを、`leak-check-secret` が通ったと数える。どれかを満たす結果が無ければ「未報告」として待ち、時間を過ぎたら止める
-  - 結果を出した実行のワークフローのファイルが `.github/workflows/leak-check-secret.yml` で、起動のイベントが `pull_request_target` である（check run から check suite を経て workflow run を引き、その `path` と `event` で確かめる）
+- **選んだ案**: 結果は、対象の Pull Request の番号・探した head の SHA・探した分岐点・検査の設定の世代に結び付けて受け入れる。NDF は、対象のリポジトリの `leak-check-secret.yml` の実行を列挙し、各実行に GitHub が紐付けたジョブの名前・状態・結論を合否の正本にする。head のコミットに付いたチェック（check run）からは探し始めない。手順は次のとおり
+  1. ワークフローの実行の一覧の API（`GET /repos/{owner}/{repo}/actions/workflows/leak-check-secret.yml/runs`）を、`event=pull_request_target`・`created=>=<Pull Request を作った日時>`・`per_page=100` で呼ぶ。`{owner}/{repo}` は NDF の設定の対象のリポジトリで、Pull Request の head のリポジトリ（fork）ではない。応答の `Link` ヘッダーの `next` を辿って最後のページまで読む。この API は、絞り込みの指定があると 1,000 件までしか返さない（[workflow runs API](https://docs.github.com/en/rest/actions/workflow-runs)）ので、`total_count` が 1,000 以上なら読み切れないとみなして「未報告」として止める
+  2. 各実行について、実行の `path` が `.github/workflows/leak-check-secret.yml`、`event` が `pull_request_target`、`repository.full_name` が対象のリポジトリであることを確かめる。外れる実行は捨てる
+  3. 残った実行ごとに、ジョブの一覧の API（`GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs`。[workflow jobs API](https://docs.github.com/en/rest/actions/workflow-jobs)）でジョブを取り、`name` が下の表示名の形に合うジョブだけを候補にする。check run を併せて読む場合は、check suite が同じというだけで関連付けず、ジョブの `check_run_url` と check run の URL が一致するものだけを同じ結果として扱う
+  4. 候補のうち、下の条件をすべて満たすジョブを集める。その中で、属する実行の `created_at` が最も新しいジョブを 1 つ選ぶ。`created_at` が同じなら `run_id` の大きいほうを選ぶ。新旧は成否を見る前に決め、古い成功で新しい失敗を覆さない
+  5. 選んだジョブの `status` が `completed` で `conclusion` が `success` なら、`leak-check-secret` が通ったと数える。`completed` でなければ「未報告」として待ち、時間を過ぎたら止める。`success` 以外の結論なら失敗として止める。条件を満たすジョブが 1 つも無ければ「未報告」として待つ
+
+  手順 4 の条件は次のとおり。
   - ジョブの表示名にある Pull Request の番号が、対象の Pull Request の番号と一致する。fork の Pull Request では workflow run の `pull_requests` が空になりうるので、番号は表示名で照らす
   - 表示名にある head の SHA が、今の head の SHA と一致する
   - 表示名にある base のブランチが、今の base のブランチと一致する
   - 表示名にある base の SHA から求めた分岐点（探した範囲の起点）が、今の base のブランチの先頭から求めた分岐点と同じか、その祖先である。どちらの分岐点も、GitHub の比較の API（`GET /repos/{owner}/{repo}/compare/{base}...{head}`）の `merge_base_commit` で求め、2 つの分岐点の関係も同じ API で `<探した分岐点>...<今の分岐点>` を比べ、`status` が `identical` か `ahead` であることで確かめる。これを満たせば、今の分岐点から head までのコミットは、すべて探した範囲に入っている
   - 表示名にある設定の世代が、リポジトリの変数 `LEAK_CHECK_GENERATION` の今の値と一致する
-  - 条件を満たす結果が複数あれば最も新しいものを数え、それが成功である
 
   表示名は `leak-check-secret (#<番号> head <head の SHA> / base <base のブランチ>@<base の SHA> / gen <世代>)` の形で、信頼できる側のワークフローが event の `pull_request.number`・`pull_request.head.sha`・`pull_request.base.ref`・`pull_request.base.sha` と変数 `LEAK_CHECK_GENERATION` から組む。ワークフローは、分岐点を同じ `pull_request.base.sha` と head から求めるので、表示名の base の SHA と探した範囲は食い違わない。変数が空なら、ワークフローは探す前に失敗する
 
@@ -326,7 +331,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 
   base のブランチに、Pull Request とは関わらないコミットが増えるだけなら、分岐点は変わらない。別の Pull Request が対象の head の祖先を base に取り込むと、分岐点は head の側へ進む。そのときは今の範囲が探した範囲より狭くなるだけなので、結果は失効させない。探し直しに、前の実行の再実行（re-run）は使わない。再実行は元の event と既定のブランチの元のコミットで動くので、今の base・今の設定で探したことにならない（STD5）
 
-  結果は head のコミットに付いたチェックからではなく、このワークフローの `pull_request_target` の実行の一覧から引く。結果が付くコミットが既定のブランチの最新のコミットでも、Pull Request の head でも、同じ手順で引ける。Pull Request の側のワークフローは `pull_request_target` で起動されず、既定のブランチの `leak-check-secret.yml` も書き換えられないので、この条件を満たす結果を作れない
+  上の手順は、結果が付くコミットに頼らない。結果が付くのが既定のブランチの最新のコミットでも、Pull Request の head でも、同じ手順で引ける。Pull Request の側のワークフローは `pull_request_target` で起動されず、既定のブランチの `leak-check-secret.yml` も書き換えられないので、この条件を満たす結果を作れない
 
   マージのときは、NDF が次の順に進める。GitHub のマージの API は、head の SHA の指定（`sha`）は受けるが、base の指定は受けない（STD6）。そのため、検査したマージ先へのマージを保証できるのは、マージの直前の読み直しから API の呼び出しまでの間に base が変わらなかった場合だけである
   1. マージの API を呼ぶ直前に、Pull Request の head の SHA・base のブランチ・base の先頭を読み直し、上の条件をすべて確かめ直す。外れていれば、マージしない
@@ -339,7 +344,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 - 採らなかった案: GitHub のルールセットで必須のチェックの発行元を GitHub Actions に限る（Pull Request の側のワークフローも GitHub Actions が出すので、区別できない）
 - **代償**: 持ち主が、秘密の値や探しの設定を変えるたびに設定の世代を増やし、開いている Pull Request を閉じて開き直す。増やし忘れると、前の設定で成功した結果が通る。NDF のマージの経路では、マージの直前の読み直しから API の呼び出しまでの間の base の変更は止められず、マージの後に人へ戻すことしかできない。NDF（devbasex/ai-plugins）に、必須のチェックを出どころで確かめる機能が要る。依頼の起票は他のリポジトリへの公開（C5）なので、設計の承認の後に人の承認を得て出す。機能が入るまで、`leak-check-secret` を必須のチェックにしない（決定 10）。その間、実際の値の規則での探しはマージを止めない（今の fork の Pull Request と同じ状態が、同じリポジトリのブランチにも広がる）
 - 作り方: 自前で作る（NDF の機能として）
-- 根拠: Value 7（MVV バージョン 3）。検査を名前の偽装や古い結果で迂回させない。外部の調査は STD1・STD4・STD5・STD6
+- 根拠: Value 7（MVV バージョン 3）。検査を名前の偽装や古い結果で迂回させない。外部の調査は STD1・STD4・STD5・STD6・STD7
 
 ### 決定 8: 公開の Pull Request から実際の値の正規表現の中身を探らせないため、`nd-real-value` の当たりは件数だけを出し、探しは誰の Pull Request でも承認なしに動かす
 
@@ -506,6 +511,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 | STD4 | GitHub Docs「Troubleshooting required status checks」 | 必須のチェックは最新のコミットで通る必要がある。Pull Request で数えられるジョブのチェックは `push`・`pull_request`・`pull_request_review`・`pull_request_target`・`deployment`・`deployment_status` で起動したものだけ（`workflow_run` は入らない）。条件で飛ばしたジョブは成功と報告される | 決定 1（`workflow_run` を採らない）・非機能（`if:` を置かない）・処理の流れ（新しい head で数え直す） | https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks （2026-11-24） |
 | STD5 | GitHub Docs「Re-running workflows and jobs」 | 再実行は、元の event の `GITHUB_SHA` と `GITHUB_REF` で動く | 決定 7（探し直しに再実行を使わず、閉じて開き直す） | https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs （2026-11-24） |
 | STD6 | GitHub Docs「REST API endpoints for pull requests」の「Merge a pull request」 | マージの API は、head が一致すべき SHA（`sha`）を受ける。base を指定する項目は無い | 決定 7（マージの直前の読み直しと、マージの後の確認） | https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request （2026-11-24） |
+| STD7 | GitHub Docs「REST API endpoints for workflow runs」と「REST API endpoints for workflow jobs」 | ワークフローごとに実行を列挙でき、`event`・`created` で絞れる。絞り込みの指定があると 1,000 件までしか返さない。実行ごとにジョブを取れ、ジョブは `name`・`status`・`conclusion`・`run_attempt`・`check_run_url` を持つ | 決定 7（実行を列挙し、紐付いたジョブを合否の正本にする手順・ページング・再実行を退ける条件） | https://docs.github.com/en/rest/actions/workflow-runs ・ https://docs.github.com/en/rest/actions/workflow-jobs （2026-11-24） |
 
 ### 主要な製品
 
