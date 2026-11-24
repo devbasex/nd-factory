@@ -192,7 +192,7 @@ erDiagram
 
 | 列 | 型 | 空を許すか | 意味 |
 | --- | --- | --- | --- |
-| `deleted_at` | 日時 | 許す | 登録を外した時刻（`machines.delete`）。外した後も行を残し、登録の token は `/v1/machine/organizer_wipes/create` だけを受ける。登録の token の期限の後に行を消す。空は「外していない」（[オーガナイザーの手元のマシンの会話の記録](organizer.md#会話の控え)） |
+| `deleted_at` | 日時 | 許す | 登録を外した時刻（`machines.delete`）。外した後も、登録の token の期限の後も、行と token の照合の値を残す。その token は `/v1/machine/organizer_wipes/create` だけを受ける。空は「外していない」（[オーガナイザーの手元のマシンの会話の記録](organizer.md#会話の控え)） |
 
 レーン（`db-sprints` の `…#LANE#…` の行）:
 
