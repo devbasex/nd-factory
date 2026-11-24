@@ -15,6 +15,8 @@
 
 ## 手元で見る
 
+利用者の Chrome で見せるときは、プロジェクト Skill `mock-viewer`（`npm run mock:up`）でコンテナから http://ndf-mock.localhost/ に出す。Chrome を使えないときは、次のとおり HTTP のサーバーで開く。
+
 ```bash
 python3 -m http.server -d docs/design/mock 8000
 ```
