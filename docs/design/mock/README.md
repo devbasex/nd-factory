@@ -4,7 +4,7 @@
 
 | ファイル | 中身 |
 | --- | --- |
-| `project/canvas.json` | キャンバスの索引（枚の位置・ページ・付箋） |
+| `project/canvas.json` | キャンバスのインデックス（枚の位置・ページ・付箋） |
 | `project/*.dc.html` | 1 枚ずつの画面 |
 | `project/nd.css` | 旧い側の画面が読む共通の見た目 |
 | `viewer.html` | 手元の閲覧のページ。`project/canvas.json` を読み、枚の並び・ページ・付箋をキャンバスと同じ位置に出す |

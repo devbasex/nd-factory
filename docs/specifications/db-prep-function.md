@@ -6,7 +6,7 @@ DB の用意の関数は、進行表の DB にプロジェクトごとのデー�
 
 関数は呼び出しが今の用意であることを読み直してから SQL を打ち、別のプロジェクトのデータベースか役割と重なると何も書かずに止まる（I10）。SQL を終えたら、プロジェクトの秘密の器の結んだ版へ `AWSCURRENT` を移し、関数の中から終わりの記録の口を呼んで結果を記す。
 
-順序の正は [データの文書の進行表の DB](../design/data.md#進行表の-db)（用意の手順・パスワードの版・用意と差し替えの順・差し替えの番号）にあり、この文書は関数の実装の振る舞いと値を持つ。資源の置き場は [アプリのスタックのインフラ](app-stack-infrastructure.md) にある。
+順序の正は [データの文書の進行表の DB](../design/data.md#進行テーブルの-db)（用意の手順・パスワードの版・用意と差し替えの順・差し替えの番号）にあり、この文書は関数の実装の振る舞いと値を持つ。資源の置き場は [アプリのスタックのインフラ](app-stack-infrastructure.md) にある。
 
 ## 用語
 
@@ -291,7 +291,7 @@ Data API の実装（`createDataApiExecutor`）:
 
 | 相手 | 連携 |
 | --- | --- |
-| 呼ぶ側（API と見回り。#6） | 用意の ID と新しい版の ID を条件つきの書き込みで置き、勝ったときだけ秘密の器のその版へパスワードの URL を入れてから、`dbPrepInvocation` を `Invoke`（`InvocationType: Event`）で渡す（[データの文書のパスワードの版](../design/data.md#パスワードの版)）。呼ぶ権限は `DbPrepFunction` の公開の値 `fn` に #6 が許す |
+| 呼ぶ側（API と見回り。#6） | 用意の ID と新しい版の ID を条件つきの書き込みで置き、勝ったときだけ秘密の器のその版へパスワードの URL を入れてから、`dbPrepInvocation` を `Invoke`（`InvocationType: Event`）で渡す（[データの文書のパスワードの版](../design/data.md#パスワードのバージョン)）。呼ぶ権限は `DbPrepFunction` の公開の値 `fn` に #6 が許す |
 | 終わりの記録の口（`PrepCompletionPort`。実装は #6） | 下の表 |
 | RDS Data API | 管理の役割の秘密の器を渡して SQL を打つ |
 | Secrets Manager | プロジェクトの秘密の器の結んだ版を読み、`AWSCURRENT` を移す |
@@ -364,7 +364,7 @@ DB のテストは CI の `check` のジョブで、PostgreSQL 16 のサービ�
 ## 関連リンク
 
 - [アプリのスタックのインフラ](app-stack-infrastructure.md)
-- [データの文書の進行表の DB](../design/data.md#進行表の-db)（[用意の手順](../design/data.md#用意の手順)・[パスワードの版](../design/data.md#パスワードの版)・[用意と差し替えの順](../design/data.md#用意と差し替えの順)・[差し替えの番号](../design/data.md#差し替えの番号)）
+- [データの文書の進行表の DB](../design/data.md#進行テーブルの-db)（[用意の手順](../design/data.md#用意の手順)・[パスワードの版](../design/data.md#パスワードのバージョン)・[用意と差し替えの順](../design/data.md#用意と差し替えの順)・[差し替えの番号](../design/data.md#差し替えの番号)）
 - [全体の設計の不変条件](../design/overview.md#不変条件)（I10・I17・I18・I22）
 - [プラットフォームの文書の決定の記録](../design/platform.md#決定の記録)（決定 83・90・95・96）
 - [設置の手順](../operations/setup.md)

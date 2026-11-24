@@ -12,4 +12,4 @@
 | 実行の場所 | — | レーンを動かす所。ホステッド（サービスが起こすコンテナ）か手元のマシン | — | — | `docs/design/overview.md` |
 | 手元のマシン | — | チームが登録し、nd ランタイムがレーンを受けて動かす利用者のマシン | — | — | `docs/design/overview.md` |
 | 推論の手段 | — | レーンの claude が推論を呼ぶ手段。サービスの推論（`managed`）か持ち込みのキー（`byok`） | — | — | `docs/design/overview.md` |
-| 進行表の DB | — | NDF の進行表と耐久の記録を置く PostgreSQL。プロジェクトごとに分ける | — | — | `docs/design/overview.md` |
+| 進行テーブルの DB | — | NDF の進行テーブルと耐久の記録を置く PostgreSQL。プロジェクトごとに分ける | — | — | `docs/design/overview.md` |
