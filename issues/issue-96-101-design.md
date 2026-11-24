@@ -71,7 +71,7 @@ flowchart TB
 ```
 
 - Pull Request ごとに、新しいチェック `leak-check-secret` が既定のブランチのコードだけで動く。fork・同じリポジトリのブランチ・Dependabot のどの Pull Request でも、途中のコミットを含む全コミットを、実際の値の規則でマージの前に探す。必須のチェックにするのは導入の 2 本目の Pull Request からである（決定 10）
-- NDF は、`leak-check-secret` の結果を、名前だけでなく、出したワークフローのファイル・起動のイベント・探した head の SHA と base のブランチで確かめてから受け入れる。NDF にその機能を足す依頼は、承認を得てから devbasex/ai-plugins へ出す（決定 7）
+- NDF は、`leak-check-secret` の結果を、名前だけでなく、出したワークフローのファイル・起動のイベント・Pull Request の番号・探した head の SHA・base のブランチ・探した分岐点・検査の設定の世代で確かめてから受け入れる。マージの直前に確かめ直し、マージの後にマージ先を確かめる。NDF にその機能を足す依頼は、承認を得てから devbasex/ai-plugins へ出す（決定 7）
 - Pull Request の側の `leak-check` は秘密を一切受けない。秘密の正規表現を書いた設定のファイルを、Pull Request のコードが読む経路が無くなる
 - `leak-check-secret` は、Pull Request の出所と起動した人によらず、秘密が空なら必ず落ちる。変数 `LEAK_CHECK_REQUIRE_PATTERN` は main への push の `leak-check-push` だけが読む。Dependabot の実行が秘密の欠けで落ちないことは、環境の秘密と Dependabot の秘密のどちらが渡るかを検証用のリポジトリで確かめてから保証する（決定 2）
 - 実際の値の正規表現は、既定のブランチ（main）の実行だけが読める環境 `leak-scan` の秘密に置く。Pull Request の側のワークフローを書き換えても読めない（決定 9）
@@ -296,7 +296,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
   - ジョブの表示名にある Pull Request の番号が、対象の Pull Request の番号と一致する。fork の Pull Request では workflow run の `pull_requests` が空になりうるので、番号は表示名で照らす
   - 表示名にある head の SHA が、今の head の SHA と一致する
   - 表示名にある base のブランチが、今の base のブランチと一致する
-  - 表示名にある base の SHA から求めた分岐点（探した範囲の起点）が、今の base のブランチの先頭から求めた分岐点と同じか、その祖先である。どちらの分岐点も、GitHub の比較の API（`GET /repos/{owner}/{repo}/compare/{base}...{head}`）の `merge_base_commit` で求め、2 つの分岐点の関係も同じ API の `status`（`identical` か `ahead`）で確かめる。これを満たせば、今の分岐点から head までのコミットは、すべて探した範囲に入っている
+  - 表示名にある base の SHA から求めた分岐点（探した範囲の起点）が、今の base のブランチの先頭から求めた分岐点と同じか、その祖先である。どちらの分岐点も、GitHub の比較の API（`GET /repos/{owner}/{repo}/compare/{base}...{head}`）の `merge_base_commit` で求め、2 つの分岐点の関係も同じ API で `<探した分岐点>...<今の分岐点>` を比べ、`status` が `identical` か `ahead` であることで確かめる。これを満たせば、今の分岐点から head までのコミットは、すべて探した範囲に入っている
   - 表示名にある設定の世代が、リポジトリの変数 `LEAK_CHECK_GENERATION` の今の値と一致する
   - 条件を満たす結果が複数あれば最も新しいものを数え、それが成功である
 
@@ -307,6 +307,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
   - 探しの設定とコード（`.github/workflows/leak-check-secret.yml`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml`）を変える Pull Request を main にマージしたとき
 
   結果が条件を外れたとき（失効）の扱いと、探し直しを起こすきっかけは次のとおり。
+
   | 外れた条件 | 起きる場面 | 探し直しのきっかけ |
   | --- | --- | --- |
   | head の SHA | 作者が新しいコミットを push した | GitHub が `synchronize` で自動で起こす |
@@ -323,13 +324,13 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
   2. 確かめた head の SHA を `sha` に渡してマージの API を呼ぶ。head が変わっていれば GitHub がマージを断る
   3. マージの後に Pull Request を読み、マージ先のブランチが確かめた base のブランチと違えば、止めて人へ戻す
 
-  手順 1 と 2 の間に base を変えられると、検査していないマージ先へマージされうる。base を変えられるのは、Pull Request の作者と書き込みの権限を持つ人である。そうしてマージされたコミットが main に入るには、そのブランチから main への Pull Request を通るか、main への push を通る。前者は `leak-check-secret` が、後者は `leak-check-push` が探す
+  手順 1 と 2 の間に base を変えられると、検査していないマージ先へマージされうる。base を変えられるのは、Pull Request の作者と書き込みの権限を持つ人である。そうしてマージされたコミットが main に入るには、そのブランチから main への Pull Request を通るか、main への push を通る。前者はマージの前に `leak-check-secret` が探し、後者は main に入った後に `leak-check-push` が探す
 - 採らなかった案: `required_checks` に名前だけで足す（今の NDF の読み方では、Pull Request の作者が足した同じ名前のジョブの結果が、最も新しい 1 件として数えられる。文脈と制約の 2・3 行目）
 - 採らなかった案: 信頼できる側のジョブが commit status か check run を Pull Request の head に書く（`statuses: write` か `checks: write` の権限が要り、#96 の受け入れ条件 4 に反する）
 - 採らなかった案: GitHub のルールセットで必須のチェックの発行元を GitHub Actions に限る（Pull Request の側のワークフローも GitHub Actions が出すので、区別できない）
 - **代償**: 持ち主が、秘密の値や探しの設定を変えるたびに設定の世代を増やし、開いている Pull Request を閉じて開き直す。増やし忘れると、前の設定で成功した結果が通る。NDF のマージの経路では、マージの直前の読み直しから API の呼び出しまでの間の base の変更は止められず、マージの後に人へ戻すことしかできない。NDF（devbasex/ai-plugins）に、必須のチェックを出どころで確かめる機能が要る。依頼の起票は他のリポジトリへの公開（C5）なので、設計の承認の後に人の承認を得て出す。機能が入るまで、`leak-check-secret` を必須のチェックにしない（決定 10）。その間、実際の値の規則での探しはマージを止めない（今の fork の Pull Request と同じ状態が、同じリポジトリのブランチにも広がる）
 - 作り方: 自前で作る（NDF の機能として）
-- 根拠: Value 7（MVV バージョン 3）。検査を名前の偽装で迂回させない。外部の調査は STD1・STD4
+- 根拠: Value 7（MVV バージョン 3）。検査を名前の偽装や古い結果で迂回させない。外部の調査は STD1・STD4・STD5・STD6
 
 ### 決定 8: 公開の Pull Request から実際の値の正規表現の中身を探らせないため、`nd-real-value` の当たりは件数だけを出し、探しは誰の Pull Request でも承認なしに動かす
 
