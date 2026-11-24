@@ -280,9 +280,9 @@ ID の種類のプレフィックス:
 | `projects.create`・`project_transfers.*`・`projects.close` | プロジェクトの割り当ての作成・変更・外しは `human_only`（P2、I3） |
 | `teams.create`・`seats.update`・`seats.delete`・`invitations.create`・`invitations.accept`・`invitations.delete` | 席はプロジェクトを見られる人を決める。席を足すことはチームの外の人へ見せることに当たる（P2）。席を変える・外す操作も、同じ判断の流れに置くため `human_only` にそろえる |
 | `delegations.create`・`delegations.revoke` | 委任が委任を作ると、人の確認しない範囲が広がる（Value 4） |
-| `organizers.close` | 戻せない `ended` へ移し、状態用 S3 バケット にある会話のキャッシュ（claude の会話の記録）を消す期限を決める。取り消せない操作なので、画面で消える対象と結果を読んだ立てた人だけが確定する（C4） |
+| `organizers.close` | 戻せない `ended` へ移し、状態用 S3 バケット にある会話のキャッシュ（claude の会話の記録）を消す期限を決める。取り消せない操作なので、オーガナイザーを立てた人が、画面で消える会話の記録と終えた後の状態を読んでから確定する（C4） |
 | `notification_targets.delete` | Slack の通知先を外すと、bot token を置いた Secrets Manager の秘密も消す（[土台の文書の決定 90](platform.md#決定の記録)）。秘密に触れる操作なので `human_only` にする（C1） |
-| `machines.delete` | 登録を外すと、そのマシンの登録の token が受けられる経路が消去の通知だけに変わり、マシンの権限が変わる（C2）。人が画面で外すマシンと、そこに残る未消去の会話の記録を読んでから確定する |
+| `machines.delete` | 登録を外すと、そのマシンの登録の token で呼べる API は、会話の記録を消したことの通知の 1 つだけになる（C2）。マシンに残る会話の記録を消す手順に関わるので、人が画面で外すマシンと、そこに残る未消去の会話の記録を読んでから確定する |
 | `organizers.create`・`organizers.resume` | どちらも立てた人の名で専用の委任（期限 30 日）を作る。委任から呼べると、委任が委任を作ることになり、`delegations.create` を `human_only` にした理由と同じく人の確認しない範囲が広がる（Value 4） |
 | `notification_targets.create`・`model_keys.create` | 送信先の値と持ち込みのキーはどちらも秘密の値で、秘密を受け取る操作は `human_only`（[全体の設計](overview.md) の「人へ残す判断」の C1） |
 | `model_keys.delete` | 持ち込みのキーは秘密で、消すと推論が止まり、同じ値を戻せない（C1）。MCP からは `model_keys.list` で消す対象（名前・作った日・最後に使った日。値は出さない）を確認できる |
@@ -291,17 +291,18 @@ ID の種類のプレフィックス:
 | `machines.create` | 登録の token（秘密）を発行する |
 | `sessions.create`・`sessions.delete`・`logins.create`・`logins.delete`・`github_installations.link` | 人のブラウザーの中の流れ（サインイン・IdP のログインをつなぐ戻り・GitHub の導入の戻り）で、委任の主体が通る流れでない。`logins.delete` は最後の 1 つのログインを外すリクエストを 409 で拒む |
 
-外す・狭める操作は、見える範囲も費用も広げないため委任から呼べる。当たるのは `repositories.remove` である。`notification_targets.delete` は Slack の通知先の bot token の秘密を消し、`machines.delete` は権限を変えるので、どちらも `human_only` にする（上の表）。また、`machines.delete` はマシンの登録を外すだけで、オーガナイザーの会話の記録を消した確認の代わりにはならない。外したマシンの未消去の記録は残り、割り当ての移行の受け入れを待たせ続ける（[オーガナイザーが手元のマシンに残す会話の記録](organizer.md#会話のキャッシュ)）。`model_keys.delete` は秘密を扱うので、狭める操作でも `human_only` にする（上の表）。
+外す・狭める操作のうち、委任から呼べるのは `repositories.remove` だけである。見える範囲も費用も広げず、秘密にも触れないためである。ほかの外す・狭める操作は、上の表に書いた理由で `human_only` にする。たとえば `notification_targets.delete` は Slack の通知先の bot token の秘密を消し、`machines.delete` は権限を変えるので、どちらも `human_only` にする（上の表）。また、`machines.delete` はマシンの登録を外すだけで、オーガナイザーの会話の記録を消した確認の代わりにはならない。外したマシンの未消去の記録は残り、割り当ての移行の受け入れを待たせ続ける（[オーガナイザーが手元のマシンに残す会話の記録](organizer.md#会話のキャッシュ)）。`model_keys.delete` は秘密を扱うので、狭める操作でも `human_only` にする（上の表）。
 
 ### 承認する以外の答えの理由
 
-**承認する以外の答えと、取り消す・拒否する・外す操作には、どの入口（画面・API・MCP）からでも必ず理由を添えられる**（利用者の決定、2026-11-24）。理由はアイテムの `reason`（文字列、0〜10,000 字）で受け、答えか操作の記録（I9）と一緒に残し、通知と会話の項目にも載せる。
+**承認する以外の答えと、取り消す・拒否する・外す操作には、どの入口（画面・API・MCP・CLI）からでも理由を添えることができる。理由が必須なのは差し戻すときだけである**（nd-factory の持ち主の決定、2026-11-24）。理由はアイテムの `reason`（文字列、0〜10,000 字）で受け、答えか操作の記録（I9）と一緒に残し、通知と会話の項目にも載せる。
 
 | 当たるもの | 理由 |
 | --- | --- |
 | `approvals.answer` の承認する（`approved`）以外の答え（差し戻す・承認しない・やり直す・終える・取り消す・起票しない） | 差し戻すは必須、ほかは任意 |
-| `questions.answer` の答え | 任意。選択肢が推しの案でないときと、`ndf-ask:human-action` の取り消すは、画面で理由の欄を開いて出す |
+| `questions.answer` の答え | 任意。推奨の選択肢以外を選んだとき、または人の作業を求める問い（`ndf-ask:human-action`）を取り消すときは、画面が理由の欄を最初から開いて出す |
 | `sprints.cancel`・`organizers.close`・`organizer_messages.withdraw`・`project_transfers.delete`・`projects.close`・`delegations.revoke` | 任意 |
+| 外す操作（`seats.delete`・`invitations.delete`・`machines.delete`・`model_keys.delete`・`notification_targets.delete`・`repositories.remove`） | 任意 |
 
 ### 人の確定の段階
 
@@ -313,8 +314,13 @@ ID の種類のプレフィックス:
 | 商用利用を始めた後の開発の設置 | `ai` | 同上 |
 | 商用利用を始めた後の本番の設置 | `human` | この文書のとおり、人のログインセッションからだけ確定する |
 
-- **商用利用の開始**: 機能が一通りそろい、β テストを経て nd-factory を正式版として公開するとき。利用者が宣言する
-- **段階の保存先**: 設置ごとの設定のファイル（[settings.md](../operations/settings.md)。キーは読む構成要素と同じ変更でスキーマの正本に足す）の 2 つのキー、`launch_declared`（商用利用を宣言したか。既定は偽）と `environment_kind`（`development` か `production`）から API が決める。`human` になるのは両方が「宣言した・本番」のときだけ。キーが読めないときは `human` に倒す。API・MCP・画面には、この 2 つのキーを書き換える操作を置かない。変えられるのは、人が設置のコマンドか反映パイプラインでの承認を通したときだけで、段階が `ai` の間も AI エージェントは段階を変えられない
+- **商用利用の開始**: 機能が一通りそろい、β テストを経て nd-factory を正式版として公開するとき。その設置を運用する人が、設定のファイルの `launch_declared` を真にして宣言する
+- **段階の保存先**: API は、設置ごとの設定のファイル（[settings.md](../operations/settings.md)）の 2 つのキーから段階を決める
+  - `launch_declared`: 商用利用を宣言したか。既定は偽
+  - `environment_kind`: `development` か `production`
+  - `human` になるのは、宣言した・本番の両方がそろったときだけ。キーが読めないときは `human` に倒す
+  - キーは、それを読むコードを足す PR と同じ PR で `packages/contracts/` のスキーマに足す
+- **段階を変えられる人**: API・MCP・画面には、この 2 つのキーを書き換える操作を置かない。変わるのは、人が設置のコマンドを打つか、反映パイプラインの承認（AWS の画面で人が押す）を通したときだけである。段階が `ai` の間も、AI エージェントは段階を変えられない
 - **変わらないもの**: 確定の時点でサーバーの今の状態（待っている・承認資料の要約値が同じ）と照合すること、オフラインの端末から確定しないこと、操作の記録（I9）に確定した主体（人か、どの委任か）を書くことは、段階によらない
 - **MCP**: 段階が `ai` の設置では、`human_only` の操作も MCP のツールとして出す。`human` の設置では上の表のとおり出さない
 - **画面**: 段階が `ai` の設置では、承認の詳細画面と問いの画面に「この設置では AI も確定できます」のバッジを出す
@@ -549,9 +555,11 @@ AI エージェントが、画面と同じ操作を MCP のツールとして呼
 
 ### `human_only` の操作の扱い
 
+下の表は、段階が `human` の設置での決まりである。段階が `ai` の設置では、`human_only` の操作も MCP のツールとして出し、委任から呼んでも 403 で断らず、読み出しの結果の `needs_human` は偽にする（[人の確定の段階](#人の確定の段階)）。
+
 | 点 | 決まり |
 | --- | --- |
-| ツール | `human_only` の操作は MCP のツールにしない。対になる読み出しのツール（操作の一覧の括弧）で、依頼と材料を読める |
+| ツール | `human_only` の操作は MCP のツールにしない。対になる読み出しのツール（例: `approvals.answer` に対する `approvals.get`）で、依頼と判断の材料を読める |
 | 読み出しの結果 | 人の確定を待つ対象は `needs_human: true` と、画面で確定する場所のリンク（`confirm_url`）を持つ。エージェントは人へリンクを渡して待つ |
 | API から呼んだとき | 委任の token で `human_only` の操作の HTTP のルートを呼ぶと、リクエスト全体を 403 `human_only` で断り、何も保存しない |
 | アイテムごとに `human_only` になる操作 | `questions.answer` はツールにある。問いの「`human_only` か」が真のアイテムだけを 403 `human_only` にし、ほかのアイテムは答えを受ける。「`human_only` か」は [実行の設計にある区分表](execution.md#区分とだれが答えられるか) で決まる（`ndf-ask:human-action` と知らない区分を含む） |
@@ -582,7 +590,7 @@ sequenceDiagram
 | --- | --- |
 | ログイン | `nd login` で、ブラウザを開いて IdP（Google・GitHub）で認証する。OAuth 2.0 の認可コードフローと PKCE で、ループバックのリダイレクト（`http://127.0.0.1:<空きポート>/callback`）で受ける（RFC 8252）。得たリフレッシュトークンは OS のキーチェーンに保存する |
 | ふつうの操作 | 読み出し・スプリントを始める・委任でもできる操作は、保存したセッションで実行する（例: `nd approvals list`・`nd sprints create`） |
-| `human_only` の操作 | `nd approvals answer` などは、実行のたびにブラウザを開いて IdP の再認証（`max_age=300`・`prompt=login`）を通し、その ID トークンの `auth_time` が 5 分以内のときだけ API が受ける。保存したトークンだけでは確定できない。同じ端末で動く AI エージェントが CLI を呼んでも、人がブラウザで認証を終えない限り確定しない |
+| `human_only` の操作 | `nd approvals answer` などは、実行のたびにブラウザを開いて再認証を通す。CLI は Cognito の認可エンドポイントへ `prompt=login` と `max_age=300` を付けて送り、Google か GitHub での再ログインを求める。API は、Cognito が発行した ID トークンの `auth_time` が 5 分以内のときだけ受ける。保存したトークンだけでは確定できない。同じ端末で動く AI エージェントが CLI を呼んでも、人がブラウザで認証を終えない限り確定しない |
 | 承認資料 | `nd approvals show <ID>` で承認資料を端末に出す。`answer` は表示した要約値を一緒に送り、API が今の値と照合する |
 | 理由 | 承認する以外の答えには `--reason` を渡せる。差し戻すでは必須（[承認する以外の答えの理由](#承認する以外の答えの理由)） |
 | 配布 | npm のパッケージとして配る。実装の置き場と受け入れ条件は子の課題で決める |
@@ -968,3 +976,4 @@ API のアイテムの項目・型・必須か・理由のコードは、スキ�
 | MCP の仕様の改訂 | 2026-07-28 バージョンで外れたセッションなどが次のバージョンで変わるかを、作る時点のバージョンで確認する |
 | 操作の記録の量と費用 | 画面の読み直し・ハートビートまで 1 件ずつ記録したときの 1 か月の書き込みの数と費用を、動く環境で測る |
 | Cognito の access token を 15 分にしたときの画面の再取得 | 再取得が画面の操作の速さを落とさないかを、実機で確認する |
+| CLI の再認証で外部の IdP までログインし直すか | Cognito に `prompt=login` を送ったとき、Google・GitHub でもログインし直させるか（Cognito のセッションだけで済ませないか）を実機で確認する。済ませてしまうなら、CLI の再認証の決まり（決定 157）を子の課題で決め直す |
