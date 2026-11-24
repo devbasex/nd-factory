@@ -301,7 +301,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 ### 決定 7: 同じ名前のチェックや、今の範囲・今の設定で探していない結果でマージさせないため、NDF は信頼できる側の実行の結果だけを、出どころ・探した範囲・設定の世代で確かめて受け入れる
 
 - **質問**: `leak-check-secret` の結果を、どういう条件で受け入れるか。Pull Request の側の同じ名前のチェックと、前の head・前の base・前の検査の設定の結果をどう退けるか。マージの直前に base が変わったときにどう扱うか
-- **選んだ案**: 結果は、対象の Pull Request の番号・探した head の SHA・探した分岐点・検査の設定の世代に結び付けて受け入れる。NDF は、対象のリポジトリの `leak-check-secret.yml` の実行を列挙し、各実行に GitHub が紐付けたジョブの名前・状態・結論を合否の正本にする。head のコミットに付いたチェック（check run）からは探し始めない。手順は次のとおり
+- **選んだ案**: 結果は、対象の Pull Request の番号・探した head の SHA・探した分岐点・検査のコードのコミット・検査の設定の世代に結び付けて受け入れる。NDF は、対象のリポジトリの `leak-check-secret.yml` の実行を列挙し、各実行に GitHub が紐付けたジョブの名前・状態・結論を合否の正本にする。head のコミットに付いたチェック（check run）からは探し始めない。手順は次のとおり
   1. ワークフローの実行の一覧の API（`GET /repos/{owner}/{repo}/actions/workflows/leak-check-secret.yml/runs`）を、`event=pull_request_target`・`created=>=<Pull Request を作った日時>`・`per_page=100` で呼ぶ。`{owner}/{repo}` は NDF の設定の対象のリポジトリで、Pull Request の head のリポジトリ（fork）ではない。応答の `Link` ヘッダーの `next` を辿って最後のページまで読む。この API は、絞り込みの指定があると 1,000 件までしか返さない（[workflow runs API](https://docs.github.com/en/rest/actions/workflow-runs)）ので、`total_count` が 1,000 以上なら読み切れないとみなして「未報告」として止める
   2. 各実行について、実行の `path` が `.github/workflows/leak-check-secret.yml`、`event` が `pull_request_target`、`repository.full_name` が対象のリポジトリであることを確かめる。外れる実行は捨てる
   3. 残った実行ごとに、ジョブの一覧の API（`GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs`。[workflow jobs API](https://docs.github.com/en/rest/actions/workflow-jobs)）でジョブを取り、`name` が下の表示名の形に合うジョブだけを候補にする。check run を併せて読む場合は、check suite が同じというだけで関連付けず、ジョブの `check_run_url` と check run の URL が一致するものだけを同じ結果として扱う
