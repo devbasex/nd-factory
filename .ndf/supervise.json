@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/contracts/schemas/ndf-settings/supervise.schema.json",
+  "version": 1,
+  "sync_checks": [
+    {"name": "生成物を作り直す", "command": "npm run generate"},
+    {"name": "置き場の間の依存の向き", "command": "npm run deps-check"},
+    {"name": "使っていないファイル・書き出し・依存", "command": "npm run knip"}
+  ],
+  "format": [
+    {"name": "eslint の自動の直し", "command": "npx eslint --fix ."}
+  ]
+}
