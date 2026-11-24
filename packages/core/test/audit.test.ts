@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actorOfCreatedUser, AUDIT_RETENTION_DAYS, AuditUnavailableError, appendAudit, auditItem, auditPartitionOf, type AuditEntry } from "../src/audit.ts";
+import { actorOfCreatedUser, AUDIT_RETENTION_DAYS, AuditUnavailableError, appendAudit, auditItem, type AuditEntry } from "../src/audit.ts";
 import type { Principal } from "../src/auth/authenticate.ts";
 import { createClock } from "../src/clock.ts";
 import { putIfAbsent, WriteUnavailableError, writeAtomically } from "../src/conditional-write.ts";
@@ -72,9 +72,10 @@ describe("auditItem", () => {
   });
 
   it("見られたプロジェクトが無ければ主体の区切り、主体の無い 401 は日ごとの区切り", () => {
-    expect(auditPartitionOf(entry({ projectId: null }))).toBe(`USER#${USER}`);
-    expect(auditPartitionOf(entry({ projectId: null, actor: { principal: null, mcpClientName: null } }))).toBe("ANON#2026-11-21");
-    expect(auditPartitionOf(entry({ projectId: null, actor: { principal: { kind: "machine", teamId: TEAM, machineId: "mch_01890a5d-ac96-774b-bcce-b302099a805b" }, mcpClientName: null } }))).toBe(`TEAM#${TEAM}`);
+    const pkOf = (e: AuditEntry) => auditItem(e, projectsRename, clock).item?.pk;
+    expect(pkOf(entry({ projectId: null }))).toBe(`USER#${USER}`);
+    expect(pkOf(entry({ projectId: null, actor: { principal: null, mcpClientName: null } }))).toBe("ANON#2026-11-21");
+    expect(pkOf(entry({ projectId: null, actor: { principal: { kind: "machine", teamId: TEAM, machineId: "mch_01890a5d-ac96-774b-bcce-b302099a805b" }, mcpClientName: null } }))).toBe(`TEAM#${TEAM}`);
   });
 
   it("主体の無い 401 の行は主体の種類を空にする", () => {

@@ -2,6 +2,8 @@ import type { OperationDef } from "@nd-factory/contracts/operation";
 import { ID_KINDS, UUID_V7_PATTERN } from "@nd-factory/contracts/ids";
 import { REASON_CODE } from "@nd-factory/contracts/reasons";
 import { utcDateTime } from "@nd-factory/contracts/values";
+import { writeRow } from "@nd-factory/contracts/row-codec";
+import { auditCodec, type AuditRow } from "@nd-factory/contracts/rows/audit";
 import type { Principal } from "./auth/authenticate.ts";
 import type { Clock } from "./clock.ts";
 import { putIfAbsent, WriteSpecError, writeAtomically, WriteUnavailableError, type TransactItem } from "./conditional-write.ts";
@@ -68,37 +70,10 @@ export class AuditUnavailableError extends Error {
   override name = "AuditUnavailableError";
 }
 
-// 記録の行の形の版
-const AUDIT_SCHEMA_VERSION = 1;
-
 // 記録を残す日数の既定（設置の設定のファイルで長くできる。設定の形が置かれるまで既定だけを持つ）
 export const AUDIT_RETENTION_DAYS = 365;
 
 const SECONDS_PER_DAY = 86_400;
-
-// 区切りの鍵（docs/design/data.md の「操作の記録」）。見られたプロジェクト → 主体の利用者 → 主体のチーム・結んだプロジェクト → 主体の無い 401 の順
-export function auditPartitionOf(entry: AuditEntry): string {
-  if (entry.projectId !== null) return `PROJECT#${entry.projectId}`;
-  const principal = entry.actor.principal;
-  // 主体の決まらない 401
-  if (principal === null) return `ANON#${entry.at.slice(0, 10)}`;
-  switch (principal.kind) {
-    case "human":
-    case "delegation":
-      return `USER#${principal.userId}`;
-    case "machine":
-      return `TEAM#${principal.teamId}`;
-    case "runner":
-    case "db_prep":
-      return `PROJECT#${principal.projectId}`;
-    case "newcomer":
-    case "github":
-    case "patrol":
-      // 利用者・チーム・プロジェクトを持たない主体は、主体の無い 401 と同じ日ごとの区切りに置く。まだ利用者へ結んでいない人は
-      // 利用者を作らなかった要素と要求だけがここへ来る（作った要素は actorOfCreatedUser で作った利用者の区切りへ置く）
-      return `ANON#${entry.at.slice(0, 10)}`;
-  }
-}
 
 // 主体の種類と、当たる ID とクライアントの名前だけ。委任の範囲は写さない
 function actorColumns(actor: AuditActor): Record<string, unknown> {
@@ -142,11 +117,10 @@ function targetIdsOf(entry: AuditEntry, op: OperationDef | null): string[] {
   });
 }
 
+// 記録の行の中身を組む。行の形の版・鍵（PK・SK）の組み立て・形の照らしは行の版の書き手（auditCodec と writeRow）が持ち、ここでは持たない
 export function auditItem(entry: AuditEntry, op: OperationDef | null, clock: Clock): TransactItem {
   if (!utcDateTime.safeParse(entry.at).success) throw new WriteSpecError("auditItem: at は UTC の日時");
   if (entry.itemIndex !== null && (!Number.isInteger(entry.itemIndex) || entry.itemIndex < 0)) throw new WriteSpecError("auditItem: itemIndex は 0 以上の整数");
-  // 要約の行と要素の行は同じ記録の ID を持つため、並びの鍵の末尾に要素の番号を足して分ける
-  const sk = entry.itemIndex === null ? `${entry.at}#${entry.auditId}` : `${entry.at}#${entry.auditId}#${String(entry.itemIndex).padStart(3, "0")}`;
   const columns = {
     audit_id: entry.auditId,
     request_id: entry.requestId,
@@ -166,8 +140,8 @@ export function auditItem(entry: AuditEntry, op: OperationDef | null, clock: Clo
     expire_at: Math.floor(clock.epochMs() / 1000) + AUDIT_RETENTION_DAYS * SECONDS_PER_DAY,
   };
   // 写した値にも秘密の形が紛れうる（ID の欄に token を入れた要素など）ため、行全体を redact へ通す
-  const safe = redact(columns) as Record<string, unknown>;
-  const item: Row = { ...safe, pk: auditPartitionOf(entry), sk, schema_version: AUDIT_SCHEMA_VERSION };
+  const safe = redact(columns) as Omit<AuditRow, "schema_version">;
+  const item = writeRow(auditCodec, { ...safe, schema_version: auditCodec.latest.version }) as Row;
   return putIfAbsent({ table: "audit", item, onConflict: "fail" });
 }
 
