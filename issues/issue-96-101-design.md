@@ -280,7 +280,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
   - 参照の検査と漏れの検査で、持ち主が GitHub の設定で行う操作（環境 `leak-scan` とその秘密 `LEAK_CHECK_PATTERN`・検証で要ると分かったときの同じ名前の Dependabot の秘密・変数 `LEAK_CHECK_REQUIRE_PATTERN`・設定の世代の変数 `LEAK_CHECK_GENERATION`・`pull_request_target` を許すイベントポリシー・今ある `REF_CHECK_TERMS` の 2 か所の登録）
   - 設定の世代を増やす場面と、増やした後に開いている Pull Request を閉じて開き直して探し直させる手順（決定 7）
   - それぞれの検査が、どの実行で秘密を受けるかと、残る経路（決定 9 の代償）
-  - `leak-check-secret` を必須にする 2 本目の Pull Request へ進む条件（決定 10）
+  - `leak-check-secret` を必須にする 2 本目の Pull Request へ進む条件と、それまでの間に NDF のマージを起動する前に成功を確かめる手順（決定 10）
   - `nd-real-value` に当たったときに、手元で `leak-scan-secret.sh --details` を打って場所を引く手順と、失敗が続く外部の Pull Request を閉じる運用（決定 8）
 
   あわせて、`AGENTS.md` の「秘密とインフラの値を置かない」の行を、秘密を使う探しが `leak-check-secret` と main への push で動くことに直し、運用の文書へリンクする
@@ -364,7 +364,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 - 2 本目へ進む条件: 手順 1 と 4 の確認が済み、手順 3 の設定があり、NDF が決定 7 の条件で結果を受け入れられる。手順 4 の確認には、最初の Dependabot の Pull Request で `leak-check-secret` が実際の値の規則で成功したことを含む。1 つでも欠ければ 2 本目を出さない
 - 採らなかった案: 実装の Pull Request で `required_checks` も変える（その Pull Request では `leak-check-secret` が起動されず、NDF のマージがチェックの欠けで止まる）
 - 採らなかった案: 2 本目まで、Pull Request の側の `leak-check` で秘密を受け続ける（その間、同じリポジトリのブランチの Pull Request のコードが秘密の正規表現を読める。#96 が塞ぐ経路を残す）
-- **代償**: 1 本目のマージから 2 本目のマージまで、実際の値の規則での探しはマージを止めない。その間は、`leak-check-secret` の失敗を持ち主が見てマージを止め、main への push の `leak-check-push` が到達できるすべてのコミットを今と同じく探す
+- **代償**: 1 本目のマージから 2 本目のマージまで、実際の値の規則での探しはマージを止めない。その間は、持ち主が NDF のマージを起動する前に、対象の Pull Request の今の head とマージ先に対応する `leak-check-secret` の成功を、実行の記録で確かめる（決定 7 の条件で読む）。未起動・実行中・失敗のどれかなら、成功するまでマージを保留する。main への push の `leak-check-push` は、到達できるすべてのコミットを今と同じく探す。この手順は運用の文書に書く
 - 根拠: Value 7 / Value 14（MVV バージョン 3）。秘密を隔てることを先に行い（Value 7）、マージを止める検査は確かめてから入れる（Value 14）
 
 ### 決定 11: この変更が保証するのは NDF が行うマージだけにし、GitHub のブランチの保護とルールセットは作らない
@@ -386,7 +386,7 @@ GitHub が `pull_request_target` の実行の結果をどのコミットに付�
 | 箇所 | 起きること | 扱い |
 | --- | --- | --- |
 | 実装の Pull Request 自身 | `pull_request_target` は既定のブランチのワークフローを動かすので、新しいワークフローを足す Pull Request ではまだ `leak-check-secret` が起動されない | 実装の Pull Request では `required_checks` を変えず、今の 7 つの必須のチェックで NDF がマージする。`leak-check-secret` を必須にするのは、持ち主が信頼できる側の結果を確かめた後の 2 本目の Pull Request である（決定 10） |
-| 1 本目と 2 本目の Pull Request の間 | 実際の値の規則での探しがマージを止めない | 持ち主が `leak-check-secret` の失敗を見てマージを止める。main への push の `leak-check-push` は今と同じく探す（決定 10） |
+| 1 本目と 2 本目の Pull Request の間 | 実際の値の規則での探しがマージを止めない | 持ち主が NDF のマージを起動する前に、対象の Pull Request の今の head とマージ先に対応する `leak-check-secret` の成功を確かめる。未起動・実行中・失敗なら、成功するまでマージを保留する。main への push の `leak-check-push` は今と同じく探す（決定 10） |
 | Pull Request の側に足した同じ名前のジョブ | 作者が `pull_request` のワークフローに `leak-check-secret` という名前のジョブを足すと、同じ名前のチェックが head に付く | NDF は出どころ（ワークフローのファイルと `pull_request_target`）と表示名の番号・head・base・世代で確かめるので、数えない（決定 7）。NDF にその機能が入るまで必須にしない |
 | base のブランチの変更 | head が同じでも、分岐点と探す範囲が変わる | `edited` で探し直し、表示名の base のブランチで照らす（決定 7） |
 | base のブランチの先頭の変化 | 別の Pull Request の取り込みや書き換えで、分岐点が変わる | 探した分岐点が今の分岐点と同じかその祖先なら受け入れ、そうでなければ失効させる。持ち主が閉じて開き直して探し直させる（決定 7） |
