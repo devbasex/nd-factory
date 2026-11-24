@@ -285,7 +285,7 @@ ID の種類の頭:
 | `machines.create` | 登録の token（秘密）を発行する |
 | `sessions.create`・`sessions.delete`・`logins.create`・`logins.delete`・`github_installations.link` | 人のブラウザーの中の流れ（サインイン・IdP のログインをつなぐ戻り・GitHub の導入の戻り）で、委任の主体が通る流れでない。`logins.delete` は最後の 1 つのログインを外す要求を 409 で拒む |
 
-外す・狭める操作は、見える範囲も費用も広げないため委任から呼べる。当たるのは `repositories.remove`・`notification_targets.delete`・`machines.delete` である。`model_keys.delete` は秘密を扱うので、狭める操作でも人だけにする（上の表）。
+外す・狭める操作は、見える範囲も費用も広げないため委任から呼べる。当たるのは `repositories.remove`・`notification_targets.delete`・`machines.delete` である。`machines.delete` はマシンの登録を外すだけで、オーガナイザーの会話の記録を消した確認の代わりにはならない。外したマシンの未消去の記録は残り、割り当ての移しの受け入れを待たせ続ける（[オーガナイザーの手元のマシンの会話の記録](organizer.md#会話の控え)）。`model_keys.delete` は秘密を扱うので、狭める操作でも人だけにする（上の表）。
 
 ### ランナー・手元のマシンの HTTP の経路
 
@@ -305,8 +305,9 @@ ID の種類の頭:
 | `/v1/runner/organizer_replies/create` | オーガナイザーのレーン（レーンの token） | 応えた項目の ID・本文 | 受け取り | オーガナイザーの答えを会話へ追記する。応えた項目の ID を冪等の鍵にし、送り直しで 2 件にしない。項目がレーンの token のオーガナイザーのもので、`delivered_generation` が token の世代と同じことを条件に書き、外れたら 404 |
 | `/v1/runner/organizer_receipts/create` | オーガナイザーのレーン（レーンの token） | 項目の ID | 受け取り | claude へ渡した項目の処理を終えたことを知らせ、`received_at` を空のときに 1 回だけ書く。同じトランザクションで、オーガナイザーの行の `inflight_message_id` がその項目であることを条件に空にする。項目がレーンの token のオーガナイザーのもので `delivered_generation` が token の世代と同じことを条件にし、外れたら 404。その項目への答えが会話に無ければ 409 `reply_missing` |
 | `/v1/runner/organizer_transcripts/create` | オーガナイザーのレーン（レーンの token） | なし | 受け取り | 今の世代の頭へ会話の控えを書き終えたことを知らせる。token の世代が今の世代で、オーガナイザーが `active` か `paused` であることを条件に `transcript_generation` をその世代にし、前の世代の控えを消す対象にする（[オーガナイザーの会話の控え](organizer.md#会話の控え)） |
-| `/v1/machine/heartbeats/create` | 手元のマシン（登録の token） | マシンの状態・受けられるレーンの数・作業の場所を消し終えたオーガナイザーのレーン（`wiped_organizer_lanes`。オーガナイザーの ID と世代の組の配列。空でよい） | 割り当てたレーン・差し替えた登録の token。最初の心拍（マシンが登録待ち）の応答はマシンの ID・心拍の間隔・差し替えた登録の token を持つ | 心拍。割り当てを受け取る。最初の心拍が登録を兼ねる（[実行の文書の決定 102](execution.md#決定の記録)）。`wiped_organizer_lanes` を受けたら、登録の token のマシンの行の `organizer_lanes` から、そのオーガナイザーの知らせた世代以下の記録を外す（[オーガナイザーの手元のマシンの会話の記録](organizer.md#会話の控え)） |
-| `/v1/machine/lane_claims/create` | 手元のマシン（登録の token） | 受けるレーンの ID | 引き換えの token | 割り当てたレーンを受け、ランナーを起こす。オーガナイザーのレーンなら、引き換えの token を返す前に、マシンの行の `organizer_lanes` にオーガナイザーの ID と世代を同じトランザクションで記す |
+| `/v1/machine/heartbeats/create` | 手元のマシン（登録の token） | マシンの状態・受けられるレーンの数 | 割り当てたレーン・差し替えた登録の token。最初の心拍（マシンが登録待ち）の応答はマシンの ID・心拍の間隔・差し替えた登録の token を持つ | 心拍。割り当てを受け取る。最初の心拍が登録を兼ねる（[実行の文書の決定 102](execution.md#決定の記録)）。登録を外したマシン（`machines.delete`）は 401 `machine_deleted` |
+| `/v1/machine/lane_claims/create` | 手元のマシン（登録の token） | 受けるレーンの ID | 引き換えの token | 割り当てたレーンを受け、ランナーを起こす。オーガナイザーのレーンなら、引き換えの token を返す前に、同じトランザクションで、プロジェクトの行の `organizer_wipes_pending` にマシン・オーガナイザー・世代の要素を足す（移し中の印が空であることを条件にする） |
+| `/v1/machine/organizer_wipes/create` | 手元のマシン（登録の token。登録を外したマシンの token も受ける） | 作業の場所を消し終えたオーガナイザーのレーン（オーガナイザーの ID と世代の組の配列。消した世代ごとに 1 組） | 受け取り | 組ごとに、プロジェクトの行の `organizer_wipes_pending` から、登録の token のマシンと知らせた組が一致する要素だけを外す。ほかの世代の要素は外さない。nd ランタイムは応答を受けるまで送り直す（[オーガナイザーの手元のマシンの会話の記録](organizer.md#会話の控え)） |
 
 見回りと DB の用意の関数は HTTP の経路を持たない。スケジュールで起きた関数（見回り）と、API と見回りが非同期で呼ぶ関数（DB の用意）が、持ち主のモジュールの操作を関数の中から呼び（HTTP で API を呼び直さない）、記録は同じ操作の記録の書き手で残す。DB の用意の順は [データの用意と差し替えの順](data.md#用意と差し替えの順) が持つ。
 
@@ -371,7 +372,7 @@ GitHub が形を決める本文は配列にできないため、I12 の外に置
 | 引き換えの token | 10 分・1 回だけ | ランナー（起動の指示） | 引き換えた時点 |
 | レーンの token | 1 時間。心拍で取り直す | ランナー（オーガナイザーのレーンを含む） | レーンの終わり・取り消し・割り当ての移しで、期限の前でも断る（I11）。オーガナイザーのレーンでは、休止・止める・終える・世代が替わった時にも断る |
 | オーガナイザーの専用の委任 | token を持たない。行の期限は作ってから 30 日 | サービスの表だけ（秘密の値を作らない） | 期限・終える・再開する（前の委任）・割り当ての移し・`delegations.revoke` |
-| 登録の token | 90 日。心拍の応答で新しい値へ差し替える | 手元のマシン | `machines.delete`・期限（90 日つながらなければ登録し直す） |
+| 登録の token | 90 日。心拍の応答で新しい値へ差し替える | 手元のマシン | `machines.delete`（外した後は `/v1/machine/organizer_wipes/create` だけを受ける）・期限（90 日つながらなければ登録し直す） |
 | Webhook の署名の秘密 | 運用の手順で差し替えるまで | API（秘密の器） | 差し替え |
 
 オーガナイザーの専用の委任は秘密の値を作らない。オーガナイザーのレーンはレーンの token で `/mcp` を呼び、API はその token のオーガナイザーの ID から専用の委任を引く（[オーガナイザーの資格情報](organizer.md#資格情報)）。そのため、委任の秘密を表・状態の S3・会話の控え・コンテナに置く経路が無い。
