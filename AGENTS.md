@@ -17,6 +17,10 @@
 | `docs/specifications/` | 実装した機能の確定仕様（今のコードと一致する仕様。課題の設計と実装計画を、実装の後にここへ書き直す） |
 | `ndf-pin.json` | NDF の固定の値（キー `ndf_ref`）。このキーはこのファイルの 1 か所だけに置く |
 
+## 開発の指針
+
+進め方・判断の基準・書き方の指針は、プロジェクト Skill [`nd-factory-dev-guidelines`](.claude/skills/nd-factory-dev-guidelines/SKILL.md) にある。設計・レビュー・承認を求めるとき・文書を書くときに読む。AI のメモリと引継ぎ文書には指針を書かず、この Skill か設計書か `.ndf/` に書く。
+
 ## コードの決まり
 
 - 言語・画面の組み方・TypeScript の書き方・テストの置き方・NDF の版の扱いの細則は、[プラットフォームの文書の言語と書き方の決まり](docs/design/platform.md#言語と書き方の決まり) に従う
