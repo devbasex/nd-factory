@@ -1,0 +1,42 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>一覧（スマートフォン）</title><script src="./support.js"></script></head><body><x-dc><helmet><style>body{margin:0;background:#ffffff} a{color:#3451c6;text-decoration:underline;text-underline-offset:2px} a:hover{color:#1f2328}</style></helmet>
+<div style="width:390px;height:844px;overflow:hidden;display:flex;flex-direction:column;font-family:system-ui,-apple-system,'Hiragino Sans','Noto Sans JP',sans-serif;font-size:14px;line-height:1.5;color:#1f2328;background:#ffffff">
+  <header style="display:flex;align-items:center;gap:8px;height:52px;padding:0 8px 0 4px;background:#f6f8fa;border-bottom:1px solid #d1d9e0">
+    <button type="button" aria-label="メニュー" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:0;background:transparent;color:#1f2328;cursor:pointer"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path></svg></button>
+    <span style="font-weight:600;font-size:14px;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">Neural Development Factory</span>
+    <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#1a7f37"></circle></svg>
+    <span style="font-size:12px;color:#59636e">つながっています</span>
+  </header>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px">
+    <h1 style="margin:0;font-size:20px;font-weight:600">オーガナイザー</h1>
+    <button type="button" style="min-height:44px;padding:0 12px;border:1px solid #3451c6;border-radius:6px;background:#3451c6;color:#ffffff;font:inherit;font-weight:600;cursor:pointer">立てる</button>
+  </div>
+  <div style="flex:1;overflow:auto;display:flex;flex-direction:column;gap:16px;padding:0 16px 16px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <h2 style="margin:0;font-size:13px;font-weight:600;color:#59636e">動いているもの（2）</h2>
+      <a href="ConvPhoneChat.dc.html" style="display:flex;flex-direction:column;gap:4px;padding:12px;border:1px solid #d1d9e0;border-radius:6px;color:#1f2328;text-decoration:none">
+        <span style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-weight:600">example/api</span><span style="padding:0 8px;border-radius:999px;background:#ddf4ff;color:#0969da;font-size:12px;font-weight:600">応答中</span></span>
+        <span style="color:#59636e;font-size:13px">#205 の実装を lane-2 で始めました（見本）</span>
+      </a>
+      <a href="ConvPhoneChat.dc.html" style="display:flex;flex-direction:column;gap:4px;padding:12px;border:1px solid #d1d9e0;border-radius:6px;color:#1f2328;text-decoration:none">
+        <span style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-weight:600">example/docs</span><span style="padding:0 8px;border-radius:999px;background:#f0f1f3;color:#59636e;font-size:12px;font-weight:600">休止中</span></span>
+        <span style="color:#59636e;font-size:13px">次の入力で起こし直します（見本）</span>
+      </a>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <h2 style="margin:0;font-size:13px;font-weight:600;color:#59636e">止まったもの（1）</h2>
+      <a href="ConvPhoneChat.dc.html" style="display:flex;flex-direction:column;gap:4px;padding:12px;border:1px solid #d1d9e0;border-radius:6px;color:#1f2328;text-decoration:none">
+        <span style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-weight:600">example/app</span><span style="display:flex;gap:4px"><span style="padding:0 8px;border-radius:999px;background:#fff8c5;color:#9a6700;font-size:12px;font-weight:600">止まった</span><span style="padding:0 8px;border-radius:999px;background:#1a7f37;color:#ffffff;font-size:12px;font-weight:600">承認待ち 1</span></span></span>
+        <span style="color:#59636e;font-size:13px">手元のマシンが止まっています（見本）</span>
+      </a>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <h2 style="margin:0;font-size:13px;font-weight:600;color:#59636e">終わったもの（1）</h2>
+      <a href="ConvPhoneChat.dc.html" style="display:flex;flex-direction:column;gap:4px;padding:12px;border:1px solid #d1d9e0;border-radius:6px;color:#1f2328;text-decoration:none">
+        <span style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-weight:600">example/legacy</span><span style="padding:0 8px;border-radius:999px;background:#fbefff;color:#8250df;font-size:12px;font-weight:600">終わった</span></span>
+        <span style="color:#59636e;font-size:13px">終えました（見本）</span>
+      </a>
+    </div>
+    <p style="margin:0;font-size:12px;color:#59636e">768 px 未満では一覧と会話を 1 つずつ出します。行を押すと会話へ移ります。</p>
+  </div>
+</div>
+</x-dc><script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>class Component extends DCLogic { renderVals() { return {}; } }</script></body></html>

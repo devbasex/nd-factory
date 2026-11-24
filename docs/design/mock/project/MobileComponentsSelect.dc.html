@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>スマホ: 部品（フォームと選択の欄）</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.m .check{min-height:44px;align-items:center}
+.m .check input{margin-top:0}
+.m .seg{height:44px;width:100%;display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.m .seg button{justify-content:center;font-size:13px;padding:0 4px}
+.m .tabs a{min-height:44px;display:inline-flex;align-items:center}
+.m .btn.sm{height:44px;font-size:15px}
+.m-row{display:flex;flex-direction:column;gap:12px}
+.m .m-item .acts{display:flex;gap:8px;flex-wrap:wrap}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="m">
+  <header class="m-top">
+    <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect class="bg" width="32" height="32" rx="7"></rect><path class="ln" d="M9.5 23V9l13 14V9"></path><circle class="fg" cx="9.5" cy="23" r="2.8"></circle><circle class="fg" cx="9.5" cy="9" r="2.8"></circle><circle class="fg" cx="22.5" cy="23" r="2.8"></circle><circle class="fg" cx="22.5" cy="9" r="2.8"></circle></svg><span class="t">部品: フォーム</span>
+    <button class="m-icon" type="button" aria-label="移動と操作"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></button>
+    <button class="m-icon" type="button" aria-label="メニュー"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+  </header>
+  <div class="m-body">
+    <p class="xs muted" style="margin:0">スマホ（768px 未満）と指で操作する端末では、入力欄・選択の欄・ボタンを高さ 44px、入力の文字を 16px にする。ラベルは上、欄は幅いっぱい</p>
+    <section class="card"><div class="card-h"><h2>選択の欄</h2></div>
+      <div class="card-b"><div class="field full"><label for="c3">範囲</label><select id="c3" class="sel"><option>読み取りだけ</option><option>読み書き</option></select></div><div class="field full"><label for="c5">実行の手段</label><select id="c5" class="sel"><option>手元のマシン（どの 1 台でも）</option><option>既定</option></select><span class="help">リポジトリごとに選びます</span></div><div class="field full"><label for="c6">席の種類</label><select id="c6" class="sel" disabled=""><option>管理者</option></select><span class="help">変えられないときは薄く出す</span></div></div>
+    </section>
+    <section class="card"><div class="card-h"><h2>入力欄・誤り・チェック</h2></div>
+      <div class="card-b"><div class="field full"><label for="c1">token の名前</label><input id="c1" class="in" value="作業用の PC"><span class="help">1〜64 字</span></div><div class="field full"><label for="c2">月の上限額（USD）</label><input id="c2" class="in bad" value="-1"><span class="err">0 から 1,000,000 の数を入れてください</span></div><label class="check"><input type="checkbox" checked=""><span>1 文字のショートカットを使う</span></label><span class="xs muted">チェックは行全体（44px）を押せる</span></div>
+    </section>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>

@@ -40,6 +40,11 @@
       "id": "platform",
       "name": "プラットフォーム",
       "meaning": "画面・状態の置き場・形の正本など、コンテキストをまたいで使う共通の仕組み"
+    },
+    {
+      "id": "organizer",
+      "name": "オーガナイザー",
+      "meaning": "AI のオーガナイザー・オーガナイザーのレーン・会話の項目・付属の画面"
     }
   ],
   "terms": [
@@ -198,6 +203,30 @@
       "context": "platform",
       "meaning": "進行表の DB の役割のパスワードを新しい値へ替え、古い値での接続を断つこと。プロジェクトの差し替えの番号で順を決める",
       "source": "docs/design/data.md"
+    },
+    {
+      "term": "AI のオーガナイザー",
+      "context": "organizer",
+      "meaning": "プロジェクトの中で利用者が立て、立てた人の委任で nd-factory の MCP の道具を使って開発を回す AI のエージェント。承認は確定しない",
+      "source": "docs/design/organizer.md"
+    },
+    {
+      "term": "オーガナイザーのレーン",
+      "context": "organizer",
+      "meaning": "AI のオーガナイザーが動くレーン。NDF を起動せず、MCP の道具を持つ claude を動かす",
+      "source": "docs/design/organizer.md"
+    },
+    {
+      "term": "会話の項目",
+      "context": "organizer",
+      "meaning": "オーガナイザーの会話に追記だけで並ぶもの（人の指示・質問・起票の依頼、オーガナイザーの答え、フェーズの報告、レーンの動き、承認待ち・問い、状態）",
+      "source": "docs/design/organizer.md"
+    },
+    {
+      "term": "付属の画面",
+      "context": "organizer",
+      "meaning": "会話のリンクとナビゲーションから開く、会話以外の画面（承認待ちの一覧・スプリント・承認・問い・設定）",
+      "source": "docs/design/organizer.md"
     }
   ]
 }

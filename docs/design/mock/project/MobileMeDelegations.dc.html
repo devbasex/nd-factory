@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>スマホ: エージェントへの委任</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.m .check{min-height:44px;align-items:center}
+.m .check input{margin-top:0}
+.m .seg{height:44px;width:100%;display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.m .seg button{justify-content:center;font-size:13px;padding:0 4px}
+.m .tabs a{min-height:44px;display:inline-flex;align-items:center}
+.m .btn.sm{height:44px;font-size:15px}
+.m-row{display:flex;flex-direction:column;gap:12px}
+.m .m-item .acts{display:flex;gap:8px;flex-wrap:wrap}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="m">
+  <header class="m-top">
+    <a class="m-icon" href="MobileAccount.dc.html" aria-label="自分の設定へ戻る"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg></a>
+    <span class="t">エージェントへの委任</span>
+    <button class="m-icon" type="button" aria-label="メニュー"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+  </header><p class="m-desc">AI エージェントがあなたの代わりに Factory を操作するための資格情報です</p>
+  <div class="m-body">
+    <p class="sm muted" style="margin:0">手元の Claude Code などのエージェントに、あなたの代わりに Factory を操作させる資格情報を発行します。承認と、キー・席・チーム・委任の操作は委任からは行えません</p>
+    <section class="card"><div class="card-h"><h3>発行する</h3></div>
+      <div class="card-b"><div class="field full"><label for="dc">クライアントの名前</label><input id="dc" class="in" value="手元の Claude Code"></div><div class="field full"><label for="ds">範囲</label><select id="ds" class="sel"><option>読み取りだけ</option><option>読み書き</option></select></div><div class="field full"><label for="dt">期限</label><select id="dt" class="sel"><option>60 分</option><option>8 時間</option><option>24 時間</option></select></div><button class="btn primary" type="button">発行する</button></div>
+    </section>
+    <section class="card"><div class="card-h"><h3>発行した資格情報（2）</h3></div>
+      <div class="m-list" style="border:0;border-radius:0">
+        <div class="m-item"><span class="row between"><span class="b sm">手元の Claude Code</span><span class="badge info">有効</span></span><span class="xs muted">読み書き・11/13 14:00 から 22:00 まで</span><div class="acts"><button class="btn danger" type="button">取り消す</button></div></div>
+        <div class="m-item"><span class="row between"><span class="b sm">試し</span><span class="badge neutral">期限切れ</span></span><span class="xs muted">読み取りだけ・11/12 09:10 から 10:10 まで</span></div>
+      </div>
+    </section>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>

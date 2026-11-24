@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>スマホ: マシン</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.m .check{min-height:44px;align-items:center}
+.m .check input{margin-top:0}
+.m .seg{height:44px;width:100%;display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.m .seg button{justify-content:center;font-size:13px;padding:0 4px}
+.m .tabs a{min-height:44px;display:inline-flex;align-items:center}
+.m .btn.sm{height:44px;font-size:15px}
+.m-row{display:flex;flex-direction:column;gap:12px}
+.m .m-item .acts{display:flex;gap:8px;flex-wrap:wrap}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="m">
+  <header class="m-top">
+    <a class="m-icon" href="MobileSettingsMenu.dc.html" aria-label="アカウントの設定へ戻る"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg></a>
+    <span class="t">マシン</span>
+    <button class="m-icon" type="button" aria-label="メニュー"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+  </header><p class="m-desc">自分の PC で AI を動かすために、マシンを登録して状態を見ます</p>
+  <div class="m-body">
+    <span class="sm muted">個人のアカウント</span>
+    <section class="card"><div class="card-h"><h3>手元のマシン（1）</h3><span class="xs muted">止まったマシンも外すまで残ります</span></div>
+      <div class="m-list" style="border:0;border-radius:0">
+        <div class="m-item"><span class="row between"><span class="b sm">作業用の PC</span><span class="badge info">つながっている</span></span><span class="mono xs muted">usr_7f3a…（あなた）</span><span class="xs muted">心拍 12 秒前・レーン 0 / 1・目安 6・版 0.1.1</span></div>
+      </div>
+    </section>
+    <section class="card"><div class="card-h"><h3>登録の token を発行する</h3></div>
+      <div class="card-b"><div class="field full"><label for="tk">token の名前</label><input id="tk" class="in" value="work-pc-2"><span class="help">1〜64 字</span></div><div class="field full"><label for="tu">マシンを使う利用者</label><select id="tu" class="sel"><option>usr_7f3a…（あなた）</option></select></div><button class="btn primary" type="button">登録の token を発行する</button><div class="alert info"><span class="grow sm">発行しました。この値は今だけ表示します</span></div><div class="row" style="gap:8px"><code class="code grow" style="overflow-wrap:anywhere">ndrt_••••••••••••••••</code><button class="btn" type="button">コピー</button></div></div>
+    </section>
+    <section class="card"><div class="card-h"><h3>発行した登録の token（1）</h3></div>
+      <div class="m-list" style="border:0;border-radius:0">
+        <div class="m-item"><span class="row between"><span class="b sm">work-pc-1</span><span class="mono xs muted">usr_7f3a…</span></span><span class="xs muted">発行 11/13 13:15・最後に使った 11/13 15:24</span><div class="acts"><button class="btn danger" type="button">取り消す</button></div></div>
+      </div>
+    </section>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>
