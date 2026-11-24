@@ -149,8 +149,8 @@ graph LR
 
 | 列 | 書くとき | 書く条件 |
 | --- | --- | --- |
-| `delivered_at` | ランナーが `/v1/runner/organizer_inputs/list` で次の項目を求めた時。API はこの書き込みが確定してから項目を返す | `delivered_at` と `withdrawn_at` がどちらも空で、オーガナイザーの行の `inflight_message_id` が空（下の表） |
-| `delivered_generation` | `delivered_at` を書く時と、渡し直す時。渡した先のレーンの token の世代を書く | 項目がそのオーガナイザーのもので、`received_at` が空 |
+| `delivered_at` | ランナーが `/v1/runner/organizer_inputs/list` で次の項目を求めた時。API はこの書き込みが確定してから項目を返す | `delivered_at` と `withdrawn_at` がどちらも空で、オーガナイザーの行が token の世代で `active`、`inflight_message_id` が空（下の表） |
+| `delivered_generation` | `delivered_at` を書く時と、渡し直す時。渡した先のレーンの token の世代を書く | 項目がそのオーガナイザーのもので、`received_at` が空。オーガナイザーの行が token の世代で `active`（下の表） |
 | `withdrawn_at` | `organizer_messages.withdraw`。取り下げの項目の追記と同じトランザクションで書く | `delivered_at` と `withdrawn_at` がどちらも空。外れたら 409 `already_delivered` を返し、取り下げの項目も足さない |
 | `received_at` | ランナーが `/v1/runner/organizer_receipts/create` で、項目の処理を終えたと知らせた時 | オーガナイザーの行の `inflight_message_id` がその項目で、その項目への答えが会話に追記済み |
 
@@ -158,11 +158,17 @@ graph LR
 
 | 書き込み | 同じトランザクションで書くもの | 条件 |
 | --- | --- | --- |
-| 次の項目を渡す（`/v1/runner/organizer_inputs/list`） | オーガナイザーの行の `inflight_message_id` をその項目の ID にする・項目の `delivered_at` と `delivered_generation` | オーガナイザーの行の `inflight_message_id` が空。項目の `delivered_at` と `withdrawn_at` がどちらも空 |
+| 次の項目を渡す（`/v1/runner/organizer_inputs/list`） | オーガナイザーの行の `inflight_message_id` をその項目の ID にする・項目の `delivered_at` と `delivered_generation` | オーガナイザーの行が `active` で、`generation` が token の世代と同じで、`inflight_message_id` が空。項目の `delivered_at` と `withdrawn_at` がどちらも空 |
+| 渡し直す（`/v1/runner/organizer_inputs/list`） | 項目の `delivered_generation` を token の世代にする | オーガナイザーの行が `active` で、`generation` が token の世代と同じで、`inflight_message_id` がその項目の ID。項目の `received_at` が空 |
 | 受け取る（`/v1/runner/organizer_receipts/create`） | 項目の `received_at`・オーガナイザーの行の `inflight_message_id` を空にする | オーガナイザーの行の `inflight_message_id` がその項目の ID。下の答えの条件 |
 
-- `/v1/runner/organizer_inputs/list` は、`inflight_message_id` が空でなければ、その項目だけを `redeliver` を真にして返す。世代は問わない。応答が途中で失われた場合も、同じ世代のランナーが呼び直せば同じ項目を受け取れる
-- 空のときだけ、次の項目を上の表の条件で渡す。条件が外れたら（ほかの要求が先に渡した）、オーガナイザーの行を読み直し、確定した処理中の項目を `redeliver` を真にして返す。2 つの要求が別々の項目を受け取ることはない
+渡す・渡し直すの書き込みに、オーガナイザーの状態と世代を条件として入れるのは、古い世代の要求が新しい世代の配信の記録を書き換えないようにするためである。認証を通った後に止まっていた前の世代のランナーの要求が、再開の後に届くことがある。この要求が `delivered_generation` を前の世代へ戻すと、新しい世代のランナーの答えと受け取りが 404 になり、利用者の次の指示が渡らなくなる。
+
+`/v1/runner/organizer_inputs/list` は、オーガナイザーの行を読み、次の順で返すものを決める。
+
+1. `inflight_message_id` が空でなければ、その項目を上の表の「渡し直す」で書き、`redeliver` を真にして返す。前の世代が渡した項目も、今の世代のランナーが受け取れる。応答が途中で失われた場合も、同じ世代のランナーが呼び直せば同じ項目を受け取れる
+2. 空なら、取り下げていない次の項目を選び、上の表の「次の項目を渡す」で書く。次の項目が無ければ空の一覧を返す
+3. 1 か 2 の条件が外れたら、オーガナイザーの行を読み直す。状態が `active` でないか、`generation` が token の世代と違えば、401 を返して書かない。そうでなければ 1 からやり直す。ほかの要求が先に渡したときは 1 で同じ項目を渡し直す。利用者が候補を先に取り下げたときは `inflight_message_id` が空のままなので、2 で次の候補を選び直す。2 つの要求が別々の項目を受け取ることはない
 
 **受け取りは、答えが会話に追記された項目だけで確定する。** ランナーが SIGTERM で会話の控えを固めると、項目の ID は入っていても、そのターンの答えが無い控えが残りうる。そのため、受け取りの判定は控えでなく、サーバーの会話にある答えで行う。
 

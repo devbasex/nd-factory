@@ -92,7 +92,7 @@ erDiagram
 | 費用の記録と月の使った量（I8） | `db-usage` の `COST#` の行と、`db-teams` の `USAGE#` の行の加算（表をまたぐ） | 費用の記録と使った量が食い違う |
 | I20 の照らし | スプリントの作成・レーンの割り当ての確定・オーガナイザーを `active` にする書き込みと、`PROJECT` の行の `ConditionCheck` | 移しや差し替えの間に新しいレーンかオーガナイザーが動き出す |
 | オーガナイザーを立てる・再開する・終える・止める・自動で戻す（[オーガナイザーの単位と状態](organizer.md#単位と状態)） | `db-organizers` のオーガナイザーの行と、`db-users` の専用の委任の行（立てる: 作る。再開する: 前の行の取り消しと新しい行。終える: 取り消し）と、`PROJECT` の行の枠の数（`organizer_slots_used`）の更新（枠を持つ状態へ移すときは上限より小さいことを条件に 1 足し、`active` か `paused` から離れるときだけ 1 引く。オーガナイザーの行は読んだ時の状態と版を条件に書く。表をまたぐ） | 終えたオーガナイザーの委任が使えるまま残る。委任の無いオーガナイザーができる。同時の作成や戻りが同じ残りの枠を取り、上限を超える。止まったものを止め直して枠を引き、数が実際より少なくなる |
-| 会話の項目を渡す・受け取る | 渡す: オーガナイザーの行の `inflight_message_id`（空であることを条件に項目の ID を書く）と、項目の `delivered_at`・`delivered_generation`（`delivered_at` と `withdrawn_at` が空であることを条件にする）。受け取る: 項目の `received_at` と、`inflight_message_id`（その項目であることを条件に空にする） | 重なった取得の要求が別々の項目を受け取り、前の項目の処理中に次の項目が渡る |
+| 会話の項目を渡す・受け取る | 渡す: オーガナイザーの行の `inflight_message_id`（`active` で世代が token と同じで、空であることを条件に項目の ID を書く）と、項目の `delivered_at`・`delivered_generation`（`delivered_at` と `withdrawn_at` が空であることを条件にする）。渡し直す: 項目の `delivered_generation`（`received_at` が空であることを条件にする）と、オーガナイザーの行の `ConditionCheck`（`active` で世代が token と同じで、`inflight_message_id` がその項目）。受け取る: 項目の `received_at` と、`inflight_message_id`（その項目であることを条件に空にする） | 重なった取得の要求が別々の項目を受け取り、前の項目の処理中に次の項目が渡る |
 | 会話の項目の取り下げ | 取り下げの項目の追記と、対象の項目の `withdrawn_at`（`delivered_at` と `withdrawn_at` が空であることを条件にする） | 取り下げた項目がオーガナイザーへ渡る |
 
 表ごとの鍵と持つ集約は次のとおりである。
