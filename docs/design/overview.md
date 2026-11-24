@@ -62,7 +62,7 @@ nd-factory は B に対して NDF の UI に徹する。工程・検査・契約
 | 姿 1 | [GitHub Actions の自前のランナー](https://docs.github.com/en/actions/reference/runners/self-hosted-runners)（[実行の文書の主要な製品](execution.md#主要な製品)、PRD60） | 外部の一次情報 | 利用者のマシンを外から開かず、外向きの HTTPS だけで仕事を受ける形が広く使われている。手元のマシンを実行の場所にできる |
 | 姿 2 | W3C の [Web Application Manifest](https://www.w3.org/TR/appmanifest/)・[Service Workers](https://www.w3.org/TR/service-workers/)・[Push API](https://www.w3.org/TR/push-api/)（[画面の文書の標準・仕様](screens.md#標準仕様)、STD20・STD22） | 外部の一次情報 | Web の画面を端末に入れ、つながらなくても読め、承認待ちの知らせを受けられる標準がある |
 | 姿 2 | [iOS・iPadOS の Safari の Web Push](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)（[画面の文書の主要な製品](screens.md#主要な製品)、PRD20） | 外部の一次情報 | ホーム画面に加えた Web アプリなら iPhone にも知らせが届く |
-| 姿 2 | [Slack の Incoming Webhook](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks)（[実行の文書のライブラリとサービス](execution.md#ライブラリとサービス)、LIB64） | 外部の一次情報 | チャンネルへ知らせを送る口があり、送る量の上限と失敗の扱いが決まっている |
+| 姿 2 | [Slack の `chat.postMessage`](https://docs.slack.dev/reference/methods/chat.postMessage)（[実行の文書のライブラリとサービス](execution.md#ライブラリとサービス)、LIB64） | 外部の一次情報 | 利用者とアプリの DM へ知らせを送る口があり、送る量の上限と失敗の扱いが決まっている |
 | 姿 3 | [Model Context Protocol の仕様 2026-07-28 版](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)（[API の文書の標準・仕様](api.md#標準仕様)、STD40） | 外部の一次情報 | AI のエージェントが外の道具を呼ぶ標準の形。API と同じ操作を道具として出せる |
 | 姿 3 | [GitHub の遠くの MCP サーバー](https://github.com/github/github-mcp-server)（[API の文書の主要な製品](api.md#主要な製品)、PRD42） | 外部の一次情報 | GitHub が自分のサービスの操作を遠くの MCP サーバーとして出し、OAuth と貼る token の両方で使わせている例 |
 | 姿 4 | [プロジェクト MVV](../../.ndf/mvv.md) の Value 9 と P2 | 利用者が承認した MVV | 割り当てたチームの外へ存在も見せない。割り当てを変えるのは人の承認 |

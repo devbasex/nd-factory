@@ -220,7 +220,7 @@ graph TD
 | Aurora Serverless v2 | PostgreSQL（自動の一時停止を持つ版、LIB80）。出口の無いサブネット。書き手 1 台・読み手なし。最小 0 ACU。最大 ACU は設定のファイルで受ける。Data API を有効にする（CDK の `enableDataApi: true`。使うのは DB の用意の関数だけ。決定 83） | Value 6（使わない間は計算の費用が 0） |
 | Aurora の SG | タスクの SG からの 5432 だけを受ける | DB へ接続するのはタスクだけ。DB の用意の関数は Data API で触れ、SG を通らない |
 | Cognito | 利用者プール。自分の登録を止め、Google（と GitHub）の IdP からだけ入る | Value 9（だれが入れるかをサーバーの側で決める） |
-| CloudFront と画面の S3 | 置き場は公開せず、配信は OAC で読む（LIB83）。料金は従量の課金（定額のプランに入らない）で、価格の区分は 100 | Value 3（HTTPS の配信で Service Worker が動く）・Value 6 |
+| CloudFront と画面の S3 | 置き場は公開せず、配信は OAC で読む（LIB83）。料金は従量の課金（定額のプランに入らない）で、価格の区分は 100。画面の HTTP の経路を直に開いても画面が出るよう、既定の振る舞いに viewer request の CloudFront Function を結び、path の最後の区切りに `.` を含まない要求を `/index.html` に書き換える（`/`・`/signin`・`/me`・`/p/*`・`/t/*`。地図に無い経路も画面が受けて `/` へ移す）。`.` を含む要求（`/config.json`・`/sw.js`・束のファイル）は書き換えず、S3 に無ければ 403 をそのまま返す。束のファイルは `/assets/*` の振る舞いに分け、関数を結ばない。403・404 を `index.html` に差し替える誤りの応答の設定は置かない（決定 141・LIB94） | Value 3（HTTPS の配信で Service Worker が動く）・Value 6・Value 1（知らせから画面を直に開く） |
 | 状態の S3 | 公開を止め、暗号化し、TLS だけ。NDF のファイルは 14 日で消す規則 | Value 7・Value 6 |
 | ECR | nd-factory 専用のリポジトリ（イメージごとに 1 つ）。ランナーのイメージは、設置のコマンドと反映のパイプラインが作ってここへ push する。ライフサイクルの規則で push の新しい版を戻せる数より多めに残し、古い版を消す（決定 87・LIB85） | Value 6（保管の費用を抑える）・Value 8（ダイジェストで引き、確認の値で縛る） |
 | Secrets Manager | 器は CDK が作り、値は人か API が入れる。名前は `<prefix>/<environment>/<用途>`（決定 90） | Value 7 |
@@ -294,7 +294,7 @@ Security Hub の ECS.2 は、ECS のサービス（`AWS::ECS::Service`）で公�
 | Aurora の計算 | 0 | 接続 0 本で 300 秒の後に一時停止（LIB80）。保守のために起きることがある（起きた後 20 分以上は止まらない） |
 | DynamoDB | 保存の量だけ | 要求の数の課金（LIB81） |
 | Cognito | 0 | 月の利用者 10,000 までは無料（下の単価の出典） |
-| CloudFront | 0 | 従量の課金。アカウントごとに毎月 1 TB・1,000 万回の要求までは無料（LIB83） |
+| CloudFront | 0 | 従量の課金。アカウントごとに毎月 1 TB・1,000 万回の要求までは無料（LIB83）。画面の経路の書き換えの関数は毎月 200 万回の呼び出しまで無料（LIB94） |
 | 掛かり続けるもの | 秘密の器の数・Aurora のストレージ・ECR の保管（残す版の数で上限がある）・ログの保管・S3 の保管 | 量に比例する。秘密の器が最も大きい（1 つ月 0.40 ドル） |
 
 ### 見込み
@@ -417,7 +417,8 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 | 使っていないコード | どこからも読まれないファイル・使われない書き出し・使われない依存（knip）。検査の CI は #1 が足す | Value 13 |
 | ワークフローの点検 | ワークフローの広すぎる権限・資格情報の持ち出し・固定していない動作の参照など（zizmor）。検査の CI は #1 が足す | Value 8 |
 | 依存の向き | `packages/contracts` → `packages/core` → `apps/*` の一方向に反する import・`apps/*` どうしの import・`infra` から `apps/*` への import（[詳細設計の依存の表](detail.md#クラスと関数の構造)）。検査の CI は #1 が足す | Value 1・Value 7 |
-| スタックのテストに足す行 | NAT が 1 件以上・タスクの SG に受け入れの規則・Lambda が VPC の中・`AWS::ECS::Service` か `TaskSet` が 1 件以上・タスクの役割に許可の文・Aurora の最小が 0 でない・表とバケットが消せる設定・PITR が無い | Value 6・I11 |
+| スタックのテストに足す行 | NAT が 1 件以上・タスクの SG に受け入れの規則・Lambda が VPC の中・`AWS::ECS::Service` か `TaskSet` が 1 件以上・タスクの役割に許可の文・Aurora の最小が 0 でない・表とバケットが消せる設定・PITR が無い・画面の配信の既定の振る舞いに経路の書き換えの関数が無い・`/assets/*` の振る舞いに関数がある・403 か 404 を差し替える誤りの応答の設定がある | Value 6・I11・Value 1 |
+| 画面の経路の書き換えの単体テスト | 書き換えの関数のコードが、`/p/prj_x/approvals/apr_y`・`/t/team_x/usage`・`/me`・`/signin`・`/`・地図に無い `/foo` を `/index.html` に変えない、または `/config.json`・`/sw.js`・`/assets/app.js` を書き換える（関数のコードを vitest で直に呼ぶ。決定 141） | Value 1・Value 3 |
 
 NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の定義のテスト）は基本の検査が受け持つ。設計の決まりを縛る検査は CI の必須のチェック（`.ndf/project.json` の宣言）に載せ、CI の定義のテストが食い違いを落とす。
 
@@ -523,6 +524,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | LIB91 | RDS Data API（Aurora PostgreSQL） | Aurora PostgreSQL 16.1 以上（13.11・14.8・15.3・17.4・18.3 以上も） | AWS のサービス | — | 無し | 条件つきで満たす。Aurora PostgreSQL の Serverless と provisioned のクラスタで使え、米国西部（オレゴン）を含む各リージョンに版の下限つきで載る。HTTPS の端点で SQL を打ち、Lambda を VPC に入れずに届く。一時停止した書き手へ Data API の要求が来ると、Aurora が書き手を再開してから処理する。再開の間の要求は `DatabaseResumingException` で断られ、数秒待って打ち直すよう示される。呼び出しは同期で、45 秒で終わらなければ取り消して時間切れを返す（`continueAfterTimeout` の既定は偽。真にすると文は止まらずに続く）。SDK の時間切れは 45 秒より長く（1 分以上を推す）する。トランザクションは、その ID を使う呼び出しが 3 分無いと時間切れになり自動で巻き戻り、最長 1 時間で巻き戻る。`transactionId` の無い文は自動で確定する。応答は 1 MiB まで。Aurora PostgreSQL 14 以上ではパスワードの暗号化に `scram-sha-256` だけを受ける。Data API は接続の池を持って呼び出しの間で使い回し、使い回す前に PostgreSQL では `DISCARD ALL` を打つ。池の接続が一時停止を妨げるかは書かれていない（一時停止は利用者の接続が開いている間は起きず、Data API の要求が頻繁だと止まらない、とだけある） | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.Aurora_Fea_Regions_DB-eng.Feature.Data_API.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.limitations.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.session-management.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api-timeouts.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.calling.cli.html ・ https://docs.aws.amazon.com/rdsdataservice/latest/APIReference/API_ExecuteStatement.html ・ https://docs.aws.amazon.com/rdsdataservice/latest/APIReference/API_BeginTransaction.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html （2026-11-21） |
 | LIB92 | Lambda の非同期の呼び出し（待ち行列・再試行・最大の年齢） | — | AWS のサービス | — | 無し | 満たす。既定では関数が誤りを返すと 2 回まで再試行し、待ち行列に最大 6 時間置く。スロットリングとシステムの誤りでは、既定で 6 時間まで待ち行列へ戻して打ち直す。`MaximumRetryAttempts`（0〜2）と `MaximumEventAgeInSeconds`（60〜21,600 秒）で狭められる。待ち行列は結果整合で、同じ呼び出しを関数へ 2 回以上届けうるため、関数は重複を扱う必要がある | https://docs.aws.amazon.com/lambda/latest/dg/invocation-async-error-handling.html ・ https://docs.aws.amazon.com/lambda/latest/api/API_PutFunctionEventInvokeConfig.html （2026-11-21） |
 | LIB93 | Secrets Manager の版とラベル（`CreateSecret`・`PutSecretValue`・`UpdateSecretVersionStage`） | — | AWS のサービス | — | 無し | 満たす。値を持つ `CreateSecret` は最初の版を作り `AWSCURRENT` を付ける。`PutSecretValue` は `VersionStages` を渡さないと `AWSCURRENT` を新しい版へ移し、渡せばそのラベルだけを付ける（別の版に付いていたラベルは外れる）。`ClientRequestToken` が版の ID になり、同じ ID と同じ値の送り直しは何もしない（値が違えば失敗）。`UpdateSecretVersionStage` は `MoveToVersionId` と `RemoveFromVersionId` でラベルを移し、`AWSCURRENT` を移すと `AWSPREVIOUS` が自動で移る。ラベルを失った版は片付けの対象になるが、作って 24 時間の版は残る。Secrets Manager は結果整合で、ラベルを移した直後の `GetSecretValue` と `DescribeSecret` は前の版を返しうる（版の ID を指した読みはラベルの付き外しに依らない） | https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_CreateSecret.html ・ https://docs.aws.amazon.com/secretsmanager/latest/userguide/troubleshoot.html ・ https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_PutSecretValue.html ・ https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecretVersionStage.html （2026-11-21） |
+| LIB94 | CloudFront Functions（viewer request） | — | AWS のサービス | — | 無し | 満たす。ビューワーから要求を受けた時（viewer request）に軽い JavaScript を拠点で打ち、要求の URI を書き換えられる。常に無料の枠は毎月 200 万回の呼び出しで、超えた分は 100 万回 0.10 ドル | https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cloudfront-functions.html ・ https://aws.amazon.com/cloudfront/pricing/pay-as-you-go/ （2026-11-24） |
 
 ### 束の大きさの測り方
 
@@ -552,7 +554,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | `ALTER ROLE … PASSWORD` を advisory lock と同じトランザクションの中で打てること | 試していない | PostgreSQL の `ALTER ROLE` の頁を取得していない。[未確認のまま残ること](#未確認のまま残ること)へ移した |
 | AWS のクォータ（Lambda の同時実行・Fargate の vCPU）の既定の値 | 試していない | 値はアカウントとリージョンで違い、設置する人が Service Quotas で読む |
 
-調べた量: 候補 9 件・取得の試み 24 回（2026-11-17）。#32 で候補 8 件・取得の試み 13 回を足し、同じサービスの行（LIB81・LIB82・LIB84）は 1 行に畳んだ（2026-11-18）。CloudFront の料金の頁 2 つの取得と、束の大きさの測りを 2 回足した（2026-11-21）。#13 の DB の用意の Data API の関数への移しで、候補 3 件（LIB91〜LIB93）・取得の試み 13 回（LIB91 の頁 8・LIB92 の頁 2・LIB93 の頁 3）を足した（2026-11-21）。決定 83・95・96 の Data API・非同期の呼び出し・秘密の器の版の事実は、この 3 行を出典にする。
+調べた量: 候補 9 件・取得の試み 24 回（2026-11-17）。#32 で候補 8 件・取得の試み 13 回を足し、同じサービスの行（LIB81・LIB82・LIB84）は 1 行に畳んだ（2026-11-18）。CloudFront の料金の頁 2 つの取得と、束の大きさの測りを 2 回足した（2026-11-21）。#13 の DB の用意の Data API の関数への移しで、候補 3 件（LIB91〜LIB93）・取得の試み 13 回（LIB91 の頁 8・LIB92 の頁 2・LIB93 の頁 3）を足した（2026-11-21）。決定 83・95・96 の Data API・非同期の呼び出し・秘密の器の版の事実は、この 3 行を出典にする。画面の経路の書き換えで、候補 1 件（LIB94）・取得の試み 3 回を足した（2026-11-24）。
 
 ## 決定の記録
 
@@ -684,7 +686,8 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | `progress-db/*`（プロジェクトの役割の URL） | API の関数（引き換えでランナーへ渡す、保留の下りた行に結んだ版。ラベルでは読まない）・DB の用意の関数（結んだ版） | API の関数: `CreateSecret`・`PutSecretValue`・`DescribeSecret`。DB の用意の関数: `DescribeSecret`・`UpdateSecretVersionStage`（[パスワードの版](data.md#パスワードの版)） |
 | `github-app`（App の私有鍵） | API の関数（導入の token を作る） | 無し |
 | `web-push`（Web Push の私有鍵） | 知らせの送り手の関数だけ（VAPID の署名。STD60） | 無し |
-| `notify/*`（Slack の宛先の URL） | 知らせの送り手の関数だけ（送る） | API の関数: `CreateSecret`・`PutSecretValue`・`DeleteSecret`（通知先の登録・外し）。読まない |
+| `notify/*`（Slack の bot の token。宛先は利用者とアプリの DM） | 知らせの送り手の関数だけ（送る） | API の関数: `CreateSecret`・`PutSecretValue`・`DeleteSecret`（通知先の登録・外し）。読まない |
+| `slack-oauth`（Slack アプリの client secret） | API の関数だけ（通知先の登録で OAuth の認可コードを token に引き換える。LIB64） | 無し。自分で設置する人が Slack アプリを作らなければ器を作らず、画面は Slack の通知先を出さない |
 | `google-oauth`・`github-oauth`（client secret） | どの関数も読まない。利用者プールの IdP へは CloudFormation が動的参照で渡す | 無し |
 | API の関数が実行の時に使うほかの器（レーンの JWT の署名の鍵・Webhook の署名の秘密・持ち込みのキー） | API の関数だけ | 器の名前と許しは、読み手を作る子の課題が同じ変更で足す（読み手の無い器を許さない） |
 
@@ -851,6 +854,19 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 比べた候補: LIB86 / LIB87 / LIB88 / LIB89 / LIB90 / STD84 / STD85
 
 根拠: Value 2 / Value 6（MVV バージョン 3）
+
+### 決定 141: 知らせから画面を直に開けるよう、画面の HTTP の経路を CloudFront Function で `index.html` に書き換え、静的なファイルは書き換えない
+
+結論: 画面の配信の既定の振る舞いに viewer request の CloudFront Function を結ぶ。path の最後の区切りに `.` を含まない要求を `/index.html` に書き換え、`.` を含む要求は S3 のファイルをそのまま返す（無ければ 403）。束のファイルは `/assets/*` の振る舞いに分け、関数を結ばない。
+
+理由: 画面は HTTP の経路を URL の path で持ち、Web Push の知らせは `/p/:projectId/approvals/:approvalId` のような URL を直に開く（[画面の文書の決定 38](screens.md#決定の記録)）。OAC の S3 を配るだけの CloudFront は、ルートの既定のオブジェクトしか `index.html` に解決せず、それ以外の経路は S3 の 403 になる。書き換えを画面の経路だけに絞ると、`/config.json` や束のファイルが無いときに HTML が 200 で返らず、Service Worker が誤った中身を控えない（Value 3）。地図に無い経路も画面が受けて `/` へ移すため、経路の一覧を関数に写さず、`.` の有無だけで分ける（Value 13）。束のファイルの振る舞いに関数を結ばないので、呼び出しは画面を開いた回数と画面の設定の値の取得に留まり、毎月 200 万回の無料の枠に収まる（LIB94・Value 6）。
+
+採らなかった案: 403・404 の誤りの応答を `index.html` と 200 に差し替える形は、関数を置かずに済むが、無い `config.json` や束のファイルまで HTML の 200 で返し、配る失敗を隠す。画面の経路の一覧（`/p/*`・`/t/*`・`/me`・`/signin`）を関数に書く形は、画面の地図を変えるたびに関数も直す 2 か所の正本になる。
+
+- 作り方: ライブラリやサービスを使う
+- 比べた候補: LIB83 / LIB94
+
+根拠: Value 1 / Value 3 / Value 6（MVV バージョン 3）
 
 ## 未確認のまま残ること
 
