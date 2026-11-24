@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>開発計画の詳細</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="app">
+<nav class="side" aria-label="主な行き先">
+  <div class="brand"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect class="bg" width="32" height="32" rx="7"></rect><path class="ln" d="M9.5 23V9l13 14V9"></path><circle class="fg" cx="9.5" cy="23" r="2.8"></circle><circle class="fg" cx="9.5" cy="9" r="2.8"></circle><circle class="fg" cx="22.5" cy="23" r="2.8"></circle><circle class="fg" cx="22.5" cy="9" r="2.8"></circle></svg>Neural Development Factory</div>
+  <button class="acct" type="button"><span class="av">個</span><span class="col grow" style="gap:0"><span class="b sm">個人のアカウント</span><span class="xs muted">個人・持ち主</span></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m7 9 5-5 5 5M7 15l5 5 5-5"></path></svg></button>
+  <button class="palette-btn" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>移動と操作<span class="kbd">Ctrl K</span></button>
+  <a class="nav" href="Home.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z"></path></svg>ホーム</a>
+  <a class="nav" href="Approvals.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h5l2 3h4l2-3h5"></path><path d="M5 5h14l2 8v6H3v-6z"></path></svg>承認待ちの一覧<span class="count">2</span></a>
+  <a class="nav on" href="Plans.dc.html" aria-current="page"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h7"></path></svg>開発計画</a>
+  <a class="nav" href="Main.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M10 6h10M10 12h10M10 18h10M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"></path></svg>スプリントの一覧</a>
+  <a class="nav" href="Loops.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"></path></svg>ループ</a>
+  <a class="nav" href="Repositories.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="6" cy="6" r="2"></circle><circle cx="6" cy="18" r="2"></circle><circle cx="18" cy="8" r="2"></circle><path d="M6 8v8M18 10c0 4-6 3-12 6"></path></svg>リポジトリ</a>
+  <div class="nav-h">Factory の構成</div>
+  <a class="nav" href="Physical.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1"></rect><rect x="3" y="13" width="18" height="7" rx="1"></rect></svg>マシンと実行</a>
+  <a class="nav" href="Roles.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="12" cy="5" r="2"></circle><circle cx="5" cy="19" r="2"></circle><circle cx="19" cy="19" r="2"></circle><path d="M12 7v8M5 17v-2h14v2"></path></svg>役割の流れ</a>
+  <div class="sep"></div>
+  <a class="nav" href="SettingsGeneral.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"></path></svg>アカウントの設定</a>
+  <a class="nav" href="Account.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg>自分の設定</a>
+  <div class="side-foot"><span class="conn">オンライン</span></div>
+</nav>
+<main class="main">
+  <header class="topbar"><div class="topbar-in">
+    <div>
+      <div class="crumb"><a href="Plans.dc.html">開発計画</a><span class="slash">/</span><span>マイルストーン 02 の残り</span></div>
+      <h1 class="title">マイルストーン 02 の残り <span class="badge info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2"></circle></svg>動いている</span></h1><p class="desc">この計画のレーンごとに、どの課題がどこまで進んだかを見ます</p>
+      <div class="meta"><span>対象 <span class="repo-tag">example-org/api</span></span><span>作った日時 <b>2026/11/12 09:30</b></span><span>同時に動くレーンの上限 <b>1</b></span></div>
+    </div>
+  <div class="actions"></div></div></header>
+  <div class="content">
+    <div class="tiles">
+      <div class="tile"><span class="k">課題</span><span class="v">5</span></div>
+      <div class="tile"><span class="k">完了</span><span class="v">2</span></div>
+      <div class="tile"><span class="k">動いている</span><span class="v">1</span></div>
+      <div class="tile"><span class="k">未着手</span><span class="v">2</span></div>
+    </div>
+    <div class="split">
+      <div class="stack">
+        <section class="card" id="lane-L1">
+          <div class="card-h"><span class="mono b">L1</span><h2>スプリントを順に流す</h2><span class="badge info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2"></circle></svg>動いている</span></div>
+          <div class="tbl-wrap"><table class="t">
+            <thead><tr><th class="num" style="width:56px">順番</th><th>課題</th><th>状態</th><th>後に流す</th><th></th></tr></thead>
+            <tbody>
+              <tr><td class="num">1</td><td><span class="mono muted">#12</span> 承認の資料に差分の要約を載せる</td><td><span class="badge done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m8 12 3 3 5-6"></path></svg>完了</span></td><td class="muted">—</td><td class="act"><a class="btn sm ghost" href="SprintDetail.dc.html">スプリントの詳細へ</a></td></tr>
+              <tr><td class="num">2</td><td><span class="mono muted">#18</span> 予算の残りを周回ごとに記録する</td><td><span class="badge info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2"></circle></svg>実行中</span></td><td class="muted">—</td><td class="act"><a class="btn sm ghost" href="SprintDetail.dc.html">スプリントの詳細へ</a></td></tr>
+            </tbody>
+          </table></div>
+        </section>
+        <section class="card" id="lane-L2">
+          <div class="card-h"><span class="mono b">L2</span><h2>スプリントを順に流す</h2><span class="badge done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m8 12 3 3 5-6"></path></svg>完了</span></div>
+          <div class="tbl-wrap"><table class="t">
+            <thead><tr><th class="num" style="width:56px">順番</th><th>課題</th><th>状態</th><th>後に流す</th><th></th></tr></thead>
+            <tbody>
+              <tr><td class="num">1</td><td><span class="mono muted">#14</span> 通知の文言をそろえる</td><td><span class="badge done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m8 12 3 3 5-6"></path></svg>完了</span></td><td class="muted">—</td><td class="act"><a class="btn sm ghost" href="SprintDetail.dc.html">スプリントの詳細へ</a></td></tr>
+            </tbody>
+          </table></div>
+        </section>
+        <section class="card" id="lane-L3">
+          <div class="card-h"><span class="mono b">L3</span><h2>開発ループ</h2><span class="badge neutral"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle></svg>未着手</span><div class="actions"><a class="btn sm ghost" href="LoopDetail.dc.html">ループの詳細へ</a></div></div>
+          <div class="tbl-wrap"><table class="t">
+            <thead><tr><th class="num" style="width:56px">順番</th><th>課題</th><th>状態</th><th>後に流す</th><th></th></tr></thead>
+            <tbody>
+              <tr><td class="num">1</td><td><span class="mono muted">#15</span> 失敗の理由を一覧に出す</td><td><span class="badge neutral"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle></svg>未着手</span></td><td>L1 の 1 行目の後</td><td></td></tr>
+              <tr><td class="num">2</td><td><span class="mono muted">#21</span> ダークの札のコントラストを上げる</td><td><span class="badge neutral"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle></svg>未着手</span></td><td class="muted">—</td><td></td></tr>
+            </tbody>
+          </table></div>
+        </section>
+      </div>
+      <aside class="stack">
+        <section class="card"><div class="card-h"><h3>計画のレーン</h3></div>
+          <div class="card-b" style="gap:6px">
+            <a href="#lane-L1" class="row between"><span><span class="mono">L1</span> 2 行</span><span class="badge info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2"></circle></svg>動いている</span></a>
+            <a href="#lane-L2" class="row between"><span><span class="mono">L2</span> 1 行</span><span class="badge done">完了</span></a>
+            <a href="#lane-L3" class="row between"><span><span class="mono">L3</span> 2 行</span><span class="badge neutral">未着手</span></a>
+          </div></section>
+        <section class="card"><div class="card-h"><h3>組み換えの記録</h3></div>
+          <div class="card-b" style="gap:10px">
+            <div class="col"><span class="row"><span class="badge done">反映した</span><span class="xs muted">11/12 15:02</span></span><span class="sm">#15 を L2 から L3 へ移した</span></div>
+            <div class="col"><span class="row"><span class="badge danger">断られた</span><span class="xs muted">11/12 13:40</span></span><span class="sm">#12 の後に #14 を置く（L2 は動き始めていた）</span></div>
+          </div></section>
+      </aside>
+    </div>
+  </div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>

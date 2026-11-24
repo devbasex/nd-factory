@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>スマホ: 実行の手段</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.m .check{min-height:44px;align-items:center}
+.m .check input{margin-top:0}
+.m .seg{height:44px;width:100%;display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.m .seg button{justify-content:center;font-size:13px;padding:0 4px}
+.m .tabs a{min-height:44px;display:inline-flex;align-items:center}
+.m .btn.sm{height:44px;font-size:15px}
+.m-row{display:flex;flex-direction:column;gap:12px}
+.m .m-item .acts{display:flex;gap:8px;flex-wrap:wrap}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="m">
+  <header class="m-top">
+    <a class="m-icon" href="MobileSettingsMenu.dc.html" aria-label="アカウントの設定へ戻る"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg></a>
+    <span class="t">実行の手段</span>
+    <button class="m-icon" type="button" aria-label="メニュー"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+  </header><p class="m-desc">AI をどこで動かし、使用量を誰が払うかを選びます</p>
+  <div class="m-body">
+    <span class="sm muted">個人のアカウント</span>
+    <section class="card"><div class="card-h"><h3>クラウドの実行の量（今月）</h3></div>
+      <div class="card-b"><dl class="dl"><dt>実行時間</dt><dd>312 分 / 含む 1,500 分</dd><dt>今月の費用</dt><dd>$3.42（上限 $50 で止まる）</dd></dl></div>
+    </section>
+    <section class="card"><div class="card-h"><h3>手段の一覧</h3></div>
+      <div class="m-list" style="border:0;border-radius:0">
+        <div class="m-item"><span class="row between"><span class="b sm">手元のマシン（どの 1 台でも）</span><span class="badge neutral">既定</span></span><span class="xs muted">つながっている・動いている実行 1 本</span></div>
+        <div class="m-item"><span class="row between"><span class="b sm">手元のマシン 作業用の PC</span><span class="badge info">つながっている</span></span><span class="mono xs muted">local:作業用の PC</span><div class="acts"><button class="btn" type="button">既定にする</button><button class="btn danger" type="button">外す</button></div></div>
+        <div class="m-item"><span class="row between"><span class="b sm">個人の Anthropic キー</span><span class="badge neutral">byok</span></span><span class="mono xs muted">sk-ant-…7Qx2・11/12 に足した</span><div class="acts"><button class="btn" type="button">既定にする</button><button class="btn danger" type="button">外す</button></div></div>
+      </div>
+    </section>
+    <section class="card"><div class="card-h"><h3>月の上限額</h3></div>
+      <div class="card-b"><div class="field full"><label for="cap">月の上限額（USD。空は 0）</label><input id="cap" class="in" value="50"><span class="help">今月の使用 $3.42。下げても今月は $50.00 まで請求します</span></div><button class="btn" type="button">上限額を変える</button></div>
+    </section>
+    <section class="card"><div class="card-h"><h3>手段を足す</h3></div>
+      <div class="card-b"><label class="check"><input type="radio" name="k" checked=""><span>byok キーの持ち込み</span></label><label class="check"><input type="radio" name="k"><span>managed サービスの Bedrock</span></label><label class="check"><input type="radio" name="k"><span>local 手元のマシン（マシンで登録）</span></label><div class="field full"><label for="kn">キーの名前</label><input id="kn" class="in"></div><div class="field full"><label for="kt">種類</label><select id="kt" class="sel"><option>Anthropic API キー</option><option>AWS のロール（Bedrock）</option></select></div><div class="field full"><label for="kv">API キー</label><input id="kv" class="in"><span class="help">保存の後は値を出しません</span></div><button class="btn primary" type="button">キーを足す</button></div>
+    </section>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>

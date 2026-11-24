@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>部品の一覧</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.cat{width:1440px;min-height:1900px;padding:40px 48px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;align-content:start;background:var(--surface)}
+.cat h1{grid-column:1/-1;font-size:24px;font-weight:600}
+.cat .lead{grid-column:1/-1;margin-top:-16px}
+.blk{background:var(--base);border:1px solid var(--border);border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.blk h2{font-size:13px;font-weight:600;color:var(--muted)}
+.span2{grid-column:span 2}.span3{grid-column:1/-1}
+.menu{border:1px solid var(--border);border-radius:6px;background:var(--base);box-shadow:0 8px 24px rgba(0,0,0,.12);padding:4px;display:flex;flex-direction:column}
+.menu .mi{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:4px;font-size:14px}
+.menu .mi.on{background:var(--selected)}
+.menu .mh{font-size:11px;color:var(--muted);padding:6px 8px 2px}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="cat">
+  <h1>部品の一覧と寸法</h1>
+  <p class="lead sm muted">PC（ポインタ）では操作の高さ 32px、スマホ（タッチ・768px 未満）では 44px。色は tokens.json・tokens.dark.json の値</p>
+
+  <section class="blk">
+    <h2>ボタン（PC 32px・小 28px・大 40px）</h2>
+    <div class="row"><button class="btn primary" type="button">スプリントを始める</button><button class="btn" type="button">もう一度読む</button></div>
+    <div class="row"><button class="btn approve" type="button">承認する</button><button class="btn danger" type="button">差し戻す</button><button class="btn danger-fill" type="button">外すを確定する</button></div>
+    <div class="row"><button class="btn ghost" type="button">一覧へ</button><button class="btn sm" type="button">小</button><button class="btn lg" type="button">大（ログイン）</button><button class="btn" type="button" disabled="">押せない</button></div>
+    <p class="xs muted">主の操作は 1 画面に 1 つ（藍）。承認の詳細の「承認する」だけ承認の緑。取り消せない操作は赤の枠</p>
+  </section>
+
+  <section class="blk">
+    <h2>状態の札（7 つの調子）</h2>
+    <div class="row">
+      <span class="badge neutral"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle></svg>未着手</span>
+      <span class="badge info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2"></circle></svg>動いている</span>
+      <span class="badge info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M9 15l6-6"></path><path d="M11 6l1.5-1.5a4 4 0 0 1 5.7 5.7L16.5 12"></path><path d="M13 18l-1.5 1.5a4 4 0 0 1-5.7-5.7L7.5 12"></path></svg>つながっている</span>
+      <span class="badge approval"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"></path></svg>承認待ち</span>
+      <span class="badge done"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m8 12 3 3 5-6"></path></svg>完了</span>
+      <span class="badge warning"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 3 2 21h20z"></path></svg>中止</span>
+      <span class="badge danger"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m9 9 6 6M15 9l-6 6"></path></svg>失敗</span>
+      <span class="badge skipped"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m6 18 12-12"></path></svg>無効</span>
+    </div>
+    <div class="row"><span class="pill">enhancement</span><span class="conn">オンライン</span><span class="phases"><i class="d"></i><i class="d"></i><i class="r"></i><i class="g"></i><i class="x"></i></span></div>
+    <p class="xs muted">札は高さ 22px・角 4px・頭にアイコン。色だけに頼らない。同じ青でも、つながっている（マシン・手段）は鎖の印、動いている（実行・レーン）は的の印で分ける</p>
+  </section>
+
+  <section class="blk">
+    <h2>サイドバーの項目とアカウントの切り替え</h2>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:2px">
+      <a class="nav on" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z"></path></svg>今の行き先</a>
+      <a class="nav" href="#"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M3 13h5l2 3h4l2-3h5"></path><path d="M5 5h14l2 8v6H3v-6z"></path></svg>件数つき<span class="count">2</span></a>
+      <div class="nav-h">群の見出し</div>
+    </div>
+    <div class="menu">
+      <span class="mh">個人</span><span class="mi on"><span class="av" style="width:20px;height:20px;border-radius:4px;background:var(--selected);color:var(--primary);display:grid;place-items:center;font-size:11px;font-weight:700">個</span>個人のアカウント</span>
+      <span class="mh">所属チーム</span><span class="mi"><span class="av" style="width:20px;height:20px;border-radius:4px;background:var(--neutral-bg);display:grid;place-items:center;font-size:11px;font-weight:700">V</span>example-team <span class="xs muted">管理者</span></span>
+      <div class="sep" style="margin:4px 0"></div><span class="mi">＋ チームを作る</span>
+    </div>
+  </section>
+
+  <section class="blk span2">
+    <h2>ページの帯（パンくず・見出し・札・主の操作）</h2>
+    <div style="border:1px solid var(--border);border-radius:6px">
+      <div class="topbar-in" style="padding:14px 16px">
+        <div><div class="crumb"><a href="#">スプリントの一覧</a><span class="slash">/</span><span class="mono">example-org/api</span></div>
+        <h3 class="title">#1 画面から形態 local の実行を始める <span class="badge approval">承認待ち</span></h3><p class="desc">このスプリントの工程の進み、承認、実行の場所、使用量を見ます</p>
+        <div class="meta"><span>NDF の版 <b class="mono">10.27.60</b></span><span>始めた日時 <b>11/13 15:29</b></span></div></div>
+        <div class="actions"></div>
+      </div>
+    </div>
+    <h2>数のタイル</h2>
+    <div class="tiles"><div class="tile attn"><span class="k">承認待ち</span><span class="v">2</span><span class="d">最も古いもの 3 時間前</span></div><div class="tile"><span class="k">動いている</span><span class="v">1</span></div><div class="tile"><span class="k">周回</span><span class="v">4</span></div></div>
+  </section>
+
+  <section class="blk">
+    <h2>道具の帯・タブ</h2>
+    <div class="seg" role="group" aria-label="例"><button class="on" type="button">すべて <span class="c">4</span></button><button type="button">動いている <span class="c">1</span></button><button type="button">終わった</button></div>
+    <input class="in" type="search" aria-label="例" placeholder="課題の番号で絞る  /">
+    <div class="tabs"><a class="on" href="#">概要</a><a href="#">バックログ <span class="c">12</span></a><a href="#">ループ</a></div>
+  </section>
+
+  <section class="blk span2">
+    <h2>カード（見出し・本文・操作の行）と表</h2>
+    <div class="card">
+      <div class="card-h"><h3>手元のマシン（1）</h3><div class="actions"><button class="btn sm ghost" type="button">一覧へ</button></div></div>
+      <div class="tbl-wrap"><table class="t">
+        <thead><tr><th>名前</th><th>状態</th><th>最後の心拍</th><th class="num">レーン</th><th></th></tr></thead>
+        <tbody><tr><td class="b">作業用の PC</td><td><span class="badge info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M9 15l6-6"></path><path d="M11 6l1.5-1.5a4 4 0 0 1 5.7 5.7L16.5 12"></path><path d="M13 18l-1.5 1.5a4 4 0 0 1-5.7-5.7L7.5 12"></path></svg>つながっている</span></td><td class="sm">12 秒前</td><td class="num">0 / 1</td><td class="act"><button class="btn sm danger" type="button">外す</button></td></tr>
+        <tr><td class="b">build-server-01</td><td><span class="badge neutral">止まった</span></td><td class="sm">2 日前</td><td class="num">0 / 2</td><td class="act"><button class="btn sm danger" type="button">外す</button></td></tr></tbody>
+      </table></div>
+      <div class="card-f"><span class="note">止まったマシンも外すまで一覧に残ります</span><button class="btn primary" type="button">保存する</button></div>
+    </div>
+  </section>
+
+  <section class="blk">
+    <h2>フォーム（ラベルは上・幅 360px）</h2>
+    <div class="field"><label for="c1">token の名前</label><input id="c1" class="in" value="作業用の PC"><span class="help">1〜64 字</span></div>
+    <div class="field"><label for="c2">月の上限額（USD）</label><input id="c2" class="in bad" value="-1"><span class="err">0 から 1,000,000 の数を入れてください</span></div>
+    <div class="field"><label for="c3">範囲</label><select id="c3" class="sel"><option>読み取りだけ</option></select></div>
+    <div class="field"><label for="c4">差し戻す理由</label><textarea id="c4" class="ta"></textarea></div>
+    <label class="check"><input type="checkbox" checked=""><span>1 文字のショートカットを使う</span></label>
+  </section>
+
+  <section class="blk">
+    <h2>知らせ</h2>
+    <div class="alert info"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle></svg><span class="grow sm">利用上限のため 16:20 に再開します</span></div>
+    <div class="alert warning"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 2 21h20z"></path></svg><span class="grow sm">設計承認ゲートで承認を待っています</span></div>
+    <div class="alert danger"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m9 9 6 6M15 9l-6 6"></path></svg><span class="grow sm">同時に動かせるスプリントは 1 本までです（今 1 本）</span></div>
+    <div class="alert done"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m8 12 3 3 5-6"></path></svg><span class="grow sm">登録の token を発行しました</span></div>
+  </section>
+
+  <section class="blk">
+    <h2>読み込み中・0 件・失敗</h2>
+    <div class="card"><div class="card-b"><div class="skel" style="width:60%"></div><div class="skel"></div><div class="skel" style="width:80%"></div><span class="xs muted">読み込み中</span></div></div>
+    <div class="card"><div class="state"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 6h10M10 12h10M10 18h10"></path></svg></span><span class="h">スプリントの実行はまだありません</span><button class="btn sm primary" type="button">スプリントを始める</button></div></div>
+    <div class="card"><div class="state"><span class="ic" style="color:var(--danger)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16h.01"></path></svg></span><span class="h">読めませんでした</span><span class="sm">時間をおいてやり直してください</span><button class="btn sm" type="button">もう一度読む</button></div></div>
+  </section>
+
+  <section class="blk">
+    <h2>コマンドパレット（Ctrl K）</h2>
+    <div class="palette" style="width:100%">
+      <div class="q"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><span class="muted">移動先か操作を入力</span></div>
+      <div class="g">移動</div>
+      <div class="it on">承認待ちの一覧<span class="kbd">G A</span></div>
+      <div class="it">スプリントの一覧<span class="kbd">G S</span></div>
+    </div>
+  </section>
+
+  <section class="blk">
+    <h2>説明の一覧・コピーできる値</h2>
+    <dl class="dl"><dt>NDF の版</dt><dd class="mono">10.27.60</dd><dt>レーン</dt><dd class="mono">run-37e1bfe1</dd><dt>費用</dt><dd class="b">$0.17</dd></dl>
+    <div class="copy"><span class="code">npm run setup -w nd-runtime</span><button class="btn sm" type="button">コピー</button></div>
+  </section>
+
+  <section class="blk span3">
+    <h2>初めての人のための部品（#173 二度目のレビュー）</h2>
+    <div class="split" style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
+      <div class="stack" style="gap:12px">
+        <div class="b sm">画面の説明（見出しの下の 1 行）</div>
+        <div style="border:1px solid var(--border);border-radius:6px"><div class="topbar-in" style="padding:14px 16px"><div><div class="crumb"><span>Factory の構成</span></div><h3 class="title">マシンと実行</h3><p class="desc">スプリントとループが、どのマシンのどこで動いているかを木で見ます（読むだけ）</p></div></div></div>
+        <p class="xs muted">どの画面も見出しの下に「何を見る・何をする画面か」を 1 行（60 字まで）で書く。主語は画面ではなく利用者のすること。用語はなるべく使わない</p>
+      </div>
+      <div class="stack" style="gap:12px">
+        <div class="b sm">次にすること（詳細の画面の上）</div>
+        <div class="next"><div class="grow"><div class="next-l">次にすること</div><div class="bb">設計を読んで、このまま実装へ進めてよいかを答えてください</div><div class="sm muted">答えるまで、このスプリントは止まっています</div></div><a class="btn primary" href="#">承認の詳細を開く</a></div>
+        <p class="xs muted">人の番のときだけ出す。主の操作は 1 つ。AI の番のときは出さない</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="blk span3">
+    <h2>ロゴ（ノードの N）</h2>
+    <div class="row" style="gap:32px;align-items:center;flex-wrap:wrap">
+      <span class="col" style="gap:6px;align-items:center"><svg class="logo" style="width:96px;height:96px" viewBox="0 0 32 32" aria-hidden="true"><rect class="bg" width="32" height="32" rx="7"></rect><path class="ln" d="M9.5 23V9l13 14V9"></path><circle class="fg" cx="9.5" cy="23" r="2.8"></circle><circle class="fg" cx="9.5" cy="9" r="2.8"></circle><circle class="fg" cx="22.5" cy="23" r="2.8"></circle><circle class="fg" cx="22.5" cy="9" r="2.8"></circle></svg><span class="xs muted">96px</span></span>
+      <span class="col" style="gap:6px;align-items:center"><svg class="logo" style="width:32px;height:32px" viewBox="0 0 32 32" aria-hidden="true"><rect class="bg" width="32" height="32" rx="7"></rect><path class="ln" d="M9.5 23V9l13 14V9"></path><circle class="fg" cx="9.5" cy="23" r="2.8"></circle><circle class="fg" cx="9.5" cy="9" r="2.8"></circle><circle class="fg" cx="22.5" cy="23" r="2.8"></circle><circle class="fg" cx="22.5" cy="9" r="2.8"></circle></svg><span class="xs muted">32px</span></span>
+      <span class="col" style="gap:6px;align-items:center"><svg class="logo" style="width:16px;height:16px" viewBox="0 0 32 32" aria-hidden="true"><rect class="bg" width="32" height="32" rx="7"></rect><path class="ln" d="M9.5 23V9l13 14V9"></path><circle class="fg" cx="9.5" cy="23" r="2.8"></circle><circle class="fg" cx="9.5" cy="9" r="2.8"></circle><circle class="fg" cx="22.5" cy="23" r="2.8"></circle><circle class="fg" cx="22.5" cy="9" r="2.8"></circle></svg><span class="xs muted">16px（最小）</span></span>
+      <span class="brand" style="padding:0"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect class="bg" width="32" height="32" rx="7"></rect><path class="ln" d="M9.5 23V9l13 14V9"></path><circle class="fg" cx="9.5" cy="23" r="2.8"></circle><circle class="fg" cx="9.5" cy="9" r="2.8"></circle><circle class="fg" cx="22.5" cy="23" r="2.8"></circle><circle class="fg" cx="22.5" cy="9" r="2.8"></circle></svg>Neural Development Factory</span>
+    </div>
+    <ul class="sm muted" style="margin:12px 0 0;padding-left:18px;line-height:1.8">
+      <li>4 つのノードを線でつないだ「N」。Neural の頭文字と、ノードがつながって動く Factory を 1 つの形で表す</li>
+      <li>色は主の色（地）と主の色の上の文字の色（線とノード）。ダークでは両方がダークの値に替わる</li>
+      <li>最小 16px。周りの余白はマークの大きさの 1/4 以上を空ける。形・比率・角の丸み（32 に対し 7）を変えない</li>
+      <li>ファビコンはライトの色の SVG（favicon.svg）を使い、16px でも読める</li>
+      <li>サイドバーは 24px のマークと名前（13px・折り返さない）を並べる。ログインの画面は 52px のマークを見出しの上に置く</li>
+    </ul>
+  </section>
+  <section class="blk span3">
+    <h2>寸法の決まり</h2>
+    <div class="tbl-wrap"><table class="t">
+      <thead><tr><th>項目</th><th>PC（1024px 以上）</th><th>768〜1023px</th><th>スマホ（767px 以下）</th></tr></thead>
+      <tbody>
+        <tr><td>枠</td><td>左にサイドバー 240px</td><td>上の帯 56px＋メニュー</td><td>上の帯 56px＋メニュー</td></tr>
+        <tr><td>本文</td><td>最大 1200px・左右 32px・上 24px</td><td>左右 24px</td><td>左右 16px</td></tr>
+        <tr><td>ページの帯</td><td>パンくず 13px・見出し 20px・右に操作</td><td>同じ（操作は折り返す）</td><td>見出しを上の帯へ、操作は下の固定の帯</td></tr>
+        <tr><td>ボタン・入力・絞り込み</td><td>高さ 32px（小 28px）・文字 14px。指で操作する端末（pointer: coarse）は 44px</td><td>マウスは PC と同じ 32px、指で操作する端末は 44px</td><td>高さ 44px・入力の文字 16px</td></tr>
+        <tr><td>詳細</td><td>2 段（本文＋側板 320px）</td><td>1 段（側板は本文の下）</td><td>1 段</td></tr>
+        <tr><td>設定</td><td>左に設定のメニュー 200px</td><td>同じ</td><td>メニューを上に縦に積む</td></tr>
+        <tr><td>表</td><td>列の表・行の上下 8px</td><td>列の表</td><td>1 行を 1 枚のカードに積む</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":3500}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>

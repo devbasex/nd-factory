@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>課題を起こす</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="app">
+<nav class="side" aria-label="主な行き先">
+  <div class="brand"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect class="bg" width="32" height="32" rx="7"></rect><path class="ln" d="M9.5 23V9l13 14V9"></path><circle class="fg" cx="9.5" cy="23" r="2.8"></circle><circle class="fg" cx="9.5" cy="9" r="2.8"></circle><circle class="fg" cx="22.5" cy="23" r="2.8"></circle><circle class="fg" cx="22.5" cy="9" r="2.8"></circle></svg>Neural Development Factory</div>
+  <button class="acct" type="button"><span class="av">個</span><span class="col grow" style="gap:0"><span class="b sm">個人のアカウント</span><span class="xs muted">個人・持ち主</span></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m7 9 5-5 5 5M7 15l5 5 5-5"></path></svg></button>
+  <button class="palette-btn" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>移動と操作<span class="kbd">Ctrl K</span></button>
+  <a class="nav" href="Home.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z"></path></svg>ホーム</a>
+  <a class="nav" href="Approvals.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h5l2 3h4l2-3h5"></path><path d="M5 5h14l2 8v6H3v-6z"></path></svg>承認待ちの一覧<span class="count">2</span></a>
+  <a class="nav" href="Plans.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h7"></path></svg>開発計画</a>
+  <a class="nav" href="Main.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M10 6h10M10 12h10M10 18h10M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"></path></svg>スプリントの一覧</a>
+  <a class="nav" href="Loops.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"></path></svg>ループ</a>
+  <a class="nav plan" href="Projects.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5 12 3l9 4.5-9 4.5z"></path><path d="m3 12 9 4.5 9-4.5"></path><path d="m3 16.5 9 4.5 9-4.5"></path></svg>プロジェクト<span class="pill plan-pill">予定</span></a>
+  <a class="nav" href="Repositories.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="6" cy="6" r="2"></circle><circle cx="6" cy="18" r="2"></circle><circle cx="18" cy="8" r="2"></circle><path d="M6 8v8M18 10c0 4-6 3-12 6"></path></svg>リポジトリ</a>
+  <div class="nav-h">Factory の構成</div>
+  <a class="nav" href="Physical.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1"></rect><rect x="3" y="13" width="18" height="7" rx="1"></rect></svg>マシンと実行</a>
+  <a class="nav" href="Roles.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="12" cy="5" r="2"></circle><circle cx="5" cy="19" r="2"></circle><circle cx="19" cy="19" r="2"></circle><path d="M12 7v8M5 17v-2h14v2"></path></svg>役割の流れ</a>
+  <div class="sep"></div>
+  <a class="nav" href="SettingsGeneral.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"></path></svg>アカウントの設定</a>
+  <a class="nav" href="Account.dc.html"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg>自分の設定</a>
+  <div class="side-foot"><span class="conn">オンライン</span></div>
+</nav>
+<main class="main">
+  <header class="topbar"><div class="topbar-in">
+    <div><div class="crumb"><span>個人のアカウント</span><span class="slash">/</span><span>課題を起こす</span></div><h1 class="title">課題を起こす <span class="badge plan">予定 #177</span></h1><p class="desc">思いついたことをそのまま書くと、AI が課題の下書きを作ります。確かめてから起票します</p></div>
+  </div></header>
+  <div class="content" style="position:relative">
+    <div class="split">
+      <div class="stack">
+        <section class="card">
+          <div class="card-h"><h2>1. 原文と起票先</h2></div>
+          <div class="card-b"><div class="fields">
+            <div class="fields-2">
+              <div class="field"><label for="in-to">起票先</label><select id="in-to" class="sel"><option>example-org/api（リポジトリ）</option><option>example-platform（プロジェクト・予定 #176）</option></select><span class="help">登録したリポジトリか、プロジェクトの主リポジトリ</span></div>
+              <div class="field"><label for="in-from">きっかけ（任意）</label><select id="in-from" class="sel"><option>スプリント #1（example-org/api）</option><option>無し</option></select><span class="help">詳細の画面の「この件を課題にする」から開くと入ります</span></div>
+            </div>
+            <div class="field full"><label for="in-raw">原文</label><textarea id="in-raw" class="ta" rows="4">ログインが 1 時間で切れるのは短い。48 時間にしてほしい</textarea><span class="help">そのまま課題の「依頼（原文）」に残ります。書き直しません</span></div>
+            <div class="alert warning"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 2 21h20z"></path><path d="M12 10v4M12 17h.01"></path></svg><span class="grow sm">持ち主が違うリポジトリや公開のリポジトリへの起票は、外への公開になります。起票の前に、もう一度確かめを求めます</span></div>
+          </div></div>
+          <div class="card-f"><span class="note">下書きを作るのに数秒かかります</span><button class="btn" type="button">AI に下書きを作らせる</button></div>
+        </section>
+        <section class="card">
+          <div class="card-h"><h2>2. AI の下書き</h2><div class="actions"><div class="seg"><button class="on" type="button">見た目</button><button type="button">本文を直す</button></div></div></div>
+          <div class="card-b">
+            <div class="md-prev">
+              <h3>画面のログイン: 期限を 1 時間から 48 時間へ延ばす</h3>
+              <p class="row" style="gap:6px"><span class="badge neutral">機能</span><span class="xs muted">種類のラベル: enhancement</span></p>
+              <h4>目的</h4><p>今の画面のログインは 1 時間で切れ、作業の途中でログインし直しが要る。ログインを 48 時間保ち、作業を止めないようにする。</p>
+              <h4>受け入れ条件</h4><ul><li>ログインから 48 時間は、画面を開いたままでもログインし直しを求められない</li><li>48 時間を過ぎると、次の操作でログインの画面へ戻る</li><li>ログアウトすると、ログインの記録が消える</li></ul>
+              <h4>起票者の推定</h4><ul><li>「48 時間」はログインしてからの通しの期限と読んだ（使うたびに延びる期限ではない）</li></ul>
+              <h4>依頼（原文）</h4><blockquote>ログインが 1 時間で切れるのは短い。48 時間にしてほしい</blockquote>
+            </div>
+          </div>
+          <div class="card-f"><span class="note">必須の項目（題・種類・目的・受け入れ条件・起票者の推定・依頼（原文））がそろっています</span><button class="btn" type="button">作り直す</button></div>
+        </section>
+        <section class="card">
+          <div class="card-h"><h2>3. 起票する</h2></div>
+          <div class="card-b"><p class="sm">example-org/api に、上の題と本文で課題を起こします。起票の後は課題の URL を出し、きっかけのスプリントの「指示」にも 1 行残します</p></div>
+          <div class="card-f"><a class="btn" href="SprintDetail.dc.html">やめる</a><button class="btn primary" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v8M8 12h8"></path></svg>起票する</button></div>
+        </section>
+      </div>
+      <aside class="stack">
+        <section class="card"><div class="card-h"><h3>この画面について</h3></div>
+          <div class="card-b"><ul class="prose" style="margin:0;padding-left:18px">
+            <li>AI へ頼んで起票するのと同じことを、画面でします</li>
+            <li>下書きの項目は、起票先のリポジトリの決まりに合わせます</li>
+            <li>承認の依頼ではありません。起票しても実行は止まりません</li>
+          </ul></div></section>
+        <p class="anno">決めていないこと（#177）: 下書きを作る AI をどの実行の手段で動かすか（費用）・席の利用者が起票できるか・起票先に決まりの無いリポジトリの項目</p>
+      </aside>
+    </div>
+    <div class="alert done toast" role="status" style="top:12px;bottom:auto"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="m8 12 3 3 5-6"></path></svg><span class="grow sm">起票しました: <a href="#">example-org/api#58</a>（起票の後に出る知らせの例）</span></div>
+  </div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":1420}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>

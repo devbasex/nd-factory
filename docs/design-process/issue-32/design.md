@@ -258,7 +258,7 @@ graph TD
 | 渡す先 | 追記する中身 | 引く全体の設計の節 | 由来 |
 | --- | --- | --- | --- |
 | #1 | 依存の向きの検査（`packages/contracts` → `packages/core` → `apps/*` の一方向・`apps/*` どうしの import が無い・`infra` が `apps/*` を import しない）を、設計の決まりを縛る検査に足す。漏れの検査を `docs/` にも掛ける | detail.md「クラスと関数の構造」の依存の表・platform.md「設計の決まりを縛る検査」「非機能の実現方式」 | R15・R13 |
-| #2 | テーブル定義の無い表（利用者・ログインの組・委任・チーム・席・招待・手元のマシン・月の使った量・リポジトリ・区間・スプリント・進捗の事象・問い・答え・知らせ・通知先・費用の記録・冪等の鍵・渡した GitHub の token の記録）の列と、3 つの索引の列を決める。共通の列（`pk`・`sk`・`schema_version`・上書きの行の `version`）は全体の設計が持つ。表の移しの読み手が両方の版を読み、2 段目だけを戻せる作り | data.md「表と鍵」「テーブル定義」「形の版と移し方」 | R1・R13 |
+| #2 | テーブル定義の無い表（利用者・ログインの組・委任・チーム・席・招待・手元のマシン・月の使った量・リポジトリ・区間・スプリント・進捗の事象・問い・答え・知らせ・通知先・費用の記録・冪等の鍵・渡した GitHub の token の記録）の列と、4 つの索引の列を決める。共通の列（`pk`・`sk`・`schema_version`・上書きの行の `version`）は全体の設計が持つ。表の移しの読み手が両方の版を読み、2 段目だけを戻せる作り | data.md「表と鍵」「テーブル定義」「形の版と移し方」 | R1・R13 |
 | #4 | F1〜F3 の操作（`sessions.*`・`users.*`・`logins.*`・`teams.*`・`seats.*`・`invitations.*`）の要素の項目・型・必須か・理由のコードを、形の正本の操作の定義に書く | api.md「操作の一覧」 | R6 |
 | #5 | F4〜F6 の操作（`projects.*`・`github_installations.*`・`repositories.*`・`project_transfers.*`）の要素と理由のコード（`credential_rotation_in_progress` を含む） | api.md「操作の一覧」・overview.md「割り当てを変える流れ」 | R6 |
 | #6 | F7〜F10・F17 の操作（`waiting_counts.get`・`issue_candidates.list`・`sprints.*`・`lanes.list`・`progress_events.list`・`execution_settings.*`・`model_keys.*`）の要素と理由のコード（`sprints.create` の `credential_rotation_in_progress` を含む）。ランナー向けの 5 つの HTTP の経路の要求と応答の項目（`redeliver` を含む）。実行の設定の値（猶予・寿命・間隔・期限・起票の上限）と推論の手段の可否の設定のファイルのキー | api.md「操作の一覧」「ランナー・手元のマシン・DB の用意のタスクの HTTP の経路」・execution.md「設定の値」・platform.md「環境の値の受け方」 | R1・R6 |

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>スマホ: 所属チーム</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./nd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.m .check{min-height:44px;align-items:center}
+.m .check input{margin-top:0}
+.m .seg{height:44px;width:100%;display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.m .seg button{justify-content:center;font-size:13px;padding:0 4px}
+.m .tabs a{min-height:44px;display:inline-flex;align-items:center}
+.m .btn.sm{height:44px;font-size:15px}
+.m-row{display:flex;flex-direction:column;gap:12px}
+.m .m-item .acts{display:flex;gap:8px;flex-wrap:wrap}
+</style>
+</helmet>
+<div class="{{theme}}">
+<div class="m">
+  <header class="m-top">
+    <a class="m-icon" href="MobileAccount.dc.html" aria-label="自分の設定へ戻る"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg></a>
+    <span class="t">所属チーム</span>
+    <button class="m-icon" type="button" aria-label="メニュー"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+  </header><p class="m-desc">あなたが席を持っているチームです。行からそのチームの設定へ移ります</p>
+  <div class="m-body">
+      <div class="m-list">
+        <a class="m-item" href="MobileSettingsMembers.dc.html"><span class="row between"><span class="b">example-team</span><span class="badge neutral">管理者</span></span><span class="xs muted">席の種類 Max</span></a>
+        <a class="m-item" href="MobileSettingsMembers.dc.html"><span class="row between"><span class="b">example-team</span><span class="badge neutral">メンバー</span></span><span class="xs muted">席の種類 Pro</span></a>
+      </div>
+    <div class="card"><div class="state"><span class="h">所属しているチームはありません</span><span class="sm">0 件のときの表示。チームを作るとここに並びます</span></div></div>
+  </div>
+  <div class="m-bar"><a class="btn primary" href="MobileTeamNew.dc.html">チームを作る</a></div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.dark ? 'nd dark' : 'nd' };
+  }
+}
+</script>
+</body>
+</html>
