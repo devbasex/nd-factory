@@ -17,11 +17,11 @@
 
 | 保存先 | 中身 | 受け持つ子の課題 |
 | --- | --- | --- |
-| `packages/core/`・`packages/contracts/` | 横断の部品・操作の表の枠・サービスのテーブルの列とインデックス・テーブルの移し | detail.md（この文書）と #2 |
+| `packages/core/`・`packages/contracts/` | 横断の部品・操作の表の枠・サービスのテーブルの列とインデックス・テーブルの移行 | detail.md（この文書）と #2 |
 | `apps/runner/` | ランナー | #6 |
 | `apps/nd-runtime/` | nd ランタイム | #7 |
 | `apps/api/src/entries/db-prep.ts`（DB の用意の関数の起点）・`apps/api/src/db-prep/`（その処理の本体） | DB の用意。用意と差し替えの SQL は `SqlExecutor` のインタフェースの裏に置き、本番は Data API の実装、CI は `pg` の実装（PostgreSQL のサービスコンテナ）で同じ手順を照合する。起点へつなぐ終わりの記録の口の本番の実装は #6 | #13 |
-| `apps/api/src/entries/` の見回り | 見回りの起点と予定。処理ごとの中身は持ち主の子（失効のやり直し #5・マシンの途切れ #7・送達のやり直し #8） | #6 |
+| `apps/api/src/entries/` の定期ジョブ | 定期ジョブの起点と予定。処理ごとの中身は持ち主の子（失効のやり直し #5・マシンの途切れ #7・送達のやり直し #8） | #6 |
 | `apps/api/src/entries/` の通知の送り手・`apps/api/src/modules/` の通知 | 通知 | #8 |
 | アイテムの項目・型・理由のコード | 操作ごとのスキーマの正本 | [API の文書の操作の一覧](api.md#操作の一覧) の受け持つ子の表 |
 | 設定のファイルのキー | 読む構成要素ごとのキー | [プラットフォームの文書の環境の値の受け方](platform.md#環境の値の受け方) の表 |
@@ -72,7 +72,7 @@ nd-factory/
 │   └── core/             * 横断の部品（時計・ID と冪等キー・ログと伏せ字・外部の呼び出しと再試行・
 │       └── src/              条件付き書き込み・認証・認可の判定・使える量の判定・操作の記録の書き手・操作の振り分け）
 ├── apps/
-│   ├── api/                API と MCP の 1 つの関数・見回り・通知の送り手・テーブルの移し・DB の用意
+│   ├── api/                API と MCP の 1 つの関数・定期ジョブ・通知の送り手・テーブルの移行・DB の用意
 │   │   └── src/
 │   │       ├── entries/  * Lambda ごとの起点（api-fn・patrol・notifier・migrate・db-prep）
 │   │       ├── modules/  * コンテキストごとのモジュール（操作のハンドラーと、認可の判定へ渡す読み手）
@@ -118,7 +118,7 @@ nd-factory/
 | `packages/core/` | `usage-limit` | `judgeUsage`・`usageAddItem`（新設） |
 | `packages/core/` | `audit` | `auditItem`・`appendAudit`（新設） |
 | `packages/core/` | `dispatch` | `readHttpCall`・`readMcpCall`・`createMcpHandler`・`createMcpServer`・`serveMcp`・`dispatch`・`writeHttpResponse`・`writeMcpResponse`（新設） |
-| `apps/api/src/entries/` | API と MCP の 1 つの関数の起点・見回り・通知の送り手・テーブルの移し・DB の用意 | 起点の関数（HTTP は `readHttpCall` → `dispatch` → `writeHttpResponse`、MCP は `readMcpCall` → `serveMcp` を呼ぶだけ。`serveMcp` は SDK へ渡す前に `authenticate` で主体を決め、実行環境ごとに 1 回作った `createMcpHandler` のハンドラーへ渡す。ハンドラーは要求ごとに `createMcpServer` でサーバーを作り、`tools/call` の道具の処理の中で決めた主体のまま `dispatch` → `writeMcpResponse` を呼ぶ。`dispatch` を通らなかった応答は、返す前に `serveMcp` が `appendAudit` で要約のレコードを書く） |
+| `apps/api/src/entries/` | API と MCP の 1 つの関数の起点・定期ジョブ・通知の送り手・テーブルの移行・DB の用意 | 起点の関数（HTTP は `readHttpCall` → `dispatch` → `writeHttpResponse`、MCP は `readMcpCall` → `serveMcp` を呼ぶだけ。`serveMcp` は SDK へ渡す前に `authenticate` で主体を決め、実行環境ごとに 1 回作った `createMcpHandler` のハンドラーへ渡す。ハンドラーは要求ごとに `createMcpServer` でサーバーを作り、`tools/call` の道具の処理の中で決めた主体のまま `dispatch` → `writeMcpResponse` を呼ぶ。`dispatch` を通らなかった応答は、返す前に `serveMcp` が `appendAudit` で要約のレコードを書く） |
 | `apps/api/src/modules/` | コンテキストごとのモジュール | 操作ごとのハンドラーと、`authorize` へ渡す読み手 |
 | `apps/api/src/db-prep/` | DB の用意の関数の処理の本体 | `createDbPrepHandler` ほか（関数の粒度は #13 の詳細設計）。`packages/contracts`（と、できた後の `packages/core`）だけに依り、`modules/` を import しない。終わりの記録の口は型（ポート）だけを持ち、中身は `entries/db-prep.ts` が `modules/` のプロジェクトのモジュールから渡す（#6）。`entries/db-prep.ts` のほかは `db-prep/` を import しない |
 | `apps/web/` | 画面 | 画面ごとの関数（[画面](screens.md)） |
@@ -139,7 +139,7 @@ nd-factory/
 | `newId` | `packages/core`（`ids`） | 新設 | `(kind: IdKind, clock: Clock) => Id` | 種類の頭と UUIDv7 から ID を作る | `kind` はスキーマの正本の ID の頭の集まりの 1 つ | 戻り値は `<頭>_<UUIDv7>` の小文字で、時刻の順に並ぶ。バイト列は `uuid` の `v7` に `msecs`（`clock` のミリ秒）と `seq`（下の単調性の状態）を渡して組む。単調性の状態（前のミリ秒と連番）は `newId` が実行環境ごとに持ち、時計が進めば連番を乱数から取り直し、進まないか戻れば前のミリ秒のまま連番を 1 足し、連番があふれたらミリ秒を 1 進める。乱数は `uuid` の乱数（`node:crypto`）だけから取る | 無し |
 | `parseId` | `packages/core`（`ids`） | 新設 | `(kind: IdKind, value: string) => Id \| null` | 受けた ID が指定の種類の形かを照合する | 無し | 頭と UUIDv7 の形が合えば値を、合わなければ `null` を返す（呼び手は 404 と同じに扱う） | 無し |
 | `claimIdempotency` | `packages/core`（`idempotency`） | 新設 | `(db: Db, claim: IdempotencyClaimInput, clock: Clock) => Promise<IdempotencyClaim>` | 主体・操作・キーの組の 1 回目を押さえ、2 回目以降に前の結果か状態を返す | `claim.fingerprint` はアイテムの正規化した JSON の SHA-256 | 戻り値は `fresh`（押さえた）・`replay`（前のアイテムの結果）・`in_progress`（他が処理中）・`reused`（中身が違う）のどれか。`fresh` のとき冪等のテーブルに借りのレコードがある | DynamoDB の `db-idempotency` への条件付き書き込みと強整合読み込み |
-| `settleIdempotency` | `packages/core`（`idempotency`） | 新設 | `(claim: IdempotencyClaimInput, result: ItemResult, clock: Clock) => TransactItem` | 借りの行を「済み」とアイテムの結果へ書き換える書き込みを組む | `claimIdempotency` が `fresh` を返した組 | 戻り値は借りの行の持ち主を条件にした更新の 1 件。1 回だけ返す値（token など）は結果から `null` に替えて保存する | 無し |
+| `settleIdempotency` | `packages/core`（`idempotency`） | 新設 | `(claim: IdempotencyClaimInput, result: ItemResult, clock: Clock) => TransactItem` | 借りのレコードを「済み」とアイテムの結果へ書き換える書き込みを組む | `claimIdempotency` が `fresh` を返した組 | 戻り値は借りのレコードの持ち主を条件にした更新の 1 件。1 回だけ返す値（token など）は結果から `null` に替えて保存する | 無し |
 | `redact` | `packages/core`（`redact`） | 新設 | `(value: unknown) => unknown` | 値の木を写し、秘密のキーの名前と秘密の形の値を伏せる | 無し | 戻り値に、秘密の形のデータに当たるキーの値と、秘密の形に当たる文字列が残らない。元の値は変えない。循環は `"[cycle]"` に替える | 無し |
 | `createLogger` | `packages/core`（`log`） | 新設 | `(context: LogContext, sink?: (line: string) => void) => Logger` | 要求の ID などの文脈を持った、JSON の 1 行を出すログの書き手を作る | `context.request_id` がある | `Logger.info`・`warn`・`error` は、文脈と項目を `redact` に通して 1 行の JSON にし、`sink` へ渡す | 標準出力へ 1 行を書く（Lambda では CloudWatch Logs へ届く） |
 | `withRetry` | `packages/core`（`retry`） | 新設 | `<T>(op: (attempt: number) => Promise<T>, policy: RetryPolicy, opts: { classify: (e: unknown) => FailureClass; deadline?: number; sleep?: (ms: number) => Promise<void> }) => Promise<T>` | 方針のデータに従って、再試行してよい失敗だけを待って繰り返す | `op` は同じ引数で繰り返してよい処理（冪等か、届かなかったと分かる失敗だけを繰り返す方針） | 成功の値を返すか、最後の失敗を `RetryExhausted`（回数と分類を持つ）で投げる。`deadline` を越えて待たない | 渡した処理の副作用を最大 `policy.max_attempts` 回起こし、間で待つ |
@@ -172,9 +172,9 @@ nd-factory/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `claimIdempotency` | 同じ組が処理中 | 並んだ 2 つの要求か、前の要求の途中 | 借りの行の条件の外れと、借りの期限の前 | 呼び出し元へ返す | アイテムの 409 `in_progress` | 後始末なし。呼び手は待って同じアイテムを送り直せる |
-| `claimIdempotency` | 中身が違う | 同じキーを別のアイテムに使い回した | 借りの行の `fingerprint` と比べた所 | 呼び出し元へ返す | アイテムの 422 `idempotency_key_reused` | 再実行しても同じ。呼び手が新しいキーを作る |
-| `claimIdempotency` | テーブルに届かない | DynamoDB の失敗・時間切れ | `writeAtomically` と読みの例外 | 再試行（方針 `dynamodb`）の後に呼び出し元へ返す | 要求全体の 503 `unavailable` | 借りの行は書けていないか、書けても期限で取り直せる。再実行できる |
+| `claimIdempotency` | 同じ組が処理中 | 並んだ 2 つの要求か、前の要求の途中 | 借りのレコードの条件の外れと、借りの期限の前 | 呼び出し元へ返す | アイテムの 409 `in_progress` | 後始末なし。呼び手は待って同じアイテムを送り直せる |
+| `claimIdempotency` | 中身が違う | 同じキーを別のアイテムに使い回した | 借りのレコードの `fingerprint` と比べた所 | 呼び出し元へ返す | アイテムの 422 `idempotency_key_reused` | 再実行しても同じ。呼び手が新しいキーを作る |
+| `claimIdempotency` | テーブルに届かない | DynamoDB の失敗・時間切れ | `writeAtomically` と読みの例外 | 再試行（方針 `dynamodb`）の後に呼び出し元へ返す | 要求全体の 503 `unavailable` | 借りのレコードは書けていないか、書けても期限で取り直せる。再実行できる |
 | `createLogger` | 書けない | 標準出力の誤り・値を JSON にできない | `sink` の呼び出しと `JSON.stringify` | 既定値で続ける（JSON にできない値は `"[unserializable]"` に替える。`sink` の例外は捨てる） | 無し（ログの欠けは操作の結果を変えない） | 後始末なし |
 | `withRetry` | 回数を使い切った | 再試行してよい失敗が続いた | 回数の数え | 呼び出し元へ返す（`RetryExhausted`） | 呼び手が決める。API では 503 `unavailable` | 後始末なし。後から再実行できる |
 | `withRetry` | 再試行してはいけない失敗 | 分類が `conflict`・`not_found`・`rejected` | `classify` の戻り値 | 呼び出し元へ返す（最初の失敗のまま） | 呼び手が決める | 繰り返さない |
@@ -229,7 +229,7 @@ nd-factory/
 | `authenticate` | 受け口 `user` で、token が 3 つの部分の JWT | Cognito の access token として、`aws-jwt-verify` の Cognito の検証（決定 48・LIB41）で署名（`kid` の公開鍵、RS256）・発行元・`client_id`・`token_use` が `access`・期限を照合する。キーの取得は `callHttp`（方針 `http-idp-keys`）を取り手として渡す。通れば人 |
 | `authenticate` | 受け口 `user` か `mcp` で、token が `ndfd_` で始まる | 委任として、中の利用者と委任の ID で行を強整合で読み、秘密の部分の SHA-256 を一定時間で比べ、期限と取り消しを照合する。入口は受け口で `API` か `MCP` |
 | `authenticate` | 受け口 `mcp` で、token が JWT | `unauthorized` |
-| `authenticate` | 受け口 `runner` | Ed25519 の JWT で宛先「レーン」。交換の HTTP の経路だけ交換用トークン、ほかはレーンの token。レーンの行が終わっていないことと世代の番号を照合する |
+| `authenticate` | 受け口 `runner` | Ed25519 の JWT で宛先「レーン」。交換の HTTP の経路だけ交換用トークン、ほかはレーンの token。レーンのレコードが終わっていないことと世代の番号を照合する |
 | `authenticate` | 受け口 `machine` で、token が `ndfm_` で始まる | 中のチームとマシンの ID で行を強整合で読み、要約を一定時間で比べ、取り消しと期限を照合する |
 | `authenticate` | 受け口 `github` | `Authorization` を読まず、本文の HMAC-SHA256 を秘密の器の値と一定時間で比べる |
 | `authenticate` | Cognito の JWT の `kid` がキャッシュに無い | `createJwksCache` のキャッシュが、前の取得から `JWKS_REFETCH_MS` 以上たっていれば公開鍵を 1 回だけ取り直す。たっていないか、取り直しても無ければ `unauthorized` |
@@ -239,14 +239,14 @@ nd-factory/
 | `authorize` | 主体が委任 | 見える集まり = 委任した人の今の集まり ∩ 委任の範囲のプロジェクト。役割は委任した人の席の役割 |
 | `authorize` | 主体がランナーか手元のマシン | 自分向けの HTTP の経路の操作だけ。見える集まりは自分のレーンのプロジェクトだけ |
 | `authorize` | 主体が DB の用意の関数 | 関数の中から呼ぶ 3 つの処理（`db_prep.is_current`・`db_prep.read_target`・`db_prep.record`。[API の文書](api.md#ランナー手元のマシンの-http-の経路)）だけ。見える集まりは呼び出しで渡されたプロジェクトだけ。利用者向けの操作は要求全体で拒む |
-| `authorize` | 主体が見回り | 保守の操作だけ。利用者向けの操作は要求全体で拒む |
+| `authorize` | 主体が定期ジョブ | 保守の操作だけ。利用者向けの操作は要求全体で拒む |
 | `authorize` | アイテムの対象が割り当てを移す途中のプロジェクトで、主体が移す先のチームの持ち主 | 名前だけを読む操作のアイテムだけ通す（I2 の例外）。ほかは 404 |
 | `authorize` | 対象の ID の種類の頭が操作と合わない | 404 `not_found`（`parseId` が `null`） |
-| `claimIdempotency` | 行が無い | 借りの行（持ち主の要求の ID・`fingerprint`・借りの期限）を条件付きで書き、`fresh` |
-| `claimIdempotency` | 済みの行で `fingerprint` が同じ | `replay`（保存したアイテムの結果） |
+| `claimIdempotency` | 行が無い | 借りのレコード（持ち主の要求の ID・`fingerprint`・借りの期限）を条件付きで書き、`fresh` |
+| `claimIdempotency` | 済みのレコードで `fingerprint` が同じ | `replay`（保存したアイテムの結果） |
 | `claimIdempotency` | 行があり `fingerprint` が違う | `reused` |
-| `claimIdempotency` | 借りの行で期限の前 | `in_progress` |
-| `claimIdempotency` | 借りの行で期限を過ぎた | 持ち主を自分へ替える条件付き更新に勝てば `fresh`、負ければ `in_progress` |
+| `claimIdempotency` | 借りのレコードで期限の前 | `in_progress` |
+| `claimIdempotency` | 借りのレコードで期限を過ぎた | 持ち主を自分へ替える条件付き更新に勝てば `fresh`、負ければ `in_progress` |
 | `judgeUsage` | 時点が「始める」 | 実行の場所と推論の手段がプランに無ければ `place_not_allowed`・`inference_not_allowed`。上限額があり使った額が上限額以上なら `monthly_cap_reached`（待っても解けない） |
 | `judgeUsage` | 時点が「割り当てる」 | 同時に動くレーンの数がプランの数以上なら `concurrency_full`（待てば解ける）。上限なしの行は照合しない |
 | `judgeUsage` | 時点が「区間の境」 | 使った額が上限額以上なら `monthly_cap_reached`（待てば解ける: 上限額を変えるか月が替わる） |
@@ -288,7 +288,7 @@ nd-factory/
 | `TRANSACT_MAX_ITEMS` | 定数（外部の仕様の値） | `packages/core`（`conditional-write`） | 100（DynamoDB の 1 つのトランザクションの件の上限。出所を添える） |
 | `WriteOutcome` | 型 | `packages/core`（`conditional-write`） | `{ ok: true }` か `{ ok: false; failed: { index, onConflict }[] }` |
 | `Principal` | 型 | `packages/core`（`auth`） | `human`（利用者の ID）・`delegation`（利用者の ID・委任の ID・範囲・クライアントの名前）・`runner`（レーンの ID・世代）・`machine`（チームの ID・マシンの ID）・`github`・`db_prep`（プロジェクトの ID・用意の ID）・`patrol` |
-| `AuthDeps` | 型 | `packages/core`（`auth`） | IdP の発行元とクライアント ID（設定）・レーンの検証のキー（秘密の器から起動のときに 1 回読む）・Webhook の秘密・委任とマシンとレーンの行の読み手・時計 |
+| `AuthDeps` | 型 | `packages/core`（`auth`） | IdP の発行元とクライアント ID（設定）・レーンの検証のキー（秘密の器から起動のときに 1 回読む）・Webhook の秘密・委任とマシンとレーンのレコードの読み手・時計 |
 | 委任の token の形 | 定数（形） | `packages/contracts`（token の形） | `ndfd_<利用者の ID>.<委任の ID>.<秘密の部分 32 バイトの base64url>`（行をパーティションキーで強整合で読むため） |
 | 登録の token の形 | 定数（形） | `packages/contracts`（token の形） | `ndfm_<チームの ID>.<マシンの ID>.<秘密の部分 32 バイトの base64url>`（委任の token と同じ理由） |
 | `JWKS_REFETCH_MS` | 定数 | `packages/core`（`auth`） | 60000。Cognito の `kid` がキャッシュに無いときの取り直しの間隔の下限。`createJwksCache` が前の取得の時刻と比べて守る |
@@ -316,7 +316,7 @@ nd-factory/
 | 同じ行に触る 2 つのトランザクション | 複数のテーブルの行 | DynamoDB のトランザクションの衝突の検出 | `TransactionConflict` は `withRetry` の方針 `dynamodb` で繰り返す。どちらも書かれないか片方だけが書かれる |
 | 同じレーンの同じ連番の事象の再送（ランナーの再試行） | `db-events` の 1 行 | `putIfAbsent` と `onConflict: return_existing` | 2 回目は前の 1 件を返して足さない（I13） |
 | 承認の確定の 2 つの要求（2 つの端末） | 承認の依頼の行 | `updateIfVersion` に `extra`（状態が待っている・要約値が同じ）を足す | 1 つだけが確定し、他は 409（I4）。答えの ID が冪等キーのため、同じ端末の送り直しは同じ結果（I5） |
-| 1 つのレーンへの 2 つ目のコンテナの割り当て | レーンの行の割り当て | `updateIfVersion` の `extra`（割り当てが空か同じ世代） | 2 つ目を拒む（I7） |
+| 1 つのレーンへの 2 つ目のコンテナの割り当て | レーンのレコードの割り当て | `updateIfVersion` の `extra`（割り当てが空か同じ世代） | 2 つ目を拒む（I7） |
 | 月間利用量の加算と区間の境の判定 | `db-teams` の `USAGE#<年月>` の行 | `usageAddItem` を費用の記録の追記と同じトランザクションにする。判定は加算の後の値を強整合で読んで行う | 費用の記録が冪等（区間の ID をキーにした `putIfAbsent`）のため、同じ区間の 2 回目は加算もしない |
 | アイテムの書き込みと操作の記録 | 状態のテーブルと `db-audit` | 同じ `writeAtomically` に入れる | 片方だけが書かれることは無い（I9） |
 | 公開鍵・秘密・AWS SDK のクライアントのキャッシュ | 1 つの実行環境のメモリ | 実行環境ごとに 1 つの約束（取りに行く途中の約束を共有）で、同じ値を 2 回取りに行かない | 実行環境をまたいで共有しない。取れなければ次の要求で取り直す |
@@ -334,7 +334,7 @@ nd-factory/
 | `authenticate` | 主体の種類・結果（`ok`・`unauthorized`・`unavailable`）。`unauthorized` の内訳（形・署名・期限・取り消し・受け口）はログにだけ出す | info・warn（依存先の失敗） | token とその要約値・秘密の部分・JWT の中の項目（`sub` 以外の利用者の値） |
 | `authorize` | 操作の名前・アイテムの数・拒んだアイテムの数と理由のコード | info | 見えないプロジェクトの ID・絞る前の数（I2 の件数の出口） |
 | `judgeUsage` | 無し（呼び手のハンドラーが理由のコードをアイテムの結果と記録に出す） | — | 料金プランの名前で分けた文 |
-| `appendAudit`・`auditItem` | 操作の記録の行（主体・入口・操作・許したキーの ID・結果） | `db-audit`（追記だけ、既定 1 年） | 本文・秘密・個人情報（呼び名・メール・IP アドレス・ブラウザーの名乗り） |
+| `appendAudit`・`auditItem` | 操作の記録のレコード（主体・入口・操作・許したキーの ID・結果） | `db-audit`（追記だけ、既定 1 年） | 本文・秘密・個人情報（呼び名・メール・IP アドレス・ブラウザーの名乗り） |
 | `dispatch` | 要求の終わりに 1 行（受け口・入口・操作・アイテムの数・結果・状態・時間）。想定しない例外は例外の名前と要求の ID | info・error | アイテムの中身・token・応答の値 |
 | `serveMcp` | `dispatch` を通らなかった要求の終わりに 1 行（JSON-RPC の方法・主体の種類・状態・時間）。`dispatch` を通った要求は `dispatch` の行だけ | info・error | JSON-RPC の本文・token・道具の一覧の値 |
 | `claimIdempotency` | 結果の種類（`fresh`・`replay`・`in_progress`・`reused`）と操作の名前 | info | 冪等キーの値と `fingerprint` |
@@ -383,7 +383,7 @@ nd-factory/
 | `createClock` | 差し替えた元の時刻を `Date` と `iso()` で返す | ミリ秒が 0 のときも 3 桁・末尾 `Z` | 無し |
 | `newId` | 頭と UUIDv7 の形。2 つ作ると後の方が大きい | 同じミリ秒の中で 1,000 個作っても重ならない | 集合に無い種類は型で弾く |
 | `parseId` | 合う ID を返す | 大文字・頭の違い・バージョンの数字が 7 でない値は `null` | 空・長すぎる値は `null` |
-| `claimIdempotency` | 1 回目は `fresh` で借りの行がある | 借りの期限ちょうどの前後で `in_progress` と `fresh` が分かれる | 処理中は `in_progress`、中身の違いは `reused`、テーブルの失敗は再試行の後に 503 |
+| `claimIdempotency` | 1 回目は `fresh` で借りのレコードがある | 借りの期限ちょうどの前後で `in_progress` と `fresh` が分かれる | 処理中は `in_progress`、中身の違いは `reused`、テーブルの失敗は再試行の後に 503 |
 | `settleIdempotency` | 済みのレコードとアイテムの結果を書く 1 件を返す | 1 回だけ返す値は `null` に替わる | 持ち主が違うと条件で外れる |
 | `redact` | `authorization`・`token` の下の値が伏せられる | 入れ子の深い所・配列の中・キーの名前の大文字と小文字・文字列の中に埋まった `ndfd_` | 循環する値で止まらない。元の値を変えない |
 | `createLogger` | 1 行の JSON に文脈が付く | 項目が空・数だけ | JSON にできない値は替えて出す。`sink` の例外で呼び手が落ちない（「書けない」の行） |
@@ -394,7 +394,7 @@ nd-factory/
 | `putIfAbsent` | 条件 `attribute_not_exists(pk)` と扱いを持つ 1 件 | `schema_version` の無い行を型で弾く | 無し |
 | `updateIfVersion` | バージョンの条件と `version + 1` を持つ 1 件 | `version` が 1・`extra` あり | `set` に `version` を含むと型で弾く |
 | `writeAtomically` | 全件が書かれ `ok` | 1 件と 100 件 | 条件の外れの件の番号と扱いを返す、衝突は再試行、届かないは再試行の後に投げる、101 件で止まる |
-| `authenticate` | 人・委任・ランナー・手元のマシン・GitHub の 5 つが決まる（見回りと DB の用意の関数は HTTP の経路を持たず、認証を通らない） | 期限の 1 秒前と 1 秒後 | 形・署名・期限・取り消し・受け口の違いはすべて同じ `unauthorized`、キーとテーブルに届かないは `unavailable`、最後に使った時刻を書けなくても続く |
+| `authenticate` | 人・委任・ランナー・手元のマシン・GitHub の 5 つが決まる（定期ジョブと DB の用意の関数は HTTP の経路を持たず、認証を通らない） | 期限の 1 秒前と 1 秒後 | 形・署名・期限・取り消し・受け口の違いはすべて同じ `unauthorized`、キーとテーブルに届かないは `unavailable`、最後に使った時刻を書けなくても続く |
 | `createJwksCache` | 保存したキーで 2 回目は取りに行かない | 知らない `kid` の取り直しが前の取得から 59 秒では起きず 60 秒で起きる・キャッシュが 1 時間ちょうどの前後で使う側と取り直す側に分かれる・同じ時の取り直しが 1 回 | 取り直しても `kid` が無い、取得の失敗を投げる |
 | `visibleProjectIds` | 人・委任・ランナーの集まり | 委任した人がチームを外れた次の要求で集まりから消える | 読み手の失敗を投げる |
 | `authorize` | 見える要素を `allow` | 見えるアイテムと見えないアイテムの混ざり・移す途中の名前だけの読み | 見えないは 404、委任の `human_only` は要求全体の 403、種類の不足は 403、メンバーの持ち主だけの操作はアイテムの 403、読み手の失敗は投げる |
