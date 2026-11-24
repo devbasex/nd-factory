@@ -508,7 +508,7 @@ NDF 11.0.32 への移行に合わせて全体の設計を見直し、設計の�
 | #133 | 招待・GitHub App の導入・持ち込みのキー・実行の設定・上限額・セッションの取り消しの行が無い | [data.md](data.md)・この文書の集約 |
 | #134 | NDF の進め方 auto・fast の承認ゲートの自動の通過を扱っていない | [execution.md](execution.md) |
 | #135 | 子へ渡す環境変数・引継ぎ文書の保持・承認資料の材料が NDF 11.0.32 と食い違う | [execution.md](execution.md) |
-| #136 | 固定の点が 11.0.12 のままで、照合が空振り | [execution.md](execution.md) の決定 104・`ndf-pin.json` |
+| [#136](https://github.com/devbasex/nd-factory/issues/136) | 2 つの問題がある。1 つ目に、NDF の固定の点（`ndf-pin.json`）が 11.0.12（契約の版 8）のままで、受ける契約の組を版 8 に限る決定 104 のままでは、開発に使う 11.0.32 で作ったイメージが `contract_mismatch` になる。2 つ目に、契約の照合（`npm run ndf-contract`）は、照らす口の書き出し（`ndf-contract-use`。#2）がまだ無いため `skip: no-contract-use` で通り、照らすこと 1〜6 を 1 つも実行していない。固定の点を上げるだけでは照合は動かず、書き出しを足して照合が skip せずに通るまでを直す | [execution.md](execution.md) の決定 104・`ndf-pin.json`・照合の書き出し |
 | #137 | Value 12・14・16 の受け先が無い | [platform.md](platform.md)・[decisions.md](decisions.md) |
 | #138 | 費用の見込みに推論が無い | [platform.md](platform.md) |
 | #140 | 旧い側で承認・実装したオーガナイザーの会話を主にする画面の地図を、決定 4・5 が比べずにホーム（いま）へ戻している | [decisions.md](decisions.md) の決定 4・5・[screens.md](screens.md)・この文書の機能一覧 |
