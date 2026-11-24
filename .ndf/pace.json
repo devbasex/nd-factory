@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/contracts/schemas/ndf-settings/pace.schema.json",
+  "version": 1,
+  "boundary_paths": [
+    ".github/workflows/**",
+    ".github/zizmor.yml",
+    "infra/lib/pipeline-stack.ts",
+    "infra/setup/**",
+    "ndf-pin.json",
+    "AGENTS.md",
+    ".ndf/mvv.md",
+    ".ndf/mvv.json",
+    ".ndf/runtimes.json",
+    ".ndf/pace.json",
+    ".ndf/project.json",
+    ".ndf/review.json",
+    ".ndf/supervise.json",
+    ".ndf/worktree.json",
+    "LICENSE",
+    "SECURITY.md"
+  ]
+}
