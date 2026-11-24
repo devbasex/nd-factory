@@ -150,10 +150,11 @@ async function visibility(view: View, op: OperationDef, item: unknown, target: T
       // 見える集まりに入り、かつ本体の今の割り当てのチームに席がある（索引の値だけで通さない）
       const role = target.teamId === null ? undefined : view.seats.get(target.teamId);
       if (view.visible.has(target.projectId) && role !== undefined) return { projectId: target.projectId, role };
-      // I2 の例外: 割り当てを移す途中のプロジェクトの名前だけを読む要素は、移す先のチームの持ち主に通す
+      // I2 の例外: 割り当てを移す途中のプロジェクトの名前だけを読む要素は、移す先のチームの持ち主の本人にだけ通す。
+      // 持ち主の委任には通さない（受け入れの前のプロジェクトは、まだ割り当てたチームの中身ではない。Value 9）
+      if (view.principal.kind !== "human") return null;
       const transfer = await scope.transferTargetOf(op, item);
-      const inScope = view.principal.kind === "human" || view.principal.scope.projectIds.includes(target.projectId);
-      if (transfer !== null && transfer.projectId === target.projectId && view.seats.get(transfer.toTeamId) === "owner" && inScope) {
+      if (transfer !== null && transfer.projectId === target.projectId && view.seats.get(transfer.toTeamId) === "owner") {
         return { projectId: target.projectId, role: "owner" };
       }
       return null;

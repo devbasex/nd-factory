@@ -247,7 +247,7 @@ nd-factory/
 | `authorize` | 主体が DB の用意のタスク | 自分向けの HTTP の経路の操作だけ。見える集まりは token に結んだ用意するプロジェクトだけ |
 | `authorize` | 主体が見回り | 保守の操作だけ。利用者向けの操作は要求全体で拒む |
 | `authorize` | 主体がまだ結んでいない人（`newcomer`） | `sessions.create` だけ。見える集まりは空で、ほかの操作は要求全体で拒む |
-| `authorize` | 要素の対象が割り当てを移す途中のプロジェクトで、主体が移す先のチームの持ち主 | 名前だけを読む操作の要素だけ通す（I2 の例外）。ほかは 404 |
+| `authorize` | 要素の対象が割り当てを移す途中のプロジェクトで、主体が移す先のチームの持ち主の本人（人） | 名前だけを読む操作の要素だけ通す（I2 の例外）。持ち主の委任には通さない。ほかは 404 |
 | `authorize` | 対象の ID の種類の頭が操作と合わない | 404 `not_found`（`parseId` が `null`） |
 | `claimIdempotency` | 行が無い | 借りの行（持ち主の要求の ID・`fingerprint`・借りの期限）を条件つきで書き、`fresh` |
 | `claimIdempotency` | 済みの行で `fingerprint` が同じ | `replay`（控えた要素の結果） |
