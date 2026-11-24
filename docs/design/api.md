@@ -245,7 +245,7 @@ ID の種類の頭:
 | `execution_settings.update` | `/v1/execution_settings/update` | F17 | 依頼と材料の読み出しだけ（`execution_settings.get`） | 人だけ | 書く |
 | `model_keys.list` | `/v1/model_keys/list` | F17 | 道具 | — | 読む（read） |
 | `model_keys.create` | `/v1/model_keys/create` | F17 | 依頼と材料の読み出しだけ（`model_keys.list`） | 人だけ | 書く |
-| `model_keys.delete` | `/v1/model_keys/delete` | F17 | 道具 | — | 書く（manage） |
+| `model_keys.delete` | `/v1/model_keys/delete` | F17 | 依頼と材料の読み出しだけ（`model_keys.list`） | 人だけ | 書く |
 | `machines.list` | `/v1/machines/list` | F18 | 道具 | — | 読む（read） |
 | `machines.create` | `/v1/machines/create` | F18 | 依頼と材料の読み出しだけ（`machines.list`） | 人だけ | 書く |
 | `machines.delete` | `/v1/machines/delete` | F18 | 道具 | — | 書く（manage） |
@@ -263,12 +263,13 @@ ID の種類の頭:
 | `teams.create`・`seats.update`・`seats.delete`・`invitations.create`・`invitations.accept`・`invitations.delete` | 席はプロジェクトを見られる人を決める。席を足すことはチームの外の人へ見せることに当たる（P2）。席を変える・外す操作も、同じ判断の流れに置くため人だけにそろえる |
 | `delegations.create`・`delegations.revoke` | 委任が委任を作ると、人の確かめない範囲が広がる（Value 4） |
 | `notification_targets.create`・`model_keys.create` | 宛先の値と持ち込みのキーは秘密の値で、秘密を受け取る操作は人だけ（[全体の設計](overview.md) の「人へ残す判断」の C1） |
+| `model_keys.delete` | 持ち込みのキーは秘密で、消すと推論が止まり、同じ値を戻せない（C1）。MCP からは `model_keys.list` で消す対象（名前・作った日・最後に使った日。値は出さない）を確かめられる |
 | `notification_targets.authorize` | Slack の登録を始め、認可の取引を人のサインインのセッションに結ぶ。`notification_targets.create` と同じセッションで呼ぶ必要がある（[実行の文書の Slack の登録](execution.md#slack-の登録)） |
 | `execution_settings.update`・`spend_caps.update` | 推論の手段と上限額は請求の額を変える |
 | `machines.create` | 登録の token（秘密）を発行する |
 | `sessions.create`・`sessions.delete`・`logins.create`・`logins.delete`・`github_installations.link` | 人のブラウザーの中の流れ（サインイン・IdP のログインをつなぐ戻り・GitHub の導入の戻り）で、委任の主体が通る流れでない。`logins.delete` は最後の 1 つのログインを外す要求を 409 で拒む |
 
-外す・狭める操作は、見える範囲も費用も広げないため委任から呼べる。当たるのは `repositories.remove`・`notification_targets.delete`・`model_keys.delete`・`machines.delete` である。
+外す・狭める操作は、見える範囲も費用も広げないため委任から呼べる。当たるのは `repositories.remove`・`notification_targets.delete`・`machines.delete` である。`model_keys.delete` は秘密を扱うので、狭める操作でも人だけにする（上の表）。
 
 ### ランナー・手元のマシンの HTTP の経路
 
@@ -839,7 +840,7 @@ API の要素の項目・型・必須か・理由のコードは、形の正本�
 
 ### 決定 57: 問いに人だけが答える範囲を 1 つにするため、問いを作るときに実行の文書の区分の表で「人だけか」を決め、API はその値で要素ごとに断る
 
-[実行の文書の区分の表](execution.md#区分とだれが答えられるか)（実行の文書の決定 72）は `ndf-ask:human-action` と知らない区分を人だけにする。「レッドラインに当たる問い」だけを人だけにする形では、レッドラインの区分は承認の依頼になり問いにならないため、人だけの問いが 0 件になる。区分の表を正本にすると、知らない区分も人だけ（強い側）になり Value 4 を弱めない。
+[実行の文書の区分の表](execution.md#区分とだれが答えられるか)（実行の文書の決定 72）は `ndf-ask:irreversible`・`ndf-ask:human-action` と知らない区分を人だけにする。「レッドラインに当たる問い」だけを人だけにする形では、レッドラインの区分は承認の依頼になり問いにならないため、人だけの問いが 0 件になる。区分の表を正本にすると、知らない区分も人だけ（強い側）になり Value 4 を弱めない。
 
 採らなかった案: API の文書に区分の一覧をコピーする形は、答えが 2 か所になり、片方だけを直したときに食い違いが戻る（[決定 1](decisions.md#決定の記録)）。
 
