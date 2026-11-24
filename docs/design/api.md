@@ -237,7 +237,7 @@ ID の種類の頭:
 | `notification_targets.authorize` | `/v1/notification_targets/authorize` | F15 | 依頼と材料の読み出しだけ（`notification_targets.list`） | 人だけ | 書く |
 | `notification_targets.create` | `/v1/notification_targets/create` | F15 | 依頼と材料の読み出しだけ（`notification_targets.list`） | 人だけ | 書く |
 | `notification_targets.test` | `/v1/notification_targets/test` | F15 | 道具 | — | 書く（manage） |
-| `notification_targets.delete` | `/v1/notification_targets/delete` | F15 | 道具 | — | 書く（manage） |
+| `notification_targets.delete` | `/v1/notification_targets/delete` | F15 | 依頼と材料の読み出しだけ（`notification_targets.list`） | 人だけ | 書く |
 | `delegations.list` | `/v1/delegations/list` | F16 | 道具 | — | 読む（read） |
 | `delegations.create` | `/v1/delegations/create` | F16 | 依頼と材料の読み出しだけ（`delegations.list`） | 人だけ | 書く |
 | `delegations.revoke` | `/v1/delegations/revoke` | F16 | 依頼と材料の読み出しだけ（`delegations.list`） | 人だけ | 書く |
@@ -256,7 +256,7 @@ ID の種類の頭:
 
 #### オーガナイザーと会話（F24・F25）
 
-形と決まりは [オーガナイザー](organizer.md) にある。会話の操作は承認の依頼と問いを変えない（I23）。オーガナイザーの専用の委任からは、人だけの操作・`manage` の操作に加えて、`approvals.answer`・`questions.answer`・下の表の書き込み（会話へ送る・取り下げるを含む）・委任の操作を 403 で断る（I24）。会話へ送る・取り下げる・終える・再開するは、立てた人（送る・取り下げる・終えるは立てた人のふつうの委任も）だけが呼べ、ほかの人とその委任は 403 `organizer_owner_only` にする（[オーガナイザーの立てた人だけが動かす](organizer.md#立てた人だけが動かす)）。
+形と決まりは [オーガナイザー](organizer.md) にある。会話の操作は承認の依頼と問いを変えない（I23）。オーガナイザーの専用の委任からは、人だけの操作・`manage` の操作に加えて、`approvals.answer`・`questions.answer`・下の表の書き込み（会話へ送る・取り下げるを含む）・委任の操作を 403 で断る（I24）。会話へ送る・取り下げる・終える・再開するは、立てた人（送る・取り下げるは立てた人のふつうの委任も。終える・再開するは人だけで、委任からは 403 `human_only`）だけが呼べ、ほかの人とその委任は 403 `organizer_owner_only` にする（[オーガナイザーの立てた人だけが動かす](organizer.md#立てた人だけが動かす)）。
 
 | 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | 人だけか | 読む / 書く |
 | --- | --- | --- | --- | --- | --- |
@@ -279,6 +279,7 @@ ID の種類の頭:
 | `teams.create`・`seats.update`・`seats.delete`・`invitations.create`・`invitations.accept`・`invitations.delete` | 席はプロジェクトを見られる人を決める。席を足すことはチームの外の人へ見せることに当たる（P2）。席を変える・外す操作も、同じ判断の流れに置くため人だけにそろえる |
 | `delegations.create`・`delegations.revoke` | 委任が委任を作ると、人の確かめない範囲が広がる（Value 4） |
 | `organizers.close` | 戻せない `ended` へ移し、状態の S3 にある会話の控え（claude の会話の記録）を消す期限を決める。取り消せない操作なので、画面で消える対象と結果を読んだ立てた人だけが確定する（C4） |
+| `notification_targets.delete` | Slack の通知先を外すと、bot token を置いた Secrets Manager の秘密も消す（[土台の文書の決定 90](platform.md#決定の記録)）。秘密に触れる操作なので人だけにする（C1） |
 | `machines.delete` | 登録を外すと、そのマシンの登録の token が受けられる経路が消去の知らせだけに変わり、マシンの権限が変わる（C2）。人が画面で外すマシンと、その上の未消去の会話の記録を読んでから確定する |
 | `organizers.create`・`organizers.resume` | どちらも立てた人の名で専用の委任（期限 30 日）を作る。委任から呼べると、委任が委任を作ることになり、`delegations.create` を人だけにした理由と同じく人の確かめない範囲が広がる（Value 4） |
 | `notification_targets.create`・`model_keys.create` | 宛先の値と持ち込みのキーは秘密の値で、秘密を受け取る操作は人だけ（[全体の設計](overview.md) の「人へ残す判断」の C1） |
@@ -288,7 +289,7 @@ ID の種類の頭:
 | `machines.create` | 登録の token（秘密）を発行する |
 | `sessions.create`・`sessions.delete`・`logins.create`・`logins.delete`・`github_installations.link` | 人のブラウザーの中の流れ（サインイン・IdP のログインをつなぐ戻り・GitHub の導入の戻り）で、委任の主体が通る流れでない。`logins.delete` は最後の 1 つのログインを外す要求を 409 で拒む |
 
-外す・狭める操作は、見える範囲も費用も広げないため委任から呼べる。当たるのは `repositories.remove`・`notification_targets.delete` である。`machines.delete` は権限を変えるので人だけにする（上の表）。また、`machines.delete` はマシンの登録を外すだけで、オーガナイザーの会話の記録を消した確認の代わりにはならない。外したマシンの未消去の記録は残り、割り当ての移しの受け入れを待たせ続ける（[オーガナイザーの手元のマシンの会話の記録](organizer.md#会話の控え)）。`model_keys.delete` は秘密を扱うので、狭める操作でも人だけにする（上の表）。
+外す・狭める操作は、見える範囲も費用も広げないため委任から呼べる。当たるのは `repositories.remove` である。`notification_targets.delete` は Slack の通知先の bot token の秘密を消し、`machines.delete` は権限を変えるので、どちらも人だけにする（上の表）。また、`machines.delete` はマシンの登録を外すだけで、オーガナイザーの会話の記録を消した確認の代わりにはならない。外したマシンの未消去の記録は残り、割り当ての移しの受け入れを待たせ続ける（[オーガナイザーの手元のマシンの会話の記録](organizer.md#会話の控え)）。`model_keys.delete` は秘密を扱うので、狭める操作でも人だけにする（上の表）。
 
 ### ランナー・手元のマシンの HTTP の経路
 
