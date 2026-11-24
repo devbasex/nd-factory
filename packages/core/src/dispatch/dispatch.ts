@@ -307,7 +307,10 @@ function checkTime(req: Request): void {
 }
 
 // taken は全部か無かの操作で、この要求が借りた冪等の鍵の借りの行を集める（確定しなかったときに手放すため）
-type Ctx = { readonly req: Request; readonly principal: Principal; readonly sessionRevokedAt: string | null; readonly op: OperationDef; readonly handler: Handler; readonly taken: IdempotencyRow[] };
+type Ctx = { readonly req: Request; readonly principal: Principal; readonly sessionRevokedAt: string | null; readonly op: OperationDef; readonly handler: Handler; readonly taken: IdempotencyRow[];
+  // 冪等の鍵の済みの行から、前の要求で確定した結果を返した要素の番号。全部か無かで今回の要素が確定しなくても、この結果は置き換えない
+  readonly replayed: Set<number>;
+};
 
 // 要素の結果を操作の結果の形で照らし、照らした値（形に無い鍵を除いた値）を返す。合わなければ 503 unavailable
 function resultOf(c: Ctx, value: unknown): ItemResult {
@@ -380,7 +383,10 @@ async function prepare(c: Ctx, index: number, parsed: ParsedItem, authz: ItemAut
       req.log.error("冪等の鍵の表に届かない", { error: errorName(error) });
       throw halt(503, "unavailable");
     }
-    if (claimed.kind === "replay") return claimed.result;
+    if (claimed.kind === "replay") {
+      c.replayed.add(index);
+      return claimed.result;
+    }
     if (claimed.kind === "in_progress") return failure(409, "in_progress");
     if (claimed.kind === "reused") return failure(422, "idempotency_key_reused");
     leased = claimed.leased;
@@ -534,9 +540,12 @@ async function allOrNothingOnce(c: Ctx, parsed: readonly ParsedItem[], authz: re
     prepared.push(await prepare(c, index, item, authz[index]));
   }
   const notApplied = failure(409, "not_applied");
+  // 今回確定しなかった要素の結果だけを置き換える。前の要求で確定した結果（冪等の鍵の送り直し）は、ほかの要素の失敗によらずそのまま返す
+  const unapplied = (results: readonly ItemResult[], to: (r: ItemResult, element: number) => ItemResult): ItemResult[] =>
+    results.map((r, element) => (c.replayed.has(element) ? r : to(r, element)));
   for (let rebuilds = 0; ; rebuilds += 1) {
     const results = prepared.map((p) => (isHandled(p) ? p.result : p));
-    if (results.some((r) => !r.ok)) return results.map((r) => (r.ok ? notApplied : r));
+    if (results.some((r, element) => !r.ok && !c.replayed.has(element))) return unapplied(results, (r) => (r.ok ? notApplied : r));
 
     const parts = prepared.flatMap((p, index) => (isHandled(p) && (p.writes.length > 0 || p.leased !== null) ? [partOf(req, principal, op, index, p, p.result, p.writes)] : []));
     if (parts.length === 0) {
@@ -566,8 +575,8 @@ async function allOrNothingOnce(c: Ctx, parsed: readonly ParsedItem[], authz: re
     }
     if (failed.some((f) => f.role === "audit")) throw halt(503, "audit_unavailable");
     // 要求元の照らしの件が外れたら、どの要素も 409 state_mismatch
-    if (failed.some((f) => f.guarded)) return results.map(() => failure(409, "state_mismatch"));
-    return results.map((_, element) => {
+    if (failed.some((f) => f.guarded)) return unapplied(results, () => failure(409, "state_mismatch"));
+    return unapplied(results, (_, element) => {
       const mine = failed.filter((f) => f.element === element);
       const p = prepared[element];
       // rebuild の件だけが外れた要素は、ほかの要素の外れで確定しなかっただけ
@@ -631,7 +640,7 @@ async function run(req: Request): Promise<DispatchResult> {
   valid.forEach((v, i) => (authz[v.index] = decision.items[i]));
   req.seen.authz = authz;
 
-  const c: Ctx = { req, principal, sessionRevokedAt, op, handler, taken: [] };
+  const c: Ctx = { req, principal, sessionRevokedAt, op, handler, taken: [], replayed: new Set() };
   try {
     const results = op.allOrNothing === null ? await eachItem(c, parsed, authz) : await allOrNothing(c, parsed, authz);
     return await finish(req, { kind: "items", items: results });

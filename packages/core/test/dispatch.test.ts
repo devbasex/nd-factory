@@ -693,6 +693,19 @@ describe("dispatch: ハンドラーの外へ働きかける前の照らし・外
     ]);
   });
 
+  it("全部か無かで前の要求で確定した要素の送り直しは、ほかの要素が失敗しても確定した結果のまま返す", async () => {
+    const { table, deps } = setup();
+    const done = { project_id: P_A, title: "one", idempotency_key: IDEM_1 };
+    const first = await dispatch(call("notes.bulk", [done]), deps);
+    expect(itemsOf(first)).toEqual([{ ok: true, item: { title: "one" } }]);
+    table.seed("sprints", { pk: `PROJECT#${P_A}`, sk: "NOTE#two", schema_version: 1, version: 1, title: "two" });
+    const second = await dispatch(call("notes.bulk", [done, { project_id: P_A, title: "two", idempotency_key: IDEM_2 }], { requestId: "req-2" }), deps);
+    expect(itemsOf(second)).toEqual([
+      { ok: true, item: { title: "one" } },
+      { ok: false, status: 409, reason: "state_mismatch" },
+    ]);
+  });
+
   it("return_existing の件が外れたら既にある行の結果を返し、付随する状態の書き込みを確定しない", async () => {
     const eventKey = { pk: `PROJECT#${P_A}`, sk: "EVENT#1" };
     const event: Handler = async (item) => {
