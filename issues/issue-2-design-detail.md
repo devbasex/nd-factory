@@ -686,7 +686,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 - `countRowVersions`
   - 目的: 行の種類の、ある版の読み手を外してよいか（その版の行が表に残っていないか）を、保存してある値だけで確かめる（版を上げる子の手順の 5）。`migrateTable` の `refused` や `append_only` は、書き手の版の行と保存の行の比べの結果で、比べで同じになる行（`narrow` を通しても値の変わらない次の版の行）と、`writeVersion` が `latest.version` でない行の種類（3b の後）の行を数えないため、この確かめに使わない
   - 処理の手順: `migrateTable` と同じに `db.scan`（`consistent: true`・`MIGRATE_PAGE_SIZE`）で走査し、残り時間が `MIGRATE_RESERVE_MS` 以下になったら最後に数えた行の鍵を `cursor` に返す。行ごとに `TableSpec.rows` の `skPattern` で行の種類を決め（当たらなければ `row_kind_unknown`）、保存してある `schema_version` の値で数える。数える欄は、1 以上の整数ならその数、列が無ければ `absent`、ほかの値（文字列の `"1"` を含む）は `invalid`。`readRow` も `repair` も `narrow` も通さず、`writeVersion` によらずどの行も数える（記録の表も同じ）
-  - 事後条件: `VersionCounts` は `Record<行の種類の名前 \| "row_kind_unknown", Record<"absent" \| "invalid" \| \`${number}\`, number>>`。返した `cursor` より前の行は 1 行ずつ数えてある。ログと戻り値には行の種類の名前・版・数だけを載せ、鍵の値と列の値を載せない
+  - 事後条件: `VersionCounts` は `Record<行の種類の名前 \| "row_kind_unknown", Record<"absent" \| "invalid" \| \`${number}\`, number>>`。返した `cursor` より前の行は 1 行ずつ数えてある。関数は再開の位置として、最後に数えた行の鍵を内部用の `cursor` で返す。ログと、走査を終えたときの集計（`VersionCounts`）には、行の種類の名前・版・件数だけを出し、鍵の値と列の値を出さない
   - 副作用: 表の走査だけ（Lambda の権限はその表の読みだけで、書きを持たない。`migrate` の Lambda の予約の同時実行を 0 にしている間も起こせる）
 
 `Db` に足すポートと、条件つきの書き込み（`packages/core`。[横断の部品の関数の仕様](#関数の仕様この課題で足すもの) にも並べる）:
