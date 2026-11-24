@@ -32,7 +32,8 @@ e2e で手数とページの数を数え、上限を超えたら落とす（決�
 | S3 承認 | 会話の承認待ちの項目か承認待ちの一覧 | 承認の確定 | 2（承認待ちのリンクか行 → 承認する） | 1（承認の詳細） | 確定から結果の表示まで 2 秒以内 |
 | S3 差し戻し | 同じ | 差し戻しの確定 | 3（リンクか行 → 差し戻す → 確かめで確定）＋理由の入力 | 1 | 同じ |
 | S4 問い | 会話の問いの項目・承認待ちの一覧か知らせ | 答えの確定 | 3（問いのリンクか行 → 選択肢 → 答える） | 1（問い） | 同じ |
-| S5 知らせから承認 | 端末の知らせ（Web Push）か Slack | 承認の確定 | 2（知らせ → 承認する） | 1（承認の詳細。会話を通らない） | 知らせを押してから承認資料が読めるまで 2 秒以内 |
+| S5 知らせから承認 | 端末の知らせ（Web Push） | 承認の確定 | 2（知らせ → 承認する） | 1（承認の詳細。会話を通らない） | 知らせを押してから承認資料が読めるまで 2 秒以内 |
+| S5 Slack から承認 | Slack | 承認の確定 | 3（Slack の URL → 承認待ちの行 → 承認する） | 2（承認待ちの一覧 → 承認の詳細。Slack はプロジェクトを指す URL を運ばない） | 同じ |
 | S6 移動中に読む | オフラインで Web アプリを開く | 最後に受け取ったスプリントと承認資料が読める | S2・S3 と同じ | 同じ | 端末の控えから 1 秒以内 |
 | サインインから | サインインの画面 | オーガナイザー（最後に開いた会話） | 1（Google か GitHub）＋ IdP の画面 | 1 | — |
 
@@ -66,7 +67,13 @@ HTTP の経路は 16 本にする。機能ごとの一覧の画面・タブの H
 | R16 | `/approvals` | 承認待ちの一覧 | 主 |
 
 - サインインの戻り（認可コードと `state` の検索の値）は `/` で受け、受けたら履歴から検索の値を消す
+- サインインの前に開いた画面へ、サインインの後に戻す。知らせから開いた承認の詳細を、セッションが切れていても探し直さずに読めるようにするためである。手順は次のとおり
+  1. ログインの控えが無いか、token を取り直せずにサインインへ移るとき、開いていた画面の HTTP の経路（path と検索の値）を、IdP へ渡す `state` の値をキーにしてタブの `sessionStorage` に置く
+  2. 戻りで `state` を照らした後、同じキーの経路を読み、すぐ `sessionStorage` から消す
+  3. 経路は、`/` で始まり `//` と `\` で始まらず、画面の地図の HTTP の経路（R1 を除く）に合うときだけ使う。合わないとき・無いときは `/` へ移る。外の URL へは移らない
+  4. 使える経路へは履歴を置き換えて移る。移った画面は通常どおり API の認可を受け、割り当ての外なら「見つからない」を出す
 - GitHub App を入れた後の戻りは R10 で受ける（検索の値を保ったまま、登録の候補を読み直す）
+- Slack の通知先を足すときの OAuth の戻り（認可コードと `state` の検索の値）は R14 の `/me` で受ける。Slack アプリには、画面のオリジンに `/me` を付けた HTTPS の絶対 URL を戻り先として登録する。登録は `notification_targets.authorize` で始め、サーバーが `state` を作って利用者とセッションに結ぶ。戻りでは `state` を登録を始めたタブの `sessionStorage` の値と照らし、一致したときだけ認可コードと `state` を `notification_targets.create` へ渡す。サーバーは同じ利用者とセッションの未使用の取引かを確かめてから引き換える。照らした `state` と検索の値はすぐ消す（[実行の文書の Slack の登録](execution.md#slack-の登録)）
 - 地図に無い HTTP の経路は `/` へ履歴を置き換えて移る。転送の表は持たない
 - R2 は、端末の控えに最後に開いた会話（R15）があり今も読めればその会話を、無ければ一覧を出す。PC とタブレットの幅では一覧と会話を 2 段で並べ、スマートフォンの幅では 1 つずつ出す
 - チームを作る・委任を発行する・手元のマシンを登録するは、それぞれ R9・R14・R11 の中のダイアログにし、HTTP の経路を足さない
@@ -80,9 +87,11 @@ graph TD
     C -->|承認待ちの項目| A[R6 承認の詳細]
     C -->|問いの項目| Q[R7 問い]
     C -->|フェーズの報告・レーンの動き| S[R5 スプリントの詳細]
-    PU[端末の知らせ・Slack] -->|承認の依頼| A
+    SL[Slack] -->|共通の URL| W
+    PU[端末の知らせ] -->|承認の依頼| A
     PU -->|問い| Q
-    PU -->|終わった・止まった| S
+    PU -->|終わった・止まった・途中で上限| S
+    PU -->|始める時に上限| U
     PU -->|オーガナイザーが止まった| C
     W[R16 承認待ちの一覧] -->|行| A
     W -->|行| Q
@@ -248,12 +257,22 @@ graph TD
 
 ### サインアウトで消す
 
-サインアウト（自分の設定の「サインアウト」）は、次をこの順で行い、終わってからサインインの画面へ移る。
+サインアウト（自分の設定の「サインアウト」）は、サーバーでこのセッションの refresh token を失効させてから、端末の控えを消す。失効の要求にはログインの控えが要るため、控えを消すのは失効の後にする。次をこの順で行う。
 
 1. この端末の Web Push の購読を外し、サーバーの通知先からこの端末を外す。つながっていないときは外す操作を確定待ちに残さない。サーバーが次に送ろうとして購読の失効を受けたときに外す
 2. 確定待ちと控えて送る操作を捨てる（捨てる数を確かめのダイアログで出す）
-3. IndexedDB のデータベースと鍵を消す
-4. ログインの控えを消し、IdP のサインアウトへ移る
+3. つながっていれば `sessions.delete` を呼び、このセッションの refresh token を Cognito で取り消す（[API の文書の token の寿命](api.md#token-の寿命)）。失敗しても、つながっていなくても、次の段へ進む。サインアウトを止めると、端末に前の利用者の控えが残るためである
+4. IndexedDB のデータベースと鍵を消す
+5. ログインの控えを消す
+6. 移る先を、3 の結果とつながりで決める（下の表）
+
+| 3 の失効 | つながり | 移る先 |
+| --- | --- | --- |
+| 済んだ | つながっている | IdP のサインアウトへ移る。IdP からはアプリのサインインの画面（`/signin`）へ戻る |
+| 済まなかった（`sessions.delete` が失敗した） | つながっている | IdP へ移らず、アプリのサインインの画面に下の警告を出す。警告の下に「IdP からもサインアウトする」を置き、押すと IdP のサインアウトへ移る |
+| 済まなかった（つながっていない） | つながっていない | IdP へ移らず、アプリのサインインの画面に下の警告を出す。画面の殻は Service Worker の控えから出す |
+
+警告は「この端末からは消しました。サーバーでのサインアウトは済んでいません。ログインは期限（最長 30 日）まで切れません」とする。失効を確定待ちに残さない。ログインの控えを消した後は、この端末から失効を送れないためである。つながっていないのに IdP へ移ると、IdP の接続の誤りの画面になり、警告を読めない。
 
 別の利用者がサインインしたときも、前の利用者の写しと鍵を消してから始める。
 
@@ -312,7 +331,7 @@ stateDiagram-v2
 | 言語を足す | 翻訳のファイルを 1 つ足し、言語の一覧（`apps/web/src/i18n/locales.ts`）に 1 行足す。画面のコードは変えない |
 | 言語の決め方 | 自分の設定の言語 → ブラウザの言語（`navigator.languages` の最初に当たるもの）→ 日本語。決まった言語を `<html lang>` に入れる |
 | 誤りの文 | API は理由のコード（`not_found`・`state_mismatch` など。[API の文書の誤りの形](api.md#誤りの形)）だけを返し、画面が `errors.reason.<コード>` の文に替える。表に無いコードは汎用の文を出し、コードの文字列をそのまま出さない（決定 35） |
-| 画面の外の文言 | Web Push と Slack の文面は、受ける利用者の言語で送り手が作る（[実行の文書](execution.md)が受ける）。画面と同じキーの決まりの翻訳のファイルを使う |
+| 画面の外の文言 | Web Push と Slack の文面は、知らせの送り手（サーバー）が、受ける利用者の言語の設定で、画面と同じ翻訳のファイルからキー `notifications.push.generic` の 1 文を引いて作る。Web Push の 1 文は暗号化した本文に入れ、Service Worker は訳さずにそのまま出す（[実行の文書の通知先](execution.md#通知先)） |
 
 ### 日時・数・金額
 
@@ -346,10 +365,10 @@ stateDiagram-v2
 | R8 `/p/:projectId/settings` | プロジェクトの設定 | F4・F5・F6 | `projects.get`・`projects.update`（名前）・`repositories.list`・`repositories.add`・`repositories.remove`・`github_installations.list`・`project_transfers.list`・`project_transfers.create`・`project_transfers.delete`・`projects.close` | 読めない | `project_transfers.create`・`project_transfers.delete`・`projects.close`（I3・P2） |
 | R9 `/t/:teamId` | チーム | F3・F4・F6 | `teams.get`・`teams.update`（名前）・`teams.create`・`seats.list`・`seats.update`・`seats.delete`・`invitations.list`・`invitations.create`・`invitations.delete`・`invitations.accept`（招かれた人が招待のリンクから開いたとき）・`projects.list`・`project_transfers.list`・`project_transfers.accept` | 読めない | `teams.create`・`seats.update`・`seats.delete`・`invitations.create`・`invitations.delete`・`invitations.accept`・`project_transfers.accept`（I3・P2） |
 | R10 `/t/:teamId/projects/new` | プロジェクトを作る | F4・F5 | `github_installations.list`（導入の状態とリポジトリの候補）・`github_installations.link`（GitHub から戻ったとき）・`projects.create`（割り当てとリポジトリの登録を同じ操作で） | 読めない | `github_installations.link`・`projects.create`（I3・P2） |
-| R11 `/t/:teamId/execution` | 実行の場所 | F17・F18 | `execution_settings.get`・`execution_settings.update`・`model_keys.list`・`model_keys.create`・`model_keys.delete`・`machines.list`・`machines.create`・`machines.delete` | 読めない | `execution_settings.update`・`model_keys.create`・`machines.create` |
+| R11 `/t/:teamId/execution` | 実行の場所 | F17・F18 | `execution_settings.get`・`execution_settings.update`・`model_keys.list`・`model_keys.create`・`model_keys.delete`・`machines.list`・`machines.create`・`machines.delete` | 読めない | `execution_settings.update`・`model_keys.create`・`model_keys.delete`・`machines.create` |
 | R12 `/t/:teamId/usage` | 使える量と費用 | F19 | `usage.get`・`usage_records.list`・`spend_caps.update` | 読めない | `spend_caps.update` |
 | R13 `/t/:teamId/audit` | 操作の記録 | F20 | `audit_records.list`（チームとそのプロジェクト、絞り込み: プロジェクト・主体・入口・期間） | 読めない | — |
-| R14 `/me` | 自分の設定 | F1・F2・F15・F16 | `users.get`・`users.update`・`logins.create`・`logins.delete`・`notification_targets.list`・`notification_targets.create`・`notification_targets.test`・`notification_targets.delete`・`delegations.list`・`delegations.create`・`delegations.revoke`・`sessions.delete`（サインアウト） | 読める（自分の設定だけ） | `logins.create`・`logins.delete`・`notification_targets.create`・`delegations.create`・`delegations.revoke`・`sessions.delete` |
+| R14 `/me` | 自分の設定 | F1・F2・F15・F16 | `users.get`・`users.update`・`logins.create`・`logins.delete`・`notification_targets.list`・`notification_targets.authorize`・`notification_targets.create`・`notification_targets.test`・`notification_targets.delete`・`delegations.list`・`delegations.create`・`delegations.revoke`・`sessions.delete`（サインアウト） | 読める（自分の設定だけ） | `logins.create`・`logins.delete`・`notification_targets.create`・`delegations.create`・`delegations.revoke`・`sessions.delete` |
 | R15 `/p/:projectId/organizers/:organizerId` | オーガナイザーの会話 | F24・F25 | `organizers.get`・`organizer_messages.list`・`organizer_messages.create`・`organizer_messages.withdraw`・`organizers.close`・`organizers.resume`・`notices.mark_read` | 読める（送るは控えて送る） | — |
 | R16 `/approvals` | 承認待ちの一覧 | F7・F9・F14 | `approvals.list`・`questions.list`（人を待つもの）・`sprints.list`（動いている）・`waiting_counts.get`・`notices.list`・`notices.mark_read` | 読める | — |
 
@@ -365,7 +384,7 @@ F1〜F20・F24・F25 はどれも 1 回以上この表に現れる。画面に�
 | 空 | 空の状態（何が無いか・次にすること） |
 | 誤り（5xx・通信の失敗） | 誤りの表示と「もう一度」。写しがあれば写しを残し、上に「読み直せませんでした（時刻）」 |
 | 見つからない（404。割り当ての外も同じ） | 「見つからないか、見る権限がありません」。存在するかを区別しない（I2）。そのプロジェクトの写しを消す |
-| 401 | ログインの控えで token を取り直し、取り直せなければサインインへ |
+| 401 | ログインの控えで token を取り直し、取り直せなければ、開いていた画面の経路を戻り先として持ってサインインへ（[画面の地図](#画面の地図)のサインインの戻り） |
 | オフライン | オフラインの帯を出し、写しを出す。控えない画面は「つながると読めます」 |
 
 ### オーガナイザー（一覧と会話）
@@ -505,7 +524,7 @@ F1〜F20・F24・F25 はどれも 1 回以上この表に現れる。画面に�
 
 | 画面 | 主な項目 | 主な操作 | 失敗と状態の見せ方 |
 | --- | --- | --- | --- |
-| 自分の設定（R14） | 呼び名（0〜32 字）・言語（選択）・時刻帯（選択）・サインインの手段（Google・GitHub）・通知先（この端末の Web Push・Slack）・委任の一覧（クライアントの名前・範囲・期限・最後に使った時刻・状態）・サインアウト | 設定を変える（`users.update`。控えて送る）・サインインの手段をつなぐ・外す（`logins.create`・`logins.delete`。つなぐは IdP へ移って戻る。最後の 1 つは外せない）・この端末へ知らせを受ける（`notification_targets.create`。押したときだけ許可を求める）・試す（`notification_targets.test`）・外す（`notification_targets.delete`）・委任を発行する（`delegations.create`。ダイアログ。token は 1 度だけ出し、写す操作を置く）・取り消す（`delegations.revoke`。確かめのダイアログ）・サインアウト（`sessions.delete`） | Web Push の許可を断られた: 端末の設定から許す案内。iOS でホーム画面に加えていない: 「ホーム画面に加えると知らせを受けられます」と手順（PRD20）。Slack の宛先の値は保存の後に出さず、末尾 4 字だけ |
+| 自分の設定（R14） | 呼び名（0〜32 字）・言語（選択）・時刻帯（選択）・サインインの手段（Google・GitHub）・通知先（この端末の Web Push・Slack）・委任の一覧（クライアントの名前・範囲・期限・最後に使った時刻・状態）・サインアウト | 設定を変える（`users.update`。控えて送る）・サインインの手段をつなぐ・外す（`logins.create`・`logins.delete`。つなぐは IdP へ移って戻る。最後の 1 つは外せない）・この端末へ知らせを受ける（`notification_targets.create`。押したときだけ許可を求める）・試す（`notification_targets.test`）・外す（`notification_targets.delete`）・委任を発行する（`delegations.create`。ダイアログ。token は 1 度だけ出し、写す操作を置く）・取り消す（`delegations.revoke`。確かめのダイアログ）・サインアウト（`sessions.delete`） | Web Push の許可を断られた: 端末の設定から許す案内。iOS でホーム画面に加えていない: 「ホーム画面に加えると知らせを受けられます」と手順（PRD20）。Slack は「Slack に追加」で Slack へ移って `/me` へ戻り、自分とアプリの DM を宛先にする（チャンネルは選べない。[実行の文書の通知先](execution.md#通知先)）。戻りの `state` が合わない・10 分を超えた・登録を始めた後に利用者やセッションが変わった: 「Slack の登録をやり直してください」。引き換えた結果に `chat:write` の権限が無い: 「Slack の権限が足りません。登録をやり直してください」。通知先を足す前に、利用の条件（自分だけが使う端末とアカウントに限る・ロック画面に出さない設定を勧める・見られたくない場面では外す）を出す。自分で設置した環境に Slack アプリの設定が無ければ、Slack の行を出さない |
 | チーム（R9） | チームの名前・席の一覧（呼び名・役割・加えた時刻）・招待の一覧・プロジェクトの一覧・受け入れ待ちの割り当て | 名前を変える（`teams.update`）・人を招く（`invitations.create`）・招待を取り下げる（`invitations.delete`）・役割を変える（`seats.update`）・外す（`seats.delete`。確かめ）・チームを作る（`teams.create`。ダイアログ）・プロジェクトを作る（R10 へ）・割り当てを受け入れる（`project_transfers.accept`。人だけ・確かめ）。招かれた人が招待のリンクから開いたときは、招待を受ける（`invitations.accept`）だけを出す | メンバーには操作を出さず読むだけ。最後の持ち主を外す・メンバーにする: 409 の理由を出す |
 | プロジェクトを作る（R10） | 名前（1〜100 字）・割り当てるチーム（今のチーム）・GitHub App の導入の状態・リポジトリの候補（主を 1 つ、サブを 0 以上選ぶ） | GitHub App を入れる（GitHub へ移り R10 へ戻る。戻りで `github_installations.link`）・作る（`projects.create`） | 主が 0 か 2 つ: 「主のリポジトリを 1 つ選んでください」（I1）。メンバーには画面への導線を出さず、直に開いたら「チームの持ち主に作成を頼んでください」と案内する |
 | プロジェクトの設定（R8） | 名前・リポジトリ（主・サブ）・割り当てたチーム・移す先と状態 | 名前を変える（`projects.update`）・リポジトリを足す（`repositories.add`）・外す（`repositories.remove`。主は外せない）・割り当てを移す（`project_transfers.create`。移す先のチームを選び、確かめ）・取り下げる（`project_transfers.delete`）・閉じる（`projects.close`。確かめ。閉じた後は見えなくなる） | 移す・閉じるは止まるスプリントの数を確かめのダイアログに出す。409（スプリントが止まりきっていない・移しの途中・資格情報の差し替えの途中）: 理由を出す。メンバーには操作を出さず、名前・リポジトリ・割り当てたチーム・移す先と状態を読むだけ |
@@ -583,15 +602,15 @@ Value 1 は「操作の手数と待ち時間を減らす変更を選ぶ」と書
 
 場面を文で書くだけの形は、増えた手数を検査で止められないので採らなかった。
 
-根拠: Value 1（MVV）
+根拠: Value 1（MVV バージョン 3）
 
 ### 決定 21: 画面を渡り歩かずに済むよう、HTTP の経路を 16 本にし、プロジェクトとチームを HTTP の経路の頭に持つ
 
-機能ごとに一覧の画面とタブの HTTP の経路を持つ形では、承認を待つものを 1 か所で読めず、HTTP の経路が機能の数だけ増える。人を待つものは承認待ちの一覧に集め、知らせ・タブの HTTP の経路・転送の HTTP の経路を持たない。会話を主にする形（決定 4）で、オーガナイザーの会話（R15）と承認待ちの一覧（R16）の 2 本を足した。プロジェクトに属する画面は `/p/:projectId` を持つ。URL だけでどのプロジェクトの何かが決まるので、Web Push と Slack から直に開ける。
+機能ごとに一覧の画面とタブの HTTP の経路を持つ形では、承認を待つものを 1 か所で読めず、HTTP の経路が機能の数だけ増える。人を待つものは承認待ちの一覧に集め、知らせ・タブの HTTP の経路・転送の HTTP の経路を持たない。会話を主にする形（決定 4）で、オーガナイザーの会話（R15）と承認待ちの一覧（R16）の 2 本を足した。プロジェクトに属する画面は `/p/:projectId` を持つ。URL だけでどのプロジェクトの何かが決まるので、Web Push から直に開ける。Slack はプロジェクトを指す URL を運ばず、承認待ちの一覧を開く（[実行の文書の通知先](execution.md#通知先)）。
 
 今のチームを HTTP の経路に持ち、プロジェクトを画面の中で選ぶ形は採らなかった。知らせの URL に選んだ状態を載せられず、認可の単位（プロジェクト）と HTTP の経路の単位がずれる。
 
-根拠: Value 1 / Value 9（MVV）
+根拠: Value 1 / Value 9（MVV バージョン 3）
 
 ### 決定 22: 会話から始め、人を待つものを 1 か所でも読めるよう、最初の画面をオーガナイザーの一覧と会話にし、承認待ちの一覧はプロジェクトをまたいで並べ、知らせの画面を別に持たない
 
@@ -599,7 +618,7 @@ Value 1 は「操作の手数と待ち時間を減らす変更を選ぶ」と書
 
 採らなかった案: ホーム（いま）を最初の画面にする形（#24 の設計）は、会話で指示する入口を持たない。知らせの一覧の画面を別に持つ形は、同じものを 2 か所に並べ、ナビゲーションの行き先を増やす。
 
-根拠: Mission / Vision / Value 1（MVV）
+根拠: Mission / Vision / Value 1（MVV バージョン 3）
 
 ### 決定 23: 知らせから承認の確定までを 2 手に保つため、「承認する」に確かめのダイアログを置かず、差し戻しは理由の欄を開く手で確かめを兼ね、取り消し・割り当てにはダイアログを置く
 
@@ -607,7 +626,7 @@ Value 1 は「操作の手数と待ち時間を減らす変更を選ぶ」と書
 
 すべての取り消せない操作に一律に確かめを置く形は、いちばん多い操作（承認）の手数を増やすので採らなかった。
 
-根拠: Value 1 / Value 3（MVV）
+根拠: Value 1 / Value 3（MVV バージョン 3）
 
 ### 決定 24: どの幅でも行き先を探さずに済むよう、ナビゲーションを 4 つの行き先に絞り、スマートフォンは下の帯・タブレットは細い帯・PC は横の帯に同じ順で並べる
 
@@ -618,7 +637,7 @@ Value 1 は「操作の手数と待ち時間を減らす変更を選ぶ」と書
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: PRD22 / PRD23
 
-根拠: Value 1 / Value 3（MVV）
+根拠: Value 1 / Value 3（MVV バージョン 3）
 
 ### 決定 25: 指でもマウスでも押し損じないよう、押せる要素をすべての幅で 44 px 以上にする
 
@@ -629,7 +648,7 @@ WCAG 2.2 の AA の下限は 24 px（2.5.8）で、44 px は拡張の基準（2.
 - 作り方: 標準に倣う
 - 比べた候補: STD23
 
-根拠: Value 1 / Value 3（MVV）
+根拠: Value 1 / Value 3（MVV バージョン 3）
 
 ### 決定 26: 配置の組を増やさないよう、区切りの幅を 640 px と 1024 px の 2 つにする
 
@@ -640,7 +659,7 @@ Primer の 5 つの区切りに合わせる形は、e2e で確かめる幅の組
 - 作り方: 自前で作る
 - 比べた候補: PRD23
 
-根拠: Value 3（MVV）
+根拠: Value 3（MVV バージョン 3）
 
 ### 決定 27: 操作を覚えずに使えるよう、1 文字のショートカットとコマンドパレットを最初の版に入れない
 
@@ -648,7 +667,7 @@ Primer の 5 つの区切りに合わせる形は、e2e で確かめる幅の組
 
 パレットとショートカットを入れる形は、行き先が 4 つの画面では得る手数が少ないので採らなかった。
 
-根拠: Value 1（MVV）
+根拠: Value 1（MVV バージョン 3）
 
 ### 決定 28: 暗号化されない置き場に中身を残さないよう、Service Worker は画面の殻と設定の値だけを控え、API の応答は画面が暗号化して IndexedDB へ置く
 
@@ -659,7 +678,7 @@ API の応答を Service Worker の控えの戦略で置く形は、暗号化さ
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: STD20 / LIB22
 
-根拠: Value 3 / Value 6（MVV）
+根拠: Value 3 / Value 6（MVV バージョン 3）
 
 ### 決定 29: 移動中に読めて端末に古いものを残し続けないよう、控える範囲を人を待つものと動いているスプリントに絞り、期間を受け取ってから 14 日にする
 
@@ -670,7 +689,7 @@ S6 で読みたいのは、オーガナイザーの一覧と開いた会話・�
 - 作り方: 自前で作る
 - 比べた候補: STD24 / PRD21
 
-根拠: Value 3 / Value 9（MVV）
+根拠: Value 3 / Value 9（MVV バージョン 3）
 
 ### 決定 30: 端末の控えを他の手段で読み出されないよう、取り出せない AES-GCM の鍵を Web Crypto で作り、IndexedDB に置いて 1 件ごとに暗号化する
 
@@ -681,7 +700,7 @@ S6 で読みたいのは、オーガナイザーの一覧と開いた会話・�
 - 作り方: 標準に倣う・ライブラリやサービスを使う
 - 比べた候補: STD24 / LIB21
 
-根拠: Value 3（MVV）
+根拠: Value 3（MVV バージョン 3）
 
 ### 決定 31: 知らせから開いてもサインインを挟まないよう、ログインの控え（refresh token）を暗号化した IndexedDB に置き、タブを閉じても残す
 
@@ -695,7 +714,7 @@ token をタブの `sessionStorage` に置くと、ホーム画面の Web アプ
 - 作り方: 標準に倣う
 - 比べた候補: STD24
 
-根拠: Value 1 / Value 3（MVV）
+根拠: Value 1 / Value 3（MVV バージョン 3）
 
 ### 決定 32: 取り消せない操作をオフラインで確定させないよう、操作を「控えて送る」「確定待ち」「つながってから押す」の 3 つに分ける
 
@@ -709,7 +728,7 @@ token をタブの `sessionStorage` に置くと、ホーム画面の Web アプ
 - 作り方: 自前で作る
 - 比べた候補: STD24 / STD27
 
-根拠: Value 3 / Value 4（MVV）
+根拠: Value 3 / Value 4（MVV バージョン 3）
 
 ### 決定 33: 写しとサーバーが食い違わないよう、サーバーを正にし、写しは読み直しで丸ごと置き換える
 
@@ -717,7 +736,7 @@ token をタブの `sessionStorage` に置くと、ホーム画面の Web アプ
 
 端末とサーバーの両方で書き換えて項目ごとに合わせる形は採らなかった。承認の依頼と問いのように片方（NDF）が決める中身には要らず、合わせ方の誤りが食い違いになる。
 
-根拠: Value 3 / Value 9（MVV）
+根拠: Value 3 / Value 9（MVV バージョン 3）
 
 ### 決定 34: 言語を足すときに画面のコードを変えないよう、翻訳のファイルは i18next の JSON v4 の形に倣い、引き当ては自前の小さな関数で行う
 
@@ -728,7 +747,7 @@ i18next を使う形は、要らない機能（名前空間の読み込み・検
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: LIB20 / STD26
 
-根拠: Value 5 / Value 6（MVV）
+根拠: Value 5 / Value 6（MVV バージョン 3）
 
 ### 決定 35: 誤りの文を言語ごとに出せるよう、API は理由のコードだけを返し、文は画面の翻訳のファイルが持つ
 
@@ -736,7 +755,7 @@ API が文を返すと、言語を足すたびに API の文面も訳すこと�
 
 API が利用者の言語で文を返す形は、言語の判定と文面が API と画面の 2 か所に分かれるので採らなかった。
 
-根拠: Value 4 / Value 5（MVV）
+根拠: Value 4 / Value 5（MVV バージョン 3）
 
 ### 決定 36: 時刻帯と地域で読み違えないよう、日時は UTC で受けて利用者の時刻帯で出し、24 時間以内は相対の時刻にする
 
@@ -747,7 +766,7 @@ API が利用者の言語で文を返す形は、言語の判定と文面が API
 - 作り方: 標準に倣う
 - 比べた候補: STD26
 
-根拠: Value 5（MVV）
+根拠: Value 5（MVV バージョン 3）
 
 ### 決定 37: まだ出ていない言語のために作り込まないよう、右から左の向きは作らず、CSS を論理の向きで書くことだけを決まりにする
 
@@ -755,15 +774,15 @@ API が利用者の言語で文を返す形は、言語の判定と文面が API
 
 向きの切り替えまで今作る形は、Value 5 の「先回りして作らない」に反するので採らなかった。
 
-根拠: Value 5（MVV）
+根拠: Value 5（MVV バージョン 3）
 
-### 決定 38: 知らせと Slack から直に画面を開けるよう、HTTP の経路を URL の path で持ち、地図の HTTP の経路には CDN が `index.html` を返す
+### 決定 38: 知らせから直に画面を開けるよう、HTTP の経路を URL の path で持ち、地図の HTTP の経路には CDN が `index.html` を返す
 
-Web Push の知らせと Slack の文面は URL だけを運ぶ。path の HTTP の経路なら、`/p/:projectId/approvals/:approvalId` を開くだけで承認の詳細が出る。オフラインでは Service Worker が控えた画面の殻を返す。CDN が地図の HTTP の経路へ `index.html` を返す設定は[プラットフォームの文書](platform.md)が受ける。
+Web Push のリンク先は、知らせの種類ごとの対象の画面とする。Slack のリンク先はホーム（いま）の `/` とする。通知に含める項目と種類ごとのリンク先は、[実行の文書の通知先](execution.md#通知先)に従う。path の HTTP の経路なら、`/p/:projectId/approvals/:approvalId` を開くだけで承認の詳細が出る。オフラインでは Service Worker が控えた画面の殻を返す。CDN は、画面の HTTP の経路を直に開いた要求を `index.html` に書き換え、静的なファイルは書き換えない（[プラットフォームの文書の決定 141](platform.md#決定の記録)）。サインインが切れていても、サインインの後に開いた画面へ戻る（[画面の地図](#画面の地図)のサインインの戻り）。
 
 `#` の後ろに HTTP の経路を置く形は採らなかった。得るのは CDN の設定が 1 つ減ることだけである。知らせと Slack に載せる URL が読みにくくなり、サインインの戻りの検索の値と並べて扱う所が増える。
 
-根拠: Value 1 / Value 3（MVV）
+根拠: Value 1 / Value 3（MVV バージョン 3）
 
 ### 決定 39: 画面を API の中身より先に作り切れるよう、ダミーデータを形の正本の見本から作り、すべての HTTP の経路を `scenario` と `connection` で動かす
 
@@ -771,7 +790,7 @@ Value 2 は、機能の画面をダミーデータで作り切ってから API �
 
 画面の中に手書きのダミーデータを置く形は、形の正本と 2 つの正本になるので採らなかった。
 
-根拠: Value 2（MVV）
+根拠: Value 2（MVV バージョン 3）
 
 ### 決定 120: メンバーが押せない操作に迷わないため、メンバーに許されない操作は画面から出さず、読む項目は出す
 
@@ -779,7 +798,7 @@ Value 2 は、機能の画面をダミーデータで作り切ってから API �
 
 押せなくして理由を添える形は、画面ごとに理由の文言が要り、手数も減らないので採らなかった。
 
-根拠: Value 1（MVV）
+根拠: Value 1（MVV バージョン 3）
 
 ## 未確認のまま残ること
 

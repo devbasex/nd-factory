@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/contracts/schemas/ndf-settings/review.schema.json",
+  "version": 1,
+  "focus": [
+    "秘密の値（client secret・token・鍵）とインフラの実際の値（アカウント ID・資源の ID・ARN・端点・実在の profile の名前・運用する環境の名前）を、コード・テスト・見本・文書・PR の本文に置いていないか。例は作り物の値（123456789012・us-west-2・acme・ops@example.com）だけか（AGENTS.md・MVV Value 7）",
+    "形を変えたときに packages/contracts を直して npm run generate の生成物をコミットしたか。型・API の仕様・MCP の道具・見本を手で写していないか（MVV Value 13）",
+    "承認済みの設計（docs/design/）を広げる・変える直しを実装の PR に入れていないか。設計を変えるなら設計 PR に分けているか",
+    "業務の規則がドメインにあり、HTTP と AWS の SDK に依存していないか。外のシステムとの接続がインタフェースの裏にあり、テストで差し替えられるか（MVV Value 11）",
+    "自前で作った仕組みに、広く使われている既存のライブラリ・サービスの組み込みの仕組みで置き換えられるものがないか。採らない理由が設計の記録にあるか（MVV Value 15）",
+    "CI のワークフローに AWS の資格情報を足していないか。cdk deploy を設置のコマンドの外で打つ手順を足していないか（MVV Value 8）",
+    "プロジェクトの中身と存在が、割り当てたチームの外から API・MCP・記録・通知・一覧の件数のどこからも見えないか。認可をサーバーの側で掛けているか（MVV Value 9）"
+  ]
+}

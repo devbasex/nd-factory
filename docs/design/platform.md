@@ -220,7 +220,7 @@ graph TD
 | Aurora Serverless v2 | PostgreSQL（自動の一時停止を持つ版、LIB80）。出口の無いサブネット。書き手 1 台・読み手なし。最小 0 ACU。最大 ACU は設定のファイルで受ける。Data API を有効にする（CDK の `enableDataApi: true`。使うのは DB の用意の関数だけ。決定 83） | Value 6（使わない間は計算の費用が 0） |
 | Aurora の SG | タスクの SG からの 5432 だけを受ける | DB へ接続するのはタスクだけ。DB の用意の関数は Data API で触れ、SG を通らない |
 | Cognito | 利用者プール。自分の登録を止め、Google（と GitHub）の IdP からだけ入る | Value 9（だれが入れるかをサーバーの側で決める） |
-| CloudFront と画面の S3 | 置き場は公開せず、配信は OAC で読む（LIB83）。料金は従量の課金（定額のプランに入らない）で、価格の区分は 100 | Value 3（HTTPS の配信で Service Worker が動く）・Value 6 |
+| CloudFront と画面の S3 | 置き場は公開せず、配信は OAC で読む（LIB83）。料金は従量の課金（定額のプランに入らない）で、価格の区分は 100。画面の HTTP の経路を直に開いても画面が出るよう、既定の振る舞いに viewer request の CloudFront Function を結び、path の最後の区切りに `.` を含まない要求を `/index.html` に書き換える（`/`・`/signin`・`/me`・`/p/*`・`/t/*`。地図に無い経路も画面が受けて `/` へ移す）。`.` を含む要求（`/config.json`・`/sw.js`・束のファイル）は書き換えず、S3 に無ければ 403 をそのまま返す。束のファイルは `/assets/*` の振る舞いに分け、関数を結ばない。403・404 を `index.html` に差し替える誤りの応答の設定は置かない（決定 141・LIB94） | Value 3（HTTPS の配信で Service Worker が動く）・Value 6・Value 1（知らせから画面を直に開く） |
 | 状態の S3 | 公開を止め、暗号化し、TLS だけ。NDF のファイルは 14 日で消す規則 | Value 7・Value 6 |
 | ECR | nd-factory 専用のリポジトリ（イメージごとに 1 つ）。ランナーのイメージは、設置のコマンドと反映のパイプラインが作ってここへ push する。ライフサイクルの規則で push の新しい版を戻せる数より多めに残し、古い版を消す（決定 87・LIB85） | Value 6（保管の費用を抑える）・Value 8（ダイジェストで引き、確認の値で縛る） |
 | Secrets Manager | 器は CDK が作り、値は人か API が入れる。名前は `<prefix>/<environment>/<用途>`（決定 90） | Value 7 |
@@ -294,7 +294,7 @@ Security Hub の ECS.2 は、ECS のサービス（`AWS::ECS::Service`）で公�
 | Aurora の計算 | 0 | 接続 0 本で 300 秒の後に一時停止（LIB80）。保守のために起きることがある（起きた後 20 分以上は止まらない） |
 | DynamoDB | 保存の量だけ | 要求の数の課金（LIB81） |
 | Cognito | 0 | 月の利用者 10,000 までは無料（下の単価の出典） |
-| CloudFront | 0 | 従量の課金。アカウントごとに毎月 1 TB・1,000 万回の要求までは無料（LIB83） |
+| CloudFront | 0 | 従量の課金。アカウントごとに毎月 1 TB・1,000 万回の要求までは無料（LIB83）。画面の経路の書き換えの関数は毎月 200 万回の呼び出しまで無料（LIB94） |
 | 掛かり続けるもの | 秘密の器の数・Aurora のストレージ・ECR の保管（残す版の数で上限がある）・ログの保管・S3 の保管 | 量に比例する。秘密の器が最も大きい（1 つ月 0.40 ドル） |
 
 ### 見込み
@@ -417,7 +417,8 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 | 使っていないコード | どこからも読まれないファイル・使われない書き出し・使われない依存（knip）。検査の CI は #1 が足す | Value 13 |
 | ワークフローの点検 | ワークフローの広すぎる権限・資格情報の持ち出し・固定していない動作の参照など（zizmor）。検査の CI は #1 が足す | Value 8 |
 | 依存の向き | `packages/contracts` → `packages/core` → `apps/*` の一方向に反する import・`apps/*` どうしの import・`infra` から `apps/*` への import（[詳細設計の依存の表](detail.md#クラスと関数の構造)）。検査の CI は #1 が足す | Value 1・Value 7 |
-| スタックのテストに足す行 | NAT が 1 件以上・タスクの SG に受け入れの規則・Lambda が VPC の中・`AWS::ECS::Service` か `TaskSet` が 1 件以上・タスクの役割に許可の文・Aurora の最小が 0 でない・表とバケットが消せる設定・PITR が無い | Value 6・I11 |
+| スタックのテストに足す行 | NAT が 1 件以上・タスクの SG に受け入れの規則・Lambda が VPC の中・`AWS::ECS::Service` か `TaskSet` が 1 件以上・タスクの役割に許可の文・Aurora の最小が 0 でない・表とバケットが消せる設定・PITR が無い・画面の配信の既定の振る舞いに経路の書き換えの関数が無い・`/assets/*` の振る舞いに関数がある・403 か 404 を差し替える誤りの応答の設定がある | Value 6・I11・Value 1 |
+| 画面の経路の書き換えの単体テスト | 書き換えの関数のコードが、`/p/prj_x/approvals/apr_y`・`/t/team_x/usage`・`/me`・`/signin`・`/`・地図に無い `/foo` を `/index.html` に変えない、または `/config.json`・`/sw.js`・`/assets/app.js` を書き換える（関数のコードを vitest で直に呼ぶ。決定 141） | Value 1・Value 3 |
 
 NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の定義のテスト）は基本の検査が受け持つ。設計の決まりを縛る検査は CI の必須のチェック（`.ndf/project.json` の宣言）に載せ、CI の定義のテストが食い違いを落とす。
 
@@ -523,6 +524,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | LIB91 | RDS Data API（Aurora PostgreSQL） | Aurora PostgreSQL 16.1 以上（13.11・14.8・15.3・17.4・18.3 以上も） | AWS のサービス | — | 無し | 条件つきで満たす。Aurora PostgreSQL の Serverless と provisioned のクラスタで使え、米国西部（オレゴン）を含む各リージョンに版の下限つきで載る。HTTPS の端点で SQL を打ち、Lambda を VPC に入れずに届く。一時停止した書き手へ Data API の要求が来ると、Aurora が書き手を再開してから処理する。再開の間の要求は `DatabaseResumingException` で断られ、数秒待って打ち直すよう示される。呼び出しは同期で、45 秒で終わらなければ取り消して時間切れを返す（`continueAfterTimeout` の既定は偽。真にすると文は止まらずに続く）。SDK の時間切れは 45 秒より長く（1 分以上を推す）する。トランザクションは、その ID を使う呼び出しが 3 分無いと時間切れになり自動で巻き戻り、最長 1 時間で巻き戻る。`transactionId` の無い文は自動で確定する。応答は 1 MiB まで。Aurora PostgreSQL 14 以上ではパスワードの暗号化に `scram-sha-256` だけを受ける。Data API は接続の池を持って呼び出しの間で使い回し、使い回す前に PostgreSQL では `DISCARD ALL` を打つ。池の接続が一時停止を妨げるかは書かれていない（一時停止は利用者の接続が開いている間は起きず、Data API の要求が頻繁だと止まらない、とだけある） | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.Aurora_Fea_Regions_DB-eng.Feature.Data_API.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.limitations.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.session-management.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api-timeouts.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.calling.cli.html ・ https://docs.aws.amazon.com/rdsdataservice/latest/APIReference/API_ExecuteStatement.html ・ https://docs.aws.amazon.com/rdsdataservice/latest/APIReference/API_BeginTransaction.html ・ https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html （2026-11-21） |
 | LIB92 | Lambda の非同期の呼び出し（待ち行列・再試行・最大の年齢） | — | AWS のサービス | — | 無し | 満たす。既定では関数が誤りを返すと 2 回まで再試行し、待ち行列に最大 6 時間置く。スロットリングとシステムの誤りでは、既定で 6 時間まで待ち行列へ戻して打ち直す。`MaximumRetryAttempts`（0〜2）と `MaximumEventAgeInSeconds`（60〜21,600 秒）で狭められる。待ち行列は結果整合で、同じ呼び出しを関数へ 2 回以上届けうるため、関数は重複を扱う必要がある | https://docs.aws.amazon.com/lambda/latest/dg/invocation-async-error-handling.html ・ https://docs.aws.amazon.com/lambda/latest/api/API_PutFunctionEventInvokeConfig.html （2026-11-21） |
 | LIB93 | Secrets Manager の版とラベル（`CreateSecret`・`PutSecretValue`・`UpdateSecretVersionStage`） | — | AWS のサービス | — | 無し | 満たす。値を持つ `CreateSecret` は最初の版を作り `AWSCURRENT` を付ける。`PutSecretValue` は `VersionStages` を渡さないと `AWSCURRENT` を新しい版へ移し、渡せばそのラベルだけを付ける（別の版に付いていたラベルは外れる）。`ClientRequestToken` が版の ID になり、同じ ID と同じ値の送り直しは何もしない（値が違えば失敗）。`UpdateSecretVersionStage` は `MoveToVersionId` と `RemoveFromVersionId` でラベルを移し、`AWSCURRENT` を移すと `AWSPREVIOUS` が自動で移る。ラベルを失った版は片付けの対象になるが、作って 24 時間の版は残る。Secrets Manager は結果整合で、ラベルを移した直後の `GetSecretValue` と `DescribeSecret` は前の版を返しうる（版の ID を指した読みはラベルの付き外しに依らない） | https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_CreateSecret.html ・ https://docs.aws.amazon.com/secretsmanager/latest/userguide/troubleshoot.html ・ https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_PutSecretValue.html ・ https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_UpdateSecretVersionStage.html （2026-11-21） |
+| LIB94 | CloudFront Functions（viewer request） | — | AWS のサービス | — | 無し | 満たす。ビューワーから要求を受けた時（viewer request）に軽い JavaScript を拠点で打ち、要求の URI を書き換えられる。常に無料の枠は毎月 200 万回の呼び出しで、超えた分は 100 万回 0.10 ドル | https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cloudfront-functions.html ・ https://aws.amazon.com/cloudfront/pricing/pay-as-you-go/ （2026-11-24） |
 
 ### 束の大きさの測り方
 
@@ -552,7 +554,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | `ALTER ROLE … PASSWORD` を advisory lock と同じトランザクションの中で打てること | 試していない | PostgreSQL の `ALTER ROLE` の頁を取得していない。[未確認のまま残ること](#未確認のまま残ること)へ移した |
 | AWS のクォータ（Lambda の同時実行・Fargate の vCPU）の既定の値 | 試していない | 値はアカウントとリージョンで違い、設置する人が Service Quotas で読む |
 
-調べた量: 候補 9 件・取得の試み 24 回（2026-11-17）。#32 で候補 8 件・取得の試み 13 回を足し、同じサービスの行（LIB81・LIB82・LIB84）は 1 行に畳んだ（2026-11-18）。CloudFront の料金の頁 2 つの取得と、束の大きさの測りを 2 回足した（2026-11-21）。#13 の DB の用意の Data API の関数への移しで、候補 3 件（LIB91〜LIB93）・取得の試み 13 回（LIB91 の頁 8・LIB92 の頁 2・LIB93 の頁 3）を足した（2026-11-21）。決定 83・95・96 の Data API・非同期の呼び出し・秘密の器の版の事実は、この 3 行を出典にする。
+調べた量: 候補 9 件・取得の試み 24 回（2026-11-17）。#32 で候補 8 件・取得の試み 13 回を足し、同じサービスの行（LIB81・LIB82・LIB84）は 1 行に畳んだ（2026-11-18）。CloudFront の料金の頁 2 つの取得と、束の大きさの測りを 2 回足した（2026-11-21）。#13 の DB の用意の Data API の関数への移しで、候補 3 件（LIB91〜LIB93）・取得の試み 13 回（LIB91 の頁 8・LIB92 の頁 2・LIB93 の頁 3）を足した（2026-11-21）。決定 83・95・96 の Data API・非同期の呼び出し・秘密の器の版の事実は、この 3 行を出典にする。画面の経路の書き換えで、候補 1 件（LIB94）・取得の試み 3 回を足した（2026-11-24）。
 
 ## 決定の記録
 
@@ -567,7 +569,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB80 / LIB81 / LIB82 / LIB83
 
-根拠: Value 6 / Value 4（MVV）
+根拠: Value 6 / Value 4（MVV バージョン 3）
 
 ### 決定 81: 存在をチームの外へ見せないため、サービスの表を持ち主のモジュールごとに分け、区切りの鍵の頭にプロジェクトかチームの ID を置く
 
@@ -580,7 +582,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB81
 
-根拠: Value 9 / Value 6（MVV）
+根拠: Value 9 / Value 6（MVV バージョン 3）
 
 ### 決定 82: 判断と記録を後から確かめられるよう、割り当て・答え・進捗の事象・費用・操作の記録を追記だけにし、形の版を 2 段で上げる
 
@@ -590,7 +592,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 採らなかった案: 状態の行も二重時間軸で持つ形は、書き込みが倍になり、事象の記録と同じ過去を 2 か所で持つ。反映のときに全件を書き換える形は、反映の途中に読めない項目ができる。
 
-根拠: Value 4・Value 8・P2（MVV）
+根拠: Value 4・Value 8・P2（MVV バージョン 3）
 
 ### 決定 83: 使わない間の費用を止めつつ NDF の進行表を動かすため、進行表の DB を Aurora Serverless v2 の 0 ACU にし、接続するのをランナーのタスクだけ、DB の用意を Data API だけにする
 
@@ -603,7 +605,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB80 / LIB91
 
-根拠: Value 6（MVV）
+根拠: Value 6（MVV バージョン 3）
 
 ### 決定 84: 他のプロジェクトの NDF の状態を読ませないため、進行表の DB をプロジェクトごとのデータベースと役割に分け、名前を無作為にする
 
@@ -613,7 +615,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 採らなかった案: チームごとに分ける形は、同じチームの別のプロジェクトを移したときに、移した先から元のプロジェクトの状態が読める。プロジェクトごとにクラスタを作る形は、ストレージと保守の起き上がりがプロジェクトの数だけ増える。
 
-根拠: Value 9 / Value 6（MVV）
+根拠: Value 9 / Value 6（MVV バージョン 3）
 
 ### 決定 85: NAT を置かずにタスクを外へ出すため、Fargate を公開のサブネットで公開 IP を付けて動かし、受け入れを空にする
 
@@ -626,7 +628,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB82
 
-根拠: Value 6（MVV）
+根拠: Value 6（MVV バージョン 3）
 
 ### 決定 86: 検出結果に例外を作らずに公開 IP を使うため、ECS のサービスとタスクセットを作らず、ECS.2 の抑止のルールも作らない
 
@@ -639,7 +641,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: STD81 / STD82
 
-根拠: Value 6 / Value 7（MVV）
+根拠: Value 6 / Value 7（MVV バージョン 3）
 
 ### 決定 87: 人が承認したものだけを反映するため、イメージを自前の ECR へ push し、テンプレートからダイジェストで引いて確認の値で縛る
 
@@ -649,7 +651,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 採らなかった案: イメージを CDK のアセットにする形（この決定の直す前の結論）。アセットのイメージは bootstrap のアセットのリポジトリにしか置けず（bootstrap の `image-publishing` の役割の書き込み先がそのリポジトリだけ）、bootstrap の規則はタグの付くアセットを消さない。自前の ECR へ写しても bootstrap の側に古い版が残る。古い版を CDK の CLI のアセットの片付け（`cdk gc`）で消す形も比べたが、片付けが設置する人の手の操作に依り、その機能は安定でない（`--unstable` を付けたときだけ動く）。bootstrap はほかのアプリと共有されうるため、その片付けはほかのアプリのアセットにも及ぶ。公開のレジストリのイメージをタグで引く形は、タグの指す中身が承認の後に変わりうり、外部のレジストリへの依存が増える。ARM64 にする形は、x86 の環境でのまねのビルドが遅く、設置の手順が増える。
 
-根拠: Value 8 / Value 6（MVV）
+根拠: Value 8 / Value 6（MVV バージョン 3）
 
 ### 決定 88: 知らせを操作の応答を待たせずに確実に送るため、知らせの表を送り出しの控えにし、表のストリームで送り手を起こす
 
@@ -662,7 +664,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB81
 
-根拠: Value 1 / Vision（MVV）
+根拠: Value 1 / Vision（MVV バージョン 3）
 
 ### 決定 89: 承認する人が 1 つの差分と確認の値で反映を承認できるよう、資源をアプリのスタックへまとめる
 
@@ -672,7 +674,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 採らなかった案: ネットワークと状態を別のスタックに分ける形は、パイプラインが複数のスタックの順序と差分を扱うように変わり、承認する人が読む差分が分かれる。
 
-根拠: Value 8（MVV）
+根拠: Value 8（MVV バージョン 3）
 
 ### 決定 90: 秘密を受け取れる主体を絞るため、秘密の器を用途ごとに分け、関数ごとに実行の時に使う器だけを名前で読めるようにする
 
@@ -684,19 +686,30 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 | `progress-db/*`（プロジェクトの役割の URL） | API の関数（引き換えでランナーへ渡す、保留の下りた行に結んだ版。ラベルでは読まない）・DB の用意の関数（結んだ版） | API の関数: `CreateSecret`・`PutSecretValue`・`DescribeSecret`。DB の用意の関数: `DescribeSecret`・`UpdateSecretVersionStage`（[パスワードの版](data.md#パスワードの版)） |
 | `github-app`（App の私有鍵） | API の関数（導入の token を作る） | 無し |
 | `web-push`（Web Push の私有鍵） | 知らせの送り手の関数だけ（VAPID の署名。STD60） | 無し |
-| `notify/*`（Slack の宛先の URL） | 知らせの送り手の関数だけ（送る） | API の関数: `CreateSecret`・`PutSecretValue`・`DeleteSecret`（通知先の登録・外し）。読まない |
+| `notify/*`（Slack の bot の token。宛先は利用者とアプリの DM） | 知らせの送り手の関数だけ（送る） | API の関数: `CreateSecret`・`PutSecretValue`・`DeleteSecret`（通知先の登録・外し）。読まない |
+| `slack-oauth`（Slack アプリの client secret） | API の関数だけ（通知先の登録で OAuth の認可コードを token に引き換える。LIB64） | 無し。自分で設置する人が Slack アプリを作らなければ器を作らず、画面は Slack の通知先を出さない |
 | `google-oauth`・`github-oauth`（client secret） | どの関数も読まない。利用者プールの IdP へは CloudFormation が動的参照で渡す | 無し |
 | API の関数が実行の時に使うほかの器（レーンの JWT の署名の鍵・Webhook の署名の秘密・持ち込みのキー） | API の関数だけ | 器の名前と許しは、読み手を作る子の課題が同じ変更で足す（読み手の無い器を許さない） |
 
 見回りの関数・表の移しの関数・タスクの役割は、どの器も読めない。見回りの GitHub の token の失効のやり直しは、失効を呼ぶモジュールの操作が器を読まずに済むかを #33 が決める（[GitHub の token の失効](data.md#github-の-token-の失効)）。読む器が要るなら、#33 がその器の名前を見回りの許しに足し、この表へ行を足す。`github-oauth` も、GitHub のログインを利用者プールの IdP として直に受けられないとき（[未確認のまま残ること](#未確認のまま残ること)）は、ログインを足す変更が読み手の関数と許しを同じ形で足す。
 
-値はログ・合成の出力・CI の記録に出さない。応答に載せるのは、`/v1/runner/exchanges/create` の引き換え（[API と MCP](api.md#ランナー手元のマシンの-http-の経路)・[実行](execution.md)）で、認可したホステッドのランナー（そのレーンの引き換えの token を出した 1 つのタスク）へ、そのレーンのプロジェクトの進行表の DB の URL（`progress-db/*` の、プロジェクトの行を強い整合で読んで差し替えの保留が無いことを照らした同じ読みの行に結んだ版。その版の ID（`progress_db_secret_version`）を `GetSecretValue` の `VersionId` に渡して読み、`AWSCURRENT` のラベルでは読まない。ラベルの読みは結果整合で、保留を下ろした直後に前の版を返しうるため。I10・[パスワードの版](data.md#パスワードの版)）と、`byok` ならそのチームの持ち込みのキーを返すときだけにする。ほかのプロジェクトの URL・ほかの器の値・手元のマシンへの DB の URL は、どの応答にも載せない。画面と API と MCP の応答は秘密の値を返さない（持ち込みのキーと通知先の宛先も、受け取った後は値を返さない）。
+値はログ・合成の出力・CI の記録に出さない。API の応答に秘密の値を載せるのは、次の表の場面だけである。表に無い応答（一覧・詳細などの通常の読み出し）は秘密の値を返さない。持ち込みのキーと通知先の宛先も、受け取った後は値を返さない。
+
+| 場面 | 返す秘密 | 受け取れる主体 | 返し方 |
+| --- | --- | --- | --- |
+| 委任の発行（`delegations.create`） | 委任の token | 発行した人（画面。人だけの操作） | 発行の応答で 1 回だけ。冪等の鍵の 2 回目は `null`（[API と MCP の冪等の鍵](api.md#冪等の鍵)） |
+| マシンの登録（`machines.create`） | 登録の token | 登録した人（画面。人だけの操作）。人はこれを手元のマシンへ写す | 同じ |
+| 手元のマシンの心拍（`/v1/machine/heartbeats/create`。登録を兼ねる最初の心拍を含む） | 差し替えた登録の token | その登録の token で呼んだ手元のマシン | 心拍の応答ごと。サービスは要約だけを持つ |
+| ランナーの引き換え（`/v1/runner/exchanges/create`） | レーンの token・プロジェクトの進行表の DB の URL・1 つのリポジトリに絞った GitHub の token・推論の一時の資格情報（`managed`）か持ち込みのキー（`byok`） | 認可したホステッドのランナー（下の段落） | 起動の直後に 1 回だけ |
+| ランナーの心拍（`/v1/runner/heartbeats/create`） | 取り直したレーンの token と資格情報 | そのレーンのランナー | 期限の前に取り直す |
+
+ランナーの引き換えで秘密の器から読んで返すのは、認可したホステッドのランナー（そのレーンの引き換えの token を出した 1 つのタスク）へ渡す 2 つだけである。1 つは、そのレーンのプロジェクトの進行表の DB の URL で、もう 1 つは、`byok` のときのそのチームの持ち込みのキーである（[API と MCP](api.md#ランナー手元のマシンの-http-の経路)・[実行](execution.md)）。DB の URL は `progress-db/*` の器から、プロジェクトの行を強い整合で読んで差し替えの保留が無いことを照らした、同じ読みの行に結んだ版を読む。その版の ID（`progress_db_secret_version`）を `GetSecretValue` の `VersionId` に渡して読み、`AWSCURRENT` のラベルでは読まない。ラベルの読みは結果整合で、保留を下ろした直後に前の版を返しうるためである（I10・[パスワードの版](data.md#パスワードの版)）。ほかのプロジェクトの URL・ほかの器の値・手元のマシンへの DB の URL は、どの応答にも載せない。
 
 理由: Value 7 は秘密を秘密の器から受けることを、I10・I11 は渡し先を絞ることを求める。関数の役割に頭の全体を許すと、その関数が使わない器（管理の役割・client secret・通知先）まで受け取れる主体が増える。API の関数は外から届く要求を受ける面で、受け取れる秘密が最も広く漏れうるため、特に管理の役割の器を外す。管理の役割の器を読めなければ、API の関数は Data API に渡す秘密を持たず、決定 83 の「Data API を呼べるのは DB の用意の関数だけ」が、`rds-data:*` を DB の用意の関数の役割だけに許すことと重なって IAM の上でも成り立つ（関数の役割を足す子の課題のスタックのテストが、その役割に `rds-data:*` と管理の役割の器の読みが無いことを照らす）。Web Push の私有鍵と Slack の宛先を使うのは送ることだけで、送るのは知らせの送り手だけのため（決定 88）、送り手だけが読み、API は宛先を書くだけにする。名前で許すと、新しい器は読み手を足す変更で許しも足すため、許しが使い道と離れて広がらない。DB の用意の関数に許す操作は #13 の詳細設計の `DbPrepFunction` にある。器を分けると、割り当てを移したときの差し替え・通知先を外したときの削除が 1 つの器で閉じる。1 つ月 0.40 ドルで、3 プロジェクトと 1 つの通知先で月 1.60 ドルの増えに留まる（[見込み](#見込み)）。
 
 採らなかった案: すべてを 1 つの器の JSON にまとめる形は、1 つの値を変えるたびに全体を書き換え、プロジェクトの間の値を同じ器で持つ。表に暗号化して置く形は、鍵の管理（KMS の鍵）の費用と部品が増える。API の関数に頭の全体を許し、管理の役割の器だけを拒む形は、器を足すたびに既定で読めるようになり、外し忘れが漏れになる。知らせの送り手へ API が宛先の値を渡す形は、知らせの表かストリームに秘密の値が載る。
 
-根拠: Value 7 / Value 9（MVV）
+根拠: Value 7 / Value 9（MVV バージョン 3）
 
 ### 決定 91: 同じ役割の処理を重ねないため、横断の部品を 1 か所に置き、外での直の利用を境界の検査で落とす
 
@@ -706,7 +719,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 採らなかった案: 入口ごとに判定と伏せ字を持つ形は、入口を足すたびに抜けが生じうる。
 
-根拠: Value 7 / Value 9（MVV）
+根拠: Value 7 / Value 9（MVV バージョン 3）
 
 ### 決定 92: 実際の値の混入を CI で止めるため、漏れの検査を形と照合の語の 2 つで行う
 
@@ -716,7 +729,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 採らなかった案: レビューで探す形は、見落としが公開の後に分かる。
 
-根拠: Value 7（MVV）
+根拠: Value 7（MVV バージョン 3）
 
 ### 決定 93: 承認と判断を DB の停止に左右させず失わないため、1 リージョンのマネージドサービスで組み、PITR と残す設定で守る
 
@@ -726,7 +739,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 
 採らなかった案: Aurora に読み手を足して切り替えを速くする形は、使わない間の費用が増え、止まるのはホステッドのレーンだけで人の判断は止まらない。
 
-根拠: Vision / Value 6（MVV）
+根拠: Vision / Value 6（MVV バージョン 3）
 
 ### 決定 94: スマートフォンでも速く迷わず操作できるよう、画面の性能の目標を Core Web Vitals に合わせる
 
@@ -739,7 +752,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: 標準に倣う
 - 比べた候補: STD80
 
-根拠: Value 1 / Value 3（MVV）
+根拠: Value 1 / Value 3（MVV バージョン 3）
 
 ### 決定 95: 古い差し替えが新しいパスワードを上書きしないため、差し替えの番号を API が上げ、DB の用意の関数が DB の側の排他の鎖の下で番号を照らしてから書く
 
@@ -752,7 +765,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: 標準に倣う・自前で作る
 - 比べた候補: STD83 / LIB81 / LIB91 / LIB93
 
-根拠: Value 9（MVV）
+根拠: Value 9（MVV バージョン 3）
 
 ### 決定 96: 2 つの呼び出しが同じデータベースと役割を変えないため、作成の時間切れを DB の用意の関数の時間切れより長くし、用意の ID の条件つきの書き込みで「無い」へ戻す
 
@@ -765,7 +778,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB91 / LIB92
 
-根拠: Value 9（MVV）
+根拠: Value 9（MVV バージョン 3）
 
 ### 決定 97: 失効の後に渡した token を残したまま受け入れないため、失効の完了を GitHub の token の世代番号の条件つきの書き込みで記録する
 
@@ -778,7 +791,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB81
 
-根拠: Value 9（MVV）
+根拠: Value 9（MVV バージョン 3）
 
 ### 決定 98: 差し替えの途中の資格情報をレーンへ渡さないため、移しの間と差し替えが終わるまで、スプリントの開始と割り当ての移しの作成を 409 で止める
 
@@ -791,7 +804,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB81
 
-根拠: Value 9 / Value 1（MVV）
+根拠: Value 9 / Value 1（MVV バージョン 3）
 
 ### 決定 99: 1 つの IdP のアカウントを 2 人へ結ばないため、IdP の主体ごとに一意の行を置き、ログインの組の行と同じトランザクションで書く
 
@@ -804,7 +817,7 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB81
 
-根拠: Value 9（MVV）
+根拠: Value 9（MVV バージョン 3）
 
 ### 決定 140: 子の課題が言語と画面の組み方を 1 か所から読めるよう、書き方の細則をプラットフォームの文書に置き、画面は React 19 と TSX で組む
 
@@ -840,7 +853,20 @@ NDF の版の数字の比べ（参照の検査）と CI の資格情報（CI の
 - 作り方: 既存の部品を使う
 - 比べた候補: LIB86 / LIB87 / LIB88 / LIB89 / LIB90 / STD84 / STD85
 
-根拠: Value 2 / Value 6（MVV）
+根拠: Value 2 / Value 6（MVV バージョン 3）
+
+### 決定 141: 知らせから画面を直に開けるよう、画面の HTTP の経路を CloudFront Function で `index.html` に書き換え、静的なファイルは書き換えない
+
+結論: 画面の配信の既定の振る舞いに viewer request の CloudFront Function を結ぶ。path の最後の区切りに `.` を含まない要求を `/index.html` に書き換え、`.` を含む要求は S3 のファイルをそのまま返す（無ければ 403）。束のファイルは `/assets/*` の振る舞いに分け、関数を結ばない。
+
+理由: 画面は HTTP の経路を URL の path で持ち、Web Push の知らせは `/p/:projectId/approvals/:approvalId` のような URL を直に開く（[画面の文書の決定 38](screens.md#決定の記録)）。OAC の S3 を配るだけの CloudFront は、ルートの既定のオブジェクトしか `index.html` に解決せず、それ以外の経路は S3 の 403 になる。書き換えを画面の経路だけに絞ると、`/config.json` や束のファイルが無いときに HTML が 200 で返らず、Service Worker が誤った中身を控えない（Value 3）。地図に無い経路も画面が受けて `/` へ移すため、経路の一覧を関数に写さず、`.` の有無だけで分ける（Value 13）。束のファイルの振る舞いに関数を結ばないので、呼び出しは画面を開いた回数と画面の設定の値の取得に留まり、毎月 200 万回の無料の枠に収まる（LIB94・Value 6）。
+
+採らなかった案: 403・404 の誤りの応答を `index.html` と 200 に差し替える形は、関数を置かずに済むが、無い `config.json` や束のファイルまで HTML の 200 で返し、配る失敗を隠す。画面の経路の一覧（`/p/*`・`/t/*`・`/me`・`/signin`）を関数に書く形は、画面の地図を変えるたびに関数も直す 2 か所の正本になる。
+
+- 作り方: ライブラリやサービスを使う
+- 比べた候補: LIB83 / LIB94
+
+根拠: Value 1 / Value 3 / Value 6（MVV バージョン 3）
 
 ## 未確認のまま残ること
 
