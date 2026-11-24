@@ -41,9 +41,9 @@ flowchart TB
 
 - リポジトリは公開で、fork から誰でも Pull Request を出せる。実際の値の正規表現そのもの（運用する環境の名前などを含む）を、リポジトリ・CI の記録・Pull Request の作者が書いたコードに渡さない（MVV の Value 7）
 - CI は AWS の資格情報を持たない。ワークフローの `permissions` は最上位を `contents: read` だけにし、ジョブで広げない（`tools/test/ci-definition.test.ts` が落とす）
-- 動作（`uses:`）はコミットの SHA で固定し、gitleaks は版と要約値で固定して取る（#1 の決定 3・5）
-- ワークフローの点検（zizmor v1.32.0）は `--offline --no-ignores --config .github/zizmor.yml` で打つ。`--no-ignores` の下では、行の中の `zizmor: ignore` も設定の `rules.<id>.ignore` も効かず、効くのは点検を丸ごと外す `rules.<id>.disable` だけである（2026-11-24 に v1.32.0 を手元で打って確認した。外部の調査の LIB2）
-- main にはブランチの保護もルールセットも無い（2026-11-24 に `gh api repos/devbasex/nd-factory/branches/main/protection` が 404、`gh api repos/devbasex/nd-factory/rulesets` が空）。必須のチェックは `.ndf/project.json` の `required_checks` の宣言だけで効き、NDF がマージの前に head のコミットのチェックを見る
+- 動作（`uses:`）はコミットの SHA で固定し、gitleaks はバージョンと要約値で固定して取る（#1 の決定 3・5）
+- ワークフローの点検（zizmor v1.32.0）は `--offline --no-ignores --config .github/zizmor.yml` で打つ。`--no-ignores` の下では、行の中の `zizmor: ignore` も設定の `rules.<id>.ignore` も効かない。効くのは、点検を丸ごと外す `rules.<id>.disable` だけである（2026-11-24 に v1.32.0 を手元で打って確認した。外部の調査の LIB2）
+- main にはブランチの保護もルールセットも無い。2026-11-24 に、`gh api repos/devbasex/nd-factory/branches/main/protection` は 404 を返し、`gh api repos/devbasex/nd-factory/rulesets` は空だった。必須のチェックは `.ndf/project.json` の `required_checks` の宣言だけで効き、NDF がマージの前に head のコミットのチェックを見る
 - 公開のリポジトリでは、GitHub の既定のイベントポリシーが `pull_request_target` を止める。今は評価のモード（実行は止めず記録だけ）で、2026-12-02 から適用される（STD2）
 - Dependabot を有効にすること・秘密と変数の登録そのものは範囲の外である（両課題の「含まない」）
 
@@ -68,7 +68,7 @@ flowchart TB
     lp --> shared
 ```
 
-- Pull Request ごとに、新しい必須のチェック `leak-check-secret` が既定のブランチのコードだけで動き、fork・同じリポジトリのブランチ・Dependabot のどの Pull Request でも、途中のコミットを含む全コミットを実際の値の規則でマージの前に探す
+- Pull Request ごとに、新しい必須のチェック `leak-check-secret` が既定のブランチのコードだけで動く。fork・同じリポジトリのブランチ・Dependabot のどの Pull Request でも、途中のコミットを含む全コミットを、実際の値の規則でマージの前に探す
 - Pull Request の側の `leak-check` は秘密を一切受けない。秘密の正規表現を書いた設定のファイルを、Pull Request のコードが読む経路が無くなる
 - 秘密を必須にする条件は、Pull Request の出所と起動した人で分けない。変数が `1` で秘密が空なら、どの Pull Request でも `leak-check-secret` が落ちる。Dependabot の実行には同じ名前の Dependabot の秘密が渡るので、秘密の欠けでは落ちない
 - 秘密の正規表現を重ねる処理と必須の判定は、新設する 1 本のスクリプトにまとめ、main への push の `leak-check` と `leak-check-secret` の両方がそれを呼ぶ
@@ -134,7 +134,7 @@ sequenceDiagram
     A->>G: Pull Request を出す・push する
     G->>J: pull_request_target（opened・synchronize・reopened）
     Note over J: 同じ Pull Request の前の実行は打ち消す
-    J->>J: 既定のブランチをチェックアウトし、gitleaks を版と要約値で置く
+    J->>J: 既定のブランチをチェックアウトし、gitleaks をバージョンと要約値で置く
     J->>G: refs/pull/番号/head を取る（ファイルは出さない）
     alt 取れない・head の SHA が event と違う
         J-->>G: 失敗（チェックは通らない）
@@ -166,12 +166,12 @@ sequenceDiagram
 ### 決定 1: 秘密の正規表現を Pull Request のコードから隔てたままマージの前に全コミットを探すため、`pull_request_target` の新しいジョブで、既定のブランチのコードだけを動かし、Pull Request のコミットは git のデータとして取る
 
 - **質問**: fork の Pull Request でも秘密を受け、同じリポジトリのブランチの Pull Request でも秘密を Pull Request のコードに渡さずに、途中のコミットを含む全コミットをマージの前に探すには、どの起動の形を使うか
-- **選んだ案**: ワークフロー `.github/workflows/leak-check-secret.yml` を新設し、`pull_request_target`（既定の `opened`・`synchronize`・`reopened`）で起動する。ジョブ `leak-check-secret` は `actions/checkout` を `ref` なし（既定のブランチ）・`fetch-depth: 0`・`persist-credentials: false` で打ち、`git fetch` で `refs/pull/<番号>/head` を参照として取り込む。取り込んだ head が event の head の SHA と一致することを確認し、分岐点（`git merge-base <base.sha> <head.sha>`）から head までを、既定のブランチの `tools/checks/leak-scan-secret.sh` で探す。`concurrency` は Pull Request の番号ごとにし、前の実行を打ち消す
-- 採らなかった案: `workflow_run` で Pull Request の CI の後に信頼できる側で探す（`workflow_run` のチェックは Pull Request の必須のチェックとして数えられず（STD4）、結果を Pull Request に付けるには `statuses: write` の権限が要り、#96 の受け入れ条件 4 に反する。zizmor の `dangerous-triggers` にも当たる）
-- 採らなかった案: マージキュー（`merge_group`）で探す（マージキューの実行は Pull Request のコードを秘密つきで動かすので #96 の受け入れ条件 3 に反し、squash のキューでは途中のコミットが残らない）
-- 採らなかった案: GitHub の secret scanning の独自のパターンと push protection に正規表現を置く（fork への push は fork のリポジトリで受けるのでこのリポジトリの push protection が掛からず、当たりは警告でマージの前のチェックにならない。PRD1）
-- 採らなかった案: マージの方法を rebase かマージのコミットに変え、途中のコミットを main への push で探す（マージの前に止めるという #96 の目的を満たさず、同じリポジトリのブランチで秘密が Pull Request のコードに渡る経路が残る）
-- **代償**: zizmor が「ほぼ常に危険」とする起動のきっかけを 1 つ持つ。Pull Request のファイルを動かさなくても、引数や環境変数への注入でコードを動かされる経路があり得る（LIB2）ので、決定 4 の形を CI の定義のテストで縛り続ける。持ち主が `pull_request_target` を許すイベントポリシーを作るまで（2026-12-02 の適用の後）、このチェックは起動されず保留のままになり、マージを止める
+- **選んだ案**: ワークフロー `.github/workflows/leak-check-secret.yml` を新設し、`pull_request_target`（既定の `opened`・`synchronize`・`reopened`）で起動する。ジョブ `leak-check-secret` は `actions/checkout` を `ref` なし（既定のブランチ）・`fetch-depth: 0`・`persist-credentials: false` で打つ。続けて `git fetch` で `refs/pull/<番号>/head` を参照として取り込む。取り込んだ head が event の head の SHA と一致することを確かめてから、分岐点から head までを、既定のブランチの `tools/checks/leak-scan-secret.sh` で探す。分岐点は `git merge-base <base.sha> <head.sha>` で求める。`concurrency` は Pull Request の番号ごとにし、前の実行を打ち消す
+- 採らなかった案: `workflow_run` で Pull Request の CI の後に信頼できる側で探す（`workflow_run` のチェックは、Pull Request の必須のチェックとして数えられない（STD4）。結果を Pull Request に付けるには `statuses: write` の権限が要り、#96 の受け入れ条件 4 に反する。zizmor の `dangerous-triggers` にも当たる）
+- 採らなかった案: マージキュー（`merge_group`）で探す（マージキューの実行は Pull Request のコードを秘密つきで動かすので、#96 の受け入れ条件 3 に反する。squash のキューでは途中のコミットが残らない）
+- 採らなかった案: GitHub の secret scanning の独自のパターンと push protection に正規表現を置く（fork への push は fork のリポジトリで受けるので、このリポジトリの push protection が掛からない。当たりは警告で、マージの前のチェックにならない。PRD1）
+- 採らなかった案: マージの方法を rebase かマージのコミットに変え、途中のコミットを main への push で探す（マージの前に止めるという #96 の目的を満たさない。同じリポジトリのブランチで、秘密が Pull Request のコードに渡る経路も残る）
+- **代償**: zizmor が「ほぼ常に危険」とする起動のきっかけを 1 つ持つ。Pull Request のファイルを動かさなくても、引数や環境変数への注入でコードを動かされる経路があり得る（LIB2）。そのため、決定 4 の形を CI の定義のテストで縛り続ける。持ち主が `pull_request_target` を許すイベントポリシーを作るまで（2026-12-02 の適用の後）、このチェックは起動されず保留のままになり、マージを止める
 - 作り方: 標準に倣う・自前で作る
 - 比べた候補: STD1 / STD2 / STD4 / PRD1 / PRD2 / LIB1
 - 根拠: Value 7「混入は検査（漏れの検査・秘密の形の検査・境界の検査）で機械的に止める」・Value 17（MVV バージョン 3）。STD1・STD2
@@ -181,7 +181,7 @@ sequenceDiagram
 - **質問**: Dependabot が起動した実行で、実際の値の規則をどう扱うか（Dependabot の秘密に登録して探すか、fork と同じく必須にしないか）
 - **選んだ案**: 持ち主が Actions の秘密と同じ名前・同じ値で Dependabot の秘密 `LEAK_CHECK_PATTERN` を登録する。ワークフローは `secrets.LEAK_CHECK_PATTERN` を 1 か所で読み、`github.actor` や `dependabot[bot]` で分ける条件を持たない。Dependabot の Pull Request の全コミットは、ほかの Pull Request と同じく Pull Request の時（`leak-check-secret`）に探す。人が Dependabot のブランチへ push して起動した実行は、Actions の秘密を受けて同じ探しをする
 - 採らなかった案: `github.actor == 'dependabot[bot]'` の実行を fork と同じく必須にしない（Dependabot の Pull Request の途中のコミットがマージの前に探されず、squash の後は main からも辿れない。起動した人での判定は、人が同じブランチへ push すると外れる）
-- 採らなかった案: `pull_request_target` の実行には Dependabot でも Actions の秘密が渡ると見て、Dependabot の秘密を登録しない（GitHub の文書は、Dependabot が起動した実行で使える秘密は Dependabot の秘密だけと書く一方で、`pull_request_target` はこの制限を持たないとも書き、どちらが当たるかを文書から決められない。STD3）
+- 採らなかった案: `pull_request_target` の実行には Dependabot でも Actions の秘密が渡ると見て、Dependabot の秘密を登録しない（GitHub の文書は、Dependabot が起動した実行で使える秘密は Dependabot の秘密だけと書く。一方で、`pull_request_target` はこの制限を持たないとも書く。どちらが当たるかを文書から決められない。STD3）
 - **代償**: 持ち主が同じ値を 2 か所に登録し、値を変えるときも 2 か所を直す。参照の検査の秘密 `REF_CHECK_TERMS` と同じ運用になる
 - 根拠: Value 7・Value 14（MVV バージョン 3）。STD3
 
@@ -197,10 +197,20 @@ sequenceDiagram
 ### 決定 4: 危険な起動のきっかけの点検を外しても同じ危険を止めるため、zizmor の `dangerous-triggers` を設定で外し、使える場所と形を CI の定義のテストで縛る
 
 - **質問**: `pull_request_target` は zizmor の `dangerous-triggers` に当たる（v1.32.0 で終了コード 14。LIB2）。ワークフローの点検（#96 の受け入れ条件 10）を通すために、点検をどう扱うか
-- **選んだ案**: `.github/zizmor.yml` で `dangerous-triggers` を `disable: true` にし、理由と課題の番号（#96）を注に書く。代わりに CI の定義のテストが次を落とす: `pull_request_target`・`workflow_run`・`issue_comment` を使うワークフローが `leak-check-secret.yml` のほかにある・そのワークフローが `pull_request` か `push` も持つ・`actions/checkout` に `ref`・`repository`・`allow-unsafe-pr-checkout` を渡す・`persist-credentials` が偽でない・`setup-node`・`npm`・`npx` を使う・`GITHUB_ENV`・`GITHUB_PATH`（gitleaks を置く手順のほか）・`GITHUB_OUTPUT` に書く・`${{ github.event.* }}` を `run:` の中に直に書く・`if:` か `continue-on-error` がある・`permissions` が `contents: read` だけでない・秘密を受ける手順が探しの手順のほかにある
+- **選んだ案**: `.github/zizmor.yml` で `dangerous-triggers` を `disable: true` にし、理由と課題の番号（#96）を注に書く。代わりに、CI の定義のテストが次のどれかに当たる定義を落とす
+  - `pull_request_target`・`workflow_run`・`issue_comment` を使うワークフローが `leak-check-secret.yml` のほかにある
+  - そのワークフローが `pull_request` か `push` も持つ
+  - `actions/checkout` に `ref`・`repository`・`allow-unsafe-pr-checkout` を渡す
+  - `persist-credentials` が偽でない
+  - `setup-node`・`npm`・`npx` を使う
+  - `GITHUB_ENV`・`GITHUB_PATH`（gitleaks を置く手順のほか）・`GITHUB_OUTPUT` に書く
+  - `${{ github.event.* }}` を `run:` の中に直に書く
+  - `if:` か `continue-on-error` がある
+  - `permissions` が `contents: read` だけでない
+  - 秘密を受ける手順が探しの手順のほかにある
 - 採らなかった案: `--no-ignores` をやめ、`rules.dangerous-triggers.ignore` でこの 1 本だけを外す（行の中の `zizmor: ignore` も効くようになり、#1 の決定 5 が `--no-ignores` で塞いだ、点検を行の注で外す経路が戻る）
 - 採らなかった案: 点検の当たりを残したまま通す（`workflow-audit` が落ち、#96 の受け入れ条件 10 に反する）
-- **代償**: `dangerous-triggers` が将来足す当たりの種類（v1.31.0 で `issue_comment` が足された）は、CI の定義のテストに手で足すまで落ちない。zizmor の版を上げるときに、点検の文書の対象の一覧とテストの一覧を見比べる
+- **代償**: `dangerous-triggers` が将来足す当たりの種類（v1.31.0 で `issue_comment` が足された）は、CI の定義のテストに手で足すまで落ちない。zizmor のバージョンを上げるときに、点検の文書の対象の一覧とテストの一覧を見比べる
 - 作り方: ライブラリやサービスを使う・自前で作る
 - 比べた候補: LIB2 / STD1
 - 根拠: Value 8・Value 14（MVV バージョン 3）。LIB2
@@ -209,7 +219,7 @@ sequenceDiagram
 
 - **質問**: 秘密の正規表現を重ねた一時の設定を組む処理と必須の判定（今は `ci.yml` の手順の中のシェル）を、2 つのジョブでどう持つか
 - **選んだ案**: `tools/checks/leak-scan-secret.sh` を新設し、今の手順の中のシェル（`'''` を含む正規表現を拒む・重ねた設定を組む・必須の判定・一時のファイルを消す）を移す。`--range <範囲>` を受ければその範囲、受けなければ到達できるすべてのコミットを、既定の規則と重ねた設定（秘密が無ければ `.gitleaks.toml`）の 2 回で探す。`leak-check-secret` も既定の規則と nd-factory の規則で範囲を探すので、Pull Request が `.gitleaks.toml` の許可を書き換えても、既定のブランチの設定で探される
-- 採らなかった案: 2 つのワークフローの手順に同じシェルを写す（同じ処理を 2 か所に持ち、片方だけを直す食い違いが起きる。Value 13）
+- 採らなかった案: 2 つのワークフローの手順に同じシェルをコピーする（同じ処理を 2 か所に持ち、片方だけを直す食い違いが起きる。Value 13）
 - 採らなかった案: `leak-check-secret` では秘密の正規表現の規則だけで探す（Pull Request が `.gitleaks.toml` に足した許可で nd-factory の規則の当たりを外したとき、マージの前に既定のブランチの設定で探す実行が無くなる）
 - **代償**: スクリプトが 1 本増え、結合のテストの対象が増える
 - 根拠: Value 13・Value 7（MVV バージョン 3）
@@ -217,8 +227,10 @@ sequenceDiagram
 ### 決定 6: 持ち主の操作の手順を今の設定と一緒に読めるよう、運用の文書 `docs/operations/ci-checks.md` を新設し、`AGENTS.md` の行を直す
 
 - **質問**: 秘密を登録して検査を必須にする持ち主の操作（#101 の受け入れ条件 6）を、どこに書くか
-- **選んだ案**: `docs/operations/ci-checks.md` を新設し、参照の検査と漏れの検査で持ち主が GitHub の設定で行う操作（Actions の秘密 `LEAK_CHECK_PATTERN`・同じ名前の Dependabot の秘密・変数 `LEAK_CHECK_REQUIRE_PATTERN`・`pull_request_target` を許すイベントポリシー・今ある `REF_CHECK_TERMS` の 2 か所の登録）と、それぞれの検査がどの実行で秘密を受けるかを書く。`AGENTS.md` の「秘密とインフラの値を置かない」の行を、秘密を使う探しが `leak-check-secret` と main への push で動くことに直し、運用の文書へリンクする
-- 採らなかった案: #1 の設計（`docs/design-process/issue-1/design.md`）の「人へ残す判断」の行を直す（その置き場は経緯の記録で、検査を足した後に追わないと README が決めている）
+- **選んだ案**: `docs/operations/ci-checks.md` を新設し、次の 2 つを書く。`AGENTS.md` の「秘密とインフラの値を置かない」の行を、秘密を使う探しが `leak-check-secret` と main への push で動くことに直し、運用の文書へリンクする
+  - 参照の検査と漏れの検査で、持ち主が GitHub の設定で行う操作（Actions の秘密 `LEAK_CHECK_PATTERN`・同じ名前の Dependabot の秘密・変数 `LEAK_CHECK_REQUIRE_PATTERN`・`pull_request_target` を許すイベントポリシー・今ある `REF_CHECK_TERMS` の 2 か所の登録）
+  - それぞれの検査が、どの実行で秘密を受けるか
+- 採らなかった案: #1 の設計（`docs/design-process/issue-1/design.md`）の「人へ残す判断」の行を直す（その文書は経緯の記録で、検査を足した後に追わないと README が決めている）
 - **代償**: `docs/operations/` の文書が 1 本増える
 - 根拠: Value 7・Value 13（MVV バージョン 3）
 
@@ -303,7 +315,7 @@ sequenceDiagram
 | --- | --- | --- | --- | --- |
 | STD1 | GitHub Docs「Events that trigger workflows」の `pull_request_target` と「Securely using pull_request_target」 | `pull_request_target` は既定のブランチの文脈で動き、ワークフローと `ref` なしの `actions/checkout` は既定のブランチのもの。秘密と既定のブランチの `GITHUB_TOKEN` を受ける。既定の起動は `opened`・`synchronize`・`reopened`。Pull Request のコードを（`git fetch` で取ったものも含め）動かすと危険で、取ったコードはデータとして扱う。トークンの権限は最小にする | 決定 1・4（既定のブランチのチェックアウト、取り込んだコミットを動かさない、`contents: read`） | https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows ・ https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target （2026-11-24） |
 | STD2 | 同「Default policy for `pull_request_target`」 | 公開のリポジトリで、既定のイベントポリシーが `pull_request_target` を止める。今は評価のモードで、2026-12-02 から適用する。続けて使うには、明示して許すイベントポリシーを作る | 決定 1 の代償・影響と危険・人へ残す判断（持ち主がポリシーを作る） | https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target （2026-11-24） |
-| STD3 | GitHub Docs「Troubleshooting Dependabot on GitHub Actions」 | Dependabot が起動した `push`・`pull_request` などの実行は fork と同じ扱いで、読み取りだけのトークンを受け、使える秘密は Dependabot の秘密だけ。直し方として `pull_request_target` を含む 2 段の形と、同じ名前で Dependabot の秘密を登録する形を挙げる | 決定 2（同じ名前で 2 か所に登録し、起動した人で分けない） | https://docs.github.com/en/code-security/reference/supply-chain-security/troubleshoot-dependabot/dependabot-on-actions （2026-11-24） |
+| STD3 | GitHub Docs「Troubleshooting Dependabot on GitHub Actions」 | Dependabot が起動した `push`・`pull_request` などの実行は fork と同じ扱いで、読み取りだけのトークンを受け、使える秘密は Dependabot の秘密だけ。直し方として `pull_request_target` を含む 2 つのワークフローに分ける形と、同じ名前で Dependabot の秘密を登録する形を挙げる | 決定 2（同じ名前で 2 か所に登録し、起動した人で分けない） | https://docs.github.com/en/code-security/reference/supply-chain-security/troubleshoot-dependabot/dependabot-on-actions （2026-11-24） |
 | STD4 | GitHub Docs「Troubleshooting required status checks」 | 必須のチェックは最新のコミットで通る必要がある。Pull Request で数えられるジョブのチェックは `push`・`pull_request`・`pull_request_review`・`pull_request_target`・`deployment`・`deployment_status` で起動したものだけ（`workflow_run` は入らない）。条件で飛ばしたジョブは成功と報告される | 決定 1（`workflow_run` を採らない）・非機能（`if:` を置かない）・処理の流れ（新しい head で数え直す） | https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks （2026-11-24） |
 
 ### 主要な製品
@@ -324,7 +336,7 @@ sequenceDiagram
 
 | 対象 | 試した手段 | 結果と理由 |
 | --- | --- | --- |
-| Dependabot が起動した `pull_request_target` の実行が受ける秘密 | STD3 の文書と、検索の語 `GitHub Actions Dependabot pull_request_target secrets "base ref" created by Dependabot GITHUB_TOKEN` | 今の文書は、Dependabot の実行で使える秘密は Dependabot の秘密だけと書く一方、`pull_request_target` はこの制限を持たないとも書く。古い版の文書は「Pull Request の基のブランチを Dependabot が作ったとき」に限っていた。どちらが今当たるかを文書から決められない |
+| Dependabot が起動した `pull_request_target` の実行が受ける秘密 | STD3 の文書と、検索の語 `GitHub Actions Dependabot pull_request_target secrets "base ref" created by Dependabot GITHUB_TOKEN` | 今の文書は、Dependabot の実行で使える秘密は Dependabot の秘密だけと書く一方、`pull_request_target` はこの制限を持たないとも書く。古いバージョンの文書は「Pull Request の基のブランチを Dependabot が作ったとき」に限っていた。どちらが今当たるかを文書から決められない |
 | `pull_request_target` のチェックが付くコミット | 検索の語 `pull_request_target workflow check run attached to pull request head commit required status check branch protection` と STD4 | Pull Request で数えられることは STD4 にあるが、付くコミットを直に書いた文書は見つからなかった |
 
 調べた量: 候補 8 件・取得の試み 10 回。
