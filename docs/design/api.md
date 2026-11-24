@@ -293,6 +293,16 @@ ID の種類の頭:
 
 外す・狭める操作は、見える範囲も費用も広げないため委任から呼べる。当たるのは `repositories.remove` である。`notification_targets.delete` は Slack の通知先の bot token の秘密を消し、`machines.delete` は権限を変えるので、どちらも `human_only` にする（上の表）。また、`machines.delete` はマシンの登録を外すだけで、オーガナイザーの会話の記録を消した確認の代わりにはならない。外したマシンの未消去の記録は残り、割り当ての移しの受け入れを待たせ続ける（[オーガナイザーの手元のマシンの会話の記録](organizer.md#会話の控え)）。`model_keys.delete` は秘密を扱うので、狭める操作でも `human_only` にする（上の表）。
 
+### 承認する以外の答えの理由
+
+**承認する以外の答えと、取り消す・断る・外す操作には、どの入口（画面・API・MCP）からでも必ず理由を添えられる**（利用者の決定、2026-11-24）。理由は要素の `reason`（文字列、0〜10,000 字）で受け、答えか操作の記録（I9）と一緒に残し、知らせと会話の項目にも載せる。
+
+| 当たるもの | 理由 |
+| --- | --- |
+| `approvals.answer` の承認する（`approved`）以外の答え（差し戻す・承認しない・打ち直す・終える・取り消す・起票しない） | 差し戻すは必須、ほかは任意 |
+| `questions.answer` の答え | 任意。選択肢が推しの案でないときと、`ndf-ask:human-action` の取り消すは、画面で理由の欄を開いて出す |
+| `sprints.cancel`・`organizers.close`・`organizer_messages.withdraw`・`project_transfers.delete`・`projects.close`・`delegations.revoke` | 任意 |
+
 ### 人の確定の段階
 
 **この文書と他の文書が「`human_only`」とした確定（I4・I24・`human_only` の操作・`human_only` の区分の問い・レッドラインの承認）を人に限るのは、商用利用を始めた後の本番の設置だけである。** それ以外の設置では、委任とオーガナイザーの専用の委任（AI のエージェント）も同じ確定を行える（利用者の決定、2026-11-24。決定 156）。
@@ -349,7 +359,7 @@ DB の用意の関数が関数の中から呼ぶプロジェクトのモジュ�
 
 | 操作・HTTP の経路 | 変える所 |
 | --- | --- |
-| `approvals.answer` | 要素に `reason`（文字列、0〜2,000 字、任意）と `drop_issues`（整数の配列、任意、設計承認ゲートの依頼だけ）を足す。外れたら要素の 400 `item_invalid` |
+| `approvals.answer` | 要素に `reason`（文字列、0〜10,000 字。差し戻すでは必須、ほかは任意。[承認する以外の答えの理由](#承認する以外の答えの理由)）と `drop_issues`（整数の配列、任意、設計承認ゲートの依頼だけ）を足す。外れたら要素の 400 `item_invalid` |
 | `questions.answer` | 問いの「`human_only` か」が真の要素を 403 `human_only`。委任でない主体（人）の要素は受ける |
 | `sprints.create`・`project_transfers.create` | 移しの間は要素の 409 `project_transfer_in_progress`、差し替えの保留の間は要素の 409 `credential_rotation_in_progress`（I20）。認可の判定に使った今の割り当ての ID（`current_assign_id`）が書き込みの時点で変わっていれば、存在しないときと同じ 404 で書かない（I20・I2） |
 | `project_transfers.create`・`project_transfers.accept`・`project_transfers.delete` | 作成は移し中の印と止める依頼（移す途中の状態の「止め終えたか」が偽）を 1 つの書き込みで書いてから E18 を出す。受け入れは、印が対象の移しの ID と同じで「取り下げたか」が偽であることを条件に入れ、割り当ての行の追加・今の割り当ての差し替え・印を空にする更新を 1 つのトランザクションで書いて E17 を出す（条件が外れたら 409 `state_mismatch` で割り当てを変えない）。取り下げは「取り下げたか」を真にし、印を空にするのは[全体の設計の割り当てを変える流れ](overview.md#割り当てを変える流れ) の条件がそろった後だけ |
