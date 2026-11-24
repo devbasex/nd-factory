@@ -159,7 +159,7 @@ nd-factory/
 | `appendAudit` | `packages/core`（`audit`） | 新設 | `(db: Db, entry: AuditEntry, op: OperationDef \| null, clock: Clock) => Promise<void>` | 状態を書かない要求（読む操作・断った要求・要求全体の要約）の記録を 1 行追記する | 状態の書き込みを伴う要素の記録には使わない（それは `auditItem` をトランザクションへ入れる） | 戻ったとき記録の表に 1 行がある。書けなければ `AuditUnavailable` を投げる | DynamoDB の `db-audit` への書き込み |
 | `readHttpCall` | `packages/core`（`dispatch`） | 新設 | `(event: HttpEvent) => OperationCall \| Problem` | HTTP の要求を、受け口の種類・入口・操作の名前・token・要素の配列を持つ共通の呼び出しへ読む | `event` は HTTP API の要求の形 | 戻り値は呼び出しか、要求全体の誤り（`body_not_json`・`body_not_array`・`body_empty`・`too_many_items`・`duplicate_item`・405）。HTTP の経路は形の正本の HTTP の経路の表だけで引く | 無し |
 | `readMcpCall` | `packages/core`（`dispatch`） | 新設 | `(event: HttpEvent, webOrigin: string) => McpCall \| McpReply` | `/mcp` の要求を、SDK へ渡す前に HTTP の段で照らし、通るものを `serveMcp` が受ける形へ替える | `webOrigin` は画面のオリジン | `POST` で `Origin` が合えば、Web 標準の `Request` と token を持つ `McpCall`。`Origin` の違いは 403、`GET` と `DELETE` は 405 の `McpReply`。JSON-RPC の本文は読まない（SDK が読む） | 無し |
-| `createMcpHandler` | `packages/core`（`dispatch`） | 新設 | `(ops: readonly OperationDef[]) => McpHandler` | 道具の定義と `@modelcontextprotocol/server`（決定 51・LIB40）の HTTP のハンドラーを、セッションを持たず JSON の 1 応答を返す設定で 1 回だけ作る | `ops` は形の正本の操作の表 | 道具の定義は人だけでない操作を操作の表の順に持ち、名前・出力の形・注記は形の正本から生成する。SDK に登録する入力の形は `{"items": unknown[]}` で、要素の数の上限 `MAX_ITEMS` だけを持ち、要素の形を持たない（要素の形の照らしは `dispatch` が要素ごとに行い、要素の 400 `item_invalid` を HTTP と同じに返すため。要素の形を SDK に渡すと、1 つの要素の誤りで要求全体が `-32602` になる）。ハンドラーは要求ごとに、その要求の `McpContext` を `createMcpServer` へ渡してサーバーを作り、応答の後にそのサーバーを閉じる。ハンドラーと道具の定義は実行環境ごとに 1 回作って使い回し、サーバーは要求をまたいで共有しない | 無し |
+| `createMcpHandler` | `packages/core`（`dispatch`） | 新設 | `(ops: readonly OperationDef[]) => McpHandler` | 道具の定義と `@modelcontextprotocol/server`（決定 51・LIB40）の HTTP のハンドラーを、セッションを持たず JSON の 1 応答を返す設定で 1 回だけ作る | `ops` は形の正本の操作の表 | 道具の定義は `human_only` でない操作を操作の表の順に持ち、名前・出力の形・注記は形の正本から生成する。SDK に登録する入力の形は `{"items": unknown[]}` で、要素の数の上限 `MAX_ITEMS` だけを持ち、要素の形を持たない（要素の形の照らしは `dispatch` が要素ごとに行い、要素の 400 `item_invalid` を HTTP と同じに返すため。要素の形を SDK に渡すと、1 つの要素の誤りで要求全体が `-32602` になる）。ハンドラーは要求ごとに、その要求の `McpContext` を `createMcpServer` へ渡してサーバーを作り、応答の後にそのサーバーを閉じる。ハンドラーと道具の定義は実行環境ごとに 1 回作って使い回し、サーバーは要求をまたいで共有しない | 無し |
 | `createMcpServer` | `packages/core`（`dispatch`） | 新設 | `(tools: readonly McpTool[], ctx: McpContext) => McpServer` | 1 つの要求のための SDK のサーバーを作り、道具の処理をその要求の主体のまま `dispatch` へつなぐ | `ctx` は `serveMcp` が決めた主体・要求の ID・`dispatch` を呼ぶ関数を持つ | `initialize`・`tools/list`・知らせ・知らない方法と道具・JSON-RPC の形の誤り・入力の外側の形の誤り（`items` が配列でない・`MAX_ITEMS` を越える）は SDK が答える。`tools/call` は `ctx` の主体と入口「MCP」の印と `arguments.items` を要素にして `dispatch` を呼び、`ctx.dispatched` を立てる | 無し |
 | `serveMcp` | `packages/core`（`dispatch`） | 新設 | `(call: McpCall, deps: McpDeps) => Promise<Response>` | `/mcp` の 1 つの要求を、認証 → SDK → `dispatch` を通らなかった応答の記録の順で通す | `call` は `readMcpCall` が通した要求。`deps` は `createMcpHandler` のハンドラー・`AuthDeps`・`Db`・時計・ログを持つ | 認証は SDK へ渡す前に `authenticate`（受け口 `mcp`）で行い、`unauthorized` は 401、`unavailable` は 503 `unavailable` を SDK へ渡さずに返す。通れば主体を `McpContext` に入れてハンドラーへ渡す。`ctx.dispatched` が立たなかった応答（`initialize`・`tools/list`・知らせ・知らない道具・SDK が先に断った要求）は、SDK の応答を返す前に要約の行を 1 件 `appendAudit` で書き、書けなければ SDK の応答を捨てて 503 `audit_unavailable` を返す。`dispatch` を通った応答は `dispatch` が記録を書いたため足さない | 認証の読み・`db-audit` への追記 |
 | `dispatch` | `packages/core`（`dispatch`） | 新設 | `(call: OperationCall, deps: DispatchDeps) => Promise<DispatchResult>` | 認証・形の検証・認可・冪等の鍵・ハンドラー・書き込みの確定・操作の記録を、どの受け口でも同じ順で通す | `deps` は操作の表・ハンドラーの表・読み手・`Db`・時計・ログを持つ。`call.principal` があれば（MCP で `serveMcp` が決めた主体）認証を繰り返さずにその主体を使う | 戻り値は要求全体の誤りか、要求と同じ数・同じ順の要素の結果。状態を書いた要素には同じトランザクションに記録の行がある。要求ごとに記録の要約の行がある | 認証と認可の読み・ハンドラーが組んだ書き込みの確定（DynamoDB）・記録の追記 |
@@ -194,8 +194,8 @@ nd-factory/
 | `authenticate` | 委任の最後に使った時刻を書けない | 表の失敗・条件の外れ | 条件つきの更新の失敗 | 既定値で続ける（主体は決めたまま） | 無し。ログの warn | 次の要求で書き直す |
 | `visibleProjectIds` | 読み手が失敗する | 表に届かない | 読み手の例外 | 呼び出し元へ返す | 要求全体の 503 `unavailable` | 再実行できる |
 | `authorize` | 対象が見えない・無い | 割り当ての外・ID の種類の違い・消えた対象 | 対象のプロジェクトの引きと見える集まりの照らし | 呼び出し元へ返す（要素の拒み） | 要素の 404 `not_found`（無い対象と同じ本文） | 後始末なし |
-| `authorize` | 委任で人だけの操作・委任の種類が足りない | 呼び手の範囲の外 | 操作の印と委任の範囲の照らし | 呼び出し元へ返す（要求全体の拒み） | 要求全体の 403 `human_only`・`scope_insufficient` | 何も保存しない |
-| `authorize` | 役割が足りない・要素だけ人だけ | 席がメンバー・レッドラインに当たる問い | 席の役割と要素の区分の照らし | 呼び出し元へ返す（要素の拒み） | 要素の 403 `role_insufficient`・`human_only` | 後始末なし |
+| `authorize` | 委任で `human_only` の操作・委任の種類が足りない | 呼び手の範囲の外 | 操作の印と委任の範囲の照らし | 呼び出し元へ返す（要求全体の拒み） | 要求全体の 403 `human_only`・`scope_insufficient` | 何も保存しない |
+| `authorize` | 役割が足りない・要素だけ `human_only` | 席がメンバー・レッドラインに当たる問い | 席の役割と要素の区分の照らし | 呼び出し元へ返す（要素の拒み） | 要素の 403 `role_insufficient`・`human_only` | 後始末なし |
 | `authorize` | 読み手が失敗する | 表に届かない | 読み手の例外 | 呼び出し元へ返す | 要求全体の 503 `unavailable`（迷うときは見せない） | 再実行できる |
 | `appendAudit` | 書けない | 表に届かない・再試行の使い切り | `writeAtomically` の失敗 | 呼び出し元へ返す（`AuditUnavailable`） | 読む操作は値を返さず要求全体の 503 `audit_unavailable` | 再実行できる。値は渡していない |
 | `createMcpServer` | JSON-RPC の形の誤り・知らない方法・知らない道具・道具の入力の外側の形の誤り（`items` が配列でない・`MAX_ITEMS` を越える） | 呼び手の誤り | SDK の要求の読みと、SDK に登録した入力の形の照らし | SDK が JSON-RPC の誤りを返す（形の誤りは `-32700`・`-32600`、知らない方法は `-32601`、知らない道具と入力の誤りは `-32602`）。要素の形はここで照らさない | JSON-RPC の誤りの応答。HTTP の状態は SDK の決まりに従う。`serveMcp` が要約の行を 1 件書く | 後始末なし。呼び手が直して送り直せる |
@@ -220,9 +220,9 @@ nd-factory/
 | `dispatch` | `call.principal` がある（MCP の `tools/call`） | `authenticate` を呼ばず、その主体で続ける。主体は同じ要求の中で `serveMcp` が決めたもので、要求をまたいで控えない |
 | `dispatch` | 主体の種類が受け口に合わない（例: 人の token で `/mcp`、委任の token で `/v1/runner/…`） | 要求全体の 401（`authenticate` が返す） |
 | `dispatch` | 本文の誤り（`readHttpCall` の順: JSON でない → 配列でない → 空 → 101 個以上 → 同じ対象の重なり） | 最初に当たった理由で要求全体の 400 |
-| `dispatch` | 操作が人だけ（`always`）で主体が委任 | 要求全体の 403 `human_only`。ハンドラーを呼ばない |
+| `dispatch` | 操作が `human_only`（`always`）で主体が委任 | 要求全体の 403 `human_only`。ハンドラーを呼ばない |
 | `dispatch` | 委任の種類（`read`・`run`・`manage`）が操作の印より弱い | 要求全体の 403 `scope_insufficient` |
-| `dispatch` | 上を通った要素ごと: 形の誤り → 見えない → 人だけの要素 → 役割 → 冪等の鍵 → ハンドラー | 先に当たったものを要素の結果にする。見えない要素は役割を照らさない（403 で存在を明かさない） |
+| `dispatch` | 上を通った要素ごと: 形の誤り → 見えない → `human_only` の要素 → 役割 → 冪等の鍵 → ハンドラー | 先に当たったものを要素の結果にする。見えない要素は役割を照らさない（403 で存在を明かさない） |
 | `dispatch` | 書く操作の要素で、ハンドラーが書き込みを返した | 書き込み・`auditItem` の要素の行・`settleIdempotency` を 1 つの `writeAtomically` で確定する |
 | `dispatch` | 読む操作 | ハンドラーの値を集め、`appendAudit` が成功してから返す |
 | `dispatch` | 全部か無かの印のある操作 | すべての要素の書き込みを 1 つの `writeAtomically` に集め、要素の失敗が 1 つでもあれば確定しない |
@@ -260,7 +260,7 @@ nd-factory/
 | `readMcpCall` | 方法が `GET` か `DELETE` | 405（SDK へ渡さない） |
 | `serveMcp` | どの方法でも、`authenticate` が主体を決める前 | SDK へ渡さない。401・503 は上の異常系のとおり |
 | `createMcpServer` | 方法が `initialize` | SDK がサーバーの名前と能力（道具だけ）を返す。`serveMcp` が要約の行を 1 件 |
-| `createMcpServer` | 方法が `tools/list` | SDK が登録した道具の一覧（人だけでない操作、操作の表の順）を返す。`serveMcp` が要約の行を 1 件書いてから返す |
+| `createMcpServer` | 方法が `tools/list` | SDK が登録した道具の一覧（`human_only` でない操作、操作の表の順）を返す。`serveMcp` が要約の行を 1 件書いてから返す |
 | `createMcpServer` | 方法が `tools/call` で、名前が道具の一覧に無い | SDK が JSON-RPC の誤り `-32602` を返す。`serveMcp` が要約の行を 1 件（操作は空） |
 | `createMcpServer` | 方法が知らせ（`notifications/` で始まる） | SDK が 202 で本文なしを返す。`serveMcp` が要約の行を 1 件 |
 | `createMcpServer` | 方法が `tools/call` で、名前が道具の一覧にある | `dispatch` が要素ごとに形を照らし、HTTP と同じ要素の結果と記録を返す。`serveMcp` は行を足さない |
@@ -397,14 +397,14 @@ nd-factory/
 | `authenticate` | 人・委任・ランナー・手元のマシン・GitHub の 5 つが決まる（見回りと DB の用意の関数は HTTP の経路を持たず、認証を通らない） | 期限の 1 秒前と 1 秒後 | 形・署名・期限・取り消し・受け口の違いはすべて同じ `unauthorized`、鍵と表に届かないは `unavailable`、最後に使った時刻を書けなくても続く |
 | `createJwksCache` | 控えた鍵で 2 回目は取りに行かない | 知らない `kid` の取り直しが前の取得から 59 秒では起きず 60 秒で起きる・控えが 1 時間ちょうどの前後で使う側と取り直す側に分かれる・同じ時の取り直しが 1 回 | 取り直しても `kid` が無い、取得の失敗を投げる |
 | `visibleProjectIds` | 人・委任・ランナーの集まり | 委任した人がチームを外れた次の要求で集まりから消える | 読み手の失敗を投げる |
-| `authorize` | 見える要素を `allow` | 見える要素と見えない要素の混ざり・移す途中の名前だけの読み | 見えないは 404、委任の人だけは要求全体の 403、種類の不足は 403、メンバーの持ち主だけの操作は要素の 403、読み手の失敗は投げる |
+| `authorize` | 見える要素を `allow` | 見える要素と見えない要素の混ざり・移す途中の名前だけの読み | 見えないは 404、委任の `human_only` は要求全体の 403、種類の不足は 403、メンバーの持ち主だけの操作は要素の 403、読み手の失敗は投げる |
 | `judgeUsage` | 上限の内で `allowed` | 使った額が上限額ちょうど・同時の数がちょうど・上限なしの行 | 上限額に当たる、場所と推論の手段が許されない、同時の数が満ちる、通貨の違い |
 | `usageAddItem` | 通貨の条件と加算を持つ 1 件 | 金額 0 | 通貨の違いで条件が外れる |
 | `auditItem` | 許した鍵だけを写した 1 行 | 見られたプロジェクトがない・主体の無い 401 の区切りの鍵 | 本文・秘密・メールを渡しても行に残らない |
 | `appendAudit` | 1 行を追記する | 断った要求の行 | 書けなければ `AuditUnavailable` |
 | `readHttpCall` | HTTP の経路から操作の名前と要素を読む | 要素 1 個と 100 個・base64 の本文 | JSON でない・配列でない・空・101 個・重なり・`POST` でない |
 | `readMcpCall` | `POST` で `Origin` が合う要求を `McpCall` へ替える | `Origin` の頭書きが無い | `Origin` の違いは 403、`GET` と `DELETE` は 405 |
-| `createMcpHandler` | 道具の一覧が操作の表の順で、人だけの操作が無い。2 つの要求が別のサーバーで処理される | 入力の形が `items` の配列と上限だけを持つ | 101 個は `-32602` |
+| `createMcpHandler` | 道具の一覧が操作の表の順で、`human_only` の操作が無い。2 つの要求が別のサーバーで処理される | 入力の形が `items` の配列と上限だけを持つ | 101 個は `-32602` |
 | `createMcpServer` | `tools/call` で `dispatch` に `ctx` の主体・入口「MCP」・`arguments.items` が渡る | `arguments.items` が 1 個 | 知らない道具は `-32602`、知らせは 202、形の合わない要素と合う要素の混ざりは `-32602` にならず要素の結果になる |
 | `serveMcp` | 委任の token で `tools/list` が返り、要約の行が 1 件ある | `tools/call` の要求で要約の行が `dispatch` の分だけ（重ならない） | Cognito の token・token 無しは 401 で SDK を呼ばない、`authenticate` の `unavailable` は 503、要約の行を書けないと 503 `audit_unavailable` で一覧を返さない |
 | `dispatch` | 書く要素ごとに状態と記録が同じトランザクションで書かれる。画面と MCP から同じ操作を呼ぶと同じ要素の結果になる | 全部か無かで 1 つだけ失敗・残り時間がちょうど予備の時間 | 401・400・403・要素の 404 と 409・ハンドラーの例外は 503・要素の記録を書けないと 503 で残りを処理しない・要約の行を書けないと読む値を返さない |

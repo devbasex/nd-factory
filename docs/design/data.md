@@ -174,6 +174,7 @@ erDiagram
 | `gh_token_generation` | 整数 | 許さない | token の記録の世代番号。記録を足すのと同じトランザクションで 1 上げる |
 | `state_url_max_expiry` | 日時 | 許す | 出した状態の S3 の署名つき URL の期限の最大値（[署名つき URL](#署名つき-url)）。空は「出していない」 |
 | `organizer_wipes_pending` | 文字列の集合 | 許す | 手元のマシンへ渡し、まだ作業の場所を消し終えたと知らせていないオーガナイザーのレーン。要素は `<マシンの ID>#<オーガナイザーの ID>#<世代>`。受け取り（`/v1/machine/lane_claims/create`）で足し、`/v1/machine/organizer_wipes/create` で知らせた組と一致する要素だけを外す。マシンの登録を外しても外さない。割り当ての移しの受け入れは、これが空であることを条件にする。空は「消し終えていない記録が無い」（[オーガナイザーの手元のマシンの会話の記録](organizer.md#会話の控え)） |
+| `ask_human_only` | 写像 | 許す | 区分ごとに `human_only` にするか（[実行の文書の区分の表](execution.md#区分とだれが答えられるか)）。空と、書いていない区分は `human_only` |
 | `organizer_slots_used` | 整数 | 許さない | 枠を持つ（`active` か `paused` の）オーガナイザーの数。オーガナイザーの状態を変える書き込みと同じトランザクションで足し引きする（[オーガナイザーの単位と状態](organizer.md#単位と状態)） |
 | `created_at` | 日時 | 許さない | 作った時刻（UTC） |
 | `schema_version`・`version` | 整数 | 許さない | 形の版とエンティティの版（[共通の列](#共通の列)） |
@@ -184,7 +185,7 @@ erDiagram
 | --- | --- | --- | --- |
 | `assign_id` | 文字列 | 許さない | 割り当ての行の ID |
 | `team_id` | 文字列 | 許す | 割り当てたチーム。空は「閉じた」行 |
-| `confirmed_by` | 文字列 | 許さない | 確定した人の利用者の ID（人だけ、I3） |
+| `confirmed_by` | 文字列 | 許さない | 確定した人の利用者の ID（`human_only`、I3） |
 | `accepted_by` | 文字列 | 許す | 移す先の持ち主の受け入れ。空は「作成と同時の割り当て」か「閉じた」 |
 | `confirmed_at` | 日時 | 許さない | 確定の時刻（UTC） |
 

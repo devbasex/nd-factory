@@ -21,11 +21,11 @@ API と MCP の外で決めるもの:
 | [呼び出しの規約](#呼び出しの規約) | ページ送りは不透明なカーソルで行い、全体の件数を返さない | 43 |
 | [呼び出しの規約](#呼び出しの規約) | 版を経路の頭の `/v1` に置く。書くエンティティに版の数を持たせ、条件つきで書く | 44・45 |
 | [値の形](#値の形) | 日時・金額・言語・時刻帯・ID を 1 つの形に決める | 47 |
-| [操作の一覧](#操作の一覧) | F1〜F20・F24・F25 を操作へ割り、人だけの操作を決める。要素の形と理由のコードは形の正本だけに置き、受け持つ子の課題を決める。問いの人だけの範囲は実行の文書の区分の表に従う | 56・57 |
+| [操作の一覧](#操作の一覧) | F1〜F20・F24・F25 を操作へ割り、`human_only` の操作を決める。要素の形と理由のコードは形の正本だけに置き、受け持つ子の課題を決める。問いの `human_only` の範囲は実行の文書の区分の表に従う | 56・57 |
 | [認証と主体](#認証と主体) | 認証を API の Lambda の中の 1 か所に置く | 48 |
 | [認可](#認可) | 一覧は見えるプロジェクトの ID から表を引き、知らせは送る直前にも照らす | 53 |
 | [委任](#委任) | 範囲をプロジェクトと 3 つの操作の種類にし、期限を 1 時間〜30 日にする。MCP は画面で発行した token を貼り、OAuth 2.1 を後に回す | 49・50 |
-| [MCP](#mcp) | 道具を操作の表から生成し、セッションを持たない。人だけの操作を道具にしない | 51・52 |
+| [MCP](#mcp) | 道具を操作の表から生成し、セッションを持たない。`human_only` の操作を道具にしない | 51・52 |
 | [操作の記録](#操作の記録) | 状態の書き込みと同じトランザクションで追記する | 54 |
 | [形の正本](#形の正本) | zod の操作の表を正本にし、OpenAPI は自前の生成のスクリプトで組む | 55 |
 
@@ -70,7 +70,7 @@ API の操作は 1 つの画面に合わせず、エンティティ（スプリ�
 
 | 区分 | 形 | いつ |
 | --- | --- | --- |
-| 要求全体の誤り | `Content-Type: application/problem+json` で `{"type": "about:blank", "status": 400, "reason": "body_not_array"}`（RFC 9457 の形。`title`・`detail` を持たない） | 本文が JSON でない・配列でない・空・101 個以上か全部か無かの操作の上限を越える・重なり（400）、認証できない（401）、人だけの操作を委任から呼んだ・委任の種類が足りない（403）、記録を書けない・依存先に届かない（503）、呼びすぎ（429） |
+| 要求全体の誤り | `Content-Type: application/problem+json` で `{"type": "about:blank", "status": 400, "reason": "body_not_array"}`（RFC 9457 の形。`title`・`detail` を持たない） | 本文が JSON でない・配列でない・空・101 個以上か全部か無かの操作の上限を越える・重なり（400）、認証できない（401）、`human_only` の操作を委任から呼んだ・委任の種類が足りない（403）、記録を書けない・依存先に届かない（503）、呼びすぎ（429） |
 | 要素の誤り | 上の「失敗の要素」 | 要素の形が違う（400 `item_invalid`）、見えない・無い（404 `not_found`）、役割が足りない（403 `role_insufficient`）、版が合わない（409 `version_mismatch`）、状態が合わない（409 `state_mismatch`）、冪等の鍵の使い回し（422 `idempotency_key_reused`）、同じ冪等の鍵の 1 回目が途中（409 `in_progress`）、使える量の上限（403。理由のコードは使える量の判定が返す `monthly_cap_reached`・`place_not_allowed`・`inference_not_allowed`・`currency_mismatch`（使った額と上限額の通貨が違う。換算しない）。同時に動くレーンの数の `concurrency_full` は待てば解けるため、要素の誤りにせずレーンの待ちの理由として返す。[実行の文書の使える量の判定](execution.md#使える量の判定)） |
 | 401 の本文 | 理由によらず同じ `{"type": "about:blank", "status": 401, "reason": "unauthorized"}` | token の形・期限・取り消しのどれでも同じにし、何が違ったかを明かさない |
 | 500 | 返さない | 想定しない失敗はハンドラーの外側で受けて 503 `unavailable` にし、要求の ID とともにログへ残す（決定 46） |
@@ -84,7 +84,7 @@ API の操作は 1 つの画面に合わせず、エンティティ（スプリ�
 | どこに置くか | 新しいものを作る操作と、外へ働きかける操作（`sprints.create`・`sprints.cancel`・`approvals.answer`・`questions.answer`・`delegations.create`・`machines.create` など）の要素に `idempotency_key`（UUID の形）を必ず持たせる |
 | 何で見分けるか | 主体の利用者・呼び手・操作の名前・鍵の 4 つの組。呼び手は、人の直の操作なら「人」、委任なら委任の ID |
 | 結果を共有する範囲 | 同じ利用者の人の直の操作は、セッション（端末やサインインし直し）が違っても 1 回目の結果を共有する。端末がサインインし直した後に送り直しても 2 重に作らないためである。委任の要求は、その委任の中でだけ共有し、人の直の操作とも、同じ利用者のほかの委任とも共有しない |
-| 結果を返す前 | 2 回目も、今の主体で認可の判定（プロジェクトが見えるか・役割・委任の範囲・人だけか）を 1 回目と同じく要素ごとに掛ける。通った要素にだけ 1 回目の結果を返す。通らない要素には 1 回目の結果を返さず、今の判定の誤り（見えなければ 404 `not_found`）を返す |
+| 結果を返す前 | 2 回目も、今の主体で認可の判定（プロジェクトが見えるか・役割・委任の範囲・`human_only` か）を 1 回目と同じく要素ごとに掛ける。通った要素にだけ 1 回目の結果を返す。通らない要素には 1 回目の結果を返さず、今の判定の誤り（見えなければ 404 `not_found`）を返す |
 | 2 回目 | 24 時間の間、同じ組の 2 回目は 1 回目の要素の結果を返し、状態を変えない。1 回だけ返す値（委任の token など）は 2 回目に `null` にする |
 | 中身が違う | 同じ組で要素の中身が違えば 422 `idempotency_key_reused` |
 | 1 回目が途中 | 409 `in_progress`。呼び手は待って同じ要素を送り直す |
@@ -167,50 +167,50 @@ ID の種類の頭:
 | 列の値 | 意味 |
 | --- | --- |
 | 「MCP の道具か」の「道具」 | 同じ名前の道具がある |
-| 「MCP の道具か」の「依頼と材料の読み出しだけ」 | 人だけの操作で、MCP では対になる読み出しの道具だけを持つ（[人だけの操作の扱い](#人だけの操作の扱い)） |
+| 「MCP の道具か」の「依頼と材料の読み出しだけ」 | `human_only` の操作で、MCP では対になる読み出しの道具だけを持つ（[`human_only` の操作の扱い](#`human_only` の操作の扱い)） |
 | 「読む / 書く」の括弧 | 委任で呼ぶときに要る委任の種類（[委任](#委任)） |
 
 ### 利用者向けの操作
 
 #### 利用者・チーム・プロジェクト（F1〜F6）
 
-| 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | 人だけか | 読む / 書く |
+| 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | `human_only` か | 読む / 書く |
 | --- | --- | --- | --- | --- | --- |
-| `sessions.create` | `/v1/sessions/create` | F1 | 依頼と材料の読み出しだけ（`users.get`） | 人だけ | 書く |
-| `sessions.delete` | `/v1/sessions/delete` | F1 | 依頼と材料の読み出しだけ（`users.get`） | 人だけ | 書く |
+| `sessions.create` | `/v1/sessions/create` | F1 | 依頼と材料の読み出しだけ（`users.get`） | `human_only` | 書く |
+| `sessions.delete` | `/v1/sessions/delete` | F1 | 依頼と材料の読み出しだけ（`users.get`） | `human_only` | 書く |
 | `users.get` | `/v1/users/get` | F1・F2 | 道具 | — | 読む（read） |
 | `users.update` | `/v1/users/update` | F2 | 道具 | — | 書く（manage） |
-| `logins.create` | `/v1/logins/create` | F1 | 依頼と材料の読み出しだけ（`users.get`） | 人だけ | 書く |
-| `logins.delete` | `/v1/logins/delete` | F1 | 依頼と材料の読み出しだけ（`users.get`） | 人だけ | 書く |
+| `logins.create` | `/v1/logins/create` | F1 | 依頼と材料の読み出しだけ（`users.get`） | `human_only` | 書く |
+| `logins.delete` | `/v1/logins/delete` | F1 | 依頼と材料の読み出しだけ（`users.get`） | `human_only` | 書く |
 | `teams.list` | `/v1/teams/list` | F3 | 道具 | — | 読む（read） |
 | `teams.get` | `/v1/teams/get` | F3 | 道具 | — | 読む（read） |
-| `teams.create` | `/v1/teams/create` | F3 | 依頼と材料の読み出しだけ（`teams.list`） | 人だけ | 書く |
+| `teams.create` | `/v1/teams/create` | F3 | 依頼と材料の読み出しだけ（`teams.list`） | `human_only` | 書く |
 | `teams.update` | `/v1/teams/update` | F3 | 道具 | — | 書く（manage） |
 | `seats.list` | `/v1/seats/list` | F3 | 道具 | — | 読む（read） |
-| `seats.update` | `/v1/seats/update` | F3 | 依頼と材料の読み出しだけ（`seats.list`） | 人だけ | 書く |
-| `seats.delete` | `/v1/seats/delete` | F3 | 依頼と材料の読み出しだけ（`seats.list`） | 人だけ | 書く |
+| `seats.update` | `/v1/seats/update` | F3 | 依頼と材料の読み出しだけ（`seats.list`） | `human_only` | 書く |
+| `seats.delete` | `/v1/seats/delete` | F3 | 依頼と材料の読み出しだけ（`seats.list`） | `human_only` | 書く |
 | `invitations.list` | `/v1/invitations/list` | F3 | 道具 | — | 読む（read） |
-| `invitations.create` | `/v1/invitations/create` | F3 | 依頼と材料の読み出しだけ（`invitations.list`） | 人だけ | 書く |
-| `invitations.accept` | `/v1/invitations/accept` | F3 | 依頼と材料の読み出しだけ（`invitations.list`） | 人だけ | 書く |
-| `invitations.delete` | `/v1/invitations/delete` | F3 | 依頼と材料の読み出しだけ（`invitations.list`） | 人だけ | 書く |
+| `invitations.create` | `/v1/invitations/create` | F3 | 依頼と材料の読み出しだけ（`invitations.list`） | `human_only` | 書く |
+| `invitations.accept` | `/v1/invitations/accept` | F3 | 依頼と材料の読み出しだけ（`invitations.list`） | `human_only` | 書く |
+| `invitations.delete` | `/v1/invitations/delete` | F3 | 依頼と材料の読み出しだけ（`invitations.list`） | `human_only` | 書く |
 | `projects.list` | `/v1/projects/list` | F4・F7 | 道具 | — | 読む（read） |
 | `projects.get` | `/v1/projects/get` | F4 | 道具 | — | 読む（read） |
-| `projects.create` | `/v1/projects/create` | F4 | 依頼と材料の読み出しだけ（`teams.list`） | 人だけ | 書く（全部か無か） |
-| `projects.update` | `/v1/projects/update` | F4 | 道具 | — | 書く（manage） |
+| `projects.create` | `/v1/projects/create` | F4 | 依頼と材料の読み出しだけ（`teams.list`） | `human_only` | 書く（全部か無か） |
+| `projects.update` | `/v1/projects/update` | F4 | 道具 | — | 書く（manage。`ask_human_only` を変える要素は `human_only`。AI のエージェントが自分の答えられる範囲を広げないため） |
 | `github_installations.list` | `/v1/github_installations/list` | F5 | 道具 | — | 読む（read） |
-| `github_installations.link` | `/v1/github_installations/link` | F5 | 依頼と材料の読み出しだけ（`github_installations.list`） | 人だけ | 書く |
+| `github_installations.link` | `/v1/github_installations/link` | F5 | 依頼と材料の読み出しだけ（`github_installations.list`） | `human_only` | 書く |
 | `repositories.list` | `/v1/repositories/list` | F5 | 道具 | — | 読む（read） |
 | `repositories.add` | `/v1/repositories/add` | F5 | 道具 | — | 書く（manage、全部か無か） |
 | `repositories.remove` | `/v1/repositories/remove` | F5 | 道具 | — | 書く（manage） |
 | `project_transfers.list` | `/v1/project_transfers/list` | F6 | 道具 | — | 読む（read） |
-| `project_transfers.create` | `/v1/project_transfers/create` | F6 | 依頼と材料の読み出しだけ（`project_transfers.list`） | 人だけ | 書く |
-| `project_transfers.accept` | `/v1/project_transfers/accept` | F6 | 依頼と材料の読み出しだけ（`project_transfers.list`） | 人だけ | 書く |
-| `project_transfers.delete` | `/v1/project_transfers/delete` | F6 | 依頼と材料の読み出しだけ（`project_transfers.list`） | 人だけ | 書く |
-| `projects.close` | `/v1/projects/close` | F6 | 依頼と材料の読み出しだけ（`projects.get`） | 人だけ | 書く |
+| `project_transfers.create` | `/v1/project_transfers/create` | F6 | 依頼と材料の読み出しだけ（`project_transfers.list`） | `human_only` | 書く |
+| `project_transfers.accept` | `/v1/project_transfers/accept` | F6 | 依頼と材料の読み出しだけ（`project_transfers.list`） | `human_only` | 書く |
+| `project_transfers.delete` | `/v1/project_transfers/delete` | F6 | 依頼と材料の読み出しだけ（`project_transfers.list`） | `human_only` | 書く |
+| `projects.close` | `/v1/projects/close` | F6 | 依頼と材料の読み出しだけ（`projects.get`） | `human_only` | 書く |
 
 #### スプリント・承認・問い・知らせ（F7〜F14）
 
-| 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | 人だけか | 読む / 書く |
+| 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | `human_only` か | 読む / 書く |
 | --- | --- | --- | --- | --- | --- |
 | `waiting_counts.get` | `/v1/waiting_counts/get` | F7・F14 | 道具 | — | 読む（read） |
 | `issue_candidates.list` | `/v1/issue_candidates/list` | F8 | 道具 | — | 読む（read） |
@@ -222,82 +222,82 @@ ID の種類の頭:
 | `sprints.cancel` | `/v1/sprints/cancel` | F10 | 道具 | — | 書く（run） |
 | `approvals.list` | `/v1/approvals/list` | F7・F11 | 道具 | — | 読む（read） |
 | `approvals.get` | `/v1/approvals/get` | F11 | 道具（承認資料を含む） | — | 読む（read） |
-| `approvals.answer` | `/v1/approvals/answer` | F12 | 依頼と材料の読み出しだけ（`approvals.get`） | 人だけ | 書く（要素は理由 `reason` と、設計承認ゲートだけ外す課題 `drop_issues` を持つ。[入出力の変わり目](#入出力の変わり目)） |
+| `approvals.answer` | `/v1/approvals/answer` | F12 | 依頼と材料の読み出しだけ（`approvals.get`） | `human_only` | 書く（要素は理由 `reason` と、設計承認ゲートだけ外す課題 `drop_issues` を持つ。[入出力の変わり目](#入出力の変わり目)） |
 | `questions.list` | `/v1/questions/list` | F7・F13 | 道具 | — | 読む（read） |
 | `questions.get` | `/v1/questions/get` | F13 | 道具 | — | 読む（read） |
-| `questions.answer` | `/v1/questions/answer` | F13 | 道具（「人だけか」が真の問いの要素は 403 `human_only`） | 「人だけか」が真の問いだけ人だけ（[実行の文書の区分の表](execution.md#区分とだれが答えられるか)） | 書く（run） |
+| `questions.answer` | `/v1/questions/answer` | F13 | 道具（「`human_only` か」が真の問いの要素は 403 `human_only`） | 「`human_only` か」が真の問いだけ `human_only`（[実行の文書の区分の表](execution.md#区分とだれが答えられるか)） | 書く（run） |
 | `notices.list` | `/v1/notices/list` | F14 | 道具 | — | 読む（read） |
 | `notices.mark_read` | `/v1/notices/mark_read` | F14 | 道具 | — | 書く（run） |
 
 #### 通知先・委任・実行・費用・記録（F15〜F20）
 
-| 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | 人だけか | 読む / 書く |
+| 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | `human_only` か | 読む / 書く |
 | --- | --- | --- | --- | --- | --- |
 | `notification_targets.list` | `/v1/notification_targets/list` | F15 | 道具 | — | 読む（read） |
-| `notification_targets.authorize` | `/v1/notification_targets/authorize` | F15 | 依頼と材料の読み出しだけ（`notification_targets.list`） | 人だけ | 書く |
-| `notification_targets.create` | `/v1/notification_targets/create` | F15 | 依頼と材料の読み出しだけ（`notification_targets.list`） | 人だけ | 書く |
+| `notification_targets.authorize` | `/v1/notification_targets/authorize` | F15 | 依頼と材料の読み出しだけ（`notification_targets.list`） | `human_only` | 書く |
+| `notification_targets.create` | `/v1/notification_targets/create` | F15 | 依頼と材料の読み出しだけ（`notification_targets.list`） | `human_only` | 書く |
 | `notification_targets.test` | `/v1/notification_targets/test` | F15 | 道具 | — | 書く（manage） |
-| `notification_targets.delete` | `/v1/notification_targets/delete` | F15 | 依頼と材料の読み出しだけ（`notification_targets.list`） | 人だけ | 書く |
+| `notification_targets.delete` | `/v1/notification_targets/delete` | F15 | 依頼と材料の読み出しだけ（`notification_targets.list`） | `human_only` | 書く |
 | `delegations.list` | `/v1/delegations/list` | F16 | 道具 | — | 読む（read） |
-| `delegations.create` | `/v1/delegations/create` | F16 | 依頼と材料の読み出しだけ（`delegations.list`） | 人だけ | 書く |
-| `delegations.revoke` | `/v1/delegations/revoke` | F16 | 依頼と材料の読み出しだけ（`delegations.list`） | 人だけ | 書く |
+| `delegations.create` | `/v1/delegations/create` | F16 | 依頼と材料の読み出しだけ（`delegations.list`） | `human_only` | 書く |
+| `delegations.revoke` | `/v1/delegations/revoke` | F16 | 依頼と材料の読み出しだけ（`delegations.list`） | `human_only` | 書く |
 | `execution_settings.get` | `/v1/execution_settings/get` | F17 | 道具 | — | 読む（read） |
-| `execution_settings.update` | `/v1/execution_settings/update` | F17 | 依頼と材料の読み出しだけ（`execution_settings.get`） | 人だけ | 書く |
+| `execution_settings.update` | `/v1/execution_settings/update` | F17 | 依頼と材料の読み出しだけ（`execution_settings.get`） | `human_only` | 書く |
 | `model_keys.list` | `/v1/model_keys/list` | F17 | 道具 | — | 読む（read） |
-| `model_keys.create` | `/v1/model_keys/create` | F17 | 依頼と材料の読み出しだけ（`model_keys.list`） | 人だけ | 書く |
-| `model_keys.delete` | `/v1/model_keys/delete` | F17 | 依頼と材料の読み出しだけ（`model_keys.list`） | 人だけ | 書く |
+| `model_keys.create` | `/v1/model_keys/create` | F17 | 依頼と材料の読み出しだけ（`model_keys.list`） | `human_only` | 書く |
+| `model_keys.delete` | `/v1/model_keys/delete` | F17 | 依頼と材料の読み出しだけ（`model_keys.list`） | `human_only` | 書く |
 | `machines.list` | `/v1/machines/list` | F18 | 道具 | — | 読む（read） |
-| `machines.create` | `/v1/machines/create` | F18 | 依頼と材料の読み出しだけ（`machines.list`） | 人だけ | 書く |
-| `machines.delete` | `/v1/machines/delete` | F18 | 依頼と材料の読み出しだけ（`machines.list`） | 人だけ | 書く |
+| `machines.create` | `/v1/machines/create` | F18 | 依頼と材料の読み出しだけ（`machines.list`） | `human_only` | 書く |
+| `machines.delete` | `/v1/machines/delete` | F18 | 依頼と材料の読み出しだけ（`machines.list`） | `human_only` | 書く |
 | `usage.get` | `/v1/usage/get` | F19 | 道具 | — | 読む（read） |
 | `usage_records.list` | `/v1/usage_records/list` | F9・F19 | 道具 | — | 読む（read） |
-| `spend_caps.update` | `/v1/spend_caps/update` | F19 | 依頼と材料の読み出しだけ（`usage.get`） | 人だけ | 書く |
+| `spend_caps.update` | `/v1/spend_caps/update` | F19 | 依頼と材料の読み出しだけ（`usage.get`） | `human_only` | 書く |
 | `audit_records.list` | `/v1/audit_records/list` | F20 | 道具 | — | 読む（read） |
 
 #### オーガナイザーと会話（F24・F25）
 
-形と決まりは [オーガナイザー](organizer.md) にある。会話の操作は承認の依頼と問いを変えない（I23）。オーガナイザーの専用の委任からは、人だけの操作・`manage` の操作に加えて、`approvals.answer`・`questions.answer`・下の表の書き込み（会話へ送る・取り下げるを含む）・委任の操作を 403 で断る（I24）。会話へ送る・取り下げる・終える・再開するは、立てた人（送る・取り下げるは立てた人のふつうの委任も。終える・再開するは人だけで、委任からは 403 `human_only`）だけが呼べ、ほかの人とその委任は 403 `organizer_owner_only` にする（[オーガナイザーの立てた人だけが動かす](organizer.md#立てた人だけが動かす)）。
+形と決まりは [オーガナイザー](organizer.md) にある。会話の操作は承認の依頼と問いを変えない（I23）。オーガナイザーの専用の委任からは、`human_only` の操作・`manage` の操作に加えて、`approvals.answer`・`questions.answer`・下の表の書き込み（会話へ送る・取り下げるを含む）・委任の操作を 403 で断る（I24）。会話へ送る・取り下げる・終える・再開するは、立てた人（送る・取り下げるは立てた人のふつうの委任も。終える・再開するは `human_only` で、委任からは 403 `human_only`）だけが呼べ、ほかの人とその委任は 403 `organizer_owner_only` にする（[オーガナイザーの立てた人だけが動かす](organizer.md#立てた人だけが動かす)）。
 
-| 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | 人だけか | 読む / 書く |
+| 操作の名前 | HTTP の経路 | 機能 | MCP の道具か | `human_only` か | 読む / 書く |
 | --- | --- | --- | --- | --- | --- |
 | `organizers.list` | `/v1/organizers/list` | F24 | 道具 | — | 読む（read） |
 | `organizers.get` | `/v1/organizers/get` | F24 | 道具 | — | 読む（read） |
-| `organizers.create` | `/v1/organizers/create` | F24 | 依頼と材料の読み出しだけ（`organizers.list`） | 人だけ | 書く（要素はプロジェクトの ID・題。立てた人の名で専用の委任を作る） |
-| `organizers.close` | `/v1/organizers/close` | F24 | 依頼と材料の読み出しだけ（`organizers.get`） | 人だけ | 書く（立てた人だけ。同じトランザクションで専用の委任を取り消す。その後の最初の要求から専用の委任の主体は 401） |
-| `organizers.resume` | `/v1/organizers/resume` | F24 | 依頼と材料の読み出しだけ（`organizers.get`） | 人だけ | 書く（立てた人だけ。前の専用の委任を取り消し、新しい専用の委任を作る。期限は延ばさない） |
+| `organizers.create` | `/v1/organizers/create` | F24 | 依頼と材料の読み出しだけ（`organizers.list`） | `human_only` | 書く（要素はプロジェクトの ID・題。立てた人の名で専用の委任を作る） |
+| `organizers.close` | `/v1/organizers/close` | F24 | 依頼と材料の読み出しだけ（`organizers.get`） | `human_only` | 書く（立てた人だけ。同じトランザクションで専用の委任を取り消す。その後の最初の要求から専用の委任の主体は 401） |
+| `organizers.resume` | `/v1/organizers/resume` | F24 | 依頼と材料の読み出しだけ（`organizers.get`） | `human_only` | 書く（立てた人だけ。前の専用の委任を取り消し、新しい専用の委任を作る。期限は延ばさない） |
 | `organizer_messages.list` | `/v1/organizer_messages/list` | F25 | 道具 | — | 読む（read） |
 | `organizer_messages.create` | `/v1/organizer_messages/create` | F25 | 道具 | — | 書く（run。立てた人だけ。要素は種類（指示・質問・起票の依頼）・本文・冪等の鍵） |
 | `organizer_messages.withdraw` | `/v1/organizer_messages/withdraw` | F25 | 道具 | — | 書く（run。立てた人だけ。オーガナイザーへ渡す前の項目だけで、渡した後は 409 `already_delivered`） |
-| `issue_requests.create` | `/v1/issue_requests/create` | F25 | 道具 | — | 書く（run。オーガナイザーの専用の委任だけ。要素は宛先・題・本文・ラベル・冪等の鍵。課題は作らず、起票の依頼（承認の依頼。C5・人だけ）を作る。[実行の文書のオーガナイザーからの起票の依頼](execution.md#オーガナイザーからの起票の依頼)） |
+| `issue_requests.create` | `/v1/issue_requests/create` | F25 | 道具 | — | 書く（run。オーガナイザーの専用の委任だけ。要素は宛先・題・本文・ラベル・冪等の鍵。課題は作らず、起票の依頼（承認の依頼。C5。人か、その人の委任が答える）を作る。[実行の文書のオーガナイザーからの起票の依頼](execution.md#オーガナイザーからの起票の依頼)） |
 
-### 人だけにした理由
+### `human_only` にした理由
 
 下の表の操作を人に限るのは、段階が `human` の設置だけである（[人の確定の段階](#人の確定の段階)）。
 
 | 操作 | 理由（MVV の項目） |
 | --- | --- |
-| `approvals.answer`・「人だけか」が真の問いの `questions.answer` | 承認ゲートとレッドラインの承認と、人だけの区分の問いの答えは人だけ（Value 4、I4）。問いの「人だけか」は、問いを作るときに [実行の文書の区分の表](execution.md#区分とだれが答えられるか) で決めて問いの行に持つ。区分の一覧はその表が正本で、この文書は写さない（決定 57） |
-| `projects.create`・`project_transfers.*`・`projects.close` | プロジェクトの割り当ての作成・変更・外しは人だけ（P2、I3） |
-| `teams.create`・`seats.update`・`seats.delete`・`invitations.create`・`invitations.accept`・`invitations.delete` | 席はプロジェクトを見られる人を決める。席を足すことはチームの外の人へ見せることに当たる（P2）。席を変える・外す操作も、同じ判断の流れに置くため人だけにそろえる |
+| `approvals.answer`・「`human_only` か」が真の問いの `questions.answer` | 承認ゲートとレッドラインの承認と、`human_only` の区分の問いの答えは `human_only`（Value 4、I4）。問いの「`human_only` か」は、問いを作るときに [実行の文書の区分の表](execution.md#区分とだれが答えられるか) で決めて問いの行に持つ。区分の一覧はその表が正本で、この文書は写さない（決定 57） |
+| `projects.create`・`project_transfers.*`・`projects.close` | プロジェクトの割り当ての作成・変更・外しは `human_only`（P2、I3） |
+| `teams.create`・`seats.update`・`seats.delete`・`invitations.create`・`invitations.accept`・`invitations.delete` | 席はプロジェクトを見られる人を決める。席を足すことはチームの外の人へ見せることに当たる（P2）。席を変える・外す操作も、同じ判断の流れに置くため `human_only` にそろえる |
 | `delegations.create`・`delegations.revoke` | 委任が委任を作ると、人の確かめない範囲が広がる（Value 4） |
 | `organizers.close` | 戻せない `ended` へ移し、状態の S3 にある会話の控え（claude の会話の記録）を消す期限を決める。取り消せない操作なので、画面で消える対象と結果を読んだ立てた人だけが確定する（C4） |
-| `notification_targets.delete` | Slack の通知先を外すと、bot token を置いた Secrets Manager の秘密も消す（[土台の文書の決定 90](platform.md#決定の記録)）。秘密に触れる操作なので人だけにする（C1） |
+| `notification_targets.delete` | Slack の通知先を外すと、bot token を置いた Secrets Manager の秘密も消す（[土台の文書の決定 90](platform.md#決定の記録)）。秘密に触れる操作なので `human_only` にする（C1） |
 | `machines.delete` | 登録を外すと、そのマシンの登録の token が受けられる経路が消去の知らせだけに変わり、マシンの権限が変わる（C2）。人が画面で外すマシンと、その上の未消去の会話の記録を読んでから確定する |
-| `organizers.create`・`organizers.resume` | どちらも立てた人の名で専用の委任（期限 30 日）を作る。委任から呼べると、委任が委任を作ることになり、`delegations.create` を人だけにした理由と同じく人の確かめない範囲が広がる（Value 4） |
-| `notification_targets.create`・`model_keys.create` | 宛先の値と持ち込みのキーは秘密の値で、秘密を受け取る操作は人だけ（[全体の設計](overview.md) の「人へ残す判断」の C1） |
+| `organizers.create`・`organizers.resume` | どちらも立てた人の名で専用の委任（期限 30 日）を作る。委任から呼べると、委任が委任を作ることになり、`delegations.create` を `human_only` にした理由と同じく人の確かめない範囲が広がる（Value 4） |
+| `notification_targets.create`・`model_keys.create` | 宛先の値と持ち込みのキーは秘密の値で、秘密を受け取る操作は `human_only`（[全体の設計](overview.md) の「人へ残す判断」の C1） |
 | `model_keys.delete` | 持ち込みのキーは秘密で、消すと推論が止まり、同じ値を戻せない（C1）。MCP からは `model_keys.list` で消す対象（名前・作った日・最後に使った日。値は出さない）を確かめられる |
 | `notification_targets.authorize` | Slack の登録を始め、認可の取引を人のサインインのセッションに結ぶ。`notification_targets.create` と同じセッションで呼ぶ必要がある（[実行の文書の Slack の登録](execution.md#slack-の登録)） |
 | `execution_settings.update`・`spend_caps.update` | 推論の手段と上限額は請求の額を変える |
 | `machines.create` | 登録の token（秘密）を発行する |
 | `sessions.create`・`sessions.delete`・`logins.create`・`logins.delete`・`github_installations.link` | 人のブラウザーの中の流れ（サインイン・IdP のログインをつなぐ戻り・GitHub の導入の戻り）で、委任の主体が通る流れでない。`logins.delete` は最後の 1 つのログインを外す要求を 409 で拒む |
 
-外す・狭める操作は、見える範囲も費用も広げないため委任から呼べる。当たるのは `repositories.remove` である。`notification_targets.delete` は Slack の通知先の bot token の秘密を消し、`machines.delete` は権限を変えるので、どちらも人だけにする（上の表）。また、`machines.delete` はマシンの登録を外すだけで、オーガナイザーの会話の記録を消した確認の代わりにはならない。外したマシンの未消去の記録は残り、割り当ての移しの受け入れを待たせ続ける（[オーガナイザーの手元のマシンの会話の記録](organizer.md#会話の控え)）。`model_keys.delete` は秘密を扱うので、狭める操作でも人だけにする（上の表）。
+外す・狭める操作は、見える範囲も費用も広げないため委任から呼べる。当たるのは `repositories.remove` である。`notification_targets.delete` は Slack の通知先の bot token の秘密を消し、`machines.delete` は権限を変えるので、どちらも `human_only` にする（上の表）。また、`machines.delete` はマシンの登録を外すだけで、オーガナイザーの会話の記録を消した確認の代わりにはならない。外したマシンの未消去の記録は残り、割り当ての移しの受け入れを待たせ続ける（[オーガナイザーの手元のマシンの会話の記録](organizer.md#会話の控え)）。`model_keys.delete` は秘密を扱うので、狭める操作でも `human_only` にする（上の表）。
 
 ### 人の確定の段階
 
-**この文書と他の文書が「人だけ」とした確定（I4・I24・人だけの操作・人だけの区分の問い・レッドラインの承認）を人に限るのは、商用利用を始めた後の本番の設置だけである。** それ以外の設置では、委任とオーガナイザーの専用の委任（AI のエージェント）も同じ確定を行える（利用者の決定、2026-11-24。決定 156）。
+**この文書と他の文書が「`human_only`」とした確定（I4・I24・`human_only` の操作・`human_only` の区分の問い・レッドラインの承認）を人に限るのは、商用利用を始めた後の本番の設置だけである。** それ以外の設置では、委任とオーガナイザーの専用の委任（AI のエージェント）も同じ確定を行える（利用者の決定、2026-11-24。決定 156）。
 
-| 設置 | 段階 | 人だけの確定 |
+| 設置 | 段階 | `human_only` の確定 |
 | --- | --- | --- |
 | 商用利用を始める前のすべての設置 | `ai` | 委任・専用の委任からも確定できる。`human_only` で断らない |
 | 商用利用を始めた後の開発の設置 | `ai` | 同上 |
@@ -306,7 +306,7 @@ ID の種類の頭:
 - **商用利用の開始**: 機能が一通りそろい、β テストを経て nd-factory を正式版として公開するとき。利用者が宣言する
 - **段階の置き場**: 設置ごとの設定のファイル（[settings.md](../operations/settings.md)。キーは読む構成要素と同じ変更で形の正本に足す）の 2 つのキー、`launch_declared`（商用利用を宣言したか。既定は偽）と `environment_kind`（`development` か `production`）から API が決める。`human` になるのは両方が「宣言した・本番」のときだけ。キーが読めないときは `human` に倒す。API・MCP・画面には、この 2 つのキーを書き換える操作を置かない。変えられるのは、人が設置のコマンドか反映のパイプラインの承認を通したときだけで、段階が `ai` の間も AI のエージェントは段階を変えられない
 - **変わらないもの**: 確定の時点でサーバーの今の状態（待っている・承認資料の要約値が同じ）と照らすこと、オフラインの端末から確定しないこと、操作の記録（I9）に確定した主体（人か、どの委任か）を書くことは、段階によらない
-- **MCP**: 段階が `ai` の設置では、人だけの操作も MCP の道具として出す。`human` の設置では上の表のとおり出さない
+- **MCP**: 段階が `ai` の設置では、`human_only` の操作も MCP の道具として出す。`human` の設置では上の表のとおり出さない
 - **画面**: 段階が `ai` の設置では、承認の詳細と問いの画面に「この設置では AI も確定できます」の札を出す
 
 ### ランナー・手元のマシンの HTTP の経路
@@ -350,7 +350,7 @@ DB の用意の関数が関数の中から呼ぶプロジェクトのモジュ�
 | 操作・HTTP の経路 | 変える所 |
 | --- | --- |
 | `approvals.answer` | 要素に `reason`（文字列、0〜2,000 字、任意）と `drop_issues`（整数の配列、任意、設計承認ゲートの依頼だけ）を足す。外れたら要素の 400 `item_invalid` |
-| `questions.answer` | 問いの「人だけか」が真の要素を 403 `human_only`。委任でない主体（人）の要素は受ける |
+| `questions.answer` | 問いの「`human_only` か」が真の要素を 403 `human_only`。委任でない主体（人）の要素は受ける |
 | `sprints.create`・`project_transfers.create` | 移しの間は要素の 409 `project_transfer_in_progress`、差し替えの保留の間は要素の 409 `credential_rotation_in_progress`（I20）。認可の判定に使った今の割り当ての ID（`current_assign_id`）が書き込みの時点で変わっていれば、存在しないときと同じ 404 で書かない（I20・I2） |
 | `project_transfers.create`・`project_transfers.accept`・`project_transfers.delete` | 作成は移し中の印と止める依頼（移す途中の状態の「止め終えたか」が偽）を 1 つの書き込みで書いてから E18 を出す。受け入れは、印が対象の移しの ID と同じで「取り下げたか」が偽であることを条件に入れ、割り当ての行の追加・今の割り当ての差し替え・印を空にする更新を 1 つのトランザクションで書いて E17 を出す（条件が外れたら 409 `state_mismatch` で割り当てを変えない）。取り下げは「取り下げたか」を真にし、印を空にするのは[全体の設計の割り当てを変える流れ](overview.md#割り当てを変える流れ) の条件がそろった後だけ |
 | `/v1/runner/answer_deliveries/create` | 要求の要素に、`ndf answer` の結果の `metrics.seqs`（NDF の答えの事象の番号）を足す（I5） |
@@ -410,7 +410,7 @@ GitHub が形を決める本文は配列にできないため、I12 の外に置
 | 決まり | 中身 |
 | --- | --- |
 | 単位 | プロジェクト。チーム・利用者・委任の操作は、それぞれ席・本人・発行した人で判定する |
-| 1 か所 | 操作の表の印（人だけか・委任の種類・役割）と主体から、`判定(主体, 操作, 対象)` の 1 つの関数が決める。ハンドラーは判定を通った要素だけを受ける |
+| 1 か所 | 操作の表の印（`human_only` か・委任の種類・役割）と主体から、`判定(主体, 操作, 対象)` の 1 つの関数が決める。ハンドラーは判定を通った要素だけを受ける |
 | 見えないもの | 存在しないときと同じ 404 `not_found`。本文も同じにする |
 | 要素ごと | 判定は要素ごとに掛ける。見える要素と見えない要素を混ぜた要求は、見えない要素だけが 404 になる |
 | 読み出しの範囲 | 一覧は主体の見えるプロジェクトの ID の集まりを先に求め、その ID だけで表を引く。見えないプロジェクトの行を読んでから捨てる形にしない |
@@ -430,7 +430,7 @@ sequenceDiagram
     C->>A: 要求（配列）
     A-->>C: 401（主体が決まらない）
     A->>Z: 主体と操作
-    Z-->>C: 403 human_only（委任で人だけの操作）・403 scope_insufficient（委任の種類が足りない）
+    Z-->>C: 403 human_only（委任で `human_only` の操作）・403 scope_insufficient（委任の種類が足りない）
     Z->>Z: 要素ごとに プロジェクトが見えるか（404）・役割（403）
     Z->>H: 通った要素
     H->>L: 要素の記録の行を状態の書き込みと同じトランザクションで確定（判定に使った割り当て・席・委任が今も有効なことを条件にする）
@@ -468,7 +468,7 @@ sequenceDiagram
 | 料金プランと使った額を読む | できる | できる |
 | 操作の記録を読む | プロジェクトの記録すべて | 自分と自分の委任の記録だけ |
 
-委任の判定は、委任した人の役割で上の表を引き、さらに委任の範囲で絞る。持ち主の委任でも人だけの操作は通らない。
+委任の判定は、委任した人の役割で上の表を引き、さらに委任の範囲で絞る。持ち主の委任でも `human_only` の操作は通らない。
 
 ## 委任
 
@@ -476,14 +476,14 @@ sequenceDiagram
 
 | 項目 | 決まり |
 | --- | --- |
-| 発行 | `delegations.create`（人だけ）。画面で範囲・期限・クライアントの名前を選び、token を 1 回だけ見せる |
+| 発行 | `delegations.create`（`human_only`）。画面で範囲・期限・クライアントの名前を選び、token を 1 回だけ見せる |
 | 範囲のプロジェクト | プロジェクトの ID の 1 つ以上の並び。発行のときに委任した人が見られるものだけを選べる |
-| 範囲の操作の種類 | `read`（読む）・`run`（読むに加え、スプリントを始める・取り消す・人だけでない問いに答える・知らせを既読にする）・`manage`（`run` に加え、操作の一覧で manage の印を持つ書き込み） |
+| 範囲の操作の種類 | `read`（読む）・`run`（読むに加え、スプリントを始める・取り消す・`human_only` でない問いに答える・知らせを既読にする）・`manage`（`run` に加え、操作の一覧で manage の印を持つ書き込み） |
 | 効く範囲 | 要求のたびに「委任した人の今の範囲」と「委任の範囲」の重なりで判定する。委任した人がチームを外れれば、その次の要求から見えなくなる |
-| 人だけの操作 | 範囲によらず 403 `human_only`。委任を発行・取り消す操作も含む |
+| `human_only` の操作 | 範囲によらず 403 `human_only`。委任を発行・取り消す操作も含む |
 | 期限 | 1 時間〜30 日から選ぶ。既定 7 日。延ばす操作は持たず、新しく発行する |
-| オーガナイザーの専用の委任 | 人が `organizers.create`・`organizers.resume` で作る（人だけ）。範囲は 1 つのプロジェクトと `read`・`run`、期限は作ってから 30 日で、延ばさない。token を持たず、オーガナイザーのレーンの token からだけ使える。`approvals.answer`・`questions.answer`・オーガナイザーと会話の書き込みを 403 で断る（I24）。委任の一覧に出し、人が `delegations.revoke` で取り消せる。終える・再開する・割り当ての移しで取り消す（[オーガナイザー](organizer.md#単位と状態)） |
-| 取り消し | `delegations.revoke`（人だけ）。その後の最初の要求から 401。照らした結果をキャッシュしない |
+| オーガナイザーの専用の委任 | 人が `organizers.create`・`organizers.resume` で作る（`human_only`）。範囲は 1 つのプロジェクトと `read`・`run`、期限は作ってから 30 日で、延ばさない。token を持たず、オーガナイザーのレーンの token からだけ使える。`approvals.answer`・`questions.answer`・オーガナイザーと会話の書き込みを 403 で断る（I24）。委任の一覧に出し、人が `delegations.revoke` で取り消せる。終える・再開する・割り当ての移しで取り消す（[オーガナイザー](organizer.md#単位と状態)） |
+| 取り消し | `delegations.revoke`（`human_only`）。その後の最初の要求から 401。照らした結果をキャッシュしない |
 | クライアントの名前 | 1〜64 字。人が付ける。画面の一覧と操作の記録の読み出しで、どのクライアントの操作かを見分けるのに使う |
 | 最後に使った時刻 | 委任ごとに持ち、一覧で見せる。使われていない委任を人が取り消せるようにする |
 | 行の保存 | 期限を過ぎ・取り消した行も、操作の記録と同じ期間は消さない。記録から委任とクライアントの名前をたどれるようにする |
@@ -509,7 +509,7 @@ MCP のクライアントは、画面で発行した委任の token を、クラ
 | MCP の仕様との合い方 | 仕様は認可を任意とする（STD40）。HTTP で認可を持つなら仕様に倣うことが推し（SHOULD）で、外れる | 仕様に倣う |
 | 使えるクライアント | 頭書きを設定できるクライアント（STD40 の範囲外のため、実機で確かめる） | OAuth に対応するクライアント |
 
-OAuth 2.1 の流れを足すときは、委任の発行の画面を同意の画面として使い、委任の表・範囲・人だけの判定をそのまま使う。足すのは token の端点と保護された資源の資料（RFC 9728）である。
+OAuth 2.1 の流れを足すときは、委任の発行の画面を同意の画面として使い、委任の表・範囲・`human_only` の判定をそのまま使う。足すのは token の端点と保護された資源の資料（RFC 9728）である。
 
 ## MCP
 
@@ -537,14 +537,14 @@ AI のエージェントが、画面と同じ操作を MCP の道具として呼
 | 理由 | 道具の説明の読み手は人でなく言語モデルで、画面の文言（翻訳のファイルで持つもの。Value 5）に当たらない。言語ごとに道具の一覧を変えると、同じ委任から見える道具の一覧が呼び手の言語で変わり、照らし合わせ（I14）と記録が言語ごとに分かれる |
 | 人が読む文言 | 道具の結果は理由のコードだけを返す。人へ見せる文は、エージェントの側か画面の翻訳のファイルが作る |
 
-### 人だけの操作の扱い
+### `human_only` の操作の扱い
 
 | 点 | 決まり |
 | --- | --- |
-| 道具 | 人だけの操作は MCP の道具にしない。対になる読み出しの道具（操作の一覧の括弧）で、依頼と材料を読める |
+| 道具 | `human_only` の操作は MCP の道具にしない。対になる読み出しの道具（操作の一覧の括弧）で、依頼と材料を読める |
 | 読み出しの結果 | 人の確定を待つ対象は `needs_human: true` と、画面で確定する場所のリンク（`confirm_url`）を持つ。エージェントは人へリンクを渡して待つ |
-| API から呼んだとき | 委任の token で人だけの操作の HTTP の経路を呼ぶと、要求全体を 403 `human_only` で断り、何も保存しない |
-| 要素ごとに人だけになる操作 | `questions.answer` は道具にある。問いの「人だけか」が真の要素だけを 403 `human_only` にし、ほかの要素は答えを受ける。「人だけか」は [実行の文書の区分の表](execution.md#区分とだれが答えられるか) で決まる（`ndf-ask:human-action` と知らない区分を含む） |
+| API から呼んだとき | 委任の token で `human_only` の操作の HTTP の経路を呼ぶと、要求全体を 403 `human_only` で断り、何も保存しない |
+| 要素ごとに `human_only` になる操作 | `questions.answer` は道具にある。問いの「`human_only` か」が真の要素だけを 403 `human_only` にし、ほかの要素は答えを受ける。「`human_only` か」は [実行の文書の区分の表](execution.md#区分とだれが答えられるか) で決まる（`ndf-ask:human-action` と知らない区分を含む） |
 
 ## 操作の記録
 
@@ -632,7 +632,7 @@ classDiagram
 | 型 | `z.infer` | API のハンドラー・画面の API の呼び出し |
 | JSON Schema | `z.toJSONSchema`（draft 2020-12） | 要素の検証・MCP の道具の入力と出力の形 |
 | OpenAPI 3.1 の文書 | 操作の表と上の JSON Schema から、自前の生成のスクリプトで組む（決定 55） | 連携するシステム（A5）の呼び手の生成・公開の文書 |
-| MCP の道具の一覧 | 操作の表のうち人だけでない操作 | `/mcp` の `tools/list` |
+| MCP の道具の一覧 | 操作の表のうち `human_only` でない操作 | `/mcp` の `tools/list` |
 | HTTP の経路の登録 | 操作の表の HTTP の経路 | CDK が API Gateway の HTTP の経路を操作ごとに作る。Lambda の振り分けの表 |
 | 画面のダミーデータ | 操作ごとの見本（`examples`。作り物の値だけ） | 画面先行の段で、API の中身の前に画面を作り切る偽の API（Value 2） |
 | 理由のコードの一覧 | 操作ごとの `reasons` | 画面の翻訳のファイルの鍵の検査（鍵の欠けを落とす） |
@@ -644,7 +644,7 @@ classDiagram
 | --- | --- |
 | 画面の呼び出し | 画面のコードが、生成した呼び出しを通さずに `/v1/` の HTTP の経路を直に書いた呼び出し |
 | 画面と操作の対応 | 利用者向けの操作のうち、画面のどこからも呼ばれないもの。画面が呼ぶのに表に無いもの |
-| MCP と操作の対応 | `tools/list` の名前の集まりが「操作の表のうち人だけでない操作」と違う。人だけの操作の対になる読み出しの道具が無い |
+| MCP と操作の対応 | `tools/list` の名前の集まりが「操作の表のうち `human_only` でない操作」と違う。`human_only` の操作の対になる読み出しの道具が無い |
 | HTTP の経路の登録 | API Gateway の HTTP の経路と Lambda の振り分けに、操作の表に無い HTTP の経路がある |
 | 機能の対応 | F1〜F20・F24・F25 のどれかが、操作の表の機能の列に無い |
 | 値の形 | 時刻帯の無い日時・通貨の無い金額を受ける形（I15） |
@@ -816,7 +816,7 @@ UUIDv7 のバイト列は `uuid` の `v7`（LIB46）で組み、単調性の状�
 
 ### 決定 49: 任せる範囲を人が読めて狭められるよう、委任の範囲をプロジェクトと 3 つの操作の種類にし、期限を 1 時間〜30 日にする
 
-範囲はプロジェクトの並びと `read`・`run`・`manage`（上は下を含む）で、効くのは委任した人の今の範囲との重なりである。期限は人が選び、既定 7 日・上限 30 日で、無期限を持たない。token を貼って使う間（決定 50）、1 時間を上限にすると人が毎時貼り直すことになり、待ちと手間が増える（Mission）。漏れたときの害は、取り消しが次の要求から効くこと・人だけの操作を呼べないこと・最後に使った時刻と記録を人が読めることで抑える。
+範囲はプロジェクトの並びと `read`・`run`・`manage`（上は下を含む）で、効くのは委任した人の今の範囲との重なりである。期限は人が選び、既定 7 日・上限 30 日で、無期限を持たない。token を貼って使う間（決定 50）、1 時間を上限にすると人が毎時貼り直すことになり、待ちと手間が増える（Mission）。漏れたときの害は、取り消しが次の要求から効くこと・`human_only` の操作を呼べないこと・最後に使った時刻と記録を人が読めることで抑える。
 
 採らなかった案: 操作ごとに許す形は、人が選ぶ項目が操作の数だけ増え、読めなくなる。読むと書くの 2 つだけの形は、スプリントを始めさせたいだけの委任にリポジトリの登録まで許してしまう。
 
@@ -827,7 +827,7 @@ UUIDv7 のバイト列は `uuid` の `v7`（LIB46）で組み、単調性の状�
 
 ### 決定 50: 最初の版で MCP を使い始められるよう、MCP の認可は画面で発行した委任の token を貼る形にし、OAuth 2.1 の流れを後に回す
 
-Cognito はクライアントの動的な登録とクライアント ID の資料を持たない（LIB44）。OAuth の流れには、認可サーバー（認可の端点・token の端点・同意の画面・refresh token）を自前で作るか、前に置く層が要る。OAuth 2.1 自体がまだ草案である（STD41）。MCP の仕様は認可を任意とし（STD40）、主要な遠くの MCP サーバーも貼る token を受ける（PRD42）。委任の表・範囲・人だけの判定は OAuth を足しても同じに使えるため、後から足しても捨てるものが無い。
+Cognito はクライアントの動的な登録とクライアント ID の資料を持たない（LIB44）。OAuth の流れには、認可サーバー（認可の端点・token の端点・同意の画面・refresh token）を自前で作るか、前に置く層が要る。OAuth 2.1 自体がまだ草案である（STD41）。MCP の仕様は認可を任意とし（STD40）、主要な遠くの MCP サーバーも貼る token を受ける（PRD42）。委任の表・範囲・`human_only` の判定は OAuth を足しても同じに使えるため、後から足しても捨てるものが無い。
 
 採らなかった案: 最初から OAuth 2.1 の流れを持つ形は、認可サーバーを作る分だけ MCP を使える時期が遅れ、運用する資源も増える（Value 6）。
 
@@ -847,11 +847,11 @@ Cognito はクライアントの動的な登録とクライアント ID の資�
 
 根拠: Value 4 / Value 6（MVV バージョン 3）
 
-### 決定 52: エージェントが断られる道具を呼ばずに済むよう、人だけの操作を MCP の道具にせず、読み出しの道具で確定の場所を返す
+### 決定 52: エージェントが断られる道具を呼ばずに済むよう、`human_only` の操作を MCP の道具にせず、読み出しの道具で確定の場所を返す
 
-人だけの操作は道具に出さず、対になる読み出しの道具の結果に `needs_human` と画面のリンクを持たせる。必ず断られる道具を一覧に置くと、エージェントが試して断られる呼び出しと記録が増える。API の HTTP の経路は残し、委任から呼べば 403 `human_only` で断る。照らし合わせ（I14）は、人だけの操作に対になる読み出しの道具があることで満たす。
+`human_only` の操作は道具に出さず、対になる読み出しの道具の結果に `needs_human` と画面のリンクを持たせる。必ず断られる道具を一覧に置くと、エージェントが試して断られる呼び出しと記録が増える。API の HTTP の経路は残し、委任から呼べば 403 `human_only` で断る。照らし合わせ（I14）は、`human_only` の操作に対になる読み出しの道具があることで満たす。
 
-採らなかった案: 人だけの操作も道具に載せて常に断る形は、エージェントの文脈と呼び出しを無駄にする。
+採らなかった案: `human_only` の操作も道具に載せて常に断る形は、エージェントの文脈と呼び出しを無駄にする。
 
 根拠: Value 1 / Value 4（MVV バージョン 3）
 
@@ -890,9 +890,9 @@ API の要素の項目・型・必須か・理由のコードは、形の正本�
 
 根拠: Value 2 / Value 4（MVV バージョン 3）
 
-### 決定 57: 問いに人だけが答える範囲を 1 つにするため、問いを作るときに実行の文書の区分の表で「人だけか」を決め、API はその値で要素ごとに断る
+### 決定 57: `human_only` の問いの範囲を 1 つにするため、問いを作るときに実行の文書の区分の表で「`human_only` か」を決め、API はその値で要素ごとに断る
 
-[実行の文書の区分の表](execution.md#区分とだれが答えられるか)（実行の文書の決定 72）は `ndf-ask:irreversible`・`ndf-ask:human-action` と知らない区分を人だけにする。「レッドラインに当たる問い」だけを人だけにする形では、レッドラインの区分は承認の依頼になり問いにならないため、人だけの問いが 0 件になる。区分の表を正本にすると、知らない区分も人だけ（強い側）になり Value 4 を弱めない。
+[実行の文書の区分の表](execution.md#区分とだれが答えられるか)（実行の文書の決定 72）は `ndf-ask:irreversible`・`ndf-ask:human-action` と知らない区分を `human_only` にする。「レッドラインに当たる問い」だけを `human_only` にする形では、レッドラインの区分は承認の依頼になり問いにならないため、`human_only` の問いが 0 件になる。区分の表を正本にすると、知らない区分も `human_only`（強い側）になり Value 4 を弱めない。
 
 採らなかった案: API の文書に区分の一覧をコピーする形は、答えが 2 か所になり、片方だけを直したときに食い違いが戻る（[決定 1](decisions.md#決定の記録)）。
 
@@ -907,13 +907,13 @@ API の要素の項目・型・必須か・理由のコードは、形の正本�
 | MCP の仕様の改訂 | 2026-07-28 版で外れたセッションなどが次の版で変わるかを、作る時点の版で確かめる |
 | 操作の記録の量と費用 | 画面の読み直し・心拍まで 1 件ずつ記録したときの 1 か月の書き込みの数と費用を、動く環境で測る |
 | Cognito の access token を 15 分にしたときの画面の取り直し | 取り直しが画面の操作の速さを落とさないかを、実機で確かめる |
-### 決定 156: 開発の初期に人の待ちを増やさないため、人だけの確定を商用利用を始めた後の本番の設置に限り、ほかの設置では AI のエージェントも確定できるようにする
+### 決定 156: 開発の初期に人の待ちを増やさないため、`human_only` の確定を商用利用を始めた後の本番の設置に限り、ほかの設置では AI のエージェントも確定できるようにする
 
-結論: 人だけの確定（I4・I24・人だけの操作・人だけの区分の問い・レッドラインの承認）は、段階 `human`（商用利用を宣言した後の本番の設置）だけで人に限る。ほかの設置は段階 `ai` で、委任とオーガナイザーの専用の委任も確定できる（[人の確定の段階](#人の確定の段階)）。
+結論: `human_only` の確定（I4・I24・`human_only` の操作・`human_only` の区分の問い・レッドラインの承認）は、段階 `human`（商用利用を宣言した後の本番の設置）だけで人に限る。ほかの設置は段階 `ai` で、委任とオーガナイザーの専用の委任も確定できる（[人の確定の段階](#人の確定の段階)）。
 
-理由: 商用利用の前は、使う人が作り手だけで、人の承認が多いと待ちが開発を止める（利用者の決定、2026-11-24: 「人の承認が多すぎる。商用利用の開始前は人の承認が必要な指摘もすべて AI が判断し、開始後は開発環境に限って AI が判断する」）。人だけの範囲そのもの（どの操作か・どの区分か）は消さずに残し、段階で効かせるかを切り替える。商用利用の後の本番では今の設計のまま効き、Value 4 の「承認の確定は人」を守る。
+理由: 商用利用の前は、使う人が作り手だけで、人の承認が多いと待ちが開発を止める（利用者の決定、2026-11-24: 「人の承認が多すぎる。商用利用の開始前は人の承認が必要な指摘もすべて AI が判断し、開始後は開発環境に限って AI が判断する」）。`human_only` の範囲そのもの（どの操作か・どの区分か）は消さずに残し、段階で効かせるかを切り替える。商用利用の後の本番では今の設計のまま効き、Value 4 の「承認の確定は人」を守る。
 
-採らなかった案: 人だけの範囲を設計から外す形は、商用利用の後に範囲を決め直すことになり、本番で効かせる範囲を誤りやすい。設置ごとに人だけの操作を 1 つずつ選ぶ形は、設定の組が増え、段階の宣言 1 つで切り替わらない。
+採らなかった案: `human_only` の範囲を設計から外す形は、商用利用の後に範囲を決め直すことになり、本番で効かせる範囲を誤りやすい。設置ごとに `human_only` の操作を 1 つずつ選ぶ形は、設定の組が増え、段階の宣言 1 つで切り替わらない。
 
 根拠: Mission / Value 4（MVV バージョン 3）
 

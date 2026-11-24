@@ -69,7 +69,7 @@
     {
       "term": "プロジェクトの割り当て",
       "context": "project",
-      "meaning": "プロジェクトを見られるチームを決める関係。作る・変える・外すのは人だけ（P2）",
+      "meaning": "プロジェクトを見られるチームを決める関係。作る・変える・外すのは `human_only`（P2）",
       "source": "docs/design/overview.md"
     },
     {
