@@ -52,7 +52,7 @@ tools/checks/
 | `tools/checks/leak_scan/history.py` | 新設 | 履歴の対象を決め、読み終えたかを確かめる | `tree.py`・`gitleaks.py`・`model.py` | `history` | `list_entries`・`check_markers`・`is_binary`・`added_lines`・`attribute`・`merge_findings` |
 | `tools/checks/leak_scan/relay.py` | 新設 | `git log -p` の出力に目印を足し、コミットの行を書き換える | 無し | `relay` | `main`・`rewrite_log` |
 | `tools/checks/leak_scan/copyrepo.py` | 新設 | 対象を親の無いコミットにして探す | `gitleaks.py` | `CopyRepo` | `install_relay`・`add`・`scan` |
-| `tools/checks/leak_scan/archive.py` | 新設 | 先頭のバイトで見分けて、上限つきで展開する | `model.py` | `archive`・`BudgetedReader` | `detect`・`expand`・`normalize_name` |
+| `tools/checks/leak_scan/archive.py` | 新設 | 中身で見分けて、上限つきで展開する | `model.py` | `archive`・`BudgetedReader` | `detect`・`expand`・`normalize_name` |
 | `tools/checks/leak-scan-secret.sh` | 変更 | 新しい失敗の行を見分ける | `leak-scan.sh` | シェルスクリプト | `count_failed`（変更） |
 | `tools/checks/install-gitleaks.sh` | 変更 | 既定の設定のファイルも置く | 無し | シェルスクリプト | 関数は無い |
 | `.gitleaks.toml` | 変更 | token の規則と絞った許可 | 無し | 設定 | — |
@@ -191,14 +191,17 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `is_excluded` | `tree.py` | 新設 | `(path: str, config: Path, root: Path) -> bool` | 決定 6 の対象外の表を 1 か所で持つ（今の木と履歴で使う） |
+| `is_excluded` | `tree.py` | 新設 | `(path: str, config: Path, root: Path, tracked: frozenset[str] \| None) -> bool` | 決定 6 の対象外の表を 1 か所で持つ（今の木と履歴で使う） |
 | `collect_tree_targets` | `tree.py` | 新設 | `(ctx, run: Run, repo: CopyRepo, budget: Budget) -> set[Mark]` | 飛ばした行のファイル・外れたディレクトリの下のファイル・アーカイブの中のファイルを写しに足す |
 
 - `is_excluded`
-  - 事後条件: 途中のディレクトリの名前が `node_modules`・`bower_components` か、パスの要素のどれかが `.git` であるか、実体のパスが `config` と同じなら真
+  - 事後条件: 次のどれかなら真。途中のディレクトリの名前が `node_modules`・`bower_components` で、`tracked` があり、`path` が `tracked` に無い。パスの要素のどれかが `.git` である。実体のパスが `config` と同じである
+- `tracked`
+  - 今の木で、探す木の根が Git の作業ツリーの最上位なら、`git ls-files -z` のパスの集合である。最上位でないとき（作業ツリーの外を含む）と履歴の探しでは `None` にする（依存のディレクトリの下を除かない）
+  - `git ls-files` が失敗したら、`None` のまま探し、`SKIPPED` を立てる
 - `collect_tree_targets`
   - 事前条件: `run` は 1 回目の結果
-  - 事後条件: 同じパスは 1 回だけ足す。大きさ 0 と確かめたファイルは足さない。展開のために、対象外でないすべての普通のファイルの先頭を読む（シンボリックリンクをたどらない）。アーカイブの中の葉のファイルは、評価のパスと報告のパス（決定 8）で足す
+  - 事後条件: 同じパスは 1 回だけ足す。大きさ 0 と確かめたファイルは足さない。展開のために、対象外でないすべての普通のファイルの先頭と末尾を読む（シンボリックリンクをたどらない）。アーカイブの中の葉のファイルは、評価のパスと報告のパス（決定 8）で足す
   - 副作用: 木のファイルの読み取り、写しのリポジトリへの書き込み
 
 ### 異常系の処理
@@ -218,11 +221,11 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `list_entries` | `history.py` | 新設 | `(root: Path, range: str \| None, config: Path) -> list[Entry]` | 設計書の「探す対象の一覧」の手順で（コミット、親、パス）と新しい blob を並べる |
+| `list_entries` | `history.py` | 新設 | `(root: Path, range: str \| None, config: Path) -> list[Entry]` | 設計書の「探す対象の一覧」の手順で（コミット、親、パス）と古い blob・新しい blob を並べる |
 | `check_markers` | `history.py` | 新設 | `(entries, relayed: set[Key], run: Run) -> tuple[list[Entry], set[Mark]]` | 設計書の「照らし合わせ」の確認 1・2 を行い、全体の許可が外した対象を返し、ほかの欠けに印を立てる |
 | `is_binary` | `history.py` | 新設 | `(entry: Entry, blob: bytes, numstat_binary: set[Key], unset_diff: set[Key]) -> bool` | 設計書のバイナリの 3 条件を判定する |
 | `added_lines` | `history.py` | 新設 | `(root: Path, entry: Entry) -> list[range]` | そのコミットがその親に対して足した行の番号を返す |
-| `attribute` | `history.py` | 新設 | `(findings: list[Finding], added: list[range]) -> list[Finding]` | 足した行と重ならない当たりを除く（行の番号 0 は残す） |
+| `attribute` | `history.py` | 新設 | `(findings: list[Finding], added: list[range], blob: bytes, before: list[Finding], old_blob: bytes) -> list[Finding]` | 設計書の「コミットへの帰属」の表で当たりを絞る |
 | `merge_findings` | `history.py` | 新設 | `(added_pass: list[Finding], blob_pass: list[Finding]) -> list[Finding]` | （規則、コミット、パス、開始の行、終了の行）が同じ組の当たりが `added_pass` に a 件、`blob_pass` に b 件あれば、max(a, b) 件にする |
 
 - `list_entries`
@@ -244,7 +247,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | `list_entries` | 一覧を作れない | Git の失敗 | 終了コードと出力の形 | 呼び出し元へ返す（`GitError`） | `HISTORY`、1。1 回目の当たりは出す | 打ち直せる |
 | `check_markers` | 中継の一覧に無い対象、目印の無い対象 | go-gitdiff が読むのをやめた、中継の失敗 | 照らし合わせ | 既定値で続ける | `HISTORY`、1 | — |
 | `is_binary` | 属性を読めない | `check-attr --source` の失敗（Git 2.40 未満を含む） | 終了コード | 呼び出し元へ返す | `HISTORY`、1 | Git を上げて打ち直せる |
-| `added_lines` | 足した行を読めない、blob を読めない | Git の失敗、浅い取得 | 終了コードと出力の形 | 呼び出し元へ返す | `HISTORY`。帰属できない当たりは除かずに出す、1 | 全履歴を取得して打ち直せる |
+| `added_lines` | 足した行を読めない、変更前か変更後の blob を読めない | Git の失敗、浅い取得 | 終了コードと出力の形 | 呼び出し元へ返す | `HISTORY`。帰属できない当たりは除かずに出す、1 | 全履歴を取得して打ち直せる |
 
 ### 処理の手順
 
@@ -252,18 +255,20 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 
 | 全体の許可が外した（`check_markers` の返り） | バイナリ | アーカイブか圧縮 | 写しに足すもの | 当たりの扱い |
 | --- | --- | --- | --- | --- |
-| はい | どちらでも | いいえ | 変更後の blob 全体（元のパス） | `attribute` で帰属する |
-| いいえ | はい | いいえ | 変更後の blob 全体（元のパス） | `attribute` で帰属し、`merge_findings` で合わせる |
+| はい | どちらでも | いいえ | 変更前と変更後の blob 全体（元のパス） | `attribute` で帰属する |
+| いいえ | はい | いいえ | 変更前と変更後の blob 全体（元のパス） | `attribute` で帰属し、`merge_findings` で合わせる |
 | いいえ | いいえ | いいえ | 足さない | — |
-| どちらでも | どちらでも | はい | blob 全体と、展開した葉のファイル | blob 全体は上の行のとおり。葉の当たりはすべて出す |
+| どちらでも | どちらでも | はい | 上の行の blob と、変更後の blob を展開した葉のファイル | blob 全体は上の行のとおり。葉の当たりはすべて出す |
 
-展開の対象は、一覧のすべての blob である（目印の確かめから除くモードだけの変更も、先頭のバイトを調べる）。
+変更前の blob の写しは、古い blob が無いか空なら足さない。
+
+展開の対象は、一覧のすべての新しい blob である（目印の確かめから除くモードだけの変更も、先頭と末尾のバイトを調べる）。
 
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `Entry` | 型（`commit`・`parent`（`none` を含む）・`path`・`blob`・`mode`・`needs_marker`） | `model.py` | — |
+| `Entry` | 型（`commit`・`parent`（`none` を含む）・`path`・`old_blob`・`blob`・`mode`・`needs_marker`） | `model.py` | — |
 | `Key` | 型（`commit`・`parent`・`path`） | `model.py` | — |
 
 ## git の中継（relay.py）
@@ -280,7 +285,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 - `main`（中継）
   - 事前条件: 環境変数 `LEAK_SCAN_RELAY` が状態の JSON を指す
   - 事後条件: 本物の Git の終了コードを返す。
-  - 事後条件（`log -p`）: `log -p` には `-c core.quotePath=true -c diff.noprefix=false -c diff.mnemonicPrefix=false` を `log` の前に足し、利用者の Git の設定で見出しの形が変わらないようにする
+  - 事後条件（`log -p`）: `log -p` には `-c core.quotePath=true -c diff.noprefix=false -c diff.mnemonicPrefix=false` を `log` の前に足し、利用者の Git の設定で見出しの形が変わらないようにする。さらに `log` の後に `--no-color` を足す。`color.ui`・`color.diff` を `always` にした Git は、パイプへの出力にも色の制御文字（ANSI）を入れるためである。`-c color.ui=false` は `color.diff` の指定を打ち消せないので使わない（2026-11-25 に Git 2.53.0 で確かめた）
   - 副作用: 本物の Git の起動、一覧のファイルへの追記
 - `rewrite_log`
   - 事後条件: hunk を持ち、新しい側が `/dev/null` でないファイルの末尾に、`@@ -<古い側の末尾>,0 +<新しい側の末尾の次>,1 @@` と `+<目印>-<親の欄>-end` を足し、（コミット、親、パス）を一覧に書く。
@@ -303,7 +308,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | hunk の外 | `@@ ` | 行の数を読み、hunk に入る |
 | hunk の外 | `diff --git `・`commit `・空の行・EOF | 前のファイルに目印の hunk を足してから流す |
 | hunk の外 | `+++ ` | パスを読み、Git の引用の形を戻す |
-| `commit ` の直後（写しの探し） | `Author:` の行 | メールアドレスの番号から元のコミットを引き、保持した `commit` の行を書き換えて流す。元のコミットが無い対象は書き換えない |
+| `commit ` の直後（写しの探し） | `Author:` の行 | メールアドレスの番号から元のコミットを引き、保持した `commit` の行を書き換えて流す。元のコミットが無い対象と、変更前の blob の写しは書き換えない |
 
 ### 内部のデータと定数
 
@@ -321,7 +326,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | --- | --- | --- | --- | --- |
 | `install_relay` | `copyrepo.py` | 新設 | `(work: Path, state: RelayState, env: Mapping[str,str]) -> dict[str,str]` | `git` の名前の起動スクリプトを置き、`PATH` の先頭に足した環境を返す（1 回目と 2 回目で使う） |
 | `CopyRepo.add` | `copyrepo.py` | 新設 | `(self, target: Target, data: bytes) -> int` | 対象に番号を振り、そのファイルだけを持つ親の無いコミットを `refs/leak-scan/<番号>` に作る |
-| `CopyRepo.scan` | `copyrepo.py` | 新設 | `(self, ctx, mark: Mark) -> tuple[list[Finding], set[Mark]]` | 2 回目を打ち、決定 4 の条件 4〜8 を確かめ、当たりを報告のパスとコミットに戻す |
+| `CopyRepo.scan` | `copyrepo.py` | 新設 | `(self, ctx, mark: Mark) -> tuple[list[Finding], dict[Key, list[Finding]], set[Mark]]` | 2 回目を打ち、決定 4 の条件 4〜8 を確かめ、当たりを報告のパスとコミットに戻す |
 
 - `install_relay`
   - 事後条件: 本物の Git は `PATH` を変える前の `which git`。起動スクリプトは `python3 -I -B relay.py` を呼ぶ（パスはシェルの引用をする）
@@ -331,7 +336,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
   - 副作用: 写しのリポジトリへの `hash-object -w`・`read-tree`・`update-index`・`write-tree`・`commit-tree`・`update-ref`
 - `CopyRepo.scan`
   - 事前条件: 対象が 1 件以上（0 件なら gitleaks を打たずに空を返す）
-  - 事後条件: `--log-opts` は `-m --all --text --no-textconv --no-ext-diff --no-renames`。渡した `mark` は、今の木が `SKIPPED`、履歴が `HISTORY`。目印の当たりは返さない。今の木の対象は `commit` が空
+  - 事後条件: `--log-opts` は `-m --all --text --no-textconv --no-ext-diff --no-renames`。渡した `mark` は、今の木が `SKIPPED`、履歴が `HISTORY`。目印の当たりは返さない。今の木の対象は `commit` が空。変更前の blob の写しの当たりは、出力する当たりに混ぜず、対象の `Key` ごとに分けて返す
   - 副作用: gitleaks の起動
 
 ### 異常系の処理
@@ -346,7 +351,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `Target` | 型（`commit`（元。今の木は空）・`parent`・`path`・`copy_path`・`report_path`・`added`（帰属しないときは `None`）） | `model.py` | — |
+| `Target` | 型（`commit`（元。今の木は空）・`parent`・`path`・`copy_path`・`report_path`・`added`（帰属しないときは `None`）・`before`（変更前の blob の写しなら真）） | `model.py` | — |
 | 作者とコミッターの固定の値 | 定数 | `copyrepo.py` | 名前 `leak-scan`、日時は固定。作者のメールは `<番号>@leak-scan.invalid` |
 
 ## アーカイブの展開（archive.py）
@@ -357,7 +362,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `detect` | `archive.py` | 新設 | `(head: bytes, name: str, data: Callable[[], bytes]) -> Kind \| None` | 先頭の 512 バイトで形式を返す。展開できない形式は `UNSUPPORTED`。`.br` のときだけ中身の全体を読む |
+| `detect` | `archive.py` | 新設 | `(head: bytes, name: str, source: Callable[[], BinaryIO]) -> Kind \| None` | 先頭の 512 バイトで形式を返し、どれにも当たらなければ末尾の ZIP のディレクトリ情報を `zipfile.is_zipfile` で確かめる。展開できない形式は `UNSUPPORTED`。`.br` のときだけ中身の全体を読む |
 | `expand` | `archive.py` | 新設 | `(path: str, data: bytes, budget: Budget) -> Iterator[Leaf \| ArchiveError]` | 入れ子をたどり、葉のファイルを評価のパス・報告のパス・中身で返す |
 | `normalize_name` | `archive.py` | 新設 | `(name: str) -> str \| None` | 決定 8 のメンバー名の形にそろえる。使えない名前は `None` |
 
@@ -444,12 +449,12 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | `conclude` | 当たりと印の行の並び | 当たり 0 件で gitleaks が 1 | 報告を読めない、印が複数 |
 | `parse_log_line`・`classify_skip` | 表の各文言 | 空白を含む引用の `path`、本文に `WRN` を含む DBG の行 | 知らない `skipping` の行 |
 | `write_rescan_config` | `useDefault` の設定、重ねた設定 | `useDefault` の無い設定 | 既定の設定のファイルが無い |
-| `collect_tree_targets`・`is_excluded` | ELF の頭、`.br` を含む名前、外れたディレクトリ | 空のファイル、`node_modules` という名前のファイル | 読めないファイル、展開の失敗 |
+| `collect_tree_targets`・`is_excluded` | ELF の頭、`.br` を含む名前、外れたディレクトリ、依存のディレクトリの下の追跡しているファイル | 空のファイル、`node_modules` という名前のファイル | 読めないファイル、展開の失敗 |
 | `list_entries`・`check_markers` | 親ごとの目印 | 空のファイル、モードだけの変更、親の無いコミット、日本語の名前 | 目印の欠け、別のコミットの除外の行 |
-| `is_binary`・`added_lines`・`attribute`・`merge_findings` | 3 条件の各 1 件 | 行の番号 0、前後の行にまたがる秘密、同じ行の 2 つの秘密 | 属性を読めない |
+| `is_binary`・`added_lines`・`attribute`・`merge_findings` | 3 条件の各 1 件 | 行の番号 0、前後の行にまたがる秘密、行の削除だけで成立した秘密、削除で行の番号がずれた既存の秘密、同じ行の 2 つの秘密 | 属性を読めない |
 | `rewrite_log`・中継の `main` | 目印と `commit` の行の書き換え | `\ No newline at end of file`、引用されたパス | 行の数の不一致、Git の失敗 |
 | `install_relay`・`CopyRepo` | 元のパスの当たり | 同じ写しのパスの 2 対象、元のリポジトリの `GIT_DIR` を設定した呼び出し | 決定 4 の条件 4〜8 の各 1 件 |
-| `detect`・`expand`・`normalize_name` | zip・tar（v7 を含む）・gzip・bzip2・xz | `./` のディレクトリ、空のメンバー、入れ子 5 段、上限ちょうど | 切れた・暗号化・7z・長い名前の上限超過・`..` |
+| `detect`・`expand`・`normalize_name` | zip（前に別のデータを持つものを含む）・tar（v7 を含む。末尾の近くに zip のメンバーを持つものは tar と見分ける）・gzip・bzip2・xz | `./` のディレクトリ、空のメンバー、入れ子 5 段、上限ちょうど | 切れた・暗号化・7z・長い名前の上限超過・`..` |
 | `run_dir`・`run_git`・`main`・`read_report`・`run_gitleaks`・`write_marker_config` | 当たりの無い範囲が 0 | 探し直しの対象が 0 件 | 内部の `git log` の失敗、JSON でない報告 |
 | `count_failed` | 当たりだけ | — | 新しい 2 つの行と当たりの同時 |
 
@@ -461,6 +466,6 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | `list_entries`・`is_binary`・`added_lines`・`check_markers`・`attribute`・`merge_findings` | `export-tree.sh` の `--history`（`diff-tree --raw` と `cat-file blob`） | `grep -rn "cat-file\|diff-tree\|ls-tree\|hash-object" tools/checks/*.sh` | 使えない。層のディレクトリへ書き出すシェルの処理で、親ごとの組を返さない。`diff-tree` の打ち方だけ合わせる |
 | `run_gitleaks`・`read_report` | `leak-scan.sh` の引数の配列と `jq` の整形 | ファイルを読んだ | 引数の並びを移す。整形は Python の `json` で行う |
 | `parse_log_line`・`classify_skip`・`write_marker_config`・`write_rescan_config` | `log_has_skipped`、`leak-scan-secret.sh` の `build_overlay` | ファイルを読んだ | 件数の行の除き方を移す。`build_overlay` は秘密の規則を組むシェルの関数で使えない |
-| `is_excluded`・`collect_tree_targets` | gitleaks の全体の許可 | 決定 6 | 使えない。依存のディレクトリより広い名前を外すためである |
+| `is_excluded`・`collect_tree_targets` | gitleaks の全体の許可 | 決定 6 | 使えない。依存のディレクトリより広い名前を外し、Git が追跡しているかも見ないためである |
 | `rewrite_log`・`main`（中継）・`install_relay`・`CopyRepo.add`・`CopyRepo.scan` | gitleaks の `--log-opts`、Git の配管コマンド | 設計書の「外部の調査」と決定 2・3 | 目印を足す仕組みは無い。写しは Git の配管コマンドを使う |
 | `detect`・`expand`・`normalize_name` | `zipfile`・`tarfile`・`gzip`・`bz2`・`lzma` | 決定 8 | 使う。見分け方・上限・名前の確かめだけを書く。`tarfile` の展開のフィルターはファイルに書かないので使わない |
