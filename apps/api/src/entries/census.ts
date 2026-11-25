@@ -8,10 +8,10 @@ import { isPurpose, isUuidV4, keyOfRow, MIGRATE_PAGE_SIZE, MIGRATE_RESERVE_MS, r
 // writeVersion によらずどの行も数える（記録の表も同じ）。書き込まない。資源（表の読みだけの Lambda）は最初に形の版を上げる子が足す
 
 // 数える欄。1 以上の整数ならその数、列が無ければ absent、ほかの値（文字列の "1" を含む）は invalid
-export type VersionBucket = "absent" | "invalid" | `${number}`;
+type VersionBucket = "absent" | "invalid" | `${number}`;
 
 // 行の種類の名前（当たらなければ row_kind_unknown）ごとの、欄ごとの行の数
-export type VersionCounts = Readonly<Record<string, Readonly<Partial<Record<VersionBucket, number>>>>>;
+type VersionCounts = Readonly<Record<string, Readonly<Partial<Record<VersionBucket, number>>>>>;
 
 export type CensusDeps = MigrateDeps;
 

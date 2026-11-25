@@ -12,7 +12,7 @@ import { AWS_ACCOUNT_ID, itemsArray } from "../src/values.ts";
 
 // 操作の表から生成物を組む（設計の「生成物」の表）。どの関数も値を返すだけで、書くのは generate.ts
 
-export type JsonSchema = Record<string, unknown>;
+type JsonSchema = Record<string, unknown>;
 export type JsonSchemaDoc = { $schema: string; $defs: Record<string, JsonSchema> };
 export type OpenApiDoc = ReturnType<typeof createDocument>;
 export type McpToolDoc = {
@@ -23,10 +23,10 @@ export type McpToolDoc = {
   annotations: { readOnlyHint: boolean; idempotentHint: boolean; destructiveHint: boolean };
 };
 export type RouteDoc = { method: "POST"; path: string; operation: string; endpoint: OperationDef["endpoint"] };
-export type ReasonPair = { code: string; status: number };
+type ReasonPair = { code: string; status: number };
 export type ReasonsDoc = { request: ReasonPair[]; item: ReasonPair[]; operations: Record<string, ReasonPair[]> };
 export type PendingDoc = { operation: string; owner: string };
-export type ExampleScene = "normal" | "edge" | "empty";
+type ExampleScene = "normal" | "edge" | "empty";
 export type ExampleProblem = { operation: string; scene: ExampleScene; index: number; problem: string };
 export type Examples = { normal: unknown[]; edge: unknown[] };
 export type ExampleSet = Examples & { empty: unknown };
@@ -289,7 +289,7 @@ function fakeValueOf(def: z.core.$ZodTypeDef & Record<string, unknown>): string 
 
 // 形が自分へ戻れるのは z.lazy と、shape に getter を持つ object だけである。この 2 つは子を写す前に写しを作って memo に入れ、
 // 子は初めて読まれたときに写す。循環で戻ってきた枝も同じ写しを指すため、再帰の深い層まで作り物の値になる
-export function withFakeValues(schema: z.core.$ZodType, memo = new Map<z.core.$ZodType, z.core.$ZodType>()): z.core.$ZodType {
+function withFakeValues(schema: z.core.$ZodType, memo = new Map<z.core.$ZodType, z.core.$ZodType>()): z.core.$ZodType {
   const known = memo.get(schema);
   if (known) return known;
   const def = schema._zod.def as z.core.$ZodTypeDef & Record<string, unknown>;

@@ -47,7 +47,7 @@ function compare(op: string, actual: unknown, expected: unknown): boolean {
   }
 }
 
-export function evaluate(condition: Condition, row: Mutable | undefined): boolean {
+function evaluate(condition: Condition, row: Mutable | undefined): boolean {
   switch (condition.kind) {
     case "exists":
       return getPath(row, condition.path) !== undefined;
@@ -79,7 +79,7 @@ function parentOf(row: Mutable, path: string): { parent: Mutable; leaf: string }
   return { parent, leaf };
 }
 
-export function applyUpdate(base: Mutable, update: Update): Mutable {
+function applyUpdate(base: Mutable, update: Update): Mutable {
   const row = structuredClone(base);
   for (const action of update) {
     const { parent, leaf } = parentOf(row, action.path);

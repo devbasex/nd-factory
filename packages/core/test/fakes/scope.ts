@@ -7,7 +7,7 @@ import type { FakeTable } from "./table.ts";
 // 索引（user-seats・team-projects）で候補を読み、候補ごとに表の本体を強い整合で読み直して、今も成り立つものだけを返す。
 // trustIndex を真にすると、約束を守らない読み手（索引の値をそのまま返す）になる。authorize が要素ごとの本体の読みで守るかを確かめる
 
-export type FakeLane = { laneId: Id<"lane">; projectId: Id<"prj">; machineId?: Id<"mch"> };
+type FakeLane = { laneId: Id<"lane">; projectId: Id<"prj">; machineId?: Id<"mch"> };
 
 export type FakeScopeOptions = {
   trustIndex?: boolean;

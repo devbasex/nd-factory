@@ -9,8 +9,8 @@ const { read, write, human } = ownedBy("#5");
 // 主体が人のときは要求元の対応の行とセッションの取り消しの行の照らしの 2 件が 1 回だけ入るため、
 // 上限は 100 件から 2 件を残して決める（データの文書の「人の書き込みの要求元の照らし」）。
 // projects.create は 19 × 5 + 2 = 97 件、repositories.add は 24 × 4 + 2 = 98 件
-export const PROJECTS_CREATE_MAX_ITEMS = 19;
-export const REPOSITORIES_ADD_MAX_ITEMS = 24;
+const PROJECTS_CREATE_MAX_ITEMS = 19;
+const REPOSITORIES_ADD_MAX_ITEMS = 24;
 
 export const PROJECT_OPERATIONS = [
   read("projects.list", ["F4", "F7"]),

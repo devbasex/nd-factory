@@ -46,7 +46,7 @@ export function seqKey(n: number): string {
 
 // 行の世代（issues/issue-2-design-row-writers.md の決定 8）。行を作るときに putIfAbsent が UUID v4 を入れ、置き換えと表の移しで変えない。
 // 消して同じ鍵で作り直した行を見分ける（version は作り直すと 1 に戻る）。U3b より前の行は repairIdentity が鍵から決まる UUID の形の値で補うため、版の桁を縛らない
-export const incarnation = uuid;
+const incarnation = uuid;
 
 type Shape = Record<string, z.ZodType>;
 

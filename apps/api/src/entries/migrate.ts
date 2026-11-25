@@ -13,13 +13,13 @@ import type { Context } from "aws-lambda";
 export const MIGRATE_RESERVE_MS = 10_000;
 export const MIGRATE_PAGE_SIZE = 100;
 // 1 行の書き込みが外れて読み直す回数の上限。外れは並んだ書き手の確定だけで起き、続けば書き手が書き続けている行として次の全走査に回す
-export const MIGRATE_ROW_ATTEMPTS = 3;
+const MIGRATE_ROW_ATTEMPTS = 3;
 
 // 移しの拒みの理由の符号（閉じた語）
-export type MigrateRefusal = "version_unsupported" | "shape_invalid" | RowCodecErrorCode | "contended" | "row_kind_unknown" | "append_only";
+type MigrateRefusal = "version_unsupported" | "shape_invalid" | RowCodecErrorCode | "contended" | "row_kind_unknown" | "append_only";
 
 // 拒んだ行の数を理由の符号ごとに持つ。欄の和は refused
-export type RefusedByReason = Partial<Record<MigrateRefusal, number>>;
+type RefusedByReason = Partial<Record<MigrateRefusal, number>>;
 
 export type MigrateDeps = {
   readonly db: Db;

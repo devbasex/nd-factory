@@ -36,14 +36,14 @@ export const AT = "2026-11-17T03:04:05.123Z";
 const SHA = "a".repeat(64);
 const UUID = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b";
 // 行の世代（putIfAbsent が入れる UUID v4 の作り物の値）
-export const INC = "3d2c1b0a-9f8e-4d7c-8b6a-5f4e3d2c1b0a";
+const INC = "3d2c1b0a-9f8e-4d7c-8b6a-5f4e3d2c1b0a";
 
 export const USR = id("usr", 1);
-export const TEAM = id("team", 2);
+const TEAM = id("team", 2);
 export const PRJ = id("prj", 3);
-export const SPR = id("spr", 4);
+const SPR = id("spr", 4);
 export const LANE = id("lane", 5);
-export const APR = id("apr", 6);
+const APR = id("apr", 6);
 
 export type RowCase = {
   readonly schema: z.ZodType;

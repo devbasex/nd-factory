@@ -10,7 +10,7 @@ const project = idOf("prj");
 const idempotencyKey = z.uuid();
 
 // 読む操作
-export const notesGet = defineOperation({
+const notesGet = defineOperation({
   name: "notes.get",
   features: ["F3"],
   access: "read",
@@ -35,7 +35,7 @@ export const notesCreate = defineOperation({
 });
 
 // 版で照らす書く操作（冪等の鍵なし）
-export const notesRename = defineOperation({
+const notesRename = defineOperation({
   name: "notes.rename",
   features: ["F3"],
   access: "write",
@@ -47,7 +47,7 @@ export const notesRename = defineOperation({
 });
 
 // 全部か無か（要素は 3 つまで）
-export const notesImport = defineOperation({
+const notesImport = defineOperation({
   name: "notes.import",
   features: ["F3"],
   access: "write",
@@ -60,7 +60,7 @@ export const notesImport = defineOperation({
 });
 
 // 人だけの操作
-export const notesPurge = defineOperation({
+const notesPurge = defineOperation({
   name: "notes.purge",
   features: ["F3"],
   access: "write",
@@ -72,7 +72,7 @@ export const notesPurge = defineOperation({
 });
 
 // サインイン（初回は利用者を作る。既にある利用者のサインインし直しは状態を書かない）
-export const sessionsCreate = defineOperation({
+const sessionsCreate = defineOperation({
   name: "sessions.create",
   features: ["F1"],
   access: "write",
@@ -85,7 +85,7 @@ export const sessionsCreate = defineOperation({
 });
 
 // サインアウト（取り消しの行を書く側。要求元の照らしを足さない）
-export const sessionsDelete = defineOperation({
+const sessionsDelete = defineOperation({
   name: "sessions.delete",
   features: ["F1"],
   access: "write",
@@ -97,7 +97,7 @@ export const sessionsDelete = defineOperation({
 });
 
 // ログインを外す。要素は外す Cognito の主体（作り物の形。ハンドラーは対応の行を強い整合で読んで消す）
-export const loginsDelete = defineOperation({
+const loginsDelete = defineOperation({
   name: "logins.delete",
   features: ["F1"],
   access: "write",
@@ -112,7 +112,7 @@ export const loginsDelete = defineOperation({
 });
 
 // 全部か無かで冪等の鍵を持つ（要素は 3 つまで）
-export const notesBulk = defineOperation({
+const notesBulk = defineOperation({
   name: "notes.bulk",
   features: ["F3"],
   access: "write",
@@ -126,7 +126,7 @@ export const notesBulk = defineOperation({
 });
 
 // 成功の item が形に無い鍵を除く（z.object）読む操作
-export const notesPeek = defineOperation({
+const notesPeek = defineOperation({
   name: "notes.peek",
   features: ["F3"],
   access: "read",
