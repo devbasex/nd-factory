@@ -82,7 +82,7 @@ die() {
 
 # 項目のパスが出力先の外や .git を指さないか。空・絶対パス・空か . か .. の部分・大文字と小文字を区別せず .git の部分を拒む
 check_path() {
-  local path="$2" part rest
+  local path="$1" part rest
   [[ -n "$path" && "$path" != /* ]] || return 1
   # パスは改行を含み得るので、read で区切らずに / ごとに切り出す（末尾の / は空の部分として拒む）
   rest="$path/"
@@ -113,7 +113,7 @@ write_entries() {
     meta="${entry%%$'\t'*}"
     path="${entry#*$'\t'}"
     read -r mode _ sha <<<"$meta"
-    check_path "$n" "$path" || die 1 "木に取り出せない項目がある（${n} 番目）"
+    check_path "$path" || die 1 "木に取り出せない項目がある（${n} 番目）"
     case "$mode" in
       100644 | 100755 | 120000) ;;
       160000) continue ;;
@@ -145,7 +145,7 @@ verify_tree() {
       100644 | 100755 | 120000) ;;
       *) continue ;;
     esac
-    check_path 0 "$path" || die 1 "$mismatch"
+    check_path "$path" || die 1 "$mismatch"
     expected=$((expected + 1))
     file="$out/$path"
     [[ -f "$file" && ! -L "$file" ]] || die 1 "$mismatch"
@@ -171,7 +171,7 @@ expected_history() {
       n=$((n + 1))
       # :<前のモード> <後のモード> <前の blob> <後の blob> <状態>
       read -r _ newmode _ newsha _ <<<"$meta"
-      check_path "$n" "$path" || die 1 "履歴の項目を書き出せない（${n} 番目）"
+      check_path "$path" || die 1 "履歴の項目を書き出せない（${n} 番目）"
       printf '%s\0' "$path" >>"$dir/paths"
       case "$newmode" in
         100644 | 100755 | 120000)
