@@ -378,7 +378,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `expand` | 壊れ・途中で切れ・暗号化 | `BadZipFile`・`zlib.error`・`EOFError`・`TarError`・`LZMAError`・`OSError`、zip の暗号化のビット、tar の終端の目印の欠け、メンバーの長さの不足 | 読み取りと読んだ後の確かめ | 呼び出し元へ返す（`ArchiveError`） | 呼び出し元の印、1 | — |
-| `expand` | 展開できない形式、入れ子が 5 段を超える、上限の超過、使えないメンバー名 | 決定 8 | `detect`・段の数・`Budget`・`normalize_name` | 呼び出し元へ返す | 同上 | — |
+| `expand` | 展開できない形式（`zipfile` が読めない圧縮の方式を含む）、入れ子が 5 段を超える、上限の超過、使えないメンバー名 | 決定 8 | `detect`・`zipfile` の `NotImplementedError`・段の数・`Budget`・`normalize_name` | 呼び出し元へ返す | 同上 | — |
 
 ### 処理の手順
 
