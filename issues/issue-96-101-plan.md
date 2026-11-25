@@ -142,7 +142,7 @@
 ## 切り戻し手順
 
 - 単位ごとの Pull Request はスプリントブランチへ出すので、単位の Pull Request を revert すれば戻せる。データの移行は無い
-- main へのマージの後に戻すときは、1 本目の Pull Request を revert すれば、`ci.yml` の `leak-check` が今と同じく Actions の秘密を受ける形に戻る。持ち主が足した環境 `leak-scan` と非公開リポジトリは、残しても動くジョブが無いので害は無い
+- main へのマージの後に 1 本目の Pull Request を revert しても、戻るのはワークフローだけで、実際の値の規則での検査は戻らない。revert で `ci.yml` の `leak-check` は Actions の秘密 `LEAK_CHECK_PATTERN` を受ける旧い形に戻る。一方、持ち主が運用の文書（`ci-checks.md` の「秘密と変数の登録」）に従って消したリポジトリの Actions の秘密は、revert では戻らない。そのため、revert の後の `leak-check` は、変数 `LEAK_CHECK_REQUIRE_PATTERN` がリポジトリにあって `1` なら同じリポジトリのブランチの Pull Request と main への push で落ち、それ以外（fork の Pull Request と、変数が環境 `leak-scan` にだけあるとき）は実際の値の規則を使わずに通る。revert したら、信頼できるコードで実際の値の規則を使う検査が戻るまで、NDF にも画面からも Pull Request をマージしない。持ち主が足した環境 `leak-scan` と非公開リポジトリは、revert の後は動くジョブが無い
 
 ## 完了の定義
 

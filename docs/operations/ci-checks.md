@@ -64,7 +64,11 @@ NDF の認証は、`<非公開リポジトリ>` に対して次の権限を持�
 `<非公開リポジトリ>` の秘密 `LEAK_CHECK_PATTERN` の値か、呼び出しのワークフローを変えるときは、進行中のマージを終わらせるか止めてから変え、新しいマージは世代 `0` で締め出す。
 
 1. 今の世代の値を控え、`<非公開リポジトリ>` の変数 `LEAK_CHECK_GENERATION` を `0` にする。この後の NDF のマージは人へ戻り、呼び出しのワークフローも探す前に失敗する
-2. `0` にした時から、NDF の時間の上限 T が過ぎるのを待つ。T が過ぎたら、控えた記録の置き場所で、NDF の未解決の記録の一覧（結果不明と未検証の状態の記録をリポジトリで絞ったもの）に、このリポジトリの記録が残っていないことを確かめる。権限を与えたのに置き場所を共有しない NDF の認証が見つかれば、その置き場所の記録も確かめ、権限を外す
+2. 手順 1 で世代を `0` にした時刻から、NDF の時間の上限（T）が過ぎるまで待つ。T は、NDF が世代を読んでからマージの API の呼び出しを終えるまでに使える時間で、このリポジトリをマージできる NDF の設定に置かれる
+   - 世代を `0` にする前に世代を読んだ NDF は、T の中でマージを終えるか、T を過ぎてマージせずに止まる。T が過ぎれば、旧い秘密の結果で NDF がマージの API を新しく呼ぶことはない（すでに送った要求は、下の未解決の記録で確かめる）
+   - T の値は、「NDF の認証の権限」で控えた認証を使うすべての NDF の設定で確かめ、最も長い値だけ待つ（未確認: 設定の名前と確かめ方は、NDF への非公開の検査の機能の依頼で決まる。設計の例は 30 分）。T の値を確かめられなければ、先へ進まない
+
+   T が過ぎたら、控えた記録の置き場所で、NDF の未解決の記録の一覧（結果不明と未検証の状態の記録をリポジトリで絞ったもの）に、このリポジトリの記録が残っていないことを確かめる。権限を与えたのに置き場所を共有しない NDF の認証が見つかれば、その置き場所の記録も確かめ、権限を外す
    - 残っていれば、記録が閉じるまで待つ。**Pull Request が閉じていることや head が変わったことを理由に、記録が残っていても先へ進まない。** 応答を失ったマージの要求は、後から GitHub が処理しうる
    - 秘密が漏れたときなど待てないときは、残した記録を控えて先へ進んでよい。その後に NDF から世代の違いの知らせが来たら、マージでできたコミットを手元で新しい秘密で探し直し（「当たりの場所を手元で引く」）、マージを戻すかを判断する
 3. 秘密か呼び出しのワークフローを変える
@@ -102,7 +106,22 @@ NDF の認証は、`<非公開リポジトリ>` に対して次の権限を持�
 NDF と同じく、起動した 1 回の実行の初回の試行だけを確かめる。
 
 1. 6 つの入力を取る。Pull Request の番号・head の SHA（`head.sha`）・base の先頭の SHA（`base.sha`）・マージコミットの SHA（`merge_commit_sha`）は、`gh api repos/devbasex/nd-factory/pulls/<番号>` で読む。`mergeable` が `null` なら読み直して待ち、真でなければ別の Pull Request を選ぶ。検査のコードのコミットは `gh api repos/devbasex/nd-factory/commits/main --jq .sha`、設定の世代は `<非公開リポジトリ>` の変数 `LEAK_CHECK_GENERATION` の値である
-2. `<非公開リポジトリ>` の呼び出しのワークフローを、既定のブランチで、6 つの値を入力にして起動する（`gh api --method POST repos/<非公開リポジトリ>/actions/workflows/<呼び出しのワークフローのファイル>/dispatches`）。応答の `workflow_run_id` を控える
+2. `<非公開リポジトリ>` の呼び出しのワークフローを、ワークフローの起動の API で起動し、応答の `workflow_run_id` を控える。送る本文には、`ref` に `<非公開リポジトリ>` の既定のブランチ（`gh api repos/<非公開リポジトリ> --jq .default_branch` で読む）を、`inputs` に手順 1 の 6 つの値を入れる。API のバージョン `2022-11-28` は、本文に `return_run_details: true` を入れたときだけ実行の ID を返すので、次の例のように入れる（バージョン `2026-03-10` は指定しなくても返す。[起動の API の仕様](https://docs.github.com/en/rest/actions/workflows?apiVersion=2022-11-28#create-a-workflow-dispatch-event)）。応答に `workflow_run_id` が無ければ、手順 3 へ進まない
+
+   ```bash
+   gh api --method POST \
+     -H "X-GitHub-Api-Version: 2022-11-28" \
+     "repos/<非公開リポジトリ>/actions/workflows/<呼び出しのワークフローのファイル>/dispatches" \
+     -f ref='<既定のブランチ>' \
+     -F return_run_details=true \
+     -f 'inputs[pr_number]=<番号>' \
+     -f 'inputs[head_sha]=<head の SHA>' \
+     -f 'inputs[base_sha]=<base の先頭の SHA>' \
+     -f 'inputs[merge_sha]=<マージコミットの SHA>' \
+     -f 'inputs[code_sha]=<検査のコードのコミット>' \
+     -f 'inputs[generation]=<設定の世代>' \
+     --jq .workflow_run_id
+   ```
 3. 控えた実行の試行 1 が完了したら、次の 4 つを確かめる。1 つでも外れれば、承認していない版か、別の対象か設定で探した結果なので、手順 1 からやり直す
    - 試行 1（`gh api repos/<非公開リポジトリ>/actions/runs/<workflow_run_id>/attempts/1`）の `conclusion` が `success` である
    - 同じ応答の `referenced_workflows` に、`path` が `devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main` の項目がちょうど 1 つあり、その `sha` が手順 1 の検査のコードのコミットと同じである（ジョブの表示名は入力から組むだけで、実際に動いた版を示さない）
@@ -120,6 +139,23 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
 3. コミットの列がある当たり（`git` の探し）は、`tools/checks/leak-scan-secret.sh git --range <分岐点>..<head の SHA> --details` を打つ
 4. main への push（`leak-check-push`）の当たりも、main の先頭のチェックアウトで `tools/checks/leak-scan-secret.sh dir --details` と `tools/checks/leak-scan-secret.sh git --details` を打って同じく引く
 5. 出た実際のファイルの名前と行を、記録の当たりの規則と行と突き合わせる。**`--details` の出力は手元の端末にだけ出し、記録・Issue・Pull Request に貼らない。当たりの理由を公開の Pull Request に書かない。** 直しを頼むときは理由を伏せるか、Pull Request を閉じる
+
+## 正当な当たりを規則単位で外す
+
+正当な当たり（誤検知）を `[[rules.allowlists]]` で外すときは、許可の変更だけの Pull Request を先に main へマージし、その後に対象を含む Pull Request をマージさせる。非公開の検査は、探す Pull Request の中の設定ではなく、検査のコードのコミット（main の先頭）の `.gitleaks.toml` と `tools/checks/gitleaks-default.toml` で探すためである。対象と許可を同じ Pull Request に入れると、公開の `leak-check`（Pull Request のマージの参照の設定で探す）は通っても、非公開の検査は許可の無い main の規則で探して落ち、NDF はマージしない。
+
+1. 当たりの場所を手元で引き（上の「当たりの場所を手元で引く」）、正当な当たりかを判断する
+2. 当てた規則の `[[rules.allowlists]]`（`.gitleaks.toml` か `tools/checks/gitleaks-default.toml`）に、理由を添えて許可を足す Pull Request を出す。この Pull Request には許可の変更だけを入れ、誤検知の対象を入れない。許可の条件に実際の値を書かない
+3. 許可の Pull Request をレビューして、NDF にマージさせる。許可は以後のすべての Pull Request と main への push の探しに効くので、広げすぎていないかをレビューで見る
+4. 対象を含む Pull Request から同じ許可の変更を外し、NDF にマージさせる。NDF が次に起動する非公開の検査は、許可の入った main の先頭の規則で探す
+
+対象が過去のコミットにあるときは、次のように扱う。
+
+| 対象のある所 | 扱い |
+| --- | --- |
+| Pull Request の途中のコミットだけ | 上の手順のままでよい。規則単位の許可は、履歴の探し（`history` と `git --range`）にも効く |
+| main の木か履歴（規則か gitleaks の版を変えたために、前から在る内容に当たるようになった） | 規則・`tools/checks/gitleaks-default.toml`・gitleaks の版を変える Pull Request に、前から在る内容への許可を同じ Pull Request で入れる。許可を後の Pull Request に分けると、許可の Pull Request のマージコミットの木にも対象があるため、許可の Pull Request 自身が非公開の検査で落ちる。規則を変える Pull Request に許可が欠けていれば、公開の `leak-check` が Pull Request の設定で前から在る内容を探して落ちるので、マージの前に気付ける |
+| 実際の値の規則 `nd-real-value` の当たり | 許可を足せない（規則は秘密の中にあり、`[[rules.allowlists]]` を持たない）。誤検知なら、「秘密を変える手順」で秘密の正規表現を直す。実際の値なら、マージせずに「当たりの場所を手元で引く」の手順 5 のとおりに扱う |
 
 ## 見本の写し直し
 
