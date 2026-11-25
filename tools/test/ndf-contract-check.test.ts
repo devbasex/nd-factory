@@ -770,6 +770,94 @@ describe("reportShapeDiff", () => {
   });
 });
 
+/** I-005 の分割の前の振る舞いの固定。required と material の差分の行と、その並びを丸ごと比べる */
+describe("reportShapeDiff: required と material の差分の行と並び", () => {
+  type Material = Record<string, string>;
+  const materialOf = (contract: Record<string, Json>): Material =>
+    (contract["hooks/unattended-report.json"] as { shape: { material: Material } }).shape.material;
+
+  it("material の値が変わると、変わった値ごとに古い値と新しい値を JSON で出す（キーは先端の順）", () => {
+    const tip = fakeContract();
+    const material = materialOf(tip);
+    material.url_prefix = "https://example.com/";
+    material.heading = "## 材料";
+    expect(reportShapeDiff(asFiles(fakeContract()), asFiles(tip))).toEqual([
+      'diff: shape.material.heading が変わった: "## 判断の材料" から "## 材料"',
+      'diff: shape.material.url_prefix が変わった: "https://" から "https://example.com/"',
+    ]);
+  });
+
+  it("material のキーが足される・消えると、キーの差分を出し、足された・消えたキーの値の変化は出さない", () => {
+    const fixed = fakeContract();
+    materialOf(fixed).old_key = "古い";
+    const tip = fakeContract();
+    materialOf(tip).new_key = "新しい";
+    expect(reportShapeDiff(asFiles(fixed), asFiles(tip))).toEqual([
+      "diff: shape.material に足された: new_key",
+      "diff: shape.material から消えた: old_key",
+    ]);
+  });
+
+  it("material のキーの差分を値の変化より先に出す", () => {
+    const tip = fakeContract();
+    const material = materialOf(tip);
+    material.body = "本文の全体";
+    material.extra = "足した";
+    expect(reportShapeDiff(asFiles(fakeContract()), asFiles(tip))).toEqual([
+      "diff: shape.material に足された: extra",
+      'diff: shape.material.body が変わった: "本文" から "本文の全体"',
+    ]);
+  });
+
+  it("required の値の差分を、values・items の後、material の前に、値ごとに always・条件・need の順で出す", () => {
+    const tip = fakeContract();
+    const shape = reportShape(tip);
+    (shape.values as Record<string, string>).保留 = "待つ";
+    shape.items.push("期限");
+    delete shape.required.できなかった;
+    shape.required.保留 = { always: ["理由"], when: [{ item: "区分", prefix: "ndf-ask:", need: ["質問"] }] };
+    shape.required.判断が要る?.always.push("期限");
+    materialOf(tip).heading = "## 材料";
+    const askKey = JSON.stringify({ item: "区分", prefix: "ndf-ask:" });
+    expect(reportShapeDiff(asFiles(fakeContract()), asFiles(tip))).toEqual([
+      "diff: shape.values に足された: 保留",
+      "diff: shape.items に足された: 期限",
+      "diff: shape.required に足された: 保留",
+      "diff: shape.required から消えた: できなかった",
+      "diff: shape.required.判断が要る.always に足された: 期限",
+      "diff: shape.required.できなかった.always から消えた: 理由",
+      "diff: shape.required.保留.always に足された: 理由",
+      `diff: shape.required.保留.when の条件 に足された: ${askKey}`,
+      `diff: shape.required.保留.when の条件 ${askKey} の need に足された: 質問`,
+      'diff: shape.material.heading が変わった: "## 判断の材料" から "## 材料"',
+    ]);
+  });
+
+  it("required の条件の行は鍵の順によらず同じ条件とみなし、同じ条件の need はまとめて比べる", () => {
+    const fixed = fakeContract();
+    const tip = fakeContract();
+    const rules = reportShape(tip).required.判断が要る;
+    if (rules === undefined) throw new Error("判断が要る の行が無い");
+    // 鍵の順を入れ替えた同じ条件と、同じ条件の 2 行目（need はまとめて比べる）
+    rules.when[0] = { need: ["承認ゲート"], prefix: "ndf-gate:", item: "区分" };
+    rules.when.push({ item: "区分", prefix: "ndf-gate:", need: ["期限"] });
+    const gateKey = JSON.stringify({ item: "区分", prefix: "ndf-gate:" });
+    expect(reportShapeDiff(asFiles(fixed), asFiles(tip))).toEqual([
+      `diff: shape.required.判断が要る.when の条件 ${gateKey} の need に足された: 期限`,
+    ]);
+  });
+
+  it("required の条件が消えると、条件の差分の後にその条件の need の消えた差分を出す", () => {
+    const tip = fakeContract();
+    reportShape(tip).required.判断が要る?.when.splice(1, 1);
+    const key = JSON.stringify({ equals: "設計 Pull Request のマージ", item: "承認ゲート" });
+    expect(reportShapeDiff(asFiles(fakeContract()), asFiles(tip))).toEqual([
+      `diff: shape.required.判断が要る.when の条件 から消えた: ${key}`,
+      `diff: shape.required.判断が要る.when の条件 ${key} の need から消えた: Pull Request`,
+    ]);
+  });
+});
+
 describe("renderSummary", () => {
   const finding: ContractFinding = {
     check: 1,
