@@ -10,3 +10,7 @@ id = "generic-api-key"
 [[rules.allowlists]]
 description = "DB の用意のテストの作り物の秘密の版とパスワード（apps/api/test/db-prep/handler.test.ts・rotate.test.ts。#13 が足し、main の履歴に残る）"
 regexes = ['''^1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f$''', '''^acme-Rotated-0123456789abcdefghijklmnopqrstu$''']
+
+[[rules.allowlists]]
+description = "横断の部品と行の形のテストの作り物の値（#2）。人の token の見本は header {\"alg\":\"RS256\"}・payload {}・署名 sig の形だけの JWT（apps/api/test/api-fn.test.ts・packages/core/test/dispatch.test.ts）。冪等キーと principal の値は手で作った UUID（packages/core/test/idempotency.test.ts・packages/contracts/test/rows.test.ts）。sprint/issue-2 の履歴に残る"
+regexes = ['''^eyJhbGciOiJSUzI1NiJ9\.e30\.c2ln$''', '''^usr_01890a5d-ac96-774b-bcce-b302099a8057$''', '''^4a6f1f0e-1f8b-4c7e-9a52-6b8f0f0e1f8b$''', '''^0b6f7f0e-1d2c-4b3a-9e8f-7a6b5c4d3e2f$''', '''^1c7a8b9d-2e3f-4a5b-8c6d-7e8f9a0b1c2d$''']
