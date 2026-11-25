@@ -1,10 +1,6 @@
 # 漏れの検査: 実際の値の規則での Pull Request の探しを非公開のリポジトリへ移し、NDF がマージの直前に起動して結果を確かめる（#96 #101）
 
-漏れの検査（CI の `leak-check`）は、実際の値の正規表現（CI の秘密 `LEAK_CHECK_PATTERN`）を Pull Request の側の実行の中で使っている。そのため、fork の Pull Request は探されず、Dependabot の Pull Request は秘密が無いために落ち、同じリポジトリのブランチの Pull Request では秘密が Pull Request のコードから読める。
-
-この設計では、Pull Request を実際の値の規則で探す処理を、持ち主が用意する検査用の非公開リポジトリへ移す。探しは、NDF（このリポジトリの開発を進めるツール）がマージの直前に起動する。探しの結果と記録は、非公開リポジトリに読み取りの権限を持つ人と NDF にしか見えない。探しのワークフローとスクリプトは公開のリポジトリの既定のブランチにあり、非公開リポジトリはそれを呼ぶだけにする。Pull Request の側の `leak-check` には秘密を渡さない。main への push の探しは、main の実行だけが読める環境（GitHub Actions の environment）の秘密で今と同じく行う。
-
-公開のリポジトリの中で `pull_request_target` を使って探す形は採らない。その形では、探しの成否と件数が誰にでも見え、外部の作者が候補の語を Pull Request に入れて、実際の値の正規表現に当たるかを確かめられるためである（決定 1・8）。
+漏れの検査（CI の `leak-check`）は実際の値の正規表現（CI の秘密 `LEAK_CHECK_PATTERN`）を Pull Request の側の実行で使うので、fork の Pull Request では探されず、Dependabot の Pull Request では落ち、同じリポジトリのブランチでは秘密を Pull Request のコードが読める。この設計では、Pull Request を実際の値の規則で探す処理を持ち主が用意する検査用の非公開リポジトリへ移し、NDF（このリポジトリの開発を進めるツール）がマージの直前に起動して、結果を非公開リポジトリに読み取りの権限を持つ人と NDF にだけ見せる。Pull Request の側の `leak-check` には秘密を渡さず、main への push の探しは main の実行だけが読める環境（GitHub Actions の environment）の秘密で今と同じく行う。公開のリポジトリで `pull_request_target` を使って探す形は、成否から外部の作者が候補の語の当たりを確かめられるので採らず、その理由とほかの採らなかった案は決定 1・8 にある。
 
 ## 今の姿
 
@@ -135,7 +131,7 @@ flowchart LR
     scan --> def
 ```
 
-図には CI の中で動くものだけを描き、テスト・宣言・文書の行は含めない。`leak-check-secret.yml` が使う `.gitleaks.toml`・`gitleaks-default.toml`・3 本のスクリプト（図に無い `export-tree.sh` を含む）は、どれも NDF が渡した検査のコードのコミット（公開のリポジトリの main のコミット）のチェックアウトにあるものである。Pull Request のコミットは git の参照として取り込まれ、マージコミットの木はチェックアウトの外のディレクトリへデータとして取り出される。
+図には CI の中で動くものだけを描き、テスト・宣言・文書の行は含めない。`leak-check-secret.yml` が使う設定とスクリプトは、`.gitleaks.toml`・`gitleaks-default.toml`・3 本のスクリプト（図に無い `export-tree.sh` を含む）である。どれも、NDF が渡した検査のコードのコミット（公開のリポジトリの main のコミット）のチェックアウトにあるものである。Pull Request のコミットは git の参照として取り込まれ、マージコミットの木はチェックアウトの外のディレクトリへデータとして取り出される。
 
 ## 処理の流れ
 
@@ -317,7 +313,7 @@ NDF が受け入れるのは、自分がこのマージのために起動した 
   3. 呼び出しのワークフローを、ワークフローの起動の API で、`ref` を非公開リポジトリの既定のブランチにして起動する。入力は、番号・head の SHA・base の先頭の SHA・マージコミットの SHA・main の先頭の SHA（検査のコードのコミット）・手順 1 の世代である。応答の `workflow_run_id`（STD9）を、この起動の実行として控える。応答に実行の ID が無ければ、マージせずに人へ戻す
   4. 控えた実行の初回の試行（試行 1）だけを読む。2 回目以降の試行は読まないので、誰かが再実行しても、試行 1 の結果は変わらない。実行の試行の取得の API（`GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/1`）で、試行 1 の `status` が `completed` になるまで待つ。完了したら、試行を指定するジョブの一覧の API（`GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/1/jobs`。STD7）で、試行 1 のジョブをすべてのページまで読む。次の条件をすべて満たすときだけ、探しが成功したと受け入れる
      - 試行 1 の `conclusion` が `success` である
-     - 試行 1 の `referenced_workflows`（実行が呼んだ再利用できるワークフローの一覧）に、`path` が `devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main` の項目がちょうど 1 つあり、その `sha` が手順 3 で渡した検査のコードのコミットと同じである。`@main` は、同じ名前のタグがあればタグに解決される（STD8）。そのため、main の先頭を読んだだけでは、実際に動いた版を確かめたことにならない
+     - 試行 1 の `referenced_workflows`（実行が呼んだ再利用できるワークフローの一覧）に、`path` が `devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main` の項目がちょうど 1 つある。その `sha` が手順 3 で渡した検査のコードのコミットと同じである。`@main` は、同じ名前のタグがあればタグに解決される（STD8）。そのため、main の先頭を読んだだけでは、実際に動いた版を確かめたことにならない
      - ジョブの一覧に、表示名が手順 3 で渡した 6 つの値から組んだ名前で終わるジョブがちょうど 1 つあり、その `conclusion` が `success` である
      - ジョブの一覧のすべてのジョブの `conclusion` が `success` である
 
@@ -341,7 +337,7 @@ NDF が受け入れるのは、自分がこのマージのために起動した 
      - 世代が手順 1 と同じである
      - head の SHA が手順 2 と同じである
      - base のブランチと先頭の SHA が手順 2 と同じである。探したのは、手順 2 の base の先頭と head を合わせたマージコミットの木なので、base の先頭が進んでいれば、合わせた後の木は探していない
-     - 検査のコードのコミットから今の main の先頭までの間に、探しの設定とコード（`.github/workflows/leak-check-secret.yml`・`tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml`）が変わっていない。比較の API（`GET /repos/{owner}/{repo}/compare/{base}...{head}`）で `<検査のコードのコミット>...<main の先頭>` を比べ、`status` が `identical` か `ahead` で、`files` にこの 6 つのパスが無いことで確かめる。`files` は 300 件で切られる（compare API）ので、300 件あれば変わったとみなす
+     - 検査のコードのコミットから今の main の先頭までの間に、探しの設定とコードが変わっていない。探しの設定とコードは、`.github/workflows/leak-check-secret.yml`・`tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml` の 6 つである。比較の API（`GET /repos/{owner}/{repo}/compare/{base}...{head}`）で `<検査のコードのコミット>...<main の先頭>` を比べ、`status` が `identical` か `ahead` で、`files` にこの 6 つのパスが無いことで確かめる。`files` は 300 件で切られる（compare API）ので、300 件あれば変わったとみなす
      - 手順 1 から T を過ぎていない
   6. **マージの API を呼んだ後は、手順 7〜9 の照合が済むまで、NDF の記録を閉じない。** マージが成り立っても照合の前に NDF が止まると、検査と違う base へのマージが誰にも知らされないためである。NDF は、Pull Request ごとの記録を NDF の記録に永続化し、次の 3 つの状態で扱う
 
@@ -439,7 +435,7 @@ NDF が受け入れるのは、自分がこのマージのために起動した 
      4. 探す対象は、Pull Request の `refs/pull/<番号>/head` と `refs/pull/<番号>/merge` を取り込んだリポジトリにする。取り込んだ head が確かめたコミットと同じであることと、マージコミットの親が今の main の先頭と確かめたコミットであることを確かめる。違えば、手順 1 からやり直す
      5. 手順 3 のスクリプトで、マージコミットの木を作業ツリーの外に取り出して `dir` で探し、分岐点から head まで（`git --range`）を探す。設定は、手順 3 のチェックアウトにある 2 つの設定を絶対パスで渡す
      6. 当たりか失敗があれば、マージしない。探した後に head か main の先頭が変われば、マージせずに手順 1 からやり直す
-  4. 1 本目のマージで起きた main への push の `leak-check-push` について、`dir` と `git` の両方の探しで `nd-real-value` の件数の行（当たりが無ければ `nd-real-value: 0 件`）が記録に出ており、「秘密が空なので `.gitleaks.toml` だけで探す」行が出ていないことを、持ち主が実行の記録で確かめる。確かめられなければ、持ち主が手順 2 の設定を直し、手元で秘密を渡して `leak-scan-secret.sh git` を打ち、main の到達できるすべてのコミットを探す。確かめた後に、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする
+  4. 1 本目のマージで起きた main への push の `leak-check-push` を、持ち主が実行の記録で確かめる。確かめるのは、`dir` と `git` の両方の探しで `nd-real-value` の件数の行（当たりが無ければ `nd-real-value: 0 件`）が出ており、「秘密が空なので `.gitleaks.toml` だけで探す」行が出ていないことである。確かめられなければ、持ち主が手順 2 の設定を直し、手元で秘密を渡して `leak-scan-secret.sh git` を打ち、main の到達できるすべてのコミットを探す。確かめた後に、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする
   5. 持ち主が検査用の非公開リポジトリを作り、呼び出しのワークフローの見本を写し、秘密 `LEAK_CHECK_PATTERN` と変数 `LEAK_CHECK_GENERATION`（値は `1`）を登録する。NDF がマージに使う今の認証で、非公開リポジトリの変数の取得・ワークフローの起動・ジョブの読み取りの API が呼べることを確かめる。呼べなければ、人の承認を受けてから権限を足す（C2）。開いている Pull Request の 1 本で、持ち主が手で探しを起動し、今の head を探して成功したことを非公開の記録で確かめる。1 本目のマージからこの確かめが済むまで、非公開の検査を手で起動できないので、持ち主は NDF にほかの Pull Request をマージさせない
   6. NDF に決定 7 の機能が入った後、2 本目の Pull Request で、`.ndf/project.json` に NDF の非公開の検査を有効にする項目を足す。2 本目の Pull Request 自身も、NDF のマージの直前に非公開の検査を通る。そのために、検査を必須にするかを NDF が決める読み取り元と、有効になる時点を次のように定める
      - NDF は、NDF の利用者の設定（リポジトリの外。非公開リポジトリの名前を持つ所）か、base のブランチの `.ndf/project.json` のどちらかで有効になっていれば、非公開の検査を必須にする。Pull Request の head の `.ndf/project.json` は読まない。Pull Request が項目を消しても足しても、その Pull Request の判定は変わらない
@@ -468,7 +464,7 @@ NDF が受け入れるのは、自分がこのマージのために起動した 
 - **プロジェクトごとに違うもの**: 実際の値の正規表現は非公開リポジトリの秘密と環境 `leak-scan` の秘密で、必須にするかは変数で、非公開リポジトリの名前は NDF の利用者の設定で受け、公開のリポジトリに置かない
 - **当たるモード**: このリポジトリに出るすべての Pull Request（fork・同じリポジトリのブランチ・Dependabot）の NDF によるマージと、main への push
 
-壊れうる箇所と扱い:
+### 壊れうる箇所と扱い
 
 | 箇所 | 起きること | 扱い |
 | --- | --- | --- |
@@ -487,7 +483,9 @@ NDF が受け入れるのは、自分がこのマージのために起動した 
 | 同じリポジトリのブランチで `ci.yml` を書き換える Pull Request | 書き込みの権限を持つ人は、`pull_request` のワークフローを書き換えて秘密を読む手順を足せる | Pull Request の側の実行は、非公開リポジトリの秘密も、main だけが使える環境の秘密も読めない（決定 9）。main に直に push できる人の経路は残る（決定 9・11） |
 | 既定の規則と nd-factory の規則の探し | `leak-check` と非公開の検査が同じ範囲を探すので、同じ当たりが 2 か所に出る | 二重に出ても通さない側なので残す（決定 5） |
 
-受け入れ条件の読み方を書く。どれも条件の文そのものは変えない。文を変える必要があるものは、下の「人へ残す判断」に要求の変更として挙げる。
+### 受け入れ条件の読み方
+
+どれも条件の文そのものは変えない。文を変える必要があるものは、下の「人へ残す判断」に要求の変更として挙げる。
 
 - #96 の受け入れ条件 1・2・6 の「必須のチェックが落ちる」「必須のチェックは通らない」は、2 本目の Pull Request で NDF の非公開の検査を有効にした後に、「NDF の非公開の検査が失敗し、NDF がマージしない」で満たす（決定 10）。有効にした後は、秘密が空なら探しが必ず落ちるので、秘密なしで成功と数えられる期間は無い（決定 3）
 - #96 の受け入れ条件 3 の「CI の定義のテストが確認する」は、公開のリポジトリの `leak-check-secret.yml` と呼び出しのワークフローの見本についての確認で満たす。非公開リポジトリに置いた写しは、検証用のリポジトリでの確認と運用の文書の手順で扱う（決定 4）

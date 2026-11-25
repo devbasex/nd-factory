@@ -340,8 +340,10 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
   - 分岐点を求める `git merge-base` に、`$BASE_SHA` と `$HEAD_SHA` 以外を渡す。マージコミットの親を確かめる `git rev-list --parents` が無い
   - `export-tree.sh` の呼び出しが無いか、`leak-scan-secret.sh` の `dir` と `git --range` の呼び出しのどちらかが無い
 - `callerViolations` が返す所: `on` が `workflow_dispatch` だけでない。`uses:` が `devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main` でない。`secrets: inherit` を使う。`scan` が `needs: generation` を持たない。`generation` の手順が `vars.LEAK_CHECK_GENERATION` と `inputs.generation` を読まない。最上位の `permissions` が `{ contents: read }` だけでない
-- `leakJobViolations` が返す所: `leak-check` の `if` が `github.event_name == 'pull_request'` でない、`environment` か `secrets.` か `LEAK_CHECK_REQUIRE_PATTERN` を持つ、`leak-scan.sh` の `dir` か `git --range` の呼び出しが無い。`leak-check-push` の `if` が `github.event_name == 'push'` でない、`environment` が `leak-scan` でない、`leak-scan-secret.sh dir --count-only` か `leak-scan-secret.sh git --count-only` の呼び出しが無い、`--range` を渡す、`LEAK_CHECK_REQUIRE_PATTERN` を受けない
-- `patternSecretReaders` の期待は、公開のリポジトリの `.github/workflows/` のうち `ci.yml#jobs.leak-check-push` と `leak-check-secret.yml#jobs.leak-check-secret` の 2 つだけで、`leak-check-secret.yml` は秘密を `on.workflow_call.secrets` で受ける
+- `leakJobViolations` が返す所
+  - `leak-check`: `if` が `github.event_name == 'pull_request'` でない。`environment` か `secrets.` か `LEAK_CHECK_REQUIRE_PATTERN` を持つ。`leak-scan.sh` の `dir` か `git --range` の呼び出しが無い
+  - `leak-check-push`: `if` が `github.event_name == 'push'` でない。`environment` が `leak-scan` でない。`leak-scan-secret.sh dir --count-only` か `leak-scan-secret.sh git --count-only` の呼び出しが無い。`--range` を渡す。`LEAK_CHECK_REQUIRE_PATTERN` を受けない
+- `patternSecretReaders` の期待は、公開のリポジトリの `.github/workflows/` のうち `ci.yml#jobs.leak-check-push` と `leak-check-secret.yml#jobs.leak-check-secret` の 2 つだけである。`leak-check-secret.yml` は秘密を `on.workflow_call.secrets` で受ける
 
 ### 異常系の処理
 
