@@ -7,6 +7,19 @@
     "./users-api": "./src/users-api.ts",
     "./web-config": "./src/web-config.ts",
     "./exit-codes": "./src/exit-codes.ts",
+    "./values": "./src/values.ts",
+    "./ids": "./src/ids.ts",
+    "./tokens": "./src/tokens.ts",
+    "./reasons": "./src/reasons.ts",
+    "./operation": "./src/operation.ts",
+    "./operations": "./src/operations/index.ts",
+    "./ndf": "./src/ndf.ts",
+    "./data": "./src/data.ts",
+    "./client": "./src/client.ts",
+    "./row-codec": "./src/row-codec.ts",
+    "./rows/*": "./src/rows/*.ts",
+    "./tables": "./src/tables.ts",
+    "./generated/routes.json": "./generated/routes.json",
     "./db-prep": "./src/db-prep.ts"
   },
   "scripts": {
@@ -14,5 +27,12 @@
   },
   "dependencies": {
     "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "10.6.0",
+    "ajv": "8.20.0",
+    "randexp": "0.6.1",
+    "zod-openapi": "6.0.2",
+    "zod-schema-faker": "3.0.1"
   }
 }

@@ -1,7 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- #2 が横断の部品へ移す
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- #2 が横断の部品へ移す
-import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import {
   STORE_UNAVAILABLE,
   type UserAnswer,
@@ -10,24 +6,35 @@ import {
   type UsersErrorBody,
   parseUsersRequest,
 } from "@nd-factory/contracts/users-api";
+import { createClock, type Clock } from "@nd-factory/core/clock";
+import { createDb, dynamoDocumentClient, TABLE_PURPOSES, type Db, type TableNames } from "@nd-factory/core/db";
+import { decodeHttpBody } from "@nd-factory/core/dispatch";
+import { createLogger, type Logger } from "@nd-factory/core/log";
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import { StoreError, ensureUser } from "./user-store.ts";
 
 // PUT /v1/users の入口。利用者の ID は認可の前段が照らした token の sub だけを使い、本文の値を利用者の ID として信じない
 
 export type HandlerDeps = {
-  client: () => DynamoDBDocumentClient;
+  // 利用者の表の実際の名前から Db を得る。名前が無いときは呼ばない
+  db: (usersTable: string) => Db;
   table: () => string | undefined;
-  now: () => Date;
-  log: (line: string) => void;
+  clock: Clock;
+  // 要求ごとのログの書き手（文脈に要求の ID を持つ）
+  log: (requestId: string) => Logger;
 };
+
+// 要素の ID が利用者自身を指すか（"self" か token の sub と同じ）
+function isSelf(item: UserRef, sub: string): boolean {
+  return item.id === "self" || item.id === sub;
+}
 
 // 要素ごとに答えを決める。ほかの利用者の ID には表を読まずに not_found を返し、無い ID と見分けられなくする
 export async function answerItems(sub: string, items: UserRef[], self: () => Promise<UserRow>): Promise<UserAnswer[]> {
   let selfRow: Promise<UserRow> | undefined;
   const answers: UserAnswer[] = [];
   for (const item of items) {
-    if (item.id === "self" || item.id === sub) {
+    if (isSelf(item, sub)) {
       selfRow ??= self();
       answers.push({ status: "ok", item: await selfRow });
     } else {
@@ -41,55 +48,73 @@ function json(statusCode: number, body: UserAnswer[] | UsersErrorBody): APIGatew
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
 }
 
-function decodeBody(event: APIGatewayProxyEventV2WithJWTAuthorizer): string | undefined {
-  if (event.body === undefined) return undefined;
-  return event.isBase64Encoded ? Buffer.from(event.body, "base64").toString("utf8") : event.body;
-}
-
 // ログは JSON の 1 行で、要求の ID と結果だけを出す。token・本文・利用者の ID は出さない
-type LogFields = { level: "info" | "error"; msg: string; status: number } & Record<string, string | number>;
+type LogFields = { status: number } & Record<string, string | number>;
+
+// 503 の失敗を、ログに出す操作の名前と失敗の名前に分ける
+function describeStoreFailure(e: unknown): { operation: string; error: string } {
+  const operation = e instanceof StoreError ? e.operation : "unknown";
+  const error = e instanceof StoreError ? e.causeName : e instanceof Error ? e.name : "Unknown";
+  return { operation, error };
+}
 
 export function createHandler(deps: HandlerDeps) {
   return async function handle(event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<APIGatewayProxyStructuredResultV2> {
     const requestId = event.requestContext?.requestId ?? "unknown";
-    const log = (fields: LogFields) => deps.log(JSON.stringify({ ...fields, request_id: requestId }));
+    const logger = deps.log(requestId);
 
     const sub = event.requestContext?.authorizer?.jwt?.claims?.sub;
     if (typeof sub !== "string" || sub.length === 0) {
       // 認可の前段を通った要求には必ず sub がある。無いのは前段の設定の誤りなので error で残す
-      log({ level: "error", msg: "認可の前段から利用者の ID を受けていない", status: 401 });
+      logger.error("認可の前段から利用者の ID を受けていない", { status: 401 } satisfies LogFields);
       return { statusCode: 401 };
     }
 
-    const parsed = parseUsersRequest(decodeBody(event));
+    const parsed = parseUsersRequest(decodeHttpBody(event));
     if (!parsed.ok) {
-      log({ level: "info", msg: "本文が形に合わない", status: 400, reason: parsed.reason });
+      logger.info("本文が形に合わない", { status: 400, reason: parsed.reason } satisfies LogFields);
       return json(400, { reason: parsed.reason });
     }
 
     const table = deps.table();
     try {
       if (!table) throw new StoreError("put", new Error("USERS_TABLE が無い"));
-      const answers = await answerItems(sub, parsed.items, () => ensureUser(deps.client(), table, sub, deps.now()));
-      log({ level: "info", msg: "利用者の要素に答えた", status: 200, items: answers.length });
+      const db = deps.db(table);
+      const answers = await answerItems(sub, parsed.items, () => ensureUser(db, "users", sub, deps.clock));
+      logger.info("利用者の要素に答えた", { status: 200, items: answers.length } satisfies LogFields);
       return json(200, answers);
     } catch (e) {
-      const operation = e instanceof StoreError ? e.operation : "unknown";
-      const error = e instanceof StoreError ? e.causeName : e instanceof Error ? e.name : "Unknown";
-      log({ level: "error", msg: "利用者の表に届かない", status: 503, operation, error });
+      const { operation, error } = describeStoreFailure(e);
+      logger.error("利用者の表に届かない", { status: 503, operation, error } satisfies LogFields);
       return json(503, { reason: STORE_UNAVAILABLE });
     }
   };
 }
 
-// 本物の依存。クライアントは最初の要求で作り、Lambda の実行環境が続く間は使い回す
-let sharedClient: DynamoDBDocumentClient | undefined;
+// 骨組みは利用者の表だけを使う。ほかの用途の表の名前は持たず、引かれたら投げる（表へ送る前に 503 にする）
+function usersOnly(usersTable: string): TableNames {
+  const names = { users: usersTable } as Record<string, string>;
+  for (const purpose of TABLE_PURPOSES) {
+    if (purpose === "users") continue;
+    Object.defineProperty(names, purpose, {
+      enumerable: true,
+      get: () => {
+        throw new Error(`骨組みは ${purpose} の表を持たない`);
+      },
+    });
+  }
+  return names as TableNames;
+}
+
+// 本物の依存。クライアントは awsClient が実行環境ごとに 1 つ作り、Db は最初の要求で組んで Lambda の実行環境が続く間は使い回す
+let sharedDb: { table: string; db: Db } | undefined;
 
 export const handler = createHandler({
-  client: () => (sharedClient ??= DynamoDBDocumentClient.from(new DynamoDBClient({}))),
+  db: (table) => {
+    if (sharedDb?.table !== table) sharedDb = { table, db: createDb(dynamoDocumentClient(), usersOnly(table)) };
+    return sharedDb.db;
+  },
   table: () => process.env.USERS_TABLE,
-  // eslint-disable-next-line no-restricted-syntax -- #2 が横断の部品へ移す
-  now: () => new Date(),
-  // eslint-disable-next-line no-restricted-globals -- #2 が横断の部品へ移す
-  log: (line) => console.log(line),
+  clock: createClock(),
+  log: (requestId) => createLogger({ request_id: requestId, fn: "users-api", endpoint: "user" }),
 });

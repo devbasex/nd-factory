@@ -1,0 +1,60 @@
+name: leak-check
+
+# 呼び出しのワークフローの見本（#96 #101 の決定 1・4・7）。正本はこのファイルで、持ち主が検査用の非公開リポジトリの
+# .github/workflows/ へ写す（手順は docs/operations/ci-checks.md）。このファイルを変えたら、世代を切り替えて写し直す。
+# 公開のリポジトリの .github/workflows/ の外に置くので、公開のリポジトリでは動かない。形は tools/test/ci-definition.test.ts の
+# callerViolations が縛る。NDF か持ち主が、ワークフローの起動の API で 6 つの入力を渡して起動する
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        type: string
+        required: true
+      head_sha:
+        type: string
+        required: true
+      base_sha:
+        type: string
+        required: true
+      merge_sha:
+        type: string
+        required: true
+      code_sha:
+        type: string
+        required: true
+      generation:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # 設定の世代（変数 LEAK_CHECK_GENERATION）が切り替え中（0）か入力と違えば、探さずに失敗する
+  generation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: 設定の世代を確かめる
+        env:
+          VAR_GENERATION: ${{ vars.LEAK_CHECK_GENERATION }}
+          INPUT_GENERATION: ${{ inputs.generation }}
+        run: |
+          if [[ ! "$VAR_GENERATION" =~ ^[1-9][0-9]*$ || "$VAR_GENERATION" != "$INPUT_GENERATION" ]]; then
+            echo "::error::設定の世代が入力と違うか、切り替え中"
+            exit 1
+          fi
+
+  # 公開のリポジトリの再利用できるワークフローを、秘密を名前で渡して呼ぶ（secrets: inherit を使わない）
+  scan:
+    needs: generation
+    uses: devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main
+    with:
+      pr_number: ${{ inputs.pr_number }}
+      head_sha: ${{ inputs.head_sha }}
+      base_sha: ${{ inputs.base_sha }}
+      merge_sha: ${{ inputs.merge_sha }}
+      code_sha: ${{ inputs.code_sha }}
+      generation: ${{ inputs.generation }}
+    secrets:
+      LEAK_CHECK_PATTERN: ${{ secrets.LEAK_CHECK_PATTERN }}

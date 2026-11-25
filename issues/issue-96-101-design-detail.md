@@ -72,8 +72,8 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 - `run_scan`
   - `dir` と `history` では、`<木の根>` へ `cd` してから `leak-scan.sh dir` を打つ。`leak-scan.sh` は今のディレクトリを探す木の根とし、根の `.gitleaksignore` を 2 で落とす
   - `history` では、木の根を `paths`・`layers/1`・`layers/2`…・`binary-text/1`・`binary-text/2`… の順に回し、根ごとに `pass` の行の前に `leak-scan-secret: 履歴 <木の根> を探す` の行を出す（層の番号と `paths` だけで、元のパスを含まない）。層が無ければ `paths` だけを探す
-  - `count` は `--count-only` のときの `nd-real-value` だけの探しにだけ使う。`leak-scan.sh` の標準出力と標準エラーを作業のディレクトリの一時のファイルに受け、読まずに消す。`leak-scan.sh` の標準エラーの「当たり <件数> 件」の行と `file-<番号>` の振り方は `nd-real-value` の当たりによって変わるので、どちらも記録に出さない
-  - **`--count-only` で記録に出る行のうち、秘密の値によって変わるのは、`report_counts` の件数の行か件数を読めない行だけである。** 既定の規則と `.gitleaks.toml` の探しは秘密を使わないので、その `pass` の出力は秘密の値によらず同じになる。終了コードも、当たりのときに 1 になるだけで、場所の手がかりを持たない
+  - `count` は `--count-only` のときの `nd-real-value` だけの探しにだけ使う。`leak-scan.sh` の標準出力と標準エラーを作業のディレクトリの一時のファイルに受け、消す前に、その探しが当たりのほかの理由で 0 以外になったか（`leak-scan.sh` の読み飛ばしか報告を読めない固定の文言がある、終了コードが 1 でない、1 なのに報告が 0 件）だけを見る。そうなら、最後に `leak-scan-secret: nd-real-value の探しが失敗した。…` の固定の行を 1 つ出す。`leak-scan.sh` は当たりと読み飛ばしが同時に起きても 1 を返すので、件数の行と終了コードだけでは、当たりだけの場合と見分けられないためである。`leak-scan.sh` の標準エラーの「当たり <件数> 件」の行と `file-<番号>` の振り方は `nd-real-value` の当たりによって変わるので、どちらも記録に出さない
+  - **`--count-only` で記録に出る行のうち、秘密の値によって変わるのは、`report_counts` の件数の行か件数を読めない行と、`nd-real-value` の探しの失敗の固定の行だけである。** 既定の規則と `.gitleaks.toml` の探しは秘密を使わないので、その `pass` の出力は秘密の値によらず同じになる。終了コードも、当たりのときに 1 になるだけで、場所の手がかりを持たない
 
 ### 異常系の処理
 
@@ -84,7 +84,7 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 | `build_overlay` | 秘密の形の誤り | 秘密に `'''` か改行を含む（TOML の文字列を閉じるか、複数行の正規表現になるため） | `build_overlay` | 止める | `leak-scan-secret: 秘密 LEAK_CHECK_PATTERN に ''' と改行を含めない`（値を出さない）、1 | `trap` で作業のディレクトリを消す。秘密を直して打ち直せる |
 | `build_overlay` | 必須なのに秘密が空 | `LEAK_CHECK_REQUIRE_PATTERN` が `1` で `LEAK_CHECK_PATTERN` が空 | `build_overlay` | 止める | `leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が無い（必須にしている）`、1 | 同上 |
 | `build_overlay` | チェックアウトの根を設定に書けない | 根の絶対パスが `"` か `\` か改行を含む | `build_overlay` | 止める | `leak-scan-secret: チェックアウトのパスを設定に書けない`、2 | 同上。別の場所へチェックアウトして打ち直す |
-| `run_scan` | 探しの失敗か当たり | `leak-scan.sh` が 1 か 2 を返した | `run_scan` の戻り値 | 最後の探しまで打ってから、悪い方の終了コードで終える | `pass` では `leak-scan.sh` の出力と終了コード。`count` では `leak-scan.sh` の出力を出さず、終了コードと `report_counts` の行だけ | 同上 |
+| `run_scan` | 探しの失敗か当たり | `leak-scan.sh` が 1 か 2 を返した | `run_scan` の戻り値 | 最後の探しまで打ってから、悪い方の終了コードで終える | `pass` では `leak-scan.sh` の出力と終了コード。`count` では `leak-scan.sh` の出力を出さず、終了コードと `report_counts` の行だけ。`count` の探しが当たりのほかの理由で 0 以外になったときは、`leak-scan-secret: nd-real-value の探しが失敗した。…`（理由とファイルの名前を出さない固定の行）も出す | 同上 |
 | `report_counts` | 件数を読めない | `nd-real-value` を探した `leak-scan.sh` のどれかが報告を書かずに終えた（範囲を読めない・gitleaks の報告を読めない・`.gitleaksignore` がある） | `report_counts` | 呼び出し元へ返す | `leak-scan-secret: nd-real-value の件数を読めない`（理由を出さない固定の行）、1（`run_scan` が 2 なら 2 のまま） | 同上。決定 10 の手順 4 の確かめは、この行が出た実行を「確かめられない」とする |
 
 ### 処理の手順

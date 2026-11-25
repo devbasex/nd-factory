@@ -1,15 +1,20 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { EXIT_CODES } from "../src/exit-codes.ts";
+import type { OperationDef } from "../src/operation.ts";
 import { type Settings, settingsSchema } from "../src/settings.ts";
 
-// 形の正本から 3 つの生成物を作る。手で直すと次の check で差が出るため、直すのは正本の側だけにする
+// 形の正本から生成物を作る（設定の 3 つと、操作の表からの generated/*）。手で直すと次の check で差が出るため、直すのは正本の側だけにする
 
 export const SCHEMA_PATH = "packages/contracts/schema/settings.schema.json";
 export const EXAMPLE_PATH = "infra/settings.example.json";
 export const SETUP_DOC_PATH = "docs/operations/setup.md";
+
+export const GENERATED_DIR = "packages/contracts/generated";
+export const DUMMY_DIR = `${GENERATED_DIR}/dummy`;
 
 export const EXIT_BEGIN = "<!-- exit-codes:begin -->";
 export const EXIT_END = "<!-- exit-codes:end -->";
@@ -81,7 +86,57 @@ async function readOrNull(path: string): Promise<string | null> {
   }
 }
 
+// 見本の問題を表に出す数。残りは件数だけを出す
+const SHOWN_PROBLEMS = 10;
+
+// 操作の表からの生成物。見本の照らしで外れれば何も書かずに投げる（終了コード 2）
+async function operationFiles(ops: readonly OperationDef[]): Promise<Array<[string, string]>> {
+  // 操作の表とデータの読み込みの誤り（印の食い違い）も、ここで投げて終了コード 2 にするため、組む関数は呼ぶときに読む
+  const a = await import("./artifacts.ts");
+  const problems = a.checkExamples(ops);
+  if (problems.length > 0) {
+    const shown = problems.slice(0, SHOWN_PROBLEMS).map((p) => `${p.operation} の ${p.scene}[${p.index}]: ${p.problem}`);
+    throw new GenerateError(`見本の照らしで ${problems.length} 件の問題がある\n${shown.join("\n")}`);
+  }
+  const schemas = a.buildOperationSchemas(ops);
+  const dummies = ops.map((op) => [op.name, a.buildDummy(op)] as const);
+  const index = Object.fromEntries(dummies.map(([name, doc]) => [name, doc === null ? null : `${name}.json`]));
+  return [
+    [`${GENERATED_DIR}/operations.schema.json`, json(schemas)],
+    [`${GENERATED_DIR}/openapi.json`, json(a.buildOpenApi(ops))],
+    [`${GENERATED_DIR}/mcp-tools.json`, json(a.buildMcpTools(ops, schemas))],
+    [`${GENERATED_DIR}/routes.json`, json(a.buildRoutes(ops))],
+    [`${GENERATED_DIR}/reasons.json`, json(a.buildReasons(ops))],
+    [`${GENERATED_DIR}/pending.json`, json(a.buildPending(ops))],
+    [`${DUMMY_DIR}/index.json`, json(index)],
+    ...dummies.flatMap(([name, doc]): Array<[string, string]> => (doc === null ? [] : [[`${DUMMY_DIR}/${name}.json`, json(doc)]])),
+  ];
+}
+
+// generated/dummy/ の直下の通常のファイルで、名前が .json で終わり、どの操作にも当たらないもの。
+// 生成が書くのはこの形だけなので、サブディレクトリや .json でない補助のファイルは対象にせず消さない
+async function staleDummies(root: string, wanted: ReadonlySet<string>): Promise<string[]> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(join(root, DUMMY_DIR), { withFileTypes: true });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw e;
+  }
+  return entries
+    .filter((d) => d.isFile() && d.name.endsWith(".json"))
+    .map((d) => `${DUMMY_DIR}/${d.name}`)
+    .filter((rel) => !wanted.has(rel))
+    .sort();
+}
+
 export async function generateArtifacts(root: string, mode: Mode): Promise<string[]> {
+  const { OPERATIONS } = await import("../src/operations/index.ts");
+  return generateArtifactsFor(root, mode, OPERATIONS);
+}
+
+// 操作の表を渡して生成する。generateArtifacts は操作の表（OPERATIONS）でこれを呼び、テストは表を変えて呼ぶ
+export async function generateArtifactsFor(root: string, mode: Mode, ops: readonly OperationDef[]): Promise<string[]> {
   const currentSetup = await readOrNull(join(root, SETUP_DOC_PATH));
   let setupWanted: string | null;
   try {
@@ -95,7 +150,9 @@ export async function generateArtifacts(root: string, mode: Mode): Promise<strin
     [SCHEMA_PATH, schemaText()],
     [EXAMPLE_PATH, exampleText()],
     [SETUP_DOC_PATH, setupWanted],
+    ...(await operationFiles(ops)),
   ];
+  const stale = await staleDummies(root, new Set(wanted.map(([rel]) => rel)));
 
   if (mode === "check") {
     const differ: string[] = [];
@@ -103,9 +160,10 @@ export async function generateArtifacts(root: string, mode: Mode): Promise<strin
       const current = rel === SETUP_DOC_PATH ? currentSetup : await readOrNull(join(root, rel));
       if (text === null || current !== text) differ.push(rel);
     }
-    return differ;
+    return [...differ, ...stale];
   }
 
+  for (const rel of stale) await rm(join(root, rel), { force: true });
   for (const [rel, text] of wanted) {
     if (text === null) continue;
     const path = join(root, rel);

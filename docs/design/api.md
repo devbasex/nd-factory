@@ -70,9 +70,9 @@ API の操作は 1 つの画面に合わせず、エンティティ（スプリ�
 
 | 区分 | 形 | いつ |
 | --- | --- | --- |
-| リクエスト全体のエラー | `Content-Type: application/problem+json` で `{"type": "about:blank", "status": 400, "reason": "body_not_array"}`（RFC 9457 の形。`title`・`detail` を持たない） | 本文が JSON でない・配列でない・空・101 個以上か全部か無かの操作の上限を越える・重なり（400）、認証できない（401）、`human_only` の操作を委任から呼んだ・委任の種類が足りない（403）、記録を書けない・依存先に届かない（503）、呼びすぎ（429） |
+| リクエスト全体のエラー | `Content-Type: application/problem+json` で `{"type": "about:blank", "status": 400, "reason": "body_not_array"}`（RFC 9457 の形。`title`・`detail` を持たない） | 本文が JSON でない・配列でない・空・101 個以上か全部か無かの操作の上限を越える・重なり（400）、認証できない（401 `unauthorized`）・検証を通した token のセッションが既に断たれている（401 `session_ended`）、人だけの操作を委任から呼んだ・委任の種類が足りない（403）、記録を書けない・依存先に届かない（503）、呼びすぎ（429） |
 | アイテムのエラー | 上の「失敗したアイテム」 | アイテムの形が違う（400 `item_invalid`）、見えない・無い（404 `not_found`）、役割が足りない（403 `role_insufficient`）、バージョンが合わない（409 `version_mismatch`）、状態が合わない（409 `state_mismatch`）、冪等キーの使い回し（422 `idempotency_key_reused`）、同じ冪等キーの 1 回目が途中（409 `in_progress`）、使える量の上限（403。理由コードは使える量の判定が返す `monthly_cap_reached`・`place_not_allowed`・`inference_not_allowed`・`currency_mismatch`（使った額と上限額の通貨が違う。換算しない）。同時に動くレーンの数の `concurrency_full` は待てば解けるため、アイテムのエラーにせずレーンの待ちの理由として返す。[実行の設計にある使える量の判定](execution.md#使える量の判定)） |
-| 401 の本文 | 理由によらず同じ `{"type": "about:blank", "status": 401, "reason": "unauthorized"}` | token の形・期限・取り消しのどれでも同じにし、何が違ったかを明かさない |
+| 401 の本文 | 既定は理由によらず同じ `{"type": "about:blank", "status": 401, "reason": "unauthorized"}`。`reason` が `session_ended` になるのは、人の Cognito の access token が、署名・発行元・クライアント・`token_use`・必須の claim（`exp`・`username`・`auth_time`・`origin_jti`）・期限（`sessions.delete` は `SESSION_DELETE_EXPIRED_GRACE_MS` の猶予の内）・エンドポイントの照合をすべて通した上で、強整合で読んだ行で、そのセッション（`sub` と `origin_jti`）が期限によらず API で断たれていると確認したときだけである。断たれているとは次のどれか: セッションの取り消しの行がある（`sessions.delete` を除く。こちらは成功で `revoked_at` を返す）・[対応の行](data.md#cognito-の主体の対応の行) が無い（`sessions.create` を除く。こちらは「まだ結んでいない人」として渡る）・対応の行があり token の `auth_time` が `bound_auth_time` より前。同じセッションの token は `sub`・`origin_jti`・`auth_time` が同じで、取り直しても同じ行に当たるため、`session_ended` はそのセッションのどの token も以後 API を通らないことを表す | token の形・署名・claim・期限・エンドポイントの外れと、`sessions.create` の「まだ結んでいない人」の照合の外れ（利用者プールに利用者が無い・別の `sub` が返る・サインインから 5 分を過ぎた）は `unauthorized` で区別せず、何が違ったかを明かさない。`session_ended` を返すのは署名を確認した token の持ち主だけで、明かすのはその持ち主のセッションが断たれたことだけである（画面がサインアウトの確定と取り違えないため。[画面の文書のサインアウトで消す](screens.md#サインアウトで消す)） |
 | 500 | 返さない | 想定しない失敗はハンドラーの外側で受けて 503 `unavailable` にし、リクエストの ID とともにログへ残す（決定 46） |
 
 理由のコードはスキーマの正本の 1 か所に操作ごとの一覧として置き、一覧に無いコードを返すと単体テストが落ちる。全体設計の文が名を挙げる理由のコード（`project_transfer_in_progress`・`credential_rotation_in_progress`・`human_only`・`visibility_widened`・`destination_unregistered`・`rotation_superseded`・`answer_seq_unknown` など）も、その操作の一覧に置く（決定 56）。
@@ -81,11 +81,11 @@ API の操作は 1 つの画面に合わせず、エンティティ（スプリ�
 
 | 決まり | 中身 |
 | --- | --- |
-| どこに置くか | 新しいものを作る操作と、外へ働きかける操作（`sprints.create`・`sprints.cancel`・`approvals.answer`・`questions.answer`・`delegations.create`・`machines.create` など）のアイテムに `idempotency_key`（UUID の形）を必ず持たせる |
-| 何で見分けるか | 主体の利用者・呼び出し元・操作の名前・キーの 4 つの組。呼び出し元は、人の直の操作なら「人」、委任なら委任の ID |
+| どこに置くか | 新しいものを作る操作と、外へ働きかける操作（`sprints.create`・`sprints.cancel`・`approvals.answer`・`questions.answer`・`delegations.create`・`machines.create` など）と、レスポンスを失った送り直しに 1 回目の確定を返す要る `logins.delete`（外した行は消えるため、鍵が無いと送り直しが 404 になり、確定を知れない）のアイテムに `idempotency_key`（UUID の形）を必ず持たせる |
+| 何で見分けるか | 主体の利用者・呼び出し元・操作の名前・キーの 4 つの組。呼び出し元は、人の直の操作なら「人」、委任なら委任の ID。`sessions.create` だけは主体の利用者の代わりに、認証が検証した Cognito の `sub` と token の `auth_time`（IdP でサインインした時刻）の組で区切る。初回は利用者がまだ無く（まだ結んでいない人）、初回の確定の後にレスポンスを失って送り直すと対応の行ができて主体が人に変わるため、どちらでも同じ鍵にして初回の結果を返す。refresh token で取り直した token も `auth_time` を変えないため、同じサインインの送り直しは同じ組になる。ログインを外した後にサインインし直すと `auth_time` が変わるため、外す前の鍵で送り直しても外す前の利用者の結果は返らない（[Cognito の主体の対応の行](data.md#cognito-の主体の対応の行) を消した `sub` が作り直しの後に同じでも）。`logins.create` は主体の利用者にリクエストのセッション（Cognito の `sub`・`origin_jti`・対応の行の `bound_auth_time`）を足して区切り、流れを始めたセッションの外の再送へ保存した連携の候補を返さない（[詳細設計の `idempotencyPrincipalKey`](detail.md#関数の仕様)） |
 | 結果を共有する範囲 | 同じ利用者の人の直の操作は、セッション（端末やサインインし直し）が違っても 1 回目の結果を共有する。端末がサインインし直した後に送り直しても 2 重に作らないためである。委任のリクエストは、同じ委任の中でだけ共有し、人の直の操作とも、同じ利用者のほかの委任とも共有しない |
 | 結果を返す前 | 2 回目も、今の主体で認可の判定（プロジェクトが見えるか・役割・委任の範囲・`human_only` か）を 1 回目と同じくアイテムごとに掛ける。通ったアイテムにだけ 1 回目の結果を返す。通らないアイテムには 1 回目の結果を返さず、今回の判定で出たエラー（見えなければ 404 `not_found`）を返す |
-| 2 回目 | 24 時間の間、同じ組の 2 回目は 1 回目のアイテムの結果を返し、状態を変えない。1 回だけ返す値（委任の token など）は 2 回目に `null` にする |
+| 2 回目 | 24 時間の間、同じ組の 2 回目は 1 回目のアイテムの結果を返し、状態を変えない。1 回だけ返す値（委任の token など）は 2 回目に `null` にする。どの値かは操作ごとにスキーマの正本（`onceOnly`）が場所で決め、その場所の形は `null` を受ける |
 | 中身が違う | 同じ組でアイテムの中身が違えば 422 `idempotency_key_reused` |
 | 1 回目が途中 | 409 `in_progress`。呼び出し元は待って同じアイテムを送り直す |
 
@@ -153,13 +153,14 @@ ID の種類のプレフィックス:
 
 | 操作と HTTP のルート | 受け持つ子の課題 |
 | --- | --- |
-| F1〜F3（`sessions.*`・`users.*`・`logins.*`・`teams.*`・`seats.*`・`invitations.*`） | #4 |
+| F1〜F3（`sessions.*`・`users.*`・`login_links.*`・`logins.*`・`teams.*`・`seats.*`・`invitations.*`） | #4 |
 | F4〜F6（`projects.*`・`github_installations.*`・`repositories.*`・`project_transfers.*`） | #5 |
-| F7〜F10・F17（`waiting_counts.get`・`issue_candidates.list`・`sprints.*`・`lanes.list`・`progress_events.list`・`execution_settings.*`・`model_keys.*`）とランナー向けの 5 つの HTTP のルート | #6 |
-| F18（`machines.*`）と手元のマシン向けの 2 つの HTTP のルート | #7 |
+| F7〜F10・F17（`waiting_counts.get`・`issue_candidates.list`・`sprints.*`・`lanes.list`・`progress_events.list`・`execution_settings.*`・`model_keys.*`）とランナー向けの 6 つの HTTP のルート（オーガナイザーのルートを除く） | #6 |
+| F18（`machines.*`）と手元のマシン向けの 2 つの HTTP のルート（オーガナイザーのルートを除く） | #7 |
 | F11〜F15（`approvals.*`・`questions.*`・`notices.*`・`notification_targets.*`） | #8 |
 | F16・F20（`delegations.*`・`audit_records.list`） | #11 |
 | F19（`usage.get`・`usage_records.list`・`spend_caps.update`） | #29 |
+| F24・F25（`organizers.*`・`organizer_messages.*`・`issue_requests.create`）とオーガナイザーのランナー・手元のマシン向けの 5 つの HTTP のルート（`/v1/runner/organizer_inputs/list`・`/v1/runner/organizer_replies/create`・`/v1/runner/organizer_receipts/create`・`/v1/runner/organizer_transcripts/create`・`/v1/machine/organizer_wipes/create`） | #10（[開発の計画](../design-process/issue-24/plan.md) の L2 と課題 #10 の対象範囲。画面は #28） |
 | DB セットアップ関数が呼ぶ 3 つの処理（`db_prep.is_current`・`db_prep.read_target`・`db_prep.record`）の本番の実装（終わりの記録のインタフェース）・DB セットアップ関数を非同期で呼ぶ API の側と定期ジョブ・インタフェースを DB セットアップ関数のエントリポイントへつなぐこと | #6（関数そのもの・呼び出しの値と終了結果の形・インタフェースの型は #13） |
 
 表の列の読み方:
@@ -180,6 +181,7 @@ ID の種類のプレフィックス:
 | `sessions.delete` | `/v1/sessions/delete` | F1 | 依頼と材料の読み出しだけ（`users.get`） | `human_only` | 書く |
 | `users.get` | `/v1/users/get` | F1・F2 | ツール | — | 読む（read） |
 | `users.update` | `/v1/users/update` | F2 | ツール | — | 書く（manage） |
+| `login_links.create` | `/v1/login_links/create` | F1 | 依頼と材料の読み出しだけ（`users.get`） | `human_only` | 書く |
 | `logins.create` | `/v1/logins/create` | F1 | 依頼と材料の読み出しだけ（`users.get`） | `human_only` | 書く |
 | `logins.delete` | `/v1/logins/delete` | F1 | 依頼と材料の読み出しだけ（`users.get`） | `human_only` | 書く |
 | `teams.list` | `/v1/teams/list` | F3 | ツール | — | 読む（read） |
@@ -196,7 +198,7 @@ ID の種類のプレフィックス:
 | `projects.list` | `/v1/projects/list` | F4・F7 | ツール | — | 読む（read） |
 | `projects.get` | `/v1/projects/get` | F4 | ツール | — | 読む（read） |
 | `projects.create` | `/v1/projects/create` | F4 | 依頼と材料の読み出しだけ（`teams.list`） | `human_only` | 書く（全部か無か） |
-| `projects.update` | `/v1/projects/update` | F4 | ツール | — | 書く（manage。`ask_human_only` を変えるアイテムは `human_only`。AI エージェントが自分の答えられる範囲を広げないため） |
+| `projects.update` | `/v1/projects/update` | F4 | ツール（`ask_human_only` を変えるアイテムは 403 `human_only`） | `ask_human_only` を変えるアイテムだけ `human_only`。AI エージェントが自分の答えられる範囲を広げないため | 書く（manage） |
 | `github_installations.list` | `/v1/github_installations/list` | F5 | ツール | — | 読む（read） |
 | `github_installations.link` | `/v1/github_installations/link` | F5 | 依頼と材料の読み出しだけ（`github_installations.list`） | `human_only` | 書く |
 | `repositories.list` | `/v1/repositories/list` | F5 | ツール | — | 読む（read） |
@@ -289,7 +291,7 @@ ID の種類のプレフィックス:
 | `notification_targets.authorize` | Slack の登録を始め、認可の取引を人のサインインセッションに結ぶ。`notification_targets.create` と同じセッションで呼ぶ必要がある（[実行の文書の Slack の登録](execution.md#slack-の登録)） |
 | `execution_settings.update`・`spend_caps.update` | 推論の手段と上限額は請求の額を変える |
 | `machines.create` | 登録の token（秘密）を発行する |
-| `sessions.create`・`sessions.delete`・`logins.create`・`logins.delete`・`github_installations.link` | 人のブラウザーの中の流れ（サインイン・IdP のログインをつなぐ戻り・GitHub の導入の戻り）で、委任の主体が通る流れでない。`logins.delete` は最後の 1 つのログインを外すリクエストを 409 で拒む |
+| `sessions.create`・`sessions.delete`・`login_links.create`・`logins.create`・`logins.delete`・`github_installations.link` | 人のブラウザーの中の流れ（サインイン・IdP のログインをつなぐ戻り・GitHub の導入の戻り）で、委任の主体が通る流れでない。`logins.delete` は最後の 1 つのログインを外すリクエストを 409 で拒む |
 
 外す・狭める操作のうち、委任から呼べるのは `repositories.remove` だけである。見える範囲も費用も広げず、秘密にも触れないためである。ほかの外す・狭める操作は、上の表に書いた理由で `human_only` にする。たとえば `notification_targets.delete` は Slack の通知先の bot token の秘密を消し、`machines.delete` はそのマシンの登録の token で呼べる API を狭め、会話の記録を消す手順に関わるので、どちらも `human_only` にする（上の表）。また、`machines.delete` はマシンの登録を外すだけで、オーガナイザーの会話の記録を消した確認の代わりにはならない。外したマシンの未消去の記録は残り、割り当ての移行の受け入れを待たせ続ける（[オーガナイザーが手元のマシンに残す会話の記録](organizer.md#会話のキャッシュ)）。`model_keys.delete` は秘密を扱うので、狭める操作でも `human_only` にする（上の表）。
 
@@ -373,6 +375,7 @@ DB セットアップ関数が関数の中から呼ぶプロジェクトのモ�
 | --- | --- |
 | `approvals.answer` | アイテムに `reason`（文字列、0〜10,000 字。差し戻すでは必須、ほかは任意。[承認する以外の答えの理由](#承認する以外の答えの理由)）と `drop_issues`（整数の配列、任意、設計承認ゲートの依頼だけ）を足す。外れたらアイテムの 400 `item_invalid` |
 | `questions.answer` | 問いの「`human_only` か」が真のアイテムを 403 `human_only`。委任でない主体（人）のアイテムは受ける |
+| `projects.update` | `ask_human_only` を変えるアイテムを、委任からは 403 `human_only`。委任でない主体（人）のアイテムは受ける |
 | `sprints.create`・`project_transfers.create` | 移行の間はアイテムの 409 `project_transfer_in_progress`、差し替えの保留の間はアイテムの 409 `credential_rotation_in_progress`（I20）。認可の判定に使った今の割り当ての ID（`current_assign_id`）が書き込みの時点で変わっていれば、存在しないときと同じ 404 で書かない（I20・I2） |
 | `project_transfers.create`・`project_transfers.accept`・`project_transfers.delete` | 作成は移行中のフラグと止める依頼（移す途中の状態の「止め終えたか」が偽）を 1 つの書き込みで書いてから E18 を出す。受け入れは、フラグが対象の移行の ID と同じで「取り下げたか」が偽であることを条件に入れ、割り当てレコードの追加・今の割り当ての差し替え・フラグを空にする更新を 1 つのトランザクションで書いて E17 を出す（条件が外れたら 409 `state_mismatch` で割り当てを変えない）。取り下げは「取り下げたか」を真にし、フラグを空にするのは[全体設計の割り当てを変える流れ](overview.md#割り当てを変える流れ) の条件がそろった後だけ |
 | `/v1/runner/answer_deliveries/create` | リクエストのアイテムに、`ndf answer` の結果の `metrics.seqs`（NDF の答えの事象の番号）を足す（I5） |
@@ -395,7 +398,7 @@ GitHub が形を決める本文は配列にできないため、I12 の外に置
 
 | 主体 | token | 確認すること | 通れる HTTP のルート | 操作の記録の入口 |
 | --- | --- | --- | --- | --- |
-| 人 | Cognito の access token（Google か GitHub でサインイン） | 署名・発行元・クライアント・期限・`token_use` が access | 利用者向けの操作（`/v1/<エンティティ>/…`） | 画面 |
+| 人 | Cognito の access token（Google か GitHub でサインイン） | 署名・発行元・クライアント・期限・`token_use` が access。`sub` で [Cognito の主体の対応の行](data.md#cognito-の主体の対応の行) を強整合で読んで利用者を引き、token の `auth_time` が行を結んだ時（`bound_auth_time`）より前なら断つ（結ぶ前のサインインのセッション）。行が無い主体（まだ結んでいないか、ログインを外した）は利用者を引かない。ログインを外すと、その Cognito の利用者をサインアウトさせて消し、対応の行も消すため、外したログインの古い token は通らない。ログインを結ぶ（初めてのサインイン・ログインの付け替え・`logins.create`）ときは、IdP と主体をリクエストの本文から採らず、検証した token の `username` で利用者プールを読んで得て、`auth_time` が 5 分の内のサインインだけを受ける。`logins.create` は今の利用者の token（Authorization）を照合し、つなぐログインの token はリクエストから受けず、`login_links.create` で今の利用者とセッション（`sub`・セッションの識別子 `origin_jti`・対応の行の `bound_auth_time`）に結んだ流れの認可コードをサーバーが交換して得る。つなぐ流れの外れはアイテムの 409 `link_invalid`（始め直す）と `already_linked`（別のアカウントを選び直す）で返す（[詳細設計の `verifyLoginToLink`](detail.md#関数の仕様)）。access token は `origin_jti` を必須にし（アプリのクライアントの token の取り消しを有効にする。無いか空なら 401）、その値をセッションの識別子として主体に持つ。サインアウトしたセッション（[セッションの取り消しの行](data.md#セッションの取り消しの行) がある `origin_jti`）の token は 401。ただし `sessions.delete` だけはその token を通し、取り消しが確定済みであること（行の `revoked_at`）を成功で返す（レスポンスを失った送り直しが、期限切れの 401 と取り違えずに確定を知るため）。期限も `sessions.delete` だけは例外にし、`exp` を過ぎた token を、`exp` から `SESSION_DELETE_EXPIRED_GRACE_MS`（30 日。refresh token の寿命と同じ）の内なら取り消しの行の有無によらず期限で断たない（行がまだ無ければ書いて確定する。access token を取り直せない端末が、手元の期限切れの token で取り消しを確定するため。[データの文書のセッションの取り消しの行](data.md#セッションの取り消しの行) の「`sessions.delete` の再送と期限切れ」）。ほかの操作は期限を過ぎた token を 401 にする。主体が人のすべての書く操作は、リクエスト元の対応の行とセッションを書き込みと同じトランザクションで照合し直す。人だけの操作に限らず、委任からも呼べる操作を人が呼んだとき（`sprints.create`・`sprints.cancel`・`questions.answer`・`users.update` など）も照合する。除くのは、主体がまだ結んでいない人の `sessions.create` と、取り消しの行を書く側の `sessions.delete` だけである（既にある利用者の `sessions.create` は照合する。[人の書き込みのリクエスト元の照合し](data.md#人の書き込みの要求元の照らし)） | 利用者向けの操作（`/v1/<エンティティ>/…`）。対応の行がまだ無い主体（初めてのサインイン）は、利用者を作る `sessions.create` だけ | 画面 |
 | 委任 | 委任の token（`ndfd_<利用者の ID>.<委任の ID>.<秘密の部分>` の形の不透明な値） | 中の利用者と委任の ID で委任のレコードを強整合で読み、秘密の部分の SHA-256 を一定時間で比べ、期限・取り消し・委任した人の今の席を照合する。だれの委任（利用者の ID）とどのクライアント（クライアントの名前）かをリクエストの文脈に置く | 利用者向けの操作と `/mcp` | API か MCP（受けた HTTP のルートで決める） |
 | ランナー | 交換用トークン・レーンの token（Ed25519 で署名した JWT。送信先は「レーン」） | 署名・期限・送信先。レーンのレコードが終わっていないこと | `/v1/runner/…` だけ | ランナー |
 | オーガナイザーのレーン | 交換用トークン・レーンの token（同じ JWT。送信先は「オーガナイザーのレーン」で、オーガナイザーの ID と世代を持つ） | 署名・期限・送信先・世代が今の値であること。オーガナイザーが `active` であること。`/mcp` では、オーガナイザー専用の委任レコードを強整合で読み、期限・取り消し・立てた人の今の席を照合し、その委任を主体にする。書き込みでは、ランナーの MCP の中継が付けた発行元の項目の ID（見出し `Nd-Organizer-Item`）が、そのオーガナイザーの渡した項目であることを照合し、冪等キーの組に使う（[オーガナイザーの渡し方と取り下げ](organizer.md#渡し方と取り下げ)） | `/v1/runner/…` のうちオーガナイザーのレーンに許したもの（下の [ランナー・手元のマシンの HTTP のルート](#ランナー手元のマシンの-http-のルート)）と `/mcp` | ランナーか MCP（`/mcp` では、専用の委任・立てた人・オーガナイザーの ID を記録に残す） |
@@ -410,8 +413,8 @@ GitHub が形を決める本文は配列にできないため、I12 の外に置
 
 | token | 有効期間 | 持つ者 | 断つとき |
 | --- | --- | --- | --- |
-| Cognito の access token | 15 分 | 画面（メモリだけ） | 期限。画面は refresh token で再取得する |
-| Cognito の refresh token | 30 日 | 画面（端末の暗号化した保存） | サインアウト（`sessions.delete` が Cognito で取り消す）・期限 |
+| Cognito の access token | 15 分 | 画面（メモリ。サインアウトの途中だけ、`sessions.delete` に送る 1 件を端末の暗号化した保存にも置き、サインアウトでデータベースと一緒に消す。[画面の文書のサインアウトで消す](screens.md#サインアウトで消す) の「サインアウトの証」） | 期限。画面は refresh token で取り直す。サインアウト（`sessions.delete`）の後は、同じセッション（`origin_jti`）の token を API が [セッションの取り消しの行](data.md#セッションの取り消しの行) で期限の前でも断つ（Cognito の取り消しは Cognito のエンドポイントだけが照合し、API の署名と期限の検証は通るため） |
+| Cognito の refresh token | 30 日（サインインから数える。回し（rotation）を使わない） | 画面（端末の暗号化した保存） | サインアウト（`sessions.delete` がセッションの取り消しの行を確定した後に、画面が持つ refresh token を Cognito で取り消す。取り消しが成功しなくても、行がその refresh token の寿命の間そのセッションを API で断つ。[データの文書のセッションの取り消しの行](data.md#セッションの取り消しの行)）・期限 |
 | 委任の token | 発行のときに 1 時間〜30 日から選ぶ。既定 7 日 | AI エージェント・連携するシステム | 期限・取り消し（その後の最初のリクエストから効く）。委任した人が席を失えば、その分の範囲が次のリクエストから消える |
 | 交換用トークン | 10 分・1 回だけ | ランナー（起動の指示） | 交換した時点 |
 | レーンの token | 1 時間。ハートビートで再取得する | ランナー（オーガナイザーのレーンを含む） | レーンの終わり・取り消し・割り当ての移行で、期限の前でも拒否する（I11）。オーガナイザーのレーンでは、休止・止める・終える・世代が替わった時にも拒否する。休止の前にキャッシュを残すときは、ランナーが `/v1/runner/organizer_transcripts/create` の確定を受けてから休止の事象を送る（[オーガナイザーの動く場所と休止](organizer.md#動く場所と休止)） |
@@ -611,12 +614,12 @@ sequenceDiagram
 | --- | --- |
 | 記録の ID | `aud_<UUIDv7>`。1 つのリクエストに 1 つ振り、リクエストの要約のレコードとアイテムごとのレコードが同じ ID を持つ。アイテムの行はアイテム番号を持ち、要約レコードは持たない。リクエストの ID も持ち、ログの同じリクエストの行とたどれる |
 | 時刻 | 受けた時刻（UTC、ミリ秒まで） |
-| 主体 | 主体の種類（人・委任・ランナー・手元のマシン・GitHub・定期ジョブ・DB セットアップ関数）と、利用者の ID・レーンの ID・マシンの ID・用意するプロジェクトの ID のうち当たるもの。決まらなかった 401 は空 |
+| 主体 | 主体の種類（人・委任・ランナー・手元のマシン・GitHub・定期ジョブ・DB セットアップ関数・まだ結んでいない人）と、利用者の ID・レーンの ID・マシンの ID・用意するプロジェクトの ID のうち当たるもの。決まらなかった 401 は空。まだ結んでいない人（`sessions.create` の初回）は、利用者を作ったアイテムの行と、そのリクエストの要約の行を、主体の種類を人にして作った利用者の ID で書く（本人が自分の記録として読める）。利用者を作らなかったリクエスト（アイテムの 400・409・503 とリクエスト全体で拒否したリクエスト）は、主体の種類をまだ結んでいない人にして ID を空にし、Cognito の `sub`・`username`・IdP の主体を写さない（どれも利用者の行に結ばない識別子で、記録に残すと消す求めに応じられない）。初回の確定の後に送り直したリクエスト（主体は人）は、ふだんの人と同じに書く |
 | 委任 | 委任の ID。人の直の操作では空 |
 | クライアント | 委任のクライアントの名前。MCP のときは MCP のリクエストが名乗るクライアントの名前も並べて持つ（名乗りは確認できないため、委任のクライアントの名前と分けて持つ） |
 | 入口 | 画面・API・MCP・ランナー・手元のマシン・GitHub・定期ジョブ・DB セットアップ |
 | 操作 | 操作の名前か、ランナー・手元のマシンの HTTP のルートの名前か、定期ジョブと DB セットアップ関数の処理の名前。表に無い HTTP のルートは空 |
-| 対象の ID | スキーマの正本が操作ごとに許したキー（`project_id`・`sprint_id` など）の値だけを並べる |
+| 対象の ID | スキーマの正本が操作ごとに許した鍵（`project_id`・`sprint_id` など）の値のうち、ID の形（`<種類のプレフィックス>_<UUIDv7>`）の値だけを並べる。許した鍵に ID の形でない値（メールアドレスなど）が入っても写さない |
 | プロジェクト | 主体がそのプロジェクトを見られたときだけ、そのプロジェクトの ID |
 | 結果 | `ok`（すべてのアイテムが成功）・`partial`（一部のアイテムが失敗）・`rejected`（リクエスト全体を拒否した）と、HTTP の状態・理由のコードの並び |
 
@@ -664,6 +667,7 @@ classDiagram
         +ownerOnly
         +allOrNothing
         +idempotencyKey
+        +onceOnly
         +item: zod
         +result: zod
         +reasons
@@ -686,7 +690,7 @@ classDiagram
 | --- | --- | --- |
 | 型 | `z.infer` | API のハンドラー・画面の API の呼び出し |
 | JSON Schema | `z.toJSONSchema`（draft 2020-12） | アイテムの検証・MCP のツールの入力と出力の形 |
-| OpenAPI 3.1 の文書 | 操作の表と上の JSON Schema から、自前の生成のスクリプトで組む（決定 55） | 連携するシステム（A5）の呼び出し元の生成・公開文書 |
+| OpenAPI 3.1 の文書 | 操作の表と上の zod の形から `zod-openapi`（LIB42）で組む（決定 55）。中で `z.toJSONSchema` を呼ぶため、上の JSON Schema と生成元が同じ | 連携するシステム（A5）の呼び手の生成・公開の文書 |
 | MCP のツールの一覧 | 操作の表のうち `human_only` でない操作 | `/mcp` の `tools/list` |
 | HTTP のルートの登録 | 操作の表の HTTP のルート | CDK が API Gateway の HTTP のルートを操作ごとに作る。Lambda の振り分けの表 |
 | 画面のダミーデータ | 操作ごとのサンプル（`examples`。作り物の値だけ） | 画面先行の段で、API の中身の前に画面を作り切る偽の API（Value 2） |
@@ -737,11 +741,16 @@ classDiagram
 | # | 候補 | バージョン | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | LIB40 | `@modelcontextprotocol/server` | 2.4.0 | Apache-2.0 | 2026-10-23 | 無し | 満たす。2026-07-28 バージョンを実装する v2 の安定の系列。依存は zod 4。v1 の系列 `@modelcontextprotocol/sdk` 1.32.2（2026-10-23、MIT）は 2026-07-28 バージョンの前の系列で、LIB40 が置き換える | https://registry.npmjs.org/@modelcontextprotocol/server （2026-11-17） |
-| LIB41 | `aws-jwt-verify` | 5.2.1 | Apache-2.0 | 2026-06-05 | 無し | 満たす。Cognito の access token の署名・発行元・クライアント・`token_use` を確認する | https://registry.npmjs.org/aws-jwt-verify （2026-11-17） |
+| LIB41 | `aws-jwt-verify` | 5.2.1 | Apache-2.0 | 2026-06-05 | 無し | 満たす。Cognito の access token の署名・発行元・クライアント・`token_use` を確認する。公開鍵のキャッシュ（`SimpleJwksCache`）は知らない `kid` で取り直し、失敗した取り直しの後は `SimplePenaltyBox`（既定 10 秒）が待たせる。取得側（`SimpleFetcher`）は `responseTimeout` を設定でき、失敗を 1 回だけすぐに再実行する | https://registry.npmjs.org/aws-jwt-verify （2026-11-17） |
 | LIB42 | `zod-openapi` | 6.0.2 | MIT | 2026-08-31 | 無し | 満たす。zod 4 から OpenAPI を作る。依存が 1 つ増える | https://registry.npmjs.org/zod-openapi （2026-11-17） |
 | LIB43 | `@asteasolutions/zod-to-openapi` | 9.1.0 | MIT | 2026-07-19 | 無し | 満たす。zod から OpenAPI を作る。依存が 1 つ増える | https://registry.npmjs.org/@asteasolutions/zod-to-openapi （2026-11-17） |
 | LIB44 | Amazon Cognito の利用者プール（認可のエンドポイント） | —（サービス） | —（AWS のサービス） | — | 無し | 一部。PKCE（S256）と RFC 8707 の `resource` で送信先を縛れる。クライアントの動的な登録とクライアント ID の資料は第三者の資料が持たないとする（公式の文書では確認していない） | https://docs.aws.amazon.com/cognito/latest/developerguide/authorization-endpoint.html （2026-11-17） |
 | LIB46 | `uuid`（`v7`） | 14.0.3 | MIT | 2026-10-10 | 無し | 満たす。RFC 9562 の UUIDv7 を組む。`msecs` と `seq` を渡すと内側の状態を使わずにバイト列だけを組むため、注入した時計で作れる。実行の時の依存は無い | https://registry.npmjs.org/uuid ・ https://github.com/uuidjs/uuid/blob/main/src/v7.ts （2026-11-18） |
+| LIB91 | `ky` | 2.2.0 | MIT | 2026-10-09 | 無し | 満たす。組み込みの `fetch` の上で、再試行（回数・方法・状態のコード・`Retry-After` の上限・待ちの上限）・リクエストごとのタイムアウト・全体の期限・`fetch` の差し替えを設定で持つ。依存 0 | https://registry.npmjs.org/ky （2026-11-21） |
+| LIB92 | `p-retry` | 9.0.0 | MIT | 2026-11-02 | 無し | 満たす。非同期の処理を回数・待ちの下限と上限・`shouldRetry` で繰り返す。HTTP と AWS SDK の再試行に当たらない所（トランザクションの衝突）に使う | https://registry.npmjs.org/p-retry （2026-11-21） |
+| LIB93 | `pino` | 10.4.0 | MIT | 2026-10-02 | 無し | 満たす。1 行の JSON の構造化ログで、ブラウザーバージョンを持つ。伏せ字は鍵のパスだけで、値の形での伏せ字は持たない | https://registry.npmjs.org/pino （2026-11-21） |
+| LIB94 | `cockatiel` | 4.0.0 | MIT | 2026-05-26 | 無し | 満たす。全幅のゆらぎ・`Retry-After` を返す待ちの関数・タイムアウトの方針を持つ。採らない（利用が `ky` と AWS SDK より狭く、両方が持つ再試行と二重になる） | https://registry.npmjs.org/cockatiel （2026-11-21） |
+| LIB95 | `jose` | 6.2.18 | MIT | 2026-11-18 | 無し | 満たす。`createRemoteJWKSet` がキャッシュの保持・取り直しの間隔・同じ時の取り直しのまとめを設定で持つ。採らない（Cognito に固有の照合を自前で書くことになる。決定 48） | https://registry.npmjs.org/jose （2026-11-21） |
 
 ### 確認できなかったこと
 
@@ -855,7 +864,7 @@ UUIDv7 のバイト列は `uuid` の `v7`（LIB46）で組み、単調性の状�
 
 ### 決定 48: 人の token と委任の token を同じ操作で受けるよう、認証を API の Lambda の中の 1 か所に置く
 
-同じ HTTP のルートが、Cognito の access token と委任の token の両方を受ける。そのため API Gateway の JWT の前段を、利用者向けの HTTP のルートに置かない。Lambda の中で token の種類を見分けて確認する。Cognito の token は `aws-jwt-verify` で確認する。委任の token は毎回、テーブルを強整合で読み、取り消しを次のリクエストから効かせる。
+同じ HTTP のルートが、Cognito の access token と委任の token の両方を受ける。そのため API Gateway の JWT の前段を、利用者向けの HTTP のルートに置かない。Lambda の中で token の種類を見分けて確認する。Cognito の token は `aws-jwt-verify`（LIB41）の Cognito の検証で確認し、公開鍵のキャッシュは組み込みの `SimpleJwksCache` と `SimplePenaltyBox` を既定のまま使う。知らない `kid` の token を受けるとキャッシュを取り直すため、IdP の鍵の差し替えに付いていける。鍵の取得のタイムアウトだけを組み込みの取得側（`SimpleFetcher`）の `responseTimeout` で設定する。委任の token は毎回、表を強整合で読み、取り消しを次のリクエストから効かせる。
 
 採らなかった案:
 
@@ -863,11 +872,13 @@ UUIDv7 のバイト列は `uuid` の `v7`（LIB46）で組み、単調性の状�
 | --- | --- |
 | Lambda の前段（authorizer） | 呼び出しが 1 段増え、結果のキャッシュが取り消しを遅らせる |
 | 人と委任で HTTP のルートを分ける | 同じ操作が 2 つの HTTP のルートに分かれる（Value 4） |
+| 公開鍵のキャッシュを自前で作り（`createJwksCache`）、キャッシュを 1 時間で捨て、知らない `kid` の取り直しを 60 秒あける（この決定の直す前の結論） | 2 つの値は設計が自分で置いた要件で、組み込みのキャッシュは知らない `kid` で取り直すため鍵の差し替えに付いていける。自前のキャッシュは AWS の公式の部品が持つ機能を作り直すことになる（Value 15） |
+| `jose`（LIB95）の `createRemoteJWKSet` で鍵を保存する | キャッシュの設定は揃うが、Cognito に固有の照合（`client_id`・`token_use`）を自前の層で書くことになる |
 
 - 作り方: ライブラリやサービスを使う・自前で作る
-- 比べた候補: LIB41 / LIB44
+- 比べた候補: LIB41 / LIB44 / LIB95
 
-根拠: Value 4 / Value 9（MVV バージョン 3）
+根拠: Value 4 / Value 9 / Value 15（MVV バージョン 3）
 
 ### 決定 49: 任せる範囲を人が読めて狭められるよう、委任の範囲をプロジェクトと 3 つの操作の種類にし、期限を 1 時間〜30 日にする
 
@@ -926,16 +937,21 @@ Cognito はクライアントの動的な登録とクライアント ID の資�
 
 根拠: Value 4（MVV バージョン 3）
 
-### 決定 55: 依存を増やさずに OpenAPI を出せるよう、OpenAPI の文書を zod の JSON Schema から自前の生成のスクリプトで組む
+### 決定 55: 自前の組み立てを持たずに OpenAPI を出せるよう、OpenAPI の文書を操作の表の zod の形から `zod-openapi` で組む
 
-HTTP のルートはすべて `POST` と配列の本文の 1 つの形で、OpenAPI の文書は操作の表と `z.toJSONSchema` の結果を並べるだけで組める。同じ生成のスクリプト（`packages/contracts/scripts/generate.ts`）が設定のファイルの JSON Schema も作り、差の検査は CI の `check` の生成物の差が担う。
+HTTP のルートはすべて `POST` と配列の本文の 1 つの形で、操作の表のアイテムと結果の zod の形を `zod-openapi`（LIB42）の `createDocument` に渡せば OpenAPI 3.1 の文書になる。`zod-openapi` は中で `z.toJSONSchema` を呼ぶため、アイテムの検証と MCP のツールが使う JSON Schema と生成元が同じになる。生成はスキーマの正本の生成のスクリプト（`packages/contracts/scripts/generate.ts`）が行い、差の検査は CI の `check` の生成物の差が担う。
 
-採らなかった案: `zod-openapi` と `@asteasolutions/zod-to-openapi` はどちらも要件を満たす。ただ HTTP のルートの形が 1 つしか無いこの API では、依存を 1 つ増やす分の得が無い。
+採らなかった案:
 
-- 作り方: 自前で作る
+| 形 | 理由 |
+| --- | --- |
+| 操作の表と `z.toJSONSchema` の結果を並べて、自前の生成のスクリプトで文書を組む（この決定の直す前の結論） | 依存を 1 つ増やさないことを得と見たが、文書の外枠（`paths`・`components`・`securitySchemes`）の組み立てと OpenAPI のバージョンの追随を自前で持ち続けることになる（Value 15） |
+| `@asteasolutions/zod-to-openapi`（LIB43） | 要件は満たすが、JSON Schema を独自の生成器で作り、アイテムの検証の JSON Schema と生成元が分かれる。zod のプロトタイプを拡張する |
+
+- 作り方: ライブラリを使う
 - 比べた候補: LIB42 / LIB43
 
-根拠: Value 6 / Value 2（MVV バージョン 3）
+根拠: Value 2 / Value 13 / Value 15（MVV バージョン 3）
 
 ### 決定 56: アイテムの形と理由のコードを 2 か所に持たないため、スキーマの正本の操作の定義だけに置き、全体の設計には決まりと受け持つ子を書く
 
