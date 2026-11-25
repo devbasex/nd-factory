@@ -1,0 +1,227 @@
+# NDF との契約: 固定の点を 11.0.36 へ上げ、契約の照合が 6 項目を必ず実行する（#136）
+
+nd-factory が使う NDF の固定の点は 11.0.12（契約の版 8）のままで、契約の照合（`npm run ndf-contract`）は使い方の書き出しが無いために何も照合せず成功で終わっている。固定の点を最新の配布 `ndf--v11.0.36`（契約の版 16）へ上げて受ける組を直し、この課題で使い方の書き出しをスキーマの正本（`packages/contracts`）に置いて、書き出しが無ければ照合が失敗するようにする。調べた結果、新しい固定の点でも #47 と上流の不足 3 件は照合の食い違いにならないため、範囲は要求のまま変えない。採らなかった案は「決定の記録」に、比べた候補は末尾の「外部の調査」にある。
+
+## 今の姿
+
+何が起きたか・目的・受け入れ条件は要求仕様（[issue-136-requirements.md](./issue-136-requirements.md)、正は [#136](https://github.com/devbasex/nd-factory/issues/136) の本文）にある。この文書は「どう解くか」と「なぜその解き方か」だけを書く。
+
+```mermaid
+graph LR
+  PIN["ndf-pin.json<br/>752a9cf（11.0.12・版 8）"]
+  ACC["data/ndf-contracts.json<br/>受ける組: 版 8"]
+  CHK["契約の照合<br/>tools/checks/src/ndf-contract-check.ts"]
+  USE["使い方の書き出し<br/>@nd-factory/contracts/ndf-contract-use<br/>（まだ無い）"]
+  NDF["NDF の契約のファイル<br/>plugins/ndf/contracts/"]
+  DOC["execution.md<br/>決定 104・NDF との契約"]
+  PIN --> CHK
+  NDF --> CHK
+  USE -. 無いので skip .-> CHK
+  ACC -. 照合されない .-> CHK
+  DOC -. 値を書き写す .-> PIN
+```
+
+点線が、この変更で直す箇所である。設計に要る今の構造は次のとおりである。
+
+### 契約の照合の作り
+
+- 照合（`tools/checks/src/ndf-contract-check.ts`）は、固定の点と NDF のデフォルトブランチの先端の 2 つのコミットから、契約のファイル 6 つ（`version.json`・`domains/entrypoint-cases.json`・`domains/entrypoints.json`・`domains/env.json`・`domains/ndf-files.json`・`hooks/unattended-report.json`）を読む
+- 照合の 6 項目は、作業の木から解決した `@nd-factory/contracts/ndf-contract-use` の `ndfContractUse` を相手にする。照合の側は、その形を型 `NdfContractUse` として自分の中に写して持っている（#2 が書き出しを置くときに合わせる前提だった）
+- 書き出しが無いとき、定数 `CONTRACT_USE_REQUIRED` が偽なので `skip: no-contract-use` を出して終了コード 0 で終わる。この定数を真にするのは #2 の予定だった（[#1 の設計の K2-6](../docs/design-process/issue-1/design.md)）
+- `packages/contracts` には受ける組のデータ（`data/ndf-contracts.json`、読むのは `src/data.ts` の `NDF_CONTRACTS`）と答えの語（`src/ndf.ts`）だけがあり、呼び出しの判定・区間の報告の読み取り・使い方のデータは無い
+
+### 新しい固定の点で契約がどう変わったか
+
+2026-11-25 時点の最新の配布のタグは `ndf--v11.0.36`（軽量のタグ。コミット `8d22be728e81983e5051799bcee4637ff65f0071`）で、`version.json` の `history` の最後の行は版 16・sha256 `c50ef840a72ab71a15023a46a37d050c36ec3aae6d1be6092b7f9dc7f3c0a726` である（外部の調査の STD1）。照合が読む 6 つのファイルを 11.0.12 と比べると、nd-factory が使う部分は変わっていない。
+
+| 契約のファイル | 11.0.12 から 11.0.36 への差 | nd-factory が使う部分への影響 |
+| --- | --- | --- |
+| `domains/entrypoints.json` | 15 行のまま。`spec-ndf_settings` の `files` から `context` が消えた | 無い（`spec-ndf_settings` は使わない） |
+| `domains/entrypoint-cases.json` | 変わらない（26 件） | 無い |
+| `domains/env.json` | 中継・アカウント・推論の手段の名前が増えた。`set_by: service` の 6 つと、`GH_TOKEN`・`NDF_STATE_HOME` の `user` は変わらない | 無い |
+| `domains/ndf-files.json` | `reader: service` の行と `fields` は変わらない。`ask-journal` は `fields` を持たないまま | 無い |
+| `hooks/unattended-report.json` | 変わらない（`shape` と見本 16 件） | 無い |
+| `version.json` | 版 8 から版 16 へ | 受ける組を直す |
+
+### #47 と上流の不足 3 件は食い違いにならない
+
+要求の「未決」の 2 つ目への答えである。次の 4 件はどれも新しい固定の点に残るが、照合の 6 項目はそれぞれが指す箇所を読まないため、食い違いとして出ない。
+
+| 件 | 残っている姿（`8d22be7`） | 照合が読まない理由 |
+| --- | --- | --- |
+| `block-next` の `source`（[#47](https://github.com/devbasex/nd-factory/issues/47)） | 無い `forms/ndf-next-block.json` を指す | 照合は口の行の `source` を読まない |
+| `report-unattended` の `source`（[devbasex/ai-plugins#3947](https://github.com/devbasex/ai-plugins/issues/3947) の依頼 2） | 無い `forms/unattended-report.json` を指す | 同上 |
+| `ask-journal` の `fields`（同じ課題の依頼 1） | `fields` が無い | 使い方のデータに `ask-journal` の項目を載せない（execution.md の決定 106）。`fields` が足されたら通知の行を出すだけで、失敗にしない |
+| `次のコマンド:` の項目（同じ課題の依頼 3） | `shape.items` に無い | 使い方のデータの区間の報告の項目に載せない |
+
+## 文脈と制約
+
+- 固定の点は `ndf-pin.json` のキー `ndf_ref` の 1 か所だけに置く（AGENTS.md。参照の検査 `tools/ref-check` が落とす）
+- 受ける組は `packages/contracts/data/ndf-contracts.json` の 1 か所だけに置き、固定の点を付け替える変更で同じ Pull Request の中で直す（[execution.md の決定 104](../docs/design/execution.md)）
+- NDF の版の数字を読んで大小を比べる処理を書かない（execution.md の「NDF との契約」の表）
+- スキーマの正本の中で画面が使うモジュールは `node:` の組み込みを読まない。使い方の書き出しはランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）と照合だけが使うが、同じ決まりに従い、組み込みを読まない純粋な関数とデータで作る
+- CI は AWS の資格情報を持たない。照合のワークフロー（`.github/workflows/ndf-contract.yml`）は変えない
+- 反映のパイプラインの承認の手順（[docs/operations/pipeline-approval.md](../docs/operations/pipeline-approval.md)）は、照合の記録の `checked: fixed <固定の点> 1-6` の行を読む。この行の形は変えない
+- 範囲に含まないもの（実行の契約の追い付き・上流の不足 3 件・#47・ランナーの起動のときの照合）は要求の「対象範囲」のとおりである
+
+## 解き方の全体像
+
+```mermaid
+graph LR
+  PIN["ndf-pin.json<br/>8d22be7（11.0.36・版 16）"]
+  subgraph contracts["packages/contracts"]
+    ACC["data/ndf-contracts.json<br/>受ける組: 版 16 の 1 組"]
+    UD["data/ndf-contract-use.json<br/>使う口の決まりの写し・渡す環境変数<br/>読むファイル・区間の報告の項目"]
+    UM["src/ndf-contract-use.ts<br/>ndfContractUse（型・判定・読み取り）"]
+  end
+  CHK["契約の照合<br/>書き出しが無ければ fail"]
+  NDF["NDF の契約のファイル"]
+  RUN["ランナー（#6。後で使う）"]
+  ACC --> UM
+  UD --> UM
+  UM --> CHK
+  PIN --> CHK
+  NDF --> CHK
+  UM -.-> RUN
+```
+
+- 固定の点は `ndf--v11.0.36` のコミット `8d22be7` を指し、受ける組は版 16 と sha256 `c50ef840…` の 1 組になる。execution.md と確定仕様の値も同じ変更でそろえる
+- スキーマの正本が使い方の書き出し（`@nd-factory/contracts/ndf-contract-use`）を持つ。データ（使う口の決まりの写し・実行の場ごとに渡す環境変数・読むファイルと項目・区間の報告の項目）は JSON に置き、呼び出しの判定と区間の報告の読み取りはそのデータだけを使う純粋な関数にする。受ける組は既存の `NDF_CONTRACTS` を引き、写さない
+- 型 `NdfContractUse` はスキーマの正本の 1 か所に置き、照合はそれを読み込む
+- 照合は書き出しが無ければ必ず `fail: no-contract-use` と終了コード 1 で終わる。skip の道と定数 `CONTRACT_USE_REQUIRED` は消す
+- 新しい固定の点で `npm run ndf-contract` が 6 項目を照合し、固定の点の食い違いが 0 件で成功する
+
+## 決定の記録
+
+### 決定 1: 上流の最新の配布と同じ契約で作るため、固定の点を `ndf--v11.0.36` のタグのコミットにし、受ける組を版 16 の 1 組にする
+
+- **質問**: 固定の点をどの配布のタグへ上げ、受ける組に何組を持つか
+- **選んだ案**: 設計の時点で最新の配布のタグ `ndf--v11.0.36`（`8d22be728e81983e5051799bcee4637ff65f0071`）を固定の点にし、受ける組をその点の `version.json` の最後の行（版 16・`c50ef840a72ab71a15023a46a37d050c36ec3aae6d1be6092b7f9dc7f3c0a726`）の 1 組にする。execution.md の決定 104 は、同じ考え方のまま値だけをこの点に書き直す
+- 採らなかった案: 開発に使っていた `ndf--v11.0.32`（版 15）にする（2026-11-25 の時点で既に 4 つ後ろの配布があり、上げた直後に古い点になる。要求の前提 2 も最新の配布のタグを選ぶとしている）
+- 採らなかった案: 受ける組に版 15 と 16 の 2 組を持つ（動いているランナーがまだ無く、古い組を受ける理由が無い。照合が見る組も増える）
+- 採らなかった案: デフォルトブランチの先端のコミットを固定の点にする（配布していない変更を含み、利用者の手元の NDF と同じにならない）
+- **代償**: 実装を終える前に新しい配布が出ても、この変更では追わない。次の配布を取り込むときに、固定の点と受ける組を同じ Pull Request で直す手間は残る
+- 作り方: 標準に倣う
+- 比べた候補: STD1 / STD3
+- 根拠: Value 8 / Value 13（MVV バージョン 3）。STD1
+
+### 決定 2: 照合が必ず 6 項目を実行するため、使い方の書き出しを #2 を待たずにこの課題で置く
+
+- **質問**: 使い方の書き出し（#1 の設計の K2-6）を、この課題で足すか、#2 が足すのを待つか
+- **選んだ案**: この課題でスキーマの正本に書き出しを置く。#1 の設計が K2-6 として #2 に割り当てた中身（使い方のデータ・呼び出しの判定・区間の報告の読み取り・必須への切り替え）を、この課題がまとめて引き受ける。#2 の受け入れ条件には K2-6 の行が無いため、#2 の範囲の書き換えは要らない
+- 採らなかった案: #2 が置くのを待つ（#2 は操作の表・型・ダミーデータなど広い範囲を持ち OPEN のままで、待つと受け入れ条件 4・5 をこのスプリントで満たせない。待つ間、照合は何も照合しないまま成功し続ける）
+- **代償**: #2 の設計が K2-6 をもう一度書かないよう、#2 の設計の時点でこの課題の書き出しを読ませる必要がある。#1 の設計の記録（`docs/design-process/issue-1/`）は記録の時点のまま残し、書き直さない
+- 根拠: Value 14 / Value 17（MVV バージョン 3）
+
+### 決定 3: 同じ規則を 2 か所に持たないため、使い方の型・データ・関数をスキーマの正本の 1 つのモジュールに置き、受ける組は既存のデータを引く
+
+- **質問**: 使い方の型とデータをどこに持つか
+- **選んだ案**: `packages/contracts/src/ndf-contract-use.ts` に型 `NdfContractUse`・呼び出しの判定・区間の報告の読み取りを置き、`ndfContractUse` を書き出す。データは `packages/contracts/data/ndf-contract-use.json` に置き、zod の形で読む。受ける組（`acceptedVersions`）は `NDF_CONTRACTS.accepted` をそのまま渡す。`package.json` の `exports` に `./ndf-contract-use` を足す。照合は型を `@nd-factory/contracts/ndf-contract-use` から型として読み込み、自分の中の写しを消す。書き出しの実体は今までどおり `--root` の作業の木から解決する
+- 採らなかった案: 型を照合の側に残し、書き出しの側で合わせる（同じ形が 2 か所に分かれ、片方だけ直したときに型の検査で落ちない）
+- 採らなかった案: 受ける組を使い方のデータにも書く（固定の点を上げるたびに 2 か所を直すことになり、片方の直し忘れを照合の 2 項目目が見落とす）
+- **代償**: 照合のツールがスキーマの正本の型に依存する（`tools` は既に `@nd-factory/contracts` に依存しているので、依存は増えない）
+- 根拠: Value 13 / Value 11（MVV バージョン 3）
+
+### 決定 4: nd-factory が使わない口の決まりを持たないため、呼び出しの判定は使う口だけを受け、照合の 1 項目目は使う口の見本だけを比べる
+
+- **質問**: 呼び出しの判定が受ける口の範囲を、契約の 15 行すべてにするか、nd-factory が使う口だけにするか
+- **選んだ案**: 判定は execution.md の「使うインタフェース」の表に載る 11 の口（`skill-workflow`・`block-next`・`report-unattended`・`hook-unattended-start`・`hook-unattended-stop`・`hook-unattended-end`・`file-plan-progress`・`file-journals`・`file-issue-request`・`gate-record`・`spec-io`）だけを受け、ほかの口の呼び出しは偽にする。照合の 1 項目目は、見本のうち口が使い方の使う口にあるものだけを判定へ通す。固定の点の 26 件では 21 件を比べ、使わない口（`file-organizer`・`file-loop-record`・`spec-pages`・`spec-ndf_settings`）の 5 件は比べない。比べない見本は食い違いにも出力の行にもしない
+- 採らなかった案: 15 行すべての口の決まりを持ち、26 件すべてを比べる（オーガナイザーやループの保存先のように、使わないと決めた口の決まりまで nd-factory が持ち続けることになる。execution.md の決定 73 と「使うインタフェースだけ」の決まりに合わない）
+- **代償**: 使わない口の見本が契約で変わっても照合は気づかない。その口を使い始める変更で、使う口と見本の比べる範囲を同時に広げる必要がある
+- 根拠: Value 13 / Value 11（MVV バージョン 3）
+
+### 決定 5: 写した口の決まりが契約から離れたら気づけるよう、使う口の行の写しを持ち、照合の 4 項目目と 6 項目目で契約の行と項目ごとに比べる
+
+- **質問**: 呼び出しの判定が使う口の決まり（種類・名前・前置きの語・引数の正規表現・入れてよい環境変数・読むファイルの相対パスの形）を、どこから得て、契約との離れをどう見つけるか
+- **選んだ案**: 使う口の行（`kind`・`target`・`lead`・`args`・`env`・`files`）と、読むファイルの相対パスの形（`ndf-files.json` の `path`）を使い方のデータに写す。照合の 6 項目目は「使う口が口の表にある」に加えて、写した行の各項目が契約の行と同じかを比べる。4 項目目は読むファイルの `path` が写しと同じかも比べる。見本の無い変更（たとえば引数の正規表現だけが変わる）も固定の点で食い違いになる
+- 採らなかった案: 写しを持たず、ランナーが実行のときにイメージの中の NDF の契約のファイルを読む（照合はスキーマの正本だけを相手にするため、判定が契約のファイルを読むと照合が判定を独立に検査できなくなる。画面と同じ決まりで組み込みを読まない形も崩れる）
+- 採らなかった案: 写しを持つが、見本の判定だけで離れを見つける（見本の無い口と引数の形の変更を見落とす。`gate-rejections` のように見本の無い読むファイルもある）
+- **代償**: 使い方のデータの型（`NdfContractUse` の `entrypoints` と `files`）が文字列の並びから行の並びに変わり、照合の 4・6 項目目の比べる中身が増える
+- 作り方: 自前で作る
+- 比べた候補: STD2 / LIB1
+- 根拠: Value 17 / Value 11（MVV バージョン 3）。STD2
+
+### 決定 6: 書き出しが消えたときに素通りさせないため、照合から skip の道を消し、書き出しが無ければ常に失敗にする
+
+- **質問**: 受け入れ条件 5 の「書き出しが無ければ `fail: no-contract-use`」を、定数 `CONTRACT_USE_REQUIRED` を真にして満たすか、skip の道ごと消して満たすか
+- **選んだ案**: 定数 `CONTRACT_USE_REQUIRED` と、テストが差し替える `MainOptions.required` を消し、書き出しが無ければ常に `fail: no-contract-use <固定の点>` と終了コード 1 にする
+- 採らなかった案: 定数を真にして残す（#1 の設計は真にした後に偽へ戻さないとしており、偽の側の分岐は二度と通らない。使わないコードを残さない Value 13 に合わない）
+- **代償**: #2 の前の段階へ戻す手段が無くなる（戻す理由も無い）。skip を前提にした手順（pipeline-approval.md の承認の注記）を同じ変更で直す
+- 根拠: Value 13（MVV バージョン 3）
+
+## 影響と危険
+
+- **働く範囲**: このリポジトリだけである。照合は nd-factory の CI と手元の `npm run ndf-contract` で動く。利用者のプロジェクトのリポジトリでは動かない
+- **プロジェクトごとに違うもの**: 無い。固定の点と受ける組はこのリポジトリのファイルに置く
+- **当たるモード**: nd-factory 自体の開発のすべての Pull Request・main への push・毎日の照合
+
+壊れうる箇所と扱い:
+
+| 箇所 | 起きうること | 扱い |
+| --- | --- | --- |
+| すべての Pull Request の CI（`ndf-contract`） | 照合が必須になり、上流の配布で使う部分が変わると固定の点を変えない Pull Request でも落ちうる | 固定の点の食い違いだけが失敗になり、先端の食い違いは要約に並べるだけ（今の振る舞いのまま）。固定の点は手で上げるので、上流の配布だけでは固定の点の結果は変わらない |
+| 反映のパイプラインの承認（pipeline-approval.md） | 「skip の行だけなら注記して承認してよい」の手順が古くなる | 同じ変更で、skip の行が出ない前提の手順に直す |
+| 確定仕様 `docs/specifications/contracts-and-core.md` | 受ける組の値が版 8 のまま残る | 同じ変更で版 16 に直す |
+| 照合のテストのフィクスチャ（`tools/test/fixtures/ndf-contract-752a9cf/`） | 古い固定の点の写しのまま残る | 新しい固定の点の写しに置き換える |
+| #2 の設計 | K2-6 を重ねて書く | 決定 2 の代償。#2 の設計の時点でこの書き出しを読む |
+| ランナー（#6） | 判定と読み取りの関数の形を、ランナーの実装の時点で変えたくなる | 照合と同じ関数をランナーが使う形は #1 の決定 7 のまま。形を変えるときは照合のテストも同じ変更で直す |
+
+## テスト設計
+
+| 受け入れ条件・決定 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
+| --- | --- | --- |
+| 受け入れ条件 1 | `ndf-pin.json` の `ndf_ref` が `ndf--v11.0.36` のタグの指すコミットと一致する（マージ前の手動の確認。`git ls-remote` か `gh api` のタグの参照と比べる） | 別のコミットを書くと、照合の 2 項目目（受ける組）で固定の点が食い違う |
+| 受け入れ条件 2 | 受ける組が版 16・`c50ef840…` の 1 組だけである。スキーマの正本の既存のデータのテストが形（空でない・重ならない）を縛る | 版 8 の組を残す・2 組にすると、手動の確認で `history` の最後の行と合わない。固定の点だけを上げて組を直し忘れると、照合の 2 項目目が落ちる |
+| 受け入れ条件 3 | execution.md の決定 104 と「契約のバージョンの照合し」の行に新しいタグ・コミット・版・sha256 があり、版 8・`ed8b0365…` を今の値として書いていない（目で見る） | 値の書き換え忘れ |
+| 受け入れ条件 4 | 新しい固定の点で `npm run ndf-contract` が `checked: fixed 8d22be7… 1-6` を出し、`skip:` の行を出さず、終了コード 0 で終わる | 使い方のデータの名前を 1 つ変えると、固定の点で食い違いが出て終了コード 1 |
+| 受け入れ条件 5 | 作業の木のパッケージが書き出しを持たないと `fail: no-contract-use` と終了コード 1。`skip:` の行は出ない | skip の分岐を戻すと落ちる |
+| 受け入れ条件 6 | `npm run check` が通る | 型・lint・生成物・単体テストのどれかが落ちる |
+| 決定 4（呼び出しの判定） | 新しい固定の点の見本のうち使う口の 21 件で、判定が `valid` と同じになる。使わない口の呼び出しは偽になる。照合の 1 項目目は使わない口の見本を比べない | 引数の正規表現の全体一致を部分一致にする（`loop-bad-budget`・`unknown-flag` が真になる）。入れてよい環境変数の外の名前を許す（`terminal-env` が真になる）。block の前置きの語を必須にする（`resume` が偽になる） |
+| 決定 4（区間の報告の読み取り） | 新しい固定の点の `cases` 16 件で、`result` と `errors` の有無が見本と同じになる | 最初の `- 結果:` の行を読む（最後の見本が `判断が要る` になる）。「無し」を値として受ける。条件つきで要る項目を見ない。`材料: 本文` で `## 判断の材料` の節を求めない |
+| 決定 5 | 写した口の行の項目（`kind`・`target`・`lead`・`args`・`env`・`files`）か読むファイルの `path` が契約の行と違うと、固定の点で 6 項目目か 4 項目目の食い違いになる | 比べる項目を 1 つ外すと、その項目だけを変えた契約で食い違いが出ない |
+| 決定 3 | 照合が読む型がスキーマの正本の `NdfContractUse` と同じである（型の検査）。書き出しの `acceptedVersions` が `NDF_CONTRACTS.accepted` と同じ値である | 型を照合の側にも書く・受ける組を使い方のデータに写すと、片方だけを変えたときに型の検査かテストで落ちる |
+
+## 設計の結果
+
+| 課題 | 扱い | 統合先 | 触るファイル |
+| --- | --- | --- | --- |
+| #136 | 実装する | — | `ndf-pin.json`、`packages/contracts/data/ndf-contracts.json`、`packages/contracts/data/ndf-contract-use.json`（新設）、`packages/contracts/src/ndf-contract-use.ts`（新設）、`packages/contracts/package.json`、`packages/contracts/test/ndf-contract-use.test.ts`（新設）、`packages/contracts/test/fixtures/ndf-contract-8d22be7/entrypoint-cases.json`（新設）、`packages/contracts/test/fixtures/ndf-contract-8d22be7/unattended-report.json`（新設）、`packages/contracts/test/data.test.ts`、`tools/checks/src/ndf-contract-check.ts`、`tools/test/ndf-contract-check.test.ts`、`tools/test/fixtures/ndf-contract-752a9cf/entrypoints.json`（消す）、`tools/test/fixtures/ndf-contract-752a9cf/env.json`（消す）、`tools/test/fixtures/ndf-contract-8d22be7/entrypoints.json`（新設）、`tools/test/fixtures/ndf-contract-8d22be7/env.json`（新設）、`docs/design/execution.md`、`docs/specifications/contracts-and-core.md`、`docs/operations/pipeline-approval.md` |
+
+## 未確認のまま残ること
+
+| 項目 | 内容 |
+| --- | --- |
+| 実装を終えるまでに新しい配布が出るか | 2026-11-25 の時点の最新は `ndf--v11.0.36` である。実装の途中で 11.0.37 以降が出ても、この変更は 11.0.36 で閉じる（決定 1）。先端の照合の要約に差が出れば、次の固定の点を上げる変更の材料になる |
+| CI の照合が新しい固定の点を取得できるか | 照合は固定の点のコミットを深さ 1 で取得する。GitHub が到達できるコミットの取得を許すことは 752a9cf で動いているが、`8d22be7` では実装の Pull Request の CI の `ndf-contract` の結果で分かる |
+
+## 外部の調査
+
+| 種類 | 調べるか | 理由 |
+| --- | --- | --- |
+| 標準・仕様 | 調べる | 上流の契約のファイルそのものと、利用する側が使う部分だけを契約として持つ考え方（利用者駆動の契約）、依存をコミットで固定する慣行を確認する |
+| 主要な製品 | 調べない | 他の製品の画面や機能の形を取り込む変更ではなく、上流 1 つとの契約の取り決めの中だけで形が決まる |
+| ライブラリとサービス | 調べる | 契約のテストに既存のツール（Pact）を使えるかと、固定の点の更新を自動化するツールがあるかを決める |
+
+### 標準・仕様
+
+| # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
+| --- | --- | --- | --- | --- |
+| STD1 | NDF の契約のファイル（`ndf--v11.0.36` のタグのコミット `8d22be7` の `plugins/ndf/contracts/`） | 照合が読む 6 つのファイル。`version.json` の最後の行は版 16・`c50ef840…`。口は 15 行、見本は 26 件、区間の報告の見本は 16 件。11.0.12 からの差は「今の姿」の表のとおり | 決定 1 の値、決定 4・5 の写しの元 | `git ls-remote https://github.com/devbasex/ai-plugins 'refs/tags/ndf--v11.0.*'` と、`git fetch --depth 1` で取った 2 つのコミットの `git diff` と `git show`（2026-11-25） |
+| STD2 | 利用者駆動の契約（Consumer-Driven Contracts） | 利用する側は、提供する側の能力のうち自分が使う部分だけを、自分の期待として契約に書く（契約は開いていて不完全でよい） | 決定 4（使う口だけを判定する）と決定 5（使う部分の写しを持ち、提供する側の契約と比べる） | https://martinfowler.com/articles/consumerDrivenContracts.html（2026-11-25） |
+| STD3 | GitHub Actions のセキュリティ強化の手引き（サードパーティのアクションの使い方） | 依存は全長のコミット SHA で固定するのが基本で、タグは動かせるため信頼できる作者に限る | 決定 1（固定の点はタグの名前ではなく、タグが指すコミットの 40 桁を書く。今の形のまま） | https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#using-third-party-actions（2026-11-25） |
+
+### ライブラリとサービス
+
+| # | 候補 | バージョン | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| LIB1 | Pact（`@pact-foundation/pact`） | 17.1.4 | MIT | 2026-09-07（npm の更新日） | 無し | 満たさない。Pact は利用する側のテストの実行から契約を生成し、提供する側がそれを検証する作りで、提供する側（NDF）が自分の契約のファイルと見本を公開している今の形とは向きが逆になる。NDF の側に Pact の検証を組み込む必要がある | `npm view @pact-foundation/pact version license time.modified deprecated`・https://docs.pact.io/（2026-11-25） |
+| LIB2 | Renovate | 44.262.1 | AGPL-3.0-only | 2026-11-25（npm の更新日） | 無し | この課題では使わない。固定の点の更新を Pull Request にする自動化はできるが、受ける組と execution.md の値を同じ Pull Request で直す手順は自動化できず、範囲は固定の点を 1 回上げることに限られる | `npm view renovate version license time.modified`（2026-11-25） |
+| LIB3 | zod（既存の依存） | 4.6.7 | MIT | 2026-10-12（npm の更新日） | 無し | 満たす。使い方のデータの形と、照合が読む契約のファイルの形を読むのに使う（今の照合と受ける組のデータも zod で読んでいる） | `npm view zod version time.modified`・`packages/contracts/package.json`（2026-11-25） |
+
+### 確認できなかったこと
+
+| 対象 | 試した手段 | 結果と理由 |
+| --- | --- | --- |
+| Pact で提供する側の参加なしに契約を検証できるか | https://docs.pact.io/ の入口のページを読んだ | 入口のページには、提供する側の検証やブローカーが要るかの記述が無かった。ブローカーの文書は読んでいない |
+
+調べた量: 候補 6 件・取得の試み 9 回。
