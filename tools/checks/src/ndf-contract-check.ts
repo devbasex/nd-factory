@@ -149,49 +149,65 @@ function checkEnv(files: ContractFiles, use: NdfContractUse, findings: ContractF
   if (entrypoints === null || env === null) return;
   const setBy = new Map(env.rows.map((row) => [row.id, row.set_by]));
   for (const pair of use.env) {
-    const id = `${pair.entrypoint}/${pair.site}`;
-    const row = entrypoints.rows.find((r) => r.id === pair.entrypoint);
-    if (row === undefined) {
-      findings.push({ check: 3, path: `${CONTRACT_DIR}/domains/entrypoints.json`, id, detail: "口が口の表に無い" });
+    checkEnvPair(pair, entrypoints, setBy, use.envSetBy, findings);
+  }
+}
+
+/** 3 の口と実行の場の 1 組ぶん。口の表・口の `env` 列・`env.json` の行と `set_by` を照らす */
+function checkEnvPair(
+  pair: NdfContractUse["env"][number],
+  entrypoints: Parsed<"domains/entrypoints.json">,
+  setBy: ReadonlyMap<string, string>,
+  envSetBy: NdfContractUse["envSetBy"],
+  findings: ContractFinding[],
+): void {
+  const id = `${pair.entrypoint}/${pair.site}`;
+  const row = entrypoints.rows.find((r) => r.id === pair.entrypoint);
+  if (row === undefined) {
+    findings.push({ check: 3, path: `${CONTRACT_DIR}/domains/entrypoints.json`, id, detail: "口が口の表に無い" });
+    return;
+  }
+  const notInColumn = missing(pair.names, row.env);
+  if (notInColumn.length > 0) {
+    findings.push({
+      check: 3,
+      path: `${CONTRACT_DIR}/domains/entrypoints.json`,
+      id,
+      detail: `口の env 列に無い名前: ${list(notInColumn)}`,
+    });
+  }
+  const notKnown: string[] = [];
+  const otherSetter: string[] = [];
+  for (const name of pair.names) {
+    const actual = setBy.get(name);
+    if (actual === undefined) {
+      notKnown.push(name);
       continue;
     }
-    const notInColumn = missing(pair.names, row.env);
-    if (notInColumn.length > 0) {
-      findings.push({
-        check: 3,
-        path: `${CONTRACT_DIR}/domains/entrypoints.json`,
-        id,
-        detail: `口の env 列に無い名前: ${list(notInColumn)}`,
-      });
-    }
-    const notKnown: string[] = [];
-    const otherSetter: string[] = [];
-    for (const name of pair.names) {
-      const actual = setBy.get(name);
-      if (actual === undefined) {
-        notKnown.push(name);
-        continue;
-      }
-      // envSetBy に載せた名前は契約の値との一致を先に照らす（user から service へ変わっても見逃さない）。
-      // 載せない名前だけに service を求める
-      const declared = Object.hasOwn(use.envSetBy, name) ? use.envSetBy[name] : undefined;
-      const expected = declared ?? "service";
-      if (actual !== expected) {
-        otherSetter.push(`${name}（set_by: ${actual}${declared === undefined ? "" : `。使い方は ${declared}`}）`);
-      }
-    }
-    if (notKnown.length > 0) {
-      findings.push({ check: 3, path: `${CONTRACT_DIR}/domains/env.json`, id, detail: `env.json に無い名前: ${list(notKnown)}` });
-    }
-    if (otherSetter.length > 0) {
-      findings.push({
-        check: 3,
-        path: `${CONTRACT_DIR}/domains/env.json`,
-        id,
-        detail: `set_by が使い方の envSetBy の値（載せない名前は service）と違う名前: ${list(otherSetter)}`,
-      });
-    }
+    const mismatch = setterMismatch(name, actual, envSetBy);
+    if (mismatch !== null) otherSetter.push(mismatch);
   }
+  if (notKnown.length > 0) {
+    findings.push({ check: 3, path: `${CONTRACT_DIR}/domains/env.json`, id, detail: `env.json に無い名前: ${list(notKnown)}` });
+  }
+  if (otherSetter.length > 0) {
+    findings.push({
+      check: 3,
+      path: `${CONTRACT_DIR}/domains/env.json`,
+      id,
+      detail: `set_by が使い方の envSetBy の値（載せない名前は service）と違う名前: ${list(otherSetter)}`,
+    });
+  }
+}
+
+/** 名前の `set_by` が期待と違えば食い違いの説明を返し、同じなら null */
+function setterMismatch(name: string, actual: string, envSetBy: NdfContractUse["envSetBy"]): string | null {
+  // envSetBy に載せた名前は契約の値との一致を先に照らす（user から service へ変わっても見逃さない）。
+  // 載せない名前だけに service を求める
+  const declared = Object.hasOwn(envSetBy, name) ? envSetBy[name] : undefined;
+  const expected = declared ?? "service";
+  if (actual === expected) return null;
+  return `${name}（set_by: ${actual}${declared === undefined ? "" : `。使い方は ${declared}`}）`;
 }
 
 /** 4: 読むファイルの行が `reader: service` であり、その `fields` が翻訳が読む項目を含み、`path` が生成の値と同じ */
