@@ -50,11 +50,11 @@ describe("PipelineStack", () => {
     built = build(PIPELINE_SETTINGS);
   });
 
-  it("取る → 準備 → 承認 → 反映 の順に段がある", () => {
+  it("取る → 準備 → 反映 の順に段があり、承認の段を持たない", () => {
     const s = stages(built.template);
-    expect(s.map((x) => x.Name)).toEqual(["Source", "Prepare", "Approve", "Deploy"]);
+    expect(s.map((x) => x.Name)).toEqual(["Source", "Prepare", "Deploy"]);
     const owners = s.map((x) => (x.Actions[0]?.ActionTypeId as { Category: string }).Category);
-    expect(owners).toEqual(["Source", "Build", "Approval", "Build"]);
+    expect(owners).toEqual(["Source", "Build", "Build"]);
     for (const x of s) expect(x.Actions).toHaveLength(1);
   });
 
@@ -69,7 +69,7 @@ describe("PipelineStack", () => {
   it("反映の入力は準備の出力だけで、準備の変数の名前空間は Prepare", () => {
     const s = stages(built.template);
     const prepare = s[1]!.Actions[0]!;
-    const deploy = s[3]!.Actions[0]!;
+    const deploy = s[2]!.Actions[0]!;
     expect(prepare.Namespace).toBe("Prepare");
     const prepOut = (prepare.OutputArtifacts as Array<{ Name: string }>).map((a) => a.Name);
     const deployIn = (deploy.InputArtifacts as Array<{ Name: string }>).map((a) => a.Name);
@@ -78,14 +78,11 @@ describe("PipelineStack", () => {
     expect(JSON.stringify(deploy.Configuration)).toContain("#{Prepare.ASSEMBLY_DIGEST}");
   });
 
-  it("承認の資料はコミット・要約値・スタックと準備の記録の URL で、依頼は知らせの宛先へ送る", () => {
-    const approve = stages(built.template)[2]!.Actions[0]! as { Configuration: Record<string, unknown> };
-    const custom = approve.Configuration.CustomData as string;
-    expect(custom).toContain("#{Prepare.COMMIT}");
-    expect(custom).toContain("#{Prepare.DIGEST_PREFIX}");
-    expect(custom).toContain("#{Prepare.STACKS}");
-    expect(approve.Configuration.ExternalEntityLink).toBe("#{Prepare.BUILD_URL}");
-    expect(approve.Configuration.NotificationArn).toBeDefined();
+  it("承認の段を持たず、準備の要約値をそのまま反映の段へ渡す（#164）", () => {
+    const s = stages(built.template);
+    expect(s.some((x) => x.Name === "Approve")).toBe(false);
+    const deploy = s[2]!.Actions[0]! as { Configuration: Record<string, unknown> };
+    expect(JSON.stringify(deploy.Configuration)).toContain("#{Prepare.ASSEMBLY_DIGEST}");
   });
 
   it("取る段は人が有効にする GitHub との接続で起点のブランチを取る", () => {
