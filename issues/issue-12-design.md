@@ -475,10 +475,14 @@ sequenceDiagram
 - 比べた候補: LIB1 / LIB2
 - 根拠: Value 15「車輪の再発明をしない」・Value 1「操作を速く分かりやすく」（MVV バージョン 3）。LIB1
 
-### 決定 2: 画面の殻だけを保存し API のレスポンスを残さないよう、Service Worker は登録・保存の規則・バージョンの切り替えを自前で書き、事前に保存するファイルの一覧は Vite のビルドの一覧から作る
+### 決定 2: 画面の殻だけを保存し API のレスポンスを残さないよう、Service Worker は登録・保存の規則・バージョンの切り替えを自前で書き、事前に保存するファイルの一覧は Vite のビルドの一覧と `index.html` などの名前の決まったファイルから作る
 
 - **質問**: Service Worker と Web App Manifest を、どう作り、ビルドの成果物とそろえるか
-- **選んだ案**: 画面の文書の決定 28（Service Worker の登録とバージョンの切り替えは自前の数十行で持ち、ラッパーのライブラリを足さない）に従う。Service Worker のコード（`apps/web/src/sw/service-worker.ts`）と登録（`apps/web/src/sw/register.ts`）を自分で書く。事前に保存する画面の殻のファイルの一覧は、Vite のビルドの一覧（`build.manifest` が出す `.vite/manifest.json`）から、ビルドの後の小さなスクリプト（`apps/web/scripts/build-sw.ts`）が作り、Service Worker の束に埋め込む。一覧の中身から作った値をバージョンにして、Cache Storage の名前に入れる。`install` で新しい名前の保存先へ一覧のファイルを入れ、`activate` で古い名前の保存先を消す。オフラインで画面の URL（`/p/prj_x/approvals/apr_y` など）を直に開けるよう、画面へのナビゲーション（`request.mode` が `navigate` のリクエスト）に限って、保存した `index.html` を返す。このナビゲーションの規則から `/signed-out` を除く。API はナビゲーションでないため、この規則に当たらない。`/config.json` はつながっていれば読み、読めなければ保存した値を返す。API と `/signed-out` は保存から返さない。Web App Manifest は `apps/web/public/manifest.webmanifest` に静的なファイルとして置く
+- **選んだ案**: 画面の文書の決定 28（Service Worker の登録とバージョンの切り替えは自前の数十行で持ち、ラッパーのライブラリを足さない）に従う。Service Worker のコード（`apps/web/src/sw/service-worker.ts`）と登録（`apps/web/src/sw/register.ts`）を自分で書く。事前に保存する画面の殻のファイルの一覧は、ビルドの後の小さなスクリプト（`apps/web/scripts/build-sw.ts`）が作り、Service Worker の束に埋め込む。一覧は次の 2 つを合わせたものである。
+  - Vite のビルドの一覧（`build.manifest` が出す `.vite/manifest.json`）に載る出力のファイル（各項目の `file`・`css`・`assets`）。このマニフェストはチャンクとその依存を記録するもので、ナビゲーションに返す HTML 自体は載らない（[Vite のバックエンドとの統合](https://vite.dev/guide/backend-integration.html)）
+  - 名前の決まったファイル。ビルドが出した `index.html` と、`index.html` と `manifest.webmanifest` が直に参照する公開のファイル（`apps/web/public/` のアイコンなど）と、`manifest.webmanifest` 自体である。スクリプトは、`index.html` と `manifest.webmanifest` が参照するファイルが成果物に無ければ失敗して止まる
+
+  一覧の全ファイルの中身から作った値（SHA-256）をバージョンにして、Cache Storage の名前に入れる。ファイルの名前だけから作らないのは、`index.html` のように名前の変わらないファイルだけを変えたビルドでも、バージョンを変えて新しい殻を入れるためである。`install` で新しい名前の保存先へ一覧のファイルを入れ、`activate` で古い名前の保存先を消す。オフラインで画面の URL（`/p/prj_x/approvals/apr_y` など）を直に開けるよう、画面へのナビゲーション（`request.mode` が `navigate` のリクエスト）に限って、保存した `index.html` を返す。このナビゲーションの規則から `/signed-out` を除く。API はナビゲーションでないため、この規則に当たらない。`/config.json` はつながっていれば読み、読めなければ保存した値を返す。API と `/signed-out` は保存から返さない。Web App Manifest は `apps/web/public/manifest.webmanifest` に静的なファイルとして置く
 - 採らなかった案: `vite-plugin-pwa` の injectManifest の方式（成果物の一覧を作る部分は使えるが、登録とバージョンの切り替えを持つラッパーで、画面の文書の決定 28 が足さないと決めたライブラリに当たる。使うなら、先に全体の設計の決定 28 を直す PR が要る（要求の前提 3））
 - 採らなかった案: 同じプラグインの generateSW の方式（上と同じ理由に加え、保存の規則を設定で書くため、API を保存しないことがコードに現れない）
 - **代償**: ビルドの一覧から事前に保存するファイルを集めるスクリプトと、保存先の名前の入れ替えを自分で持つ。誤りは e2e（テスト設計の「10・決定 2 オフラインで直に開く」と「13・IW1 暗号化」）でしか見つけられない
@@ -620,7 +624,8 @@ sequenceDiagram
 | 8 実機の確認 | 実機で確認し、結果を詳細設計に残す（手動） | — |
 | 9 詳細設計 | `issues/issue-12-design-detail.md` があり、全体の設計の決定を決め直していない（レビュー） | — |
 | 10 HTTP のルート | 16 本の path を直に開くとその画面の題が出る。表に無い path は履歴を置き換えて `/` へ移る（e2e、`vite preview`）。加えて、#177 の書き換えを反映した検証用の配信環境で、CloudFront を通して R6 の URL と表に無い path を直に開き、R6 の画面の題が出ることと `/` へ移ることを確かめる（e2e の同じ場面を配信環境の URL へ向けて打つ）。この確認を通すまで受け入れ条件 10 を満たしたとしない | 表から 1 行消す・置き換えを `push` に変える・配信環境で書き換えの関数を外す |
-| 10・決定 2 オフラインで直に開く | 一度開いて Service Worker と写しが入った状態で、ブラウザーをオフラインにし、R5 と R6 の URL を直に開くと、保存した `index.html` から画面が出て、写しの中身が出る。オフラインで `/signed-out` を直に開くと保存から返らない | ナビゲーションの規則を外す・`/signed-out` を規則に含める |
+| 10・決定 2 オフラインで直に開く | 一度開いて Service Worker と写しが入った状態で、ブラウザーをオフラインにし、R5 と R6 の URL を直に開くと、保存した `index.html` から画面が出て、写しの中身が出る。オフラインで `/signed-out` を直に開くと保存から返らない | ナビゲーションの規則を外す・`/signed-out` を規則に含める・事前に保存する一覧から `index.html` かアイコンを外す |
+| 決定 2 殻のバージョン | ビルドの後の一覧に、`.vite/manifest.json` の出力のファイルと、`index.html`・`manifest.webmanifest`・その 2 つが参照するアイコンがすべてある。`index.html` だけを変えてビルドし直すと、Service Worker のバージョンと Cache Storage の名前が変わり、開き直した画面が新しい `index.html` を使う | バージョンをファイルの名前だけから作るように壊す・名前の決まったファイルを一覧に入れないように壊す |
 | 11 ナビゲーション | 3 つの幅で 4 つの行き先が同じ順で、決まった帯に出る。区切りは 640 px 未満・640 px 以上 1024 px 未満・1024 px 以上で、境目の 639・640・1023・1024 px でも確かめる（639 px は下の帯、640 px と 1023 px は細い帯、1024 px は横の帯） | 幅ごとに並びを変える・帯の置き場を変える・区切りの比べを `>` と `>=` で入れ替える |
 | 12 押せる要素 | 3 つの幅のすべてのルートで、押せる要素（文中のリンクを除く）の幅と高さが 44 px 以上 | ボタンの高さを 40 px にする |
 | 13・IW1 暗号化 | IndexedDB の写し・送る列・ログイン・途中の記録の中身を直に読んで作り物の値の文字列が無い。ログインの行を復号しても、作り物の access token と ID token の文字列が無く、通常のサインインと token の取り直しの後も同じである。Cache Storage に API の URL の項目が無い | 暗号化を外す・Service Worker で API を保存する・`User` の直列化した値をそのまま置く |
