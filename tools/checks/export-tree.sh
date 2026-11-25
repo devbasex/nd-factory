@@ -95,6 +95,14 @@ check_path() {
   return 0
 }
 
+# blob を出力先のパスに書く（親のディレクトリを作り、中身を書き、0644 にする）。失敗したら 3 番目の引数の知らせで 1 で終える
+write_blob() {
+  local sha="$1" target="$2" failure="$3"
+  mkdir -p -- "$(dirname -- "$target")" || die 1 "$failure"
+  git cat-file blob "$sha" >"$target" || die 1 "$failure"
+  chmod 0644 -- "$target" || die 1 "$failure"
+}
+
 # 木のファイルの項目ごとに blob を書く。シンボリックリンクはリンク先の文字列を中身とする普通のファイルにし、サブモジュールは書かない
 write_entries() {
   local commit="$1" out="$2" n=0 entry meta path mode sha target
@@ -115,9 +123,7 @@ write_entries() {
     if [[ -e "$target" || -L "$target" ]]; then
       die 1 "木に取り出せない項目がある（${n} 番目）"
     fi
-    mkdir -p -- "$(dirname -- "$target")" || die 1 "木を書き出せない（${n} 番目）"
-    git cat-file blob "$sha" >"$target" || die 1 "木を書き出せない（${n} 番目）"
-    chmod 0644 -- "$target" || die 1 "木を書き出せない（${n} 番目）"
+    write_blob "$sha" "$target" "木を書き出せない（${n} 番目）"
   done <"$work/tree"
 }
 
@@ -228,9 +234,7 @@ write_history() {
       taken["$layer"$'\t'"$ancestor"]=d
     done
     target="$out/layers/$layer/$path"
-    mkdir -p -- "$(dirname -- "$target")" || die 1 "履歴の項目を書き出せない（${n} 番目）"
-    git cat-file blob "$sha" >"$target" || die 1 "履歴の項目を書き出せない（${n} 番目）"
-    chmod 0644 -- "$target" || die 1 "履歴の項目を書き出せない（${n} 番目）"
+    write_blob "$sha" "$target" "履歴の項目を書き出せない（${n} 番目）"
     if has_nul "$target"; then
       target="$out/binary-text/$layer/$path"
       mkdir -p -- "$(dirname -- "$target")" || die 1 "履歴の項目を書き出せない（${n} 番目）"
