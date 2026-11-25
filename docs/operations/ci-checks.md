@@ -89,14 +89,15 @@ NDF の認証は、`<非公開リポジトリ>` に対して次の権限を持�
    - `leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が空なので .gitleaks.toml だけで探す` の行が出ていない
 
    3 つのどれかが欠ければ、今の木と履歴の両方で当たりと失敗が無くなるまで次へ進まず、変数 `LEAK_CHECK_REQUIRE_PATTERN` も `1` にしない。
-   - 秘密が空の行が出ていれば、手順 2 の設定を直し、同じ `leak-check-push` の実行を GitHub Actions で再実行する（画面の「Re-run jobs」か `gh run rerun <実行の ID>`）。再実行の記録で、上の 3 つがすべてそろうことを確かめる。手元の探し直しは、GitHub Actions が直した後の環境から秘密を受け取れたことを確かめられないので、この確認の代わりにしない
+   - 秘密が空の行が出ていれば、手順 2 の設定を直し、下の「コミットを入れずに GitHub の設定だけを直したとき」の手順で、今の main の先頭を探した `leak-check-push` の実行を確かめる。再実行は GitHub Actions の画面の「Re-run jobs」か `gh run rerun <実行の ID>` で行う。手元の探し直しは、GitHub Actions が直した後の環境から秘密を受け取れたことを確かめられないので、この確認の代わりにしない
    - 当たりや検査の失敗があれば、原因を解消する（当たりは「当たりの場所を手元で引く」で場所を引く）
    - 当たりや検査の失敗を直した後も、確かめるのは GitHub Actions の `leak-check-push` の記録である。手元の探し（下の「main のコミットを手元で探し直す」）は原因の特定に使い、手元で成功しても先へ進まない。手元の成功では、GitHub Actions でジョブが動き、環境 `leak-scan` から秘密を受け取れたことを確かめられないためである
      - 直すために main へコミットを入れたときは、そのコミットの push で動いた `leak-check-push` の記録で、上の 3 つがすべてそろうことを確かめる。元の実行を再実行しても、探すのは元の SHA のままなので、直した後のコミットを確かめたことにならない（[ワークフローの再実行](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)）
-     - コミットを入れずに GitHub の設定だけを直したときも、確かめるのは今の main の先頭を探した記録である。待つ間に、ほかの変更で main が進んでいることがあるためである
-       - 元の実行の `head_sha`（`gh api repos/devbasex/nd-factory/actions/runs/<実行の ID> --jq .head_sha`）が今の main の先頭（`gh api repos/devbasex/nd-factory/commits/main --jq .sha`）と同じなら、その実行を再実行する
-       - main が進んでいれば、元の実行は再実行しない。今の main の先頭への push で動いた `leak-check-push` の実行を使う
-       - どちらの場合も、使った実行の記録で、上の 3 つがすべてそろうことを確かめる
+     - コミットを入れずに GitHub の設定だけを直したとき（秘密が空だった場合を含む）も、確かめるのは、設定を直した後に今の main の先頭を探した記録である。待つ間に、ほかの変更で main が進んでいることがあるためである
+       1. 設定を直した後で、今の main の先頭の SHA（`gh api repos/devbasex/nd-factory/commits/main --jq .sha`）を読み、その SHA への push で動いた `leak-check-push` の実行を選ぶ。元の実行の `head_sha`（`gh api repos/devbasex/nd-factory/actions/runs/<実行の ID> --jq .head_sha`）が同じなら、元の実行を選ぶ
+       2. 選んだ実行が設定を直す前に終わっていれば、その実行を再実行する（直す前の実行は、直した後の設定で動いていないため）。直した後に始まった実行なら、終わるのを待つ
+       3. 選んだ実行（再実行したなら再実行の記録）で、上の 3 つがすべてそろうことを確かめる。設定を直す前の記録の失敗は、判断に使わない
+       4. 変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする直前に、今の main の先頭の SHA を読み直し、確かめた実行の `head_sha` と照らし合わせる。main が進んでいれば、新しい先頭の実行で 1 から確かめ直す
 
    確かめた後に、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする
 5. `<非公開リポジトリ>` を作り、[`leak-check-caller.yml`](leak-check-caller.yml) を写し、秘密 `LEAK_CHECK_PATTERN` と変数 `LEAK_CHECK_GENERATION`（値は `1`）を登録する。NDF がマージに使う今の認証で、「NDF の認証の権限」の 3 つの API が呼べることを確かめる。続けて、開いている Pull Request の 1 本で探しを手で起動して確かめる（下の「手で起動して確かめる」）。この結果で Pull Request をマージしない
@@ -213,13 +214,20 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
    - 探したマージコミットの最初の親（`git rev-parse <探したマージコミット>^1`）が、今の main の先頭（`gh api repos/devbasex/nd-factory/commits/main --jq .sha`）と同じである
    - 探したマージコミットの 2 つ目の親（`git rev-parse <探したマージコミット>^2`）が、応答の `head.sha` と同じである
 4. 1 つでも違えば、マージしない。新しいマージコミットを取り込み、「main のコミットを手元で探し直す」で `dir` と `git` の両方を探し直してから、手順 1 からやり直す
-5. 3 つがそろっても、この Pull Request のマージを終えるまで main を進めない。手順 3 の確認の後に別の Pull Request が main に入ると、探したのは古い候補になり、新しい main の履歴を変更後の規則で探していないことになる。GitHub のマージの API の `sha` で固定できるのは head だけで、base は固定できないので、main を止めておくしかない（[マージの API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)）
-   - マージのコミットを手元で探し直す前から止めておく。NDF にほかの Pull Request をマージさせず、画面からもマージせず、main へ直に push しない
+5. 3 つがそろったら、base は main を止めて固定し、head はマージの API の `sha` で固定してマージする。手順 3 の確認の後に別の Pull Request が main に入るか、Pull Request の head が更新されると、探したのは古い候補になり、変更後の規則で全履歴を探していない候補がマージされうる。GitHub のマージの API は、head が一致すべき SHA（`sha`）を受けるが、base を指定する項目は無い（[マージの API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)）
+   - main は、マージのコミットを手元で探し直す前から、この Pull Request のマージを終えるまで止めておく。NDF にほかの Pull Request をマージさせず、画面からもマージせず、main へ直に push しない
+   - NDF には、手順 3 で確かめた head の SHA（探した head）を渡し、その SHA と今の head が一致する場合だけ、その SHA をマージの API の `sha` に渡してマージさせる。一致しなければマージせずに手順 4 に戻る（未確認: 探した head の SHA を NDF に渡す方法は、NDF の機能で決まる。渡せなければ、NDF にマージさせずに、渡せるようになるまで待つ）
    - 止めている間に main が進んでしまったら、マージせずに手順 4 のとおり探し直す
-6. マージの後に、Pull Request を読み直し、マージでできたコミット（`merge_commit_sha`）が探した組み合わせで作られたことを確かめる
-   - 最初の親が探したマージコミットの最初の親（探した base）と同じで、2 つ目の親が探した head と同じである
+6. マージの後に、Pull Request を読み直し、マージでできたコミット（`merge_commit_sha`）が探した組み合わせで作られたことを確かめる。NDF は squash でマージする（`.ndf/project.json` の `merge.commit` が `squash`）ので、できたコミットの親は 1 つだけで、取り込んだ head は親にならない。head は手順 5 で `sha` に渡して固定したので、ここでは応答の `head.sha` で確かめる
+   - できたコミットの親がちょうど 1 つで、その親（`git rev-parse <コミット>^1`）が探したマージコミットの最初の親（探した base）と同じである
+   - 応答の `head.sha` が探した head と同じである
    - 木（`git rev-parse <コミット>^{tree}`）が、探したマージコミットの木と同じである
-   - 1 つでも違えば、マージでできたコミットを「main のコミットを手元で探し直す」で探し直す。当たりがあれば、マージを戻すかを判断する
+7. 手順 6 の 1 つでも違えば、実際にマージされたコミットを、探したときに確かめた検査のコードで探し直す。実際にマージされたコミットのスクリプトは読んで確かめていないので、秘密を外へ送る処理が入っていることがありうる。そのため、そのスクリプトを読んで確かめるまで、そのスクリプトに秘密を渡さない
+   1. 手順 4 で探したマージコミットのチェックアウト（「main のコミットを手元で探し直す」の手順 3〜5 で、スクリプトを読み、gitleaks を置いたディレクトリ）を、検査のコードとして使う
+   2. それとは別の新しい空のディレクトリに公開のリポジトリを複製し、実際にマージされたコミットを `git checkout --detach` でチェックアウトする。このチェックアウトのコードは動かさない
+   3. 実際にマージされたコミットの規則（`.gitleaks.toml`・`tools/checks/gitleaks-default.toml`）か gitleaks の版（`tools/checks/install-gitleaks.sh`）が、探したマージコミットと違えば、1 の検査のコードではそのコミットの規則と版で探せない。この場合は、4 の代わりに、実際にマージされたコミットの 6 つのファイルを「main のコミットを手元で探し直す」の手順 4 のとおりに読んで確かめてから、そのコミットを「main のコミットを手元で探し直す」で探す
+   4. 規則と版が同じなら、実際にマージされたコミットのチェックアウトの中で、1 のディレクトリのスクリプトを絶対パスで打つ。`export-tree.sh <実際にマージされたコミット> <空のディレクトリ>` で木を作業ツリーの外に取り出す。秘密を `LEAK_CHECK_PATTERN` に、`LEAK_CHECK_REQUIRE_PATTERN=1` を渡し、`leak-scan-secret.sh dir <取り出した木> --count-only` と、全履歴を探す `leak-scan-secret.sh git --count-only` を打つ
+   5. 両方の終了コードが `0` でなければ、当たりの場所を `--details` で引き、マージを戻すかを判断する
 
 ## 見本の写し直し
 
