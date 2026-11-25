@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { RowKey } from "./rows/common.ts";
+import { sha256 } from "./sha256.ts";
 
 // 行の版の読み手と書き手（issues/issue-2-design-detail.md の「表の移し」、決定 9）。
 // 読み手が受ける版（latest と previous の 2 つ）と、書き手が出す版（writeVersion）を分けて持つ。読み手はどちらの版も latest の形へそろえ、
@@ -349,13 +349,13 @@ export function rowReplaceOf<L>(codec: RowCodec<L>, raw: Readonly<Record<string,
   return Object.fromEntries(Object.entries(written).filter(([column]) => !SET_BY_WRITER.has(column)));
 }
 
-// 旧形式の補いで、鍵から決まる incarnation の値。区切りと並びの鍵の SHA-256 の頭の 16 バイトを、UUID の形（RFC 9562 の版 8・変種 10）にする。
+// 旧形式の補いで、鍵から決まる incarnation の値。区切りと並びの鍵の SHA-256（依存なしの sha256.ts）の頭の 16 バイトを、UUID の形（RFC 9562 の版 8・変種 10）にする。
 // 同じ鍵なら読むたびに同じ値になり、putIfAbsent が入れる UUID v4 と版の桁で分かれる
 function incarnationOfKey(pk: string, sk: string | null): string {
-  const bytes = createHash("sha256").update(JSON.stringify(["nd-factory/incarnation", pk, sk])).digest().subarray(0, 16);
+  const bytes = sha256(new TextEncoder().encode(JSON.stringify(["nd-factory/incarnation", pk, sk]))).subarray(0, 16);
   bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x80;
   bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
-  const hex = bytes.toString("hex");
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 

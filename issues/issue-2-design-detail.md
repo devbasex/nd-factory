@@ -44,6 +44,7 @@ packages/contracts/
 │   │   └── idempotency.ts      *   冪等の鍵
 │   ├── tables.ts               *   10 の表の仕様（名前の末尾・鍵・索引・TTL・行の種類）
 │   ├── row-codec.ts            *   行の版の読み手と書き手（RowCodec・readRow・writeRow・rowReplaceOf）
+│   ├── sha256.ts               *   依存なしの SHA-256（旧形式の補いの incarnation。形の正本は zod だけに依存するため node:crypto を読まない）
 │   ├── ndf.ts                  *   受ける NDF の契約の組の形・答えの語
 │   ├── data.ts                 *   data/*.json の読みと検証
 │   └── client.ts               *   画面とテストが操作を呼ぶ口・ダミーの送り手（決定 16）
@@ -94,6 +95,7 @@ infra/
 | `packages/contracts/src/rows/*.ts` | 新設 | 表の行の形 | values・ids | rows | 行ごとの `<行>Row` の zod と `ROW_CODECS` |
 | `packages/contracts/src/tables.ts` | 新設 | 10 の表の仕様 | rows | tables | `TABLES`・`TableSpec` |
 | `packages/contracts/src/row-codec.ts` | 新設 | 行の版の読み手と書き手 | rows | row-codec | `rowCodec`・`readRow`・`writeRow`・`rowReplaceOf` |
+| `packages/contracts/src/sha256.ts` | 新設 | 依存なしの SHA-256（鍵から決まる incarnation だけに使い、秘密には使わない） | なし | sha256 | `sha256` |
 | `packages/contracts/src/ndf.ts` | 新設 | NDF の契約の値 | zod | ndf | `ndfContractSet`・`ndfAnswerWord` |
 | `packages/contracts/src/data.ts` | 新設 | データのファイルを形で検証して出す | ndf・values | data | `RETRY_POLICIES`・`SECRET_SHAPES`・`NDF_CONTRACTS`・`PLANS` |
 | `packages/contracts/src/client.ts` | 新設 | 操作の名前で型を引く呼び出しの口と、生成したダミーを返す送り手 | operations | client | `createOperationClient`・`createDummyTransport` |
