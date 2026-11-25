@@ -215,6 +215,13 @@ worse() {
   fi
 }
 
+# run_scan を 1 回打ち、その終了コードを worse で残す（引数は run_scan と同じ）
+scan_merge() {
+  local status=0
+  run_scan "$@" || status=$?
+  worse "$status"
+}
+
 reports=()
 index=0
 for i in "${!roots[@]}"; do
@@ -222,27 +229,20 @@ for i in "${!roots[@]}"; do
   if [[ -n "${labels[$i]}" ]]; then
     echo "leak-scan-secret: 履歴 ${labels[$i]} を探す"
   fi
-  status=0
-  run_scan "$root" "$DEFAULT_CONFIG" "" pass || status=$?
-  worse "$status"
+  scan_merge "$root" "$DEFAULT_CONFIG" "" pass
   index=$((index + 1))
   report=""
   if [[ "$has_secret" == true ]]; then
     report="$work/report-${index}.json"
     reports+=("$report")
   fi
-  status=0
   if [[ "$count_only" == true ]]; then
-    run_scan "$root" "$ND_CONFIG" "" pass || status=$?
-    worse "$status"
+    scan_merge "$root" "$ND_CONFIG" "" pass
     if [[ "$has_secret" == true ]]; then
-      status=0
-      run_scan "$root" "$overlay" "$report" count || status=$?
-      worse "$status"
+      scan_merge "$root" "$overlay" "$report" count
     fi
   else
-    run_scan "$root" "$overlay" "$report" pass || status=$?
-    worse "$status"
+    scan_merge "$root" "$overlay" "$report" pass
   fi
 done
 
