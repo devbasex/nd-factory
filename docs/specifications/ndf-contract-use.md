@@ -436,7 +436,7 @@ graph LR
 
 固定の点を新しい配布へ上げるときは、次の値を 1 つの Pull Request で直す。
 
-1. 配布のタグが指すコミットを `gh api repos/devbasex/ai-plugins/git/ref/tags/<タグ>` などで確かめ、`ndf-pin.json` の `ndf_ref` に書く
+1. 配布のタグが指すコミットを `gh api repos/devbasex/ai-plugins/git/ref/tags/` の後ろにタグの名前を付けた呼び出しなどで確かめ、`ndf-pin.json` の `ndf_ref` に書く
 2. そのコミットの `plugins/ndf/contracts/version.json` の `history` の最後の行を、`packages/contracts/data/ndf-contracts.json` の受ける組にし、`packages/contracts/test/data.test.ts` の期待値も直す
 3. `npm run ndf-contract:sync` を打ち、生成のファイルをコミットする
 4. 実行の設計の決定 104 と「NDF との契約」の表の「契約のバージョンの照合し」・「NDF 11 の名前」の行の値と、この文書の値を直す
