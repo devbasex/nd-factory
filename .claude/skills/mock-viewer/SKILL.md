@@ -51,7 +51,7 @@ flowchart LR
 | 直したのに古い | `mock:up` を打ち直していない |
 | 利用者がタブを閉じた | `mock:up` を打ち直すと新しいタブを開く（経路 A では `CDP_URL` を付ける） |
 
-Chrome を使えない場面（CI・ほかの人の手元）では、`python3 -m http.server -d docs/design/mock 8000` で http://localhost:8000/viewer.html を開く。
+Chrome を使えない場合は、リポジトリを取得した利用者の PC で `python3 -m http.server -d docs/design/mock 8000` を打ち、同じ PC のブラウザーで http://localhost:8000/viewer.html#foundation を開く。リモートのホストやコンテナで打った場合、利用者の PC の `localhost` はそこに届かないため、ポート 8000 を転送して、転送先の URL を開く。
 
 ### 経路 B の接続の確かめ方
 

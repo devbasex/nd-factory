@@ -17,7 +17,7 @@
 
 ## 手元で見る
 
-利用者の Chrome で見せるときは、プロジェクト Skill `mock-viewer`（`npm run mock:up`）でコンテナから http://ndf-mock.localhost/ に出す（新しいタブではページ「画面の基盤（#12）」が開く。前のモックのタブが残っているときは、そのタブを読み直すだけでページは移らない）。接続先の指定は Skill の手順に従う。Chrome を使えないときは、次のとおり HTTP のサーバーで開く。
+利用者の Chrome で見せるときは、プロジェクト Skill `mock-viewer`（`npm run mock:up`）でコンテナから http://ndf-mock.localhost/ に出す（新しいタブではページ「画面の基盤（#12）」が開く。前のモックのタブが残っているときは、そのタブを読み直すだけでページは移らない）。接続先の指定は Skill の手順に従う。Chrome を使えないときは、リポジトリを取得した利用者の PC で次のとおり HTTP のサーバーを起動し、同じ PC のブラウザーで開く。リモートのホストやコンテナで起動した場合は、ポート 8000 を転送して、転送先の URL を開く。
 
 ```bash
 python3 -m http.server -d docs/design/mock 8000
