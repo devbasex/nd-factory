@@ -98,7 +98,7 @@ skip: no-contract-use 752a9cf48a6d36c00ffb3197c8668d1c898c32e2
 
 ## 受け入れ条件
 
-- [ ] 1. `ndf-pin.json` の `ndf_ref` が、devbasex/ai-plugins の `ndf--v11.0.<N>`（N は 32 以上）のタグが指すコミットと一致する
+- [ ] 1. `ndf-pin.json` の `ndf_ref` が、devbasex/ai-plugins の `ndf--v11.0.N`（N は 32 以上）のタグが指すコミットと一致する
 - [ ] 2. 受ける組（`packages/contracts/data/ndf-contracts.json` の `accepted`）が、新しい固定の点の `plugins/ndf/contracts/version.json` の `history` の最後の行と同じ版と sha256 の 1 組だけである
 - [ ] 3. execution.md の決定 104 と「NDF との契約」の表の「契約のバージョンの照合し」の行が、新しい固定の点のタグ・コミット・契約の版・sha256 を書いており、版 8 と sha256 `ed8b0365…` を今の値として書いていない
 - [ ] 4. `npm run ndf-contract` の出力に `skip:` の行が無く、固定の点の契約と使い方を突き合わせた 6 項目の結果が出て、終了コードが 0 になる
