@@ -596,10 +596,12 @@ type RunResult = { status: number | null; output: string };
 /**
  * `export-tree.sh` を子のプロセスで打ち、標準出力と標準エラーを合わせて返す。
  * 引数は木の取り出し・履歴の取り出し・照らすだけの 2 つ（`--verify`・`--verify-history`）のどれか。
- * `tmp` を渡せば、スクリプトの作業のディレクトリをそこに作らせる（残らないことを確かめるため）
+ * `tmp` を渡せば、スクリプトの作業のディレクトリをそこに作らせる（残らないことを確かめるため）。
+ * `umask` を渡せば、その umask で打つ（書いたファイルの権限が umask によらないことを確かめるため）
  */
-function exportTree(cwd: string, args: string[], { tmp }: { tmp?: string } = {}): RunResult {
-  const result = spawnSync("bash", [EXPORT_SCRIPT, ...args], {
+function exportTree(cwd: string, args: string[], { tmp, umask }: { tmp?: string; umask?: string } = {}): RunResult {
+  const command = umask === undefined ? [EXPORT_SCRIPT, ...args] : ["-c", `umask ${umask} && exec bash "$0" "$@"`, EXPORT_SCRIPT, ...args];
+  const result = spawnSync("bash", command, {
     cwd,
     encoding: "utf8",
     env: tmp === undefined ? process.env : { ...process.env, TMPDIR: tmp },
@@ -655,6 +657,29 @@ function commitCraftedTree(root: string, dir: string, name: string, parent?: str
   const outer = spawnSync("git", ["mktree"], { cwd: root, input: `040000 tree ${inner.stdout.trim()}\t${dir}\n`, encoding: "utf8" });
   if (outer.status !== 0) throw new Error("git mktree が失敗した");
   return git(root, "commit-tree", outer.stdout.trim(), ...(parent === undefined ? [] : ["-p", parent]), "-m", "crafted");
+}
+
+/** 倉庫に無い blob の名前（`git cat-file blob` が失敗する） */
+function missingBlob(): string {
+  return hex(40);
+}
+
+/**
+ * `git mktree --missing` で根に `entries`（名前と blob）だけを置いた木を作り、コミットにする。
+ * 倉庫に無い blob も置ける（blob を書く手順の失敗を起こすため）
+ */
+function commitFlatTree(root: string, entries: [name: string, blob: string, mode?: string][], parent?: string): string {
+  const input = entries.map(([name, blob, mode = "100644"]) => `${mode} blob ${blob}\t${name}\n`).join("");
+  const tree = spawnSync("git", ["mktree", "--missing"], { cwd: root, input, encoding: "utf8" });
+  if (tree.status !== 0) throw new Error("git mktree が失敗した");
+  return git(root, "commit-tree", tree.stdout.trim(), ...(parent === undefined ? [] : ["-p", parent]), "-m", "flat");
+}
+
+/** 中身を blob として倉庫に書き、名前を返す */
+function storeBlob(root: string, body: string): string {
+  const result = spawnSync("git", ["hash-object", "-w", "--stdin"], { cwd: root, input: body, encoding: "utf8" });
+  if (result.status !== 0) throw new Error("git hash-object が失敗した");
+  return result.stdout.trim();
 }
 
 describe("木の取り出し（export-tree.sh）", () => {
@@ -722,6 +747,33 @@ describe("木の取り出し（export-tree.sh）", () => {
     expect(listOutput(out)).toEqual({ files: ["a.md", "link"], others: 0 });
     expect(readFileSync(join(out, "link"), "utf8")).toBe("../../outside");
     expect(lstatSync(join(out, "link")).mode & 0o777).toBe(0o644);
+  }, TIMEOUT);
+
+  it("実行できるファイル（100755）も、深い階層のファイルも、中身のまま umask によらず 0644 の普通のファイルとして書く", () => {
+    const { root } = makeRepo({ "run.sh": "#!/bin/sh\necho 一\n", "a/b/c/d.md": "深い\n" }, "first");
+    chmodSync(join(root, "run.sh"), 0o755);
+    const head = commitAll(root, "exec");
+    expect(git(root, "ls-tree", head, "run.sh")).toContain("100755 blob");
+    const out = join(tempDir("export-out-"), "tree");
+    expect(exportTree(root, [head, out], { umask: "077" })).toEqual({ status: 0, output: "" });
+    expect(listOutput(out)).toEqual({ files: ["a/b/c/d.md", "run.sh"], others: 0 });
+    expect(readFileSync(join(out, "run.sh"), "utf8")).toBe("#!/bin/sh\necho 一\n");
+    expect(readFileSync(join(out, "a", "b", "c", "d.md"), "utf8")).toBe("深い\n");
+    for (const file of ["run.sh", "a/b/c/d.md"]) expect(lstatSync(join(out, file)).mode & 0o777).toBe(0o644);
+  }, TIMEOUT);
+
+  it("倉庫に無い blob の項目で、その項目の番号を示す「木を書き出せない」の 1 になり、診断と作業のディレクトリを残さない", () => {
+    const realWord = fakeWord();
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+    const commit = commitFlatTree(root, [
+      ["a.md", storeBlob(root, "中身\n")],
+      [`${realWord}.md`, missingBlob()],
+      ["z.md", storeBlob(root, "後\n")],
+    ]);
+    const tmp = tempDir("export-tmp-");
+    const result = exportTree(root, [commit, join(tempDir("export-out-"), "tree")], { tmp });
+    expect(result).toEqual({ status: 1, output: "export-tree: 木を書き出せない（2 番目）\n" });
+    expect(readdirSync(tmp)).toEqual([]);
   }, TIMEOUT);
 
   it.each([[".."], [".git"], [".GIT"]])("%s の部分を持つ項目の木で 1 になり、項目のパスを出さない", (name) => {
@@ -873,6 +925,34 @@ describe("履歴の取り出し（export-tree.sh --history）", () => {
     expect(exportTree(root, ["--history", base, head, out]).status).toBe(0);
     expect(listOutput(out).files).toEqual(["paths/1"]);
     expect(readFileSync(join(out, "paths", "1"), "utf8")).toBe("sub");
+  }, TIMEOUT);
+
+  it("実行できるファイル（100755）と深い階層のファイルを、層に中身のまま umask によらず 0644 の普通のファイルとして書く", () => {
+    const { root, base } = forkRepo();
+    write(root, "run.sh", "#!/bin/sh\necho 一\n");
+    chmodSync(join(root, "run.sh"), 0o755);
+    write(root, "a/b/c/d.md", "深い\n");
+    const head = commitAll(root, "exec");
+    expect(git(root, "ls-tree", head, "run.sh")).toContain("100755 blob");
+    const out = join(tempDir("history-out-"), "history");
+    expect(exportTree(root, ["--history", base, head, out], { umask: "077" })).toEqual({ status: 0, output: "" });
+    expect(listOutput(join(out, "layers")).files).toEqual(["1/a/b/c/d.md", "1/run.sh"]);
+    expect(readFileSync(join(out, "layers", "1", "run.sh"), "utf8")).toBe("#!/bin/sh\necho 一\n");
+    expect(readFileSync(join(out, "layers", "1", "a", "b", "c", "d.md"), "utf8")).toBe("深い\n");
+    for (const file of ["run.sh", "a/b/c/d.md"]) expect(lstatSync(join(out, "layers", "1", file)).mode & 0o777).toBe(0o644);
+  }, TIMEOUT);
+
+  it("倉庫に無い blob の組で、パスの番号でなく組の番号を示す「履歴の項目を書き出せない」の 1 になり、診断と作業のディレクトリを残さない", () => {
+    const { root, base } = forkRepo();
+    const missing = missingBlob();
+    // 古いコミット: m.md（倉庫に無い blob）と x.md を足す。新しいコミット: ok.md を足し、x.md を消す。
+    // 新しい順に読むので、パスは ok.md・x.md（消した）・m.md・x.md、組は ok.md・m.md・x.md の順になり、m.md は組の 2 番目
+    const first = commitFlatTree(root, [["m.md", missing], ["x.md", storeBlob(root, "消す\n")]], base);
+    const head = commitFlatTree(root, [["m.md", missing], ["ok.md", storeBlob(root, "足す\n")]], first);
+    const tmp = tempDir("export-tmp-");
+    const result = exportTree(root, ["--history", base, head, join(tempDir("history-out-"), "history")], { tmp });
+    expect(result).toEqual({ status: 1, output: "export-tree: 履歴の項目を書き出せない（2 番目）\n" });
+    expect(readdirSync(tmp)).toEqual([]);
   }, TIMEOUT);
 
   it("読めない範囲で 2", () => {
