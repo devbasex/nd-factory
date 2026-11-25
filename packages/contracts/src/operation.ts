@@ -310,7 +310,7 @@ export function itemFailure<const RS extends readonly [ReasonDef, ...ReasonDef[]
 // その操作で起きうる要素の理由。ITEM_REASONS のうち空にならない always の 3 つを必ず含む。
 // 意図した妥協: 型引数 _Op は使わず、要素を ReasonDef に広げる。このため ResultOf の失敗の側の reason は string になり、
 // 呼び手は reason のリテラルで絞り込めない。理由ごとの status と reason の組は、itemFailure が実行の時に作る zod の和が縛る。
-// 型引数は、操作ごとの理由をリテラルで残す形へ後で絞っても呼び手の書き方が変わらないように置いている（issues/issue-2-design-detail.md の ReasonsOf の行）
+// 型引数は、操作ごとの理由をリテラルで残す形へ後で絞っても呼び手の書き方が変わらないように置いている（docs/specifications/contracts-and-core.md の「操作の表」の ReasonsOf）
 export type ReasonsOf<_Op extends OperationDef = OperationDef> = readonly [ReasonDef, ...ReasonDef[]];
 
 export function itemReasonsOf<Op extends OperationDef>(op: Op): ReasonsOf<Op> {

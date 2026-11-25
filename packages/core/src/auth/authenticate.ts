@@ -103,7 +103,7 @@ export const DELEGATION_TOUCH_MS = 3_600_000;
 // 委任の行の読んだ値（中身は委任の持ち主の子 #11 が apps/api/src/modules/ で読む）。
 // stored は読んだ委任の行に保存してあった version と incarnation（readRow の stored）。委任の使った時刻の行を書くトランザクションが、
 // 認証の読みの後に委任の行が変わっていない（delegations.revoke が確定していない）ことをこの値で照らす。
-// 最後に使った時刻は委任の行に無く、authenticate が委任の使った時刻の行（DELEGATION_USED#<委任>）を読む（issues/issue-2-design-row-writers.md の決定 10）
+// 最後に使った時刻は委任の行に無く、authenticate が委任の使った時刻の行（DELEGATION_USED#<委任>）を読む（docs/specifications/contracts-and-core.md の行の書き手の決定 10）
 export type DelegationRecord = {
   readonly secretSha256: string;
   readonly expiresAt: string;

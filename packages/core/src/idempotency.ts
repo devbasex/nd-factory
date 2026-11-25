@@ -9,7 +9,7 @@ import type { Logger } from "./log.ts";
 // 冪等の鍵（docs/design/api.md の「冪等の鍵」）。主体・操作・鍵の組の 1 回目を借りの行で押さえ、
 // 済みの行は状態の書き込みと同じトランザクションで書く（settleIdempotency の 1 件を dispatch が writeAtomically へ入れる）。
 // 冪等の鍵の行は version と incarnation を持ち、取り直し・確定・手放しは読んだ（書いた）行の version と incarnation を条件にした
-// 行全体の置き換えと消しで書く（issues/issue-2-design-row-writers.md の決定 7・8）
+// 行全体の置き換えと消しで書く（docs/specifications/contracts-and-core.md の行の書き手の決定 7・8）
 
 // API の関数の時間切れ（infra/lib/app-stack.ts の 10 秒）。形の正本の設定にこの値がまだ無いため、置かれるまでここに置く
 const API_FUNCTION_TIMEOUT_MS = 10_000;

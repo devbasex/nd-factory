@@ -2,7 +2,7 @@ import { IDEMPOTENT, ownedBy } from "./marks.ts";
 
 // F24・F25: オーガナイザーと会話、オーガナイザーのランナー・手元のマシン向けの HTTP のルート（受け持つ子 #10。
 // docs/design-process/issue-24/plan.md の L2）。専用の委任だけが呼べる issue_requests.create の制限（I24）の印は、
-// #10 が操作を中身ごと作るときに足す（issues/issue-2-plan.md の持ち越し）
+// #10 が操作を中身ごと作るときに足す（docs/specifications/contracts-and-core.md の「対象範囲」）
 const { read, write, human, self } = ownedBy("#10");
 
 export const ORGANIZER_OPERATIONS = [

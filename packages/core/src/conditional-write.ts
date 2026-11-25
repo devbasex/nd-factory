@@ -15,7 +15,7 @@ export const TRANSACT_MAX_ITEMS = 100;
 
 // 外れたときの扱い。呼び手が要素の 409 version_mismatch・state_mismatch か、前の 1 件の結果にする。
 // rebuild は、サーバーが読んだ行から作る書き換え（月の使った量の加算・利用者の行の login_count の足し引き）が外れたとき、
-// dispatch がハンドラーを呼び直して組み直す扱い。writeAtomically は訳さずに外れた件と一緒に返す（issues/issue-2-design-row-writers.md の決定 6）
+// dispatch がハンドラーを呼び直して組み直す扱い。writeAtomically は訳さずに外れた件と一緒に返す（docs/specifications/contracts-and-core.md の行の書き手の決定 6）
 export type ConflictRule = "version_mismatch" | "state_mismatch" | "return_existing" | "rebuild" | "fail";
 
 // 比べる値の列の道。入れ子の地図の中は . で区切る（列の名前は英小文字と _ だけで . を持たない）
@@ -182,7 +182,7 @@ export function deleteIfVersion(spec: { table: TableName; key: RowKey; expect: S
   return out;
 }
 
-// 表の移しの置き換え（issues/issue-2-design-detail.md の「表の移し」）。item は書く行全体（rowReplaceOf の戻り値に、行の種類が持てば
+// 表の移しの置き換え（docs/specifications/contracts-and-core.md の「テーブルの移行と版の数え」）。item は書く行全体（rowReplaceOf の戻り値に、行の種類が持てば
 // 読み手の見る形の version と incarnation を足したもの）。expect は読んだ行に保存してあった schema_version・version・incarnation の値そのもの
 // （列が無ければ absent、形を外れた値もそのまま）。保存の値から行が変わっていないときだけ置き換え、version を上げない
 // （読み手の見る中身を変えない書き換えのため、並んで読んだ書き手の replaceIfVersion を外さない）。行が消えていれば外れ、作り直さない。記録の表は拒む

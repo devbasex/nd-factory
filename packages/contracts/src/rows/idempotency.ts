@@ -5,7 +5,7 @@ import { expireAt, overwriteRow, type RowKey } from "./common.ts";
 
 // db-idempotency の行（冪等の鍵）。区切りの鍵だけの表で、作成から 24 時間で TTL。
 // 上書き（借りから済みへの書き換えと借りの取り直しを、読んだ version と incarnation を条件にした行全体の置き換えで書くため、
-// issues/issue-2-design-row-writers.md の決定 2・7 で version を持つ）
+// docs/specifications/contracts-and-core.md の行の書き手の決定 2・7 で version を持つ）
 
 // 冪等の鍵（<主体>#<操作の名前>#<鍵> / なし）
 export const idempotencyRow = overwriteRow(1, {

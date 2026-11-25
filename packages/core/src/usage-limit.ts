@@ -77,7 +77,7 @@ function usageRowOf(written: Row | undefined): UsageMonthRow {
 
 export type UsageAddResult = { readonly ok: true; readonly item: TransactItem; readonly row: UsageMonthRow } | { readonly ok: false; readonly onConflict: "state_mismatch" };
 
-// チームの月の使った量の行（db-teams の TEAM#<チーム> / USAGE#<UTC の年月>）へ費用を足した行全体を組む（issues/issue-2-design-row-writers.md の決定 5）。
+// チームの月の使った量の行（db-teams の TEAM#<チーム> / USAGE#<UTC の年月>）へ費用を足した行全体を組む（docs/specifications/contracts-and-core.md の行の書き手の決定 5）。
 // current はハンドラーがその月の行を強い整合で読み、行の版の読み手で今の形にした値（無ければ null）。
 // 行が無ければ足した行の putIfAbsent、あれば読んだ行に保存してあった version と incarnation を条件にした replaceIfVersion で、どちらも onConflict: "rebuild"
 // （並んだ加算に外れたら dispatch がハンドラーを呼び直し、読み直して足し直す）。通貨が違えば書き込みを組まずに state_mismatch（換算しない）。
