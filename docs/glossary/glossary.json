@@ -227,6 +227,30 @@
       "context": "organizer",
       "meaning": "会話のリンクとナビゲーションから開く、会話以外の画面（承認待ちの一覧・スプリント・承認・問い・設定）",
       "source": "docs/design/organizer.md"
+    },
+    {
+      "term": "ログインのキャッシュ",
+      "context": "platform",
+      "meaning": "サインインで受けた refresh token を含む利用者の値を、端末の IndexedDB に暗号化して置いたもの。タブを閉じても残り、サインアウトで消す",
+      "source": "issues/issue-12-design.md"
+    },
+    {
+      "term": "送る列",
+      "context": "platform",
+      "meaning": "まだ送れていない操作（キャッシュして送る・確定待ち）を、押した順に端末の IndexedDB へ暗号化して溜めたもの",
+      "source": "issues/issue-12-design.md"
+    },
+    {
+      "term": "つながってから押す",
+      "context": "platform",
+      "meaning": "その場で読む値が要る・取り消せない操作を、つながっていない端末では押せなくする扱い",
+      "source": "issues/issue-12-design.md"
+    },
+    {
+      "term": "画面の殻",
+      "context": "platform",
+      "meaning": "画面の HTML・JS・CSS・アイコン・翻訳のファイルの 1 揃い。Service Worker が保存する",
+      "source": "issues/issue-12-design.md"
     }
   ]
 }
