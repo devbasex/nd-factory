@@ -117,7 +117,7 @@
 
   `acme-cognito-login` のように `cognito` を含む名前は、漏れの検査の結合テスト（許可 4 が効くことを確かめるテスト）だけで使う。
 
-  main の履歴に残る旧い値は許可 5 で許す。許可 5 の値とコミットの組は、実装担当者が次の手順で求める。最後の検査と同じ方法（候補の設定とスクリプトの `leak-scan.sh git`）で main の全履歴を検査し、当たりの規則・ファイル・行・コミットを列挙する。そのコミットの当たった行から値を読み、規則ごとに、値とコミットの組を登録する。`git log -S` は使わない。`-S` はファイルの中の出現の回数が変わるコミットだけを返すので、旧い値を含む行を書き換えたコミットを拾えず、値を消したコミットも候補に入れる（STD6）
+  main の履歴に残る旧い値は許可 5 で許す。許可 5 の値とコミットの組は、実装担当者が次の手順で求める。設計書のテスト設計の「マージの前の確認」と同じ方法（最終のマージの候補の設定とスクリプトの `leak-scan.sh git`）で main の全履歴を検査し、当たりの規則・ファイル・行・コミットを列挙する。そのコミットの当たった行から値を読み、規則ごとに、値とコミットの組を登録する。`git log -S` は使わない。`-S` はファイルの中の出現の回数が変わるコミットだけを返すので、旧い値を含む行を書き換えたコミットを拾えず、値を消したコミットも候補に入れる（STD6）
 
   `nd-aws-resource-id` の許可は、すべて外す。この規則が取り出すのは `vpc-` などの頭と 16 進なので、アカウント ID の例（`123456789012`）を部分一致で許すと、16 進の中にその並びを持つ実在の ID を通す。ほかの許可（`^acme`・`example\.com`・プレースホルダー・`EXAMPLE`）は、この形の値に当たり得ない。今の木と main の全履歴に、この規則の形の値は無い。正当な作り物の ID が要るようになったら、その ID だけを許す許可を理由とともに足す
 
@@ -128,7 +128,7 @@
   | 置き換え記号の例 | プレースホルダー（`<名前>`・`${名前}`）と区切り（`.`・`-`）だけ。前に `role/` か `policy/` を付けてよい |
   | 一覧にある例 | ARN の全体を 1 つずつ並べる。2026-11-25 の main の木と履歴にある例は、下の 8 つである |
 
-  一覧に並べるのは、`role/acme-deploy`・`role/example`・`role/`（直後に空白を含む置き換え記号が続く形）・`policy/acme-test-deny-approval`・`task-definition/example:1`・`cluster:acme-test-progress`・`secret:acme/test/progress-db-admin-AbCdEf`・`acme-test-pipeline/Approve/Approve` で終わる ARN である。サービスとリージョンの欄も今の値のとおりに書く。
+  一覧に並べるのは、`role/acme-deploy`・`role/example`・`role/<AI のロール>`（`docs/operations/pipeline-approval.md` の例。置き換え記号に空白を含むので、上の `<名前>` の形に当たらず、一覧に 1 件として並べる）・`policy/acme-test-deny-approval`・`task-definition/example:1`・`cluster:acme-test-progress`・`secret:acme/test/progress-db-admin-AbCdEf`・`acme-test-pipeline/Approve/Approve` で終わる ARN である。サービスとリージョンの欄も今の値のとおりに書く。
 
   アカウント ID の 2 規則の許可は変えない（「同じ形の箇所」の表）
 - **例外の許可（許可 3・4）を外すとき**: 例外の元になった表記を変える Pull Request の作者が、例外を外せるかを確かめる。元になった表記は、3 が結合テストの値、4 の `<prefix>-<environment>-login` が `docs/operations/idp-and-apps.md` の Cognito のドメインの形である。main への push の探し（`leak-check-push`）は main の全履歴を探すので、旧い表記が main の履歴に残る間は、その値と足したコミットの組を許可 5 に移す。どの例外も、ほかの規則には置かない（4 は端点だけの例で、S3 の置き場の ARN には現れない）
@@ -138,7 +138,7 @@
 - 採らなかった案: アカウント ID の 2 規則の許可も全体の形にそろえる。この 2 規則が取り出すのは 12 桁の数だけで、部分一致と全体一致の結果が同じである
 - 採らなかった案: `nd-aws-arn` の許可を変えず、アカウントの欄を `nd-aws-account-id` に任せる。`example\.com` や `EXAMPLE` が ARN の一部にあるか、アカウントの欄が作り物であれば、資源の欄の実際の名前が通る
 - 採らなかった案: `acme` で始まる名前を許す（AGENTS.md が作り物の接頭辞を `acme` と決めていても、S3 の置き場の名前と Cognito のドメインは誰でも付けられるので、`acme` で始まる実在の名前を通す）
-- **代償**: 資源の欄に名前を書く ARN の例を新しく足すときは、一覧への追加が要る。非公開の検査は main の設定で探すので、許可だけの Pull Request を先にマージする。S3 の置き場と端点の例に、AGENTS.md の `acme` を使えなくなる。新しい作り物の名前を文書やテストに足すときは、許可 1・2 の形にするか、例外の許可を理由とともに足すことになる。この約束は `docs/specifications/leak-check.md` と AGENTS.md に書く。infra のテストの Cognito の端点は、ドメインの名前の定数から組み立てて書く。旧い `acme-test-login` の端点は、main の履歴に残る分だけを許可 5 で許す。2026-11-25 に試しの設定で、次の値が当たることを確かめた。`data-example.com-logs` の置き場の ARN と端点、`real-<env>` の端点、`logs.example.com` の置き場の端点、`real-EXAMPLE-x` の CloudFront の端点、`EXAMPLE1234.execute-api.us-west-2.amazonaws.com` である。試しの設定は、この設計の前の版の許可（`acme` で始まる名前と `assets.example.com` を許していた）を写したものである。この表の許可で今の木と履歴を探した結果は、テスト設計の「マージの前の確認」で確かめる
+- **代償**: 資源の欄に名前を書く ARN の例を新しく足すときは、一覧への追加が要る。非公開の検査は main の設定で探すので、許可だけの Pull Request を先にマージする。S3 の置き場と端点の例に、AGENTS.md の `acme` を使えなくなる。新しい作り物の名前を文書やテストに足すときは、許可 1・2 の形にするか、例外の許可を理由とともに足すことになる。この約束は `docs/specifications/leak-check.md` と AGENTS.md に書く。infra のテストの Cognito の端点は、ドメインの名前の定数から組み立てて書く。旧い `acme-test-login` の端点は、main の履歴に残る分だけを許可 5 で許す。2026-11-25 に試しの設定で、次の値が当たることを確かめた。`data-example.com-logs` の置き場の ARN と端点、`real-<env>` の端点、`logs.example.com` の置き場の端点、`real-EXAMPLE-x` の CloudFront の端点、`EXAMPLE1234.execute-api.us-west-2.amazonaws.com` である。試しの設定は、この設計書の旧稿（決定 5 が許可を外す前の版）の許可（`acme` で始まる名前と `assets.example.com` を許していた）を写したものである。この表の許可で今の木と履歴を探した結果は、テスト設計の「マージの前の確認」で確かめる
 - 作り方: 標準に倣う
 - 比べた候補: STD2 / STD3 / STD4 / STD5 / STD6
 - 根拠: Value 7（MVV バージョン 3）。STD2・STD3・STD4・STD5・STD6
