@@ -73,9 +73,15 @@ export function generateContractUse(files: ContractFiles, ids: readonly string[]
   const report = readForSync(files, "hooks/unattended-report.json");
   const absent = missing(ids, entrypoints.rows.map((row) => row.id));
   if (absent.length > 0) throw new ContractUseSyncError(`契約の entrypoints.json に無い id: ${list(absent)}`);
-  const rows = ids.flatMap((id) => entrypoints.rows.filter((row) => row.id === id).slice(0, 1).map(entrypointRow));
+  const rows = ids.flatMap((id) => {
+    const row = entrypoints.rows.find((r) => r.id === id);
+    return row === undefined ? [] : [entrypointRow(row)];
+  });
   const fileIds = [...new Set(rows.flatMap((row) => row.files ?? []))];
-  const paths = fileIds.flatMap((id) => ndfFiles.rows.filter((row) => row.id === id).slice(0, 1).map((row) => ({ id, path: row.path })));
+  const paths = fileIds.flatMap((id) => {
+    const row = ndfFiles.rows.find((r) => r.id === id);
+    return row === undefined ? [] : [{ id, path: row.path }];
+  });
   const noPath = missing(fileIds, paths.map((p) => p.id));
   if (noPath.length > 0) throw new ContractUseSyncError(`契約の ndf-files.json に無い読むファイル: ${list(noPath)}`);
   const parsed = ndfContractUseGenerated.safeParse({
