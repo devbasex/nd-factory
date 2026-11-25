@@ -1117,6 +1117,113 @@ describe("mainNdfContractCheck", () => {
     capture();
     expect(await mainNdfContractCheck(["--nope"], {})).toBe(2);
   });
+
+  describe("要約のファイルへの追記", () => {
+    /** 要約のファイルを任意のパスにして走らせる（`summary` を省けば --summary を渡さない） */
+    async function runWith(up: Upstream | { url: string }, pin: string, use: NdfContractUse | null, summary?: string) {
+      const root = makeRoot(pin);
+      const io = capture();
+      const args = ["--root", root, ...(summary === undefined ? [] : ["--summary", summary])];
+      const code = await mainNdfContractCheck(args, {}, {
+        repoUrl: up.url,
+        loadUse: () => Promise.resolve(use === null ? null : { ...use, pinnedCommit: pin }),
+      });
+      return { code, out: io.out.join(""), err: io.err.join("") };
+    }
+
+    /** 書けない要約のファイル（無いディレクトリの下のパス） */
+    function unwritableSummary(): string {
+      return join(tempDir("ndf-summary-"), "no-such-dir", "summary.md");
+    }
+
+    it("食い違いが無いときの要約は、前の中身の後に renderSummary(固定の点, 先端, 行) をそのまま足す", async () => {
+      const up = makeUpstream(fakeContract(), fakeContract());
+      const summary = join(tempDir("ndf-summary-"), "summary.md");
+      writeFileSync(summary, "# 前\n");
+      const result = await runWith(up, up.fixed, fakeUse(), summary);
+      expect(result.code).toBe(0);
+      const lines = [`read: fixed ${up.fixed}`, `read: tip ${up.tip}`, `checked: fixed ${up.fixed} 1-6`, `checked: tip ${up.tip} 1-6`];
+      expect(readFileSync(summary, "utf8")).toBe(`# 前\n${renderSummary([], [], lines)}`);
+    });
+
+    it("使い方の書き出しが無いときの要約は、前の中身の後に renderSummary([], [], [fail の行]) をそのまま足す", async () => {
+      const pin = "d".repeat(40);
+      const summary = join(tempDir("ndf-summary-"), "summary.md");
+      writeFileSync(summary, "# 前\n");
+      const result = await runWith({ url: "file:///nonexistent" }, pin, null, summary);
+      expect(result.code).toBe(1);
+      expect(readFileSync(summary, "utf8")).toBe(`# 前\n${renderSummary([], [], [`fail: no-contract-use ${pin}`])}`);
+    });
+
+    it("要約のファイルが無ければ作って書く", async () => {
+      const up = makeUpstream(fakeContract(), fakeContract());
+      const summary = join(tempDir("ndf-summary-"), "new.md");
+      const result = await runWith(up, up.fixed, fakeUse(), summary);
+      expect(result.code).toBe(0);
+      expect(readFileSync(summary, "utf8")).toContain(`checked: fixed ${up.fixed} 1-6`);
+    });
+
+    it("--summary が無ければ要約を書かず、食い違いが無ければ 0（エラーを出さない）", async () => {
+      const up = makeUpstream(fakeContract(), fakeContract());
+      const result = await runWith(up, up.fixed, fakeUse());
+      expect(result.code).toBe(0);
+      expect(result.err).not.toContain("要約のファイルに書けない");
+    });
+
+    it("--summary が無ければ、使い方の書き出しが無くても 1 のまま（要約を書かない）", async () => {
+      const pin = "d".repeat(40);
+      const result = await runWith({ url: "file:///nonexistent" }, pin, null);
+      expect(result.code).toBe(1);
+      expect(result.out).toBe(`fail: no-contract-use ${pin}\n`);
+      expect(result.err).not.toContain("要約のファイルに書けない");
+    });
+
+    it("使い方の書き出しが無く要約に書けないと、fail の行を出した後に 2 と標準エラーの理由（1 でない）", async () => {
+      const pin = "d".repeat(40);
+      const result = await runWith({ url: "file:///nonexistent" }, pin, null, unwritableSummary());
+      expect(result.code).toBe(2);
+      expect(result.out).toBe(`fail: no-contract-use ${pin}\n`);
+      expect(result.err).toContain("書き出し");
+      expect(result.err).toMatch(/error: 要約のファイルに書けない: .+\n/);
+    });
+
+    it("食い違いが無く要約に書けないと、標準出力の行を出した後に 2 と標準エラーの理由", async () => {
+      const up = makeUpstream(fakeContract(), fakeContract());
+      const result = await runWith(up, up.fixed, fakeUse(), unwritableSummary());
+      expect(result.code).toBe(2);
+      expect(result.out).toContain(`checked: fixed ${up.fixed} 1-6`);
+      expect(result.out).toContain(`checked: tip ${up.tip} 1-6`);
+      expect(result.err).toMatch(/error: 要約のファイルに書けない: .+\n/);
+    });
+
+    it("固定の点で食い違い要約に書けないと 2（1 でない）で、食い違いの件数の行を標準エラーに出さない", async () => {
+      const fixed = fakeContract();
+      rowById(fixed, "domains/entrypoint-cases.json", "unknown-flag").valid = true;
+      const up = makeUpstream(fixed, fakeContract());
+      const result = await runWith(up, up.fixed, fakeUse(), unwritableSummary());
+      expect(result.code).toBe(2);
+      expect(result.out).toContain("unknown-flag");
+      expect(result.err).toMatch(/error: 要約のファイルに書けない: .+\n/);
+      expect(result.err).not.toContain("件食い違う");
+    });
+
+    it("要約のパスがディレクトリでも書けないとして 2", async () => {
+      const up = makeUpstream(fakeContract(), fakeContract());
+      const result = await runWith(up, up.fixed, fakeUse(), tempDir("ndf-summary-dir-"));
+      expect(result.code).toBe(2);
+      expect(result.err).toContain("error: 要約のファイルに書けない: ");
+    });
+
+    it("固定の点で食い違い要約に書けたら、食い違いの件数の行を標準エラーに出して 1", async () => {
+      const fixed = fakeContract();
+      rowById(fixed, "domains/entrypoint-cases.json", "unknown-flag").valid = true;
+      const up = makeUpstream(fixed, fakeContract());
+      const result = await runWith(up, up.fixed, fakeUse(), join(tempDir("ndf-summary-"), "summary.md"));
+      expect(result.code).toBe(1);
+      expect(result.err).toContain(`固定の点 ${up.fixed} の NDF の契約と形の正本が 1 件食い違う\n`);
+      expect(result.err).not.toContain("要約のファイルに書けない");
+    });
+  });
 });
 
 describe("generateContractUse", () => {
