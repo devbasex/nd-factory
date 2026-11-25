@@ -102,9 +102,15 @@ function channelOf(endpoint: CallEndpoint, token: string | null): AuditChannel {
 
 type BodyRead = { readonly ok: true; readonly value: unknown } | { readonly ok: false };
 
+// 本文の文字列を得る。本文が無いときは undefined、Base64 と示されたときだけ UTF-8 へ戻す（PUT /v1/users の入口も使う）
+export function decodeHttpBody(event: Pick<HttpEvent, "body" | "isBase64Encoded">): string | undefined {
+  if (event.body === undefined) return undefined;
+  return event.isBase64Encoded ? Buffer.from(event.body, "base64").toString("utf8") : event.body;
+}
+
 function readBody(event: HttpEvent): BodyRead {
-  if (event.body === undefined) return { ok: false };
-  const text = event.isBase64Encoded ? Buffer.from(event.body, "base64").toString("utf8") : event.body;
+  const text = decodeHttpBody(event);
+  if (text === undefined) return { ok: false };
   try {
     return { ok: true, value: JSON.parse(text) };
   } catch {

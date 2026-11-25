@@ -14,7 +14,7 @@ import type { Logger } from "../log.ts";
 import { bodyFaultOf, canonicalJson, problem } from "./http.ts";
 import type { AllowedAuthz, DispatchDeps, DispatchResult, Handler, HandlerOutput, OperationCall, Problem, WriteConflict } from "./types.ts";
 
-export { readHttpCall, writeHttpResponse } from "./http.ts";
+export { decodeHttpBody, readHttpCall, writeHttpResponse } from "./http.ts";
 export type * from "./types.ts";
 
 // 操作の振り分け（docs/design/detail.md の「処理の手順」の dispatch）。受けた方法 → 認証 → 本文の形 → 人だけ・委任の種類 →

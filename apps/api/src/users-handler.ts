@@ -8,6 +8,7 @@ import {
 } from "@nd-factory/contracts/users-api";
 import { createClock, type Clock } from "@nd-factory/core/clock";
 import { createDb, dynamoDocumentClient, TABLE_PURPOSES, type Db, type TableNames } from "@nd-factory/core/db";
+import { decodeHttpBody } from "@nd-factory/core/dispatch";
 import { createLogger, type Logger } from "@nd-factory/core/log";
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import { StoreError, ensureUser } from "./user-store.ts";
@@ -42,11 +43,6 @@ function json(statusCode: number, body: UserAnswer[] | UsersErrorBody): APIGatew
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
 }
 
-function decodeBody(event: APIGatewayProxyEventV2WithJWTAuthorizer): string | undefined {
-  if (event.body === undefined) return undefined;
-  return event.isBase64Encoded ? Buffer.from(event.body, "base64").toString("utf8") : event.body;
-}
-
 // ログは JSON の 1 行で、要求の ID と結果だけを出す。token・本文・利用者の ID は出さない
 type LogFields = { status: number } & Record<string, string | number>;
 
@@ -62,7 +58,7 @@ export function createHandler(deps: HandlerDeps) {
       return { statusCode: 401 };
     }
 
-    const parsed = parseUsersRequest(decodeBody(event));
+    const parsed = parseUsersRequest(decodeHttpBody(event));
     if (!parsed.ok) {
       logger.info("本文が形に合わない", { status: 400, reason: parsed.reason } satisfies LogFields);
       return json(400, { reason: parsed.reason });
