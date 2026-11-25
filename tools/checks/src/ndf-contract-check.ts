@@ -284,12 +284,17 @@ function checkReportCases(
   });
 }
 
+/** 鍵と値の組を、鍵の順（コード単位の順）に並べる */
+function sortedByKey<T>(entries: [string, T][]): [string, T][] {
+  return entries.sort(([a], [b]) => (a === b ? 0 : a < b ? -1 : 1));
+}
+
 /** 値を、オブジェクトのキーの順によらない JSON の文字列にする（配列の順は保つ） */
 function normalized(value: unknown): string {
   const sort = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(sort);
     if (v === null || typeof v !== "object") return v;
-    const entries = Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a === b ? 0 : a < b ? -1 : 1));
+    const entries = sortedByKey(Object.entries(v as Record<string, unknown>));
     return Object.fromEntries(entries.map(([k, inner]) => [k, sort(inner)]));
   };
   return JSON.stringify(sort(value)) ?? "undefined";
@@ -297,9 +302,7 @@ function normalized(value: unknown): string {
 
 /** `when` の行の条件（`need` のほかの鍵）を、鍵の順によらない文字列にする */
 function conditionKey(rule: Readonly<Record<string, unknown>>): string {
-  const entries = Object.entries(rule)
-    .filter(([key]) => key !== "need")
-    .sort(([a], [b]) => (a === b ? 0 : a < b ? -1 : 1));
+  const entries = sortedByKey(Object.entries(rule).filter(([key]) => key !== "need"));
   return JSON.stringify(Object.fromEntries(entries));
 }
 
