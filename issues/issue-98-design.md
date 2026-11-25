@@ -55,7 +55,10 @@ flowchart TD
 - 非公開の検査の流れ（`leak-check-secret.yml`・`leak-scan-secret.sh`・`export-tree.sh` が何をどの順で探すか）は変えない。`leak-scan.sh` の変更で非公開の検査の結果が変わることは範囲に含む
 - `--paths` を渡さなければ、出力にファイルの名前を出さない。当たった値は `--paths` を渡しても出さない。記録の段を DBG・TRC まで上げると、gitleaks の記録に当たった値（`finding=`）が載るので（`detect/detect.go` の 720 行目）、その記録はそのまま出さない
 - テストに置く token と秘密は、テストの実行中に乱数から作る（要求の前提 2）
-- 変更の後のリポジトリ自身が通る。Pull Request の `leak-check` は木と分岐点からの範囲を、マージの後の `leak-check-push` は main の全履歴を `.gitleaks.toml` で探す。2026-11-25 に、この設計の規則と許可（決定 1・5）を写した試しの設定と、`--log-opts` に `--text` などを足した `leak-scan.sh` で、今の main（`69fd0b9`）の木と全 97 コミットを探すと、新しい当たりは 0 件だった。この測定は、今の木の探し直し（決定 3・4）を含まず、最終の設定でもない。測った許可は決定 5 の前の版（`acme` で始まる名前を許していた）なので、今の決定 5 では、今の木の `acme` の置き場と端点の例が当たる。これらは同じ Pull Request で書き換える（決定 5）。マージしてよいかは、テスト設計の「マージの前の確認」で決める。測るときは試しの設定を木の外に置いたので、木の中の `.gitleaks.toml` も探す対象に入った。この `.gitleaks.toml` 自身の当たりは数えていない。CI では `.gitleaks.toml` を `--config` に渡し、gitleaks は `--config` に渡した設定のファイルを探さないためである
+- 変更の後のリポジトリ自身が通る。Pull Request の `leak-check` は木と分岐点からの範囲を、マージの後の `leak-check-push` は main の全履歴を `.gitleaks.toml` で探す。最終の設定で今の main を探した結果は、まだ無い。マージしてよいかは、テスト設計の「マージの前の確認」で決める
+  - 参考の測定: 2026-11-25 に、決定 5 より前の版の許可（`acme` で始まる名前を許していた）と決定 1 の規則を写した試しの設定と、`--log-opts` に `--text` などを足した `leak-scan.sh` で、今の main（`69fd0b9`）の木と全 97 コミットを探すと、新しい当たりは 0 件だった。この測定は、今の木の探し直し（決定 3・4）を含まない
+  - 今の決定 5 では、今の木の `acme` の置き場と端点の例が当たる。これらは同じ Pull Request で書き換える（決定 5）
+  - 測るときは試しの設定を木の外に置いたので、木の中の `.gitleaks.toml` も探す対象に入った。この `.gitleaks.toml` 自身の当たりは数えていない。CI では `.gitleaks.toml` を `--config` に渡し、gitleaks は `--config` に渡した設定のファイルを探さないためである
 - 既定の規則の設定（`tools/checks/gitleaks-default.toml`）は、`useDefault` で gitleaks の既定の全体の許可を読む。この許可は `.bin`・`.pdf`・画像・`node_modules/`・`package-lock.json` などを名前で外す。今の結合テストは、この扱いを前提に、これらのファイルが当たらないことを確かめている
 
 ## 解き方の全体像
