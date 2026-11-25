@@ -99,7 +99,7 @@ flowchart TB
 | NDF のマージの前の非公開の検査（devbasex/ai-plugins、このリポジトリの外） | マージの直前に非公開リポジトリの呼び出しのワークフローを起動し、その 1 回の実行の結果を渡した値で確かめ、設定の世代と時間の上限を守ってマージし、マージの後にマージ先を確かめる機能。この変更では作らず、依頼を出す（決定 7） |
 | NDF の設定（`.ndf/project.json`） | 導入の 2 本目の Pull Request で、NDF のマージの前の非公開の検査を有効にする項目を足す。項目の形は NDF の依頼で決める。非公開リポジトリの名前は公開のリポジトリに書かず、NDF の利用者の設定（リポジトリの外）に持つ。検査を必須にするかを NDF が決める読み取り元は、NDF の利用者の設定と、base のブランチの `.ndf/project.json` だけで、Pull Request の head の `.ndf/project.json` は読まない（決定 10 の手順 6）。1 本目（実装の Pull Request）では変えない（決定 10） |
 | 運用の文書（`docs/operations/ci-checks.md`、新設）と指示書（`AGENTS.md`） | 持ち主が行う操作の手順（決定 6）と、秘密を使う探しがどこで動き、誰に結果が見えるか |
-| プラットフォームの設計（`docs/design/platform.md` の「設計の決まりを縛る検査」） | 漏れの検査の行に、実際の値の規則での Pull Request の探しが、NDF のマージの直前に非公開リポジトリで動くことを足す |
+| プラットフォームの設計（`docs/design/platform.md` の「設計の決まりを縛る検査」と決定 92） | この設計の Pull Request で改める。承認済みの設計は「設計の決まりを縛る検査は CI の必須のチェック（`.ndf/project.json` の `required_checks`）に載せる」と定めているが、非公開の検査は結果を公開のチェックにしないので、必須のチェックに載せられない（決定 7・11）。そこで、漏れの検査の行に実際の値の探しの場所を足し、必須のチェックの規定に「非公開の検査は必須のチェックに載せず、NDF がマージの直前に結果を確かめてマージを止める」という例外を足し、決定 92 に改訂を足す。実装の Pull Request は、この改めた規定に従い、`docs/design/platform.md` を変えない |
 
 ```mermaid
 flowchart LR
@@ -575,7 +575,7 @@ NDF が受け入れるのは、自分がこのマージのために起動した 
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #96 | 実装する | — | 1 本目（実装）: `.github/workflows/leak-check-secret.yml`（新設）、`.github/workflows/ci.yml`、`tools/checks/leak-scan-secret.sh`（新設）、`tools/checks/export-tree.sh`（新設）、`tools/checks/install-gitleaks.sh`（新設）、`tools/test/ci-definition.test.ts`、`tools/test/leak-scan.integration.test.ts`、`AGENTS.md`、`docs/operations/ci-checks.md`（新設）、`docs/operations/leak-check-caller.yml`（新設）、`docs/design/platform.md`。2 本目: `.ndf/project.json`（決定 10） |
+| #96 | 実装する | — | 1 本目（実装）: `.github/workflows/leak-check-secret.yml`（新設）、`.github/workflows/ci.yml`、`tools/checks/leak-scan-secret.sh`（新設）、`tools/checks/export-tree.sh`（新設）、`tools/checks/install-gitleaks.sh`（新設）、`tools/test/ci-definition.test.ts`、`tools/test/leak-scan.integration.test.ts`、`AGENTS.md`、`docs/operations/ci-checks.md`（新設）、`docs/operations/leak-check-caller.yml`（新設）。2 本目: `.ndf/project.json`（決定 10）。`docs/design/platform.md` は、この設計の Pull Request で改める |
 | #101 | マージする | #96 | — |
 
 ## 人へ残す判断
@@ -593,6 +593,13 @@ NDF が受け入れるのは、自分がこのマージのために起動した 
 | NDF がマージに使う認証に、非公開リポジトリの変数の読み取り・ワークフローの起動・実行とジョブの読み取りの権限を与える。非公開リポジトリに読み取りか書き込みの権限を持つ人を決める（決定 7・9） | C2 | 誰が秘密を使う探しを起動でき、その結果と当たりの場所を見られ、秘密を読めるかが変わる |
 | devbasex/ai-plugins へ、マージの直前に非公開リポジトリの探しを起動し、その 1 回の結果を渡した値・設定の世代・時間の上限で確かめてマージし、マージの後にマージ先と世代を確かめる機能の依頼を起票する（決定 7） | C5 | 他のリポジトリへ課題を公開する |
 | 2 本目の Pull Request で `.ndf/project.json` に NDF の非公開の検査を有効にする項目を足す。実装の Pull Request で `AGENTS.md` の「秘密とインフラの値を置かない」の行を直す | C7 | 利用者の設定と指示書を書き換える |
+
+次は承認済みの設計の変更である。設計の承認のときに、この設計の Pull Request に入れた `docs/design/platform.md` の変更とあわせて承認を受ける。
+
+| 承認済みの設計 | 今の規定 | 変える案 | 理由 |
+| --- | --- | --- | --- |
+| `docs/design/platform.md` の「設計の決まりを縛る検査」 | 設計の決まりを縛る検査は CI の必須のチェック（`.ndf/project.json` の宣言）に載せる | 漏れの検査のうち、PR を実際の値で探す非公開の検査だけは必須のチェックに載せない。`.ndf/project.json` の非公開の検査の項目と NDF の利用者の設定で有効にし、NDF がマージの直前に結果を確かめられなければマージしない | 決定 1・7・11 |
+| `docs/design/platform.md` の決定 92 | 照合の語は CI の秘密から受ける | 実際の値の正規表現は PR の側の CI に渡さず、PR は非公開リポジトリで、main への push は環境 `leak-scan` の秘密で探す | 決定 1・3・9 |
 
 次は要求の変更である。設計の承認のときに、要求を出した人の承認を受ける。承認されたら #96・#101 の本文と、このリポジトリの写し（`issues/issue-96-requirements.md`・`issues/issue-101-requirements.md`）に同じ変更を入れる。
 

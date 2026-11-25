@@ -6,7 +6,7 @@
 
 各節の頭の「満たす決定」の「決定 N」は設計文書の決定 N を、`#96-1` のような番号は要求仕様（[issue-96-requirements.md](./issue-96-requirements.md)・[issue-101-requirements.md](./issue-101-requirements.md)）の受け入れ条件（課題の番号と条件の番号）を指す。
 
-この文書が扱うのは、導入の 1 本目（実装の Pull Request）で触るファイルである。2 本目の Pull Request で変える `.ndf/project.json` と、NDF（devbasex/ai-plugins）の側の機能は、NDF への依頼で形が決まるので、関数の粒度へは下ろさない（末尾の「NDF への依頼と 2 本目の Pull Request」）。
+この文書が扱うのは、導入の 1 本目（実装の Pull Request）で触るファイルである。`docs/design/platform.md` の必須のチェックの規定と決定 92 は、この設計の Pull Request で改めたので、1 本目では変えない（設計文書の構成要素の表の最後の行）。2 本目の Pull Request で変える `.ndf/project.json` と、NDF（devbasex/ai-plugins）の側の機能は、NDF への依頼で形が決まるので、関数の粒度へは下ろさない（末尾の「NDF への依頼と 2 本目の Pull Request」）。
 
 ## 地図
 
@@ -27,7 +27,6 @@ tools/test/
 docs/operations/
   ci-checks.md *              持ち主の操作の手順
   leak-check-caller.yml *     非公開リポジトリに置く呼び出しのワークフローの見本
-docs/design/platform.md       設計の決まりを縛る検査の「漏れの検査」の行
 AGENTS.md                     秘密とインフラの値を置かない、の行
 ```
 
@@ -45,7 +44,6 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 | `docs/operations/leak-check-caller.yml` | 新設 | 持ち主が非公開リポジトリへ写す、呼び出しのワークフローの正本 | `leak-check-secret.yml@main` | ジョブ `generation`・`scan` | — |
 | `docs/operations/ci-checks.md` | 新設 | 持ち主が GitHub の設定で行う操作と、検査ごとの秘密の受け方・結果の見え方 | — | 文書 | — |
 | `AGENTS.md` | 変更 | 秘密を使う探しが動く場所を直し、運用の文書へリンクする | — | 文書 | — |
-| `docs/design/platform.md` | 変更 | 漏れの検査の行に、Pull Request の探しが NDF のマージの直前に非公開リポジトリで動くことを足す | — | 文書 | — |
 
 ## 秘密を使う探しのスクリプト（`tools/checks/leak-scan-secret.sh`）
 
@@ -462,7 +460,7 @@ gitleaks の版と要約値を持つのは、このスクリプトだけであ�
 
 2 本目の Pull Request で `.ndf/project.json` に足す項目の名前と形は、NDF の依頼で決まる。1 本目では `.ndf/project.json` を変えない。CI の定義のテストの「必須のチェックの宣言」の比べは、1 本目の後も今の 7 つのままで通る。
 
-## 運用の文書と指示書（`docs/operations/ci-checks.md`・`AGENTS.md`・`docs/design/platform.md`）
+## 運用の文書と指示書（`docs/operations/ci-checks.md`・`AGENTS.md`）
 
 満たす決定: 決定 6・7・8・9・10、受け入れ条件 #101-5・#101-6
 
@@ -479,4 +477,3 @@ gitleaks の版と要約値を持つのは、このスクリプトだけであ�
 | 同上 | 見本の写し直し | `docs/operations/leak-check-caller.yml` を変えたら、世代を切り替えて非公開リポジトリへ写し直すこと |
 | 同上 | 振る舞いの変化 | main への push で結合のテストを打たなくなったこと（上の `ci.yml` の節） |
 | `AGENTS.md` | 秘密とインフラの値を置かない | 47 行目の「`leak-check` のジョブが `.gitleaks.toml` に重ねて探す」を、「Pull Request は NDF のマージの直前に検査用の非公開リポジトリで、main への push は環境 `leak-scan` を持つ `leak-check-push` で、`.gitleaks.toml` に重ねて探す」に直し、`docs/operations/ci-checks.md` へリンクする。gitleaks の当たりの外し方の文は変えない |
-| `docs/design/platform.md` | 設計の決まりを縛る検査の「漏れの検査」の行 | 落とすものの列の最後に、「実際の値の当たりは、Pull Request では NDF のマージの直前に検査用の非公開リポジトリで、main への push では `leak-check-push` で探す」を足す |
