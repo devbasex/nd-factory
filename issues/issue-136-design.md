@@ -258,12 +258,11 @@ execution.md の変更は、直す時期で 2 つに分かれる。
   3. 結果の行より後ろの `- <項目>: <値>` の行を項目として読む。値の前後の空白は除く。結果の行より前の項目の行は読まない
   4. 同じ名前の項目が 2 つ以上あれば、最後の行の値を採る。前の行の値は捨てる
   5. `shape.required` が結果の値ごとに要るとする項目を確かめる。`always` の項目と、`when` の条件に当たったときの `need` の項目の両方を確かめる。`when` の条件は、項目の値が `prefix` で始まる・`equals` と同じ、のどちらかである。要る項目が無い、値が空、値が `無し` のどれかなら、欠落として誤りにする。項目「材料」もこの規則だけで扱う。材料が要る結果（`判断が要る`）で材料が無い・空・`無し` なら欠落の誤りにし、材料が要らない結果（`完了`・`できなかった`）なら誤りにしない（契約のサンプルにある `材料: 無し` の `完了` と `できなかった` は有効である）
-  6. 項目「材料」に、空でも `無し` でもない値があるときだけ、値の形を確かめる。値は、`shape.material.body`（`本文`）か、`shape.material.url_prefix`（`https://`）で始まる URL を空白で区切って並べたもの、のどちらかでなければ誤りにする。`本文` のときは、結果の行より前に `shape.material.heading`（`## 判断の材料`）の見出しが要る。無ければ誤りにする。見出しと節は、Markdown の構造で次のとおり決める
-     - フェンスのコードブロック（行頭から 3 つまでの空白の後に、`` ` `` か `~` を 3 つ以上並べた行で始まり、同じ文字を同じ数以上並べた行で閉じる）の中の行は、見出しとみなさない。閉じないまま結果の行に達したら、そこまでをコードブロックとする
-     - コードブロックの外で、`shape.material.heading` と同じ行を見出しとする。見出しが 2 つ以上あれば、最後の見出しを採る。項目の後勝ち（規則 4）と同じく、訂正した節を承認者に見せるためである
-     - 節は、採った見出しの次の行から、コードブロックの外にある次の `#` か `##` の見出しの行の前まで、それが無ければ結果の行の前までとする
+  6. 項目「材料」に、空でも `無し` でもない値があるときだけ、値の形を確かめる。値は、`shape.material.body`（`本文`）か、`shape.material.url_prefix`（`https://`）で始まる URL を空白で区切って並べたもの、のどちらかでなければ誤りにする。`本文` のときは、結果の行より前に `shape.material.heading`（`## 判断の材料`）の見出しが要る。無ければ誤りにする。見出しと節は、結果の行より前の文を GFM の解析器（LIB4。execution.md の「判断の材料」節の URL の取り出しと同じ解析器）で解析し、文書の直下にある見出しだけから決める。行を上から追う独自の規則は使わない。コードブロック・HTML のブロック・引用・リストの中にある見出し風の行は、文書の直下の見出しではないため、見出しとみなさない
+     - 文書の直下の ATX 見出しのうち、その行（前後の空白を除く）が `shape.material.heading` と同じものを「判断の材料」の見出しとする。2 つ以上あれば、最後の見出しを採る。項目の後勝ち（規則 4）と同じく、訂正した節を承認者に見せるためである
+     - 節は、採った見出しの終わりの位置から、文書の直下にある次のレベル 1 か 2 の見出し（ATX と Setext のどちらも）の始まりの位置の前まで、それが無ければ結果の行の前までとする。節の文は、解析器が返した位置で元の文から切り出す。閉じないフェンスのコードブロックは、GFM の解釈どおり結果の行の前まで続く
 
-  ランナーは、検証にも承認資料の組み立てにも、読み取りが返した値だけを使い、応答の文を読み直さない。読み直すと、検証した値と承認者に見せる値が別の規則で取り出され、訂正前の項目や別の節を見せうるためである。読み取りが返すものは次のとおりである。型はスキーマの正本に置く
+  ランナーは、区間の報告に由来する値（結果・区分・質問・承認ゲート・Pull Request・材料・「判断の材料」節）を、検証にも承認資料の組み立てにも読み取りの戻り値から取り、応答の文を読み直さない。承認資料のうち報告に由来しない項目（対象の課題番号・Pull Request の状態・MVV 判定の助言・費用）は、execution.md の「[承認資料](../docs/design/execution.md#承認資料)」の表に示す出所（`plan-progress`・GitHub の API・`ask.jsonl`・API の費用の記録）から補う。読み直すと、検証した値と承認者に見せる値が別の規則で取り出され、訂正前の項目や別の節を見せうるためである。読み取りが返すものは次のとおりである。型はスキーマの正本に置く
 
   | 戻り値の項目 | 中身 |
   | --- | --- |
@@ -280,10 +279,10 @@ execution.md の変更は、直す時期で 2 つに分かれる。
   | `result_value_unknown` | 結果が 3 つの値のどれでもない（規則 2） | `結果` |
   | `item_missing` | 要る項目が無い・空・`無し`（規則 5） | 欠けた項目 |
   | `material_form_invalid` | 材料の値が `本文` でも URL の並びでもない（規則 6） | `材料` |
-  | `material_heading_missing` | `材料: 本文` なのに、コードブロックの外に「判断の材料」の見出しが無い（規則 6） | `材料` |
+  | `material_heading_missing` | `材料: 本文` なのに、文書の直下に「判断の材料」の見出しが無い（規則 6） | `材料` |
 - 採らなかった案: execution.md の「[区間と結果の行](../docs/design/execution.md#区間と結果の行)」へのリンクだけを置く（リンク先には、同じ項目の後勝ちと、URL を空白で区切ることが書かれていない。同じ項目を先勝ちで読むと、訂正した承認資料の参照先ではなく古い資料を承認者に見せる）
 - 採らなかった案: 上流の誤りの文をそのまま返し、進捗の事象へは伏せ字を通して載せる（伏せ字は既知の秘密の形しか伏せず、材料の欄に入った署名付き URL の署名が残る）
-- **代償**: 上流が `rule` を変えたら、この規則と関数を同じ変更で直す。見出しをコードブロックの外に限る規則は、上流の読み取りより厳しい可能性がある。契約のサンプルと判定が分かれれば、照合の 5 項目目が食い違いとして出す。`shape` の変化は照合の 5 項目目と、先端の差分の行で気づける。誤りの理由から値を落とすため、進捗の事象を見る人は、どの項目が誤りかまでは分かるが、どんな値が書かれていたかは分からない
+- **代償**: 上流が `rule` を変えたら、この規則と関数を同じ変更で直す。見出しを文書の直下に限る規則は、上流の読み取りより厳しい可能性がある。契約のサンプルと判定が分かれれば、照合の 5 項目目が食い違いとして出す。`shape` の変化は照合の 5 項目目と、先端の差分の行で気づける。誤りの理由から値を落とすため、進捗の事象を見る人は、どの項目が誤りかまでは分かるが、どんな値が書かれていたかは分からない
 - 根拠: Value 11（MVV バージョン 3）。STD1
 
 ## 影響と危険
@@ -325,13 +324,14 @@ execution.md の変更は、直す時期で 2 つに分かれる。
 - 条件は、execution.md の「[承認資料](../docs/design/execution.md#承認資料)」の「確かめる順番」の表の上から順に当てる。最初に合わなかった条件の拒否の理由のコードを 1 つだけ出す
 - 条件と理由のコードの対応は、その表にある。たとえば、ホストの条件の順 3 が `host_not_allowed`、クエリの条件の順 6 が `query_present` である。S3 の署名付き URL は順 3 で先に当たるため、`host_not_allowed` になる
 - 条件は、ブラウザーが開く URL に直す前の文字列に当てる
-- 条件は、材料の欄の URL・「判断の材料」節の中の URL・項目「Pull Request」の URL の 3 か所に当てる。項目「Pull Request」は Pull Request そのものを指す形（`/<owner>/<repo>/pull/<n>`。`/files`・`/commits` とフラグメントは付けない）だけを受ける。承認資料の Pull Request の URL には、確かめた掲載用の URL だけを書く
+- 条件は、材料の欄の URL・「判断の材料」節の中の URL・項目「Pull Request」の URL・項目「区分」「質問」「承認ゲート」の値の中の URL に当てる。区分・質問・承認ゲートは承認資料の区分・問い・題に載る自由な文で、署名付き URL や共有リンクが入りうるためである。この 3 つの欄の URL は「判断の材料」節と同じ取り出し方で探す。項目「Pull Request」は Pull Request そのものを指す形（`/<owner>/<repo>/pull/<n>`。`/files`・`/commits` とフラグメントは付けない）だけを受ける。承認資料の Pull Request の URL には、確かめた掲載用の URL だけを書く
 
 「判断の材料」節の中の URL は、次のように取り出す。規則の全体は execution.md の「[承認資料](../docs/design/execution.md#承認資料)」の「判断の材料」節の URL の取り出し方にある。
 
 - 節は、読み取り（決定 7）が返した節の文を使う
-- 節の中の生の HTML は、`<` を `&lt;` に置き換えてただの文字にしてから確かめ、置き換えた後の本文を保存して配る。HTML の要素を残さないので、`srcset` などの属性を数え上げる必要が無い。置き換えた文字の中の URL は裸の URL として探す
+- 節と、区分・質問・承認ゲートの値の中の生の HTML は、`<` を `&lt;` に置き換えてただの文字にしてから確かめ、置き換えた後の本文を保存して配る。HTML の要素を残さないので、`srcset` などの属性を数え上げる必要が無い。置き換えた文字の中の URL は裸の URL として探す
 - GFM の解釈でリンク先を取り出す。スキームを省いたリンク先・コードの中の裸の URL も含めて確かめる
+- リンク先とは別に、リンクの表示文字列・画像の代替テキスト・リンクと画像と参照の定義のタイトルからも裸の URL を探す。これらは配る本文に文字として残るためである
 - スキームの無い裸の文字列を URL とみなすのは、次の 2 つの形だけである。どちらも、直前が行頭・空白・括弧・引用符のときだけ当てる
   - `www.` で始まる形。この形は `http://` を補った後に条件を当てる（下の「ランナーのテストに引き継ぐこと」の表のとおり、`scheme_not_https` になる）
   - ホスト名の形（英数字とハイフンのラベルを `.` でつなぎ、最後のラベルが英字だけ）の直後に `/` が続く形
@@ -359,12 +359,15 @@ execution.md の変更は、直す時期で 2 つに分かれる。
 | `材料: 本文` で、「判断の材料」節に `<img srcset="https://docs.example.com/share/a.png 1x, https://docs.example.com/share/b.png 2x">` を含む | 承認の依頼・問い・承認資料は受けない。区間とレーンを `material_url_rejected` で失敗にする進捗の事象を 1 件受ける | 理由は、位置と拒否の理由のコード `host_not_allowed` だけを持つ（2 つの URL のそれぞれで 1 件）。`share` も `a.png` も出ない |
 | `材料: 本文` で、「判断の材料」節に受け入れる URL だけと、`<details>` の HTML を含む | 承認の依頼を受ける。承認資料の本文には `<details>` が無く、`&lt;details>` がある | — |
 | `材料: 本文` で、応答の文に `## 判断の材料` の見出しが 2 つある。1 つ目の節は、`https://github.com/acme/app/issues/2` と、`## 判断の材料` の行と `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000` を含むコードブロックを持つ。2 つ目の節は `https://github.com/acme/app/issues/3` だけを含む | 承認の依頼を受ける。承認資料の本文は 2 つ目の節で、読み取りが返した節の文と同じである。`issues/2` の URL も、コードブロックの中の署名付き URL も含まない | — |
+| `材料: 本文` で、「判断の材料」節に `[https://docs.example.com/share/abcd](https://github.com/acme/app/issues/2)`（表示文字列に共有 URL）か `![https://docs.example.com/share/abcd](https://github.com/acme/app/issues/2)`（代替テキスト）か `[計画](https://github.com/acme/app/issues/2 "https://docs.example.com/share/abcd")`（タイトル）を含む。偽物の GitHub の API は `issues/2` を読める形で返す | 承認の依頼・問い・承認資料は受けない。区間とレーンを `material_url_rejected` で失敗にする進捗の事象を 1 件受ける | 理由は、位置と拒否の理由のコード `host_not_allowed` だけを持つ。リンク先が受け入れる URL でも、表示文字列・代替テキスト・タイトルの URL を見つける。`share`・`abcd` が出ない |
+| 材料の欄が上の受け入れる URL で、項目「質問」が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 を見て承認してよいか` か `[計画](https://docs.example.com/share/abcd) を承認してよいか`、または項目「承認ゲート」が `設計 Pull Request のマージ https://github.com/acme/app/pull/1?token=0000`、または項目「区分」が `ndf-ask:cost docs.example.com/share/abcd` | 同上 | 理由は、位置（質問・承認ゲート・区分のどの欄か）と拒否の理由のコードだけを持つ。コードは順に `host_not_allowed`・`host_not_allowed`・`query_present`・`url_not_absolute` である。承認資料の問いと題にも載せない。`X-Amz-Signature=0000`・`abcd`・`token=0000` が出ない |
+| `材料: 本文` で、応答の文に `<div>` で始まる HTML のブロックがあり、その中に `## 判断の材料` の行と `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000` の行がある。HTML のブロックの後に、文書の直下の `## 判断の材料` の見出しと `https://github.com/acme/app/issues/3` だけの節がある | 承認の依頼を受ける。承認資料の本文は文書の直下の見出しの節で、`issues/3` だけを含む。HTML のブロックの中の署名付き URL を含まない | — |
 | `材料: 本文` で、`## 判断の材料` の行がコードブロックの中にしか無い | 承認の依頼・問い・承認資料は受けない。区間とレーンを `report_item_invalid` で失敗にする進捗の事象を 1 件受ける | 理由は、誤りのコード `material_heading_missing` と項目の名前 `材料` だけを持つ |
 | `材料: 本文` で、「判断の材料」節に上の行の受け入れる URL のほか、インラインのコード `` `node:fs` `` と、`import { readFile } from "node:fs/promises";` と `C/hooks/unattended-report.json` を含むコードブロックを含む | 承認の依頼を受ける | — |
 | 結果の値が `保留 https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000`（読み取りが `result_value_unknown` を返す） | 承認の依頼・問い・承認資料は受けない。区間とレーンを `result_value_unknown` で失敗にする進捗の事象を 1 件受ける（`result_value_unknown` は区間の失敗の理由 `segmentFailureReason` に今ある値で、この変更では足さない。項目の誤りと違い、結果の値そのものが読めないため、`report_item_invalid` に包まない） | 理由は、コード `result_value_unknown` だけを持つ。`保留` も `X-Amz-Signature=0000` も出ない |
 | 材料の欄が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url`（読み取りが `material_form_invalid` を返す） | 承認の依頼・問い・承認資料は受けない。区間とレーンを `report_item_invalid` で失敗にする進捗の事象を 1 件受ける | 理由は、誤りのコード `material_form_invalid` と項目の名前 `材料` だけを持つ。`X-Amz-Signature=0000` も `not-a-url` も出ない |
 
-ランナーが組み立てる呼び出しと環境変数も、ランナーの単体テストで契約に照らす。照合の 1 項目目は、判定（`judgeCall`）が契約のサンプルと同じ答えを出すことだけを確かめ、ランナーの組み立ての関数は通さないためである。
+ランナーが組み立てる呼び出しと環境変数も、ランナーの単体テストで契約に照らす。照合の 1 項目目は、判定（`judgeCall`）が契約のサンプルと同じ答えを出すことだけを確かめ、ランナーの組み立ての関数は通さないためである。定期の照合の責務をこのように分けることは、platform.md の検査の表（「NDF の契約の照合（定期）」の行）にも同じ変更で書いた。上流の先端でインタフェースの行（引数の正規表現・環境変数など）が変われば、照合の 6 項目目が生成した行との差として先端の要約に並べる。このため、ランナーの組み立てが先端の契約に合わなくなる変化も、定期の照合で気づける。
 
 - 使うインタフェースのうちランナーが呼び出しを組み立てるもの（`skill-workflow` の Skill の引数・`block-next` のブロックの中身・読むファイルの相対パスなど）と、実行の場（ホステッド・手元のマシン）の組ごとに、ランナーの組み立ての関数の出力を `ndfContractUse.judgeCall` へ渡し、真になることを確かめる
 - 渡すのは、組み立てた呼び出し文字列と、ランナーが組んだ環境変数の名前の一覧である。テストの中で呼び出し文字列や名前を手で書かない
@@ -385,7 +388,7 @@ execution.md の変更は、直す時期で 2 つに分かれる。
 | 決定 4（呼び出しの判定） | 新しい固定の点のサンプルのうち、使うインタフェースの 21 件で、判定が `valid` と同じになる。使わないインタフェースの呼び出しは偽になる。照合の 1 項目目は、使わないインタフェースのサンプルを判定で比べない。参照先の検査は、使うインタフェースのサンプル 1 件（たとえば `block-next` へのサンプル）の `entrypoint` だけを `entrypoints.json` に無い id（たとえば `no-such-entrypoint`）に差し替えた契約で確かめる。`entrypoints.json` のインタフェースの行は消さずに残す。照合は、1 項目目の食い違いとして、そのサンプルの id を含む行（`mismatch: … 1 … entrypoint-cases.json <サンプルの id>: …`）を出す。終了コードが 1 であることだけでは確かめない（行を消すと 6 項目目も食い違いになり、1 項目目の退行と区別できないため） | 参照先の id の検査を絞り込みの後に移す（差し替えた id は使い方のデータの 11 の id にも契約の id にも無いため、どちらで絞ってもサンプルが外れ、1 項目目の行が出ない）。引数の正規表現の全体一致を部分一致にする（`loop-bad-budget`・`unknown-flag` が真になる）。入れてよい環境変数の外の名前を許す（`terminal-env` が真になる）。block の前置きの語を必須にする（`resume` が偽になる） |
 | 決定 4（網羅） | 使い方のデータの `entrypoints` の id の集合が、単体テストに置いた 11 の id のリストとちょうど同じになる | データから `block-next` を 1 件消すと、単体テストが落ちて CI が失敗する。リストに無い id（たとえば `file-loop-record`）を足しても落ちる |
 | 決定 4（呼び出しの判定の種類ごとの規則） | 決定 5 の表の種類ごとに、valid のサンプルが真になる。とくに `block-next` の `resume`（`/goal ` の前置きが無い）と `resume-loop`（前置きがある）がどちらも真、`spec-io` の `spec-io-args` が真で `spec-outside` が偽、`file-plan-progress` の `plan-progress` が真になる | `target` と `args` をそのまま連結して比べると `resume` が偽になる。`spec` の `target` を完全一致で比べると `spec-io-args` が偽になる |
-| 決定 7（区間の報告の読み取り） | 新しい固定の点の `cases` 16 件で、`result` と `errors` の有無がサンプルと同じになる。加えて単体テストで、結果の行の後ろに同じ項目（たとえば `材料`）が 2 行あるとき、戻り値の `items` と `material` が後ろの行の値になる。`材料: 本文` で、コードブロックの中の `## 判断の材料` の行を見出しとみなさず、コードブロックの外の見出しが 2 つあれば最後の見出しの節を `material` に返す。節は次の `#` か `##` の見出しの前で終わる | 最初の `- 結果:` の行を読む（最後のサンプルが `判断が要る` になる）。同じ名前の項目を先勝ちで読む（2 行目の `材料` の URL ではなく 1 行目の値を返す）。必須の項目（たとえば `判断が要る` の `材料`）の `無し` を欠落として扱わず、有効な値として受ける。条件つきで要る項目を見ない。`材料: 本文` で `## 判断の材料` の節を求めない。コードブロックの中の見出しの行を見出しとして数える（見出しがコードブロックの中にしか無い報告が誤りにならない）。最初の見出しの節を返す。空白で区切った複数の URL を誤りにする。材料の要らない `完了`・`できなかった` で `材料: 無し` を誤りにする（契約の `完了` と `できなかった` の有効なサンプルが誤りになる） |
+| 決定 7（区間の報告の読み取り） | 新しい固定の点の `cases` 16 件で、`result` と `errors` の有無がサンプルと同じになる。加えて単体テストで、結果の行の後ろに同じ項目（たとえば `材料`）が 2 行あるとき、戻り値の `items` と `material` が後ろの行の値になる。`材料: 本文` で、コードブロックと HTML のブロックの中の `## 判断の材料` の行を見出しとみなさず、文書の直下の見出しが 2 つあれば最後の見出しの節を `material` に返す。節は次の `#` か `##` の見出しの前で終わる | 最初の `- 結果:` の行を読む（最後のサンプルが `判断が要る` になる）。同じ名前の項目を先勝ちで読む（2 行目の `材料` の URL ではなく 1 行目の値を返す）。必須の項目（たとえば `判断が要る` の `材料`）の `無し` を欠落として扱わず、有効な値として受ける。条件つきで要る項目を見ない。`材料: 本文` で `## 判断の材料` の節を求めない。コードブロックか HTML のブロックの中の見出しの行を見出しとして数える（見出しがコードブロックの中にしか無い報告が誤りにならない。HTML のブロックの中の見出し風の行の節を返す）。最初の見出しの節を返す。空白で区切った複数の URL を誤りにする。材料の要らない `完了`・`できなかった` で `材料: 無し` を誤りにする（契約の `完了` と `できなかった` の有効なサンプルが誤りになる） |
 | 決定 7（誤りの一覧に値を入れない） | 単体テストで、材料の欄が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url` の報告を読むと、誤りの一覧が `material_form_invalid` と `材料` の 1 件だけになり、一覧を文字列にしても `X-Amz-Signature`・`0000`・`not-a-url` を含まない | 上流と同じく誤りの文に値を入れると、一覧の文字列に署名が出て落ちる |
 | `ask-journal` の通知（「#47 と上流の不足 3 件は食い違いにならない」） | 照合のテストで、固定の点の `ndf-files.json` の `ask-journal` に `fields` を足した契約を渡すと、`notice: … の ask-journal が fields を持つ: …` の行が標準出力と要約のファイルの両方に出て、終了コードは 0 のまま、食い違いの件数も 0 のまま | 通知を 4 項目目の食い違いに数えると、終了コードが 1 になって落ちる。通知の処理を消すと、行が出ずに落ちる |
 | 決定 5（照合） | 生成したインタフェースの行の項目（`kind`・`target`・`lead`・`args`・`env`・`files`）か、読むファイルの `path` が契約の行と違うと、固定の点で 6 項目目か 4 項目目の食い違いになる。生成した区間の報告の形（たとえば `required` の `判断が要る` の `always`）が契約の `shape` と違うと、5 項目目の食い違いになる。生成のファイルが持つ固定の点が `ndf-pin.json` と違っても、6 項目目の食い違いになる | 比べる項目を 1 つ外すと、その項目だけを変えた契約で食い違いが出ない。`ndf-pin.json` だけを別のコミットに変えて生成し直さないと、食い違いが出る |
@@ -398,7 +401,7 @@ execution.md の変更は、直す時期で 2 つに分かれる。
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #136 | 実装する | — | `ndf-pin.json`、`packages/contracts/data/ndf-contracts.json`、`packages/contracts/data/ndf-contract-use.json`（新設）、`packages/contracts/data/ndf-contract-use.generated.json`（新設。生成のファイル）、`package.json`（`ndf-contract:sync` を足す）、`packages/contracts/src/ndf-contract-use-schema.ts`（新設）、`packages/contracts/src/ndf-contract-use.ts`（新設）、`packages/contracts/package.json`、`packages/contracts/test/ndf-contract-use.test.ts`（新設）、`packages/contracts/test/fixtures/ndf-contract-8d22be7/entrypoint-cases.json`（新設）、`packages/contracts/test/fixtures/ndf-contract-8d22be7/unattended-report.json`（新設）、`packages/contracts/test/data.test.ts`、`tools/checks/src/ndf-contract-check.ts`、`tools/test/ndf-contract-check.test.ts`、`tools/test/fixtures/ndf-contract-752a9cf/entrypoints.json`（消す）、`tools/test/fixtures/ndf-contract-752a9cf/env.json`（消す）、`tools/test/fixtures/ndf-contract-8d22be7/entrypoints.json`（新設）、`tools/test/fixtures/ndf-contract-8d22be7/env.json`（新設）、`tools/test/fixtures/ndf-contract-8d22be7/ndf-files.json`（新設）、`docs/design/execution.md`、`docs/specifications/contracts-and-core.md`、`docs/operations/pipeline-approval.md` |
+| #136 | 実装する | — | `ndf-pin.json`、`packages/contracts/data/ndf-contracts.json`、`packages/contracts/data/ndf-contract-use.json`（新設）、`packages/contracts/data/ndf-contract-use.generated.json`（新設。生成のファイル）、`package.json`（`ndf-contract:sync` を足す）、`packages/contracts/src/ndf-contract-use-schema.ts`（新設）、`packages/contracts/src/ndf-contract-use.ts`（新設）、`packages/contracts/package.json`、`packages/contracts/test/ndf-contract-use.test.ts`（新設）、`packages/contracts/test/fixtures/ndf-contract-8d22be7/entrypoint-cases.json`（新設）、`packages/contracts/test/fixtures/ndf-contract-8d22be7/unattended-report.json`（新設）、`packages/contracts/test/data.test.ts`、`tools/checks/src/ndf-contract-check.ts`、`tools/test/ndf-contract-check.test.ts`、`tools/test/fixtures/ndf-contract-752a9cf/entrypoints.json`（消す）、`tools/test/fixtures/ndf-contract-752a9cf/env.json`（消す）、`tools/test/fixtures/ndf-contract-8d22be7/entrypoints.json`（新設）、`tools/test/fixtures/ndf-contract-8d22be7/env.json`（新設）、`tools/test/fixtures/ndf-contract-8d22be7/ndf-files.json`（新設）、`docs/design/execution.md`、`docs/design/platform.md`、`docs/specifications/contracts-and-core.md`、`docs/operations/pipeline-approval.md` |
 
 ## 未確認のまま残ること
 
@@ -429,6 +432,7 @@ execution.md の変更は、直す時期で 2 つに分かれる。
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | LIB1 | Pact（`@pact-foundation/pact`） | 17.1.4 | MIT | 2026-09-07（npm の更新日） | 無し | 満たさない。Pact は、利用する側のテストの実行から契約を生成し、提供する側がそれを検証する作りである。提供する側（NDF）が自分の契約のファイルとサンプルを公開している今の形とは、向きが逆になる。NDF の側に Pact の検証を組み込む必要がある | `npm view @pact-foundation/pact version license time.modified deprecated`・https://docs.pact.io/ （2026-11-25） |
 | LIB2 | Renovate | 44.262.1 | AGPL-3.0-only | 2026-11-25（npm の更新日） | 無し | この課題では使わない。固定の点の更新を Pull Request にする自動化はできる。ただし、受ける組と execution.md の値を同じ Pull Request で直す手順は自動化できず、範囲は固定の点を 1 回上げることに限られる | `npm view renovate version license time.modified`（2026-11-25） |
+| LIB4 | mdast-util-from-markdown・mdast-util-gfm・micromark-extension-gfm（unified の Markdown の解析器と GFM の拡張） | 2.1.0・3.1.0・3.0.0 | MIT | 2026-10-03・2025-02-10・2023-06-26（npm の更新日） | 無し | 満たす。CommonMark と GFM の構文木を、各要素の元の文の位置つきで返す。決定 7 の規則 6 で文書の直下の見出しを特定し、位置で節を切り出すのに使う。ランナー（#6）が「判断の材料」節の URL を取り出すときも同じ解析器を使う。行を上から追う自前の規則では、HTML のブロックやリストの中の見出し風の行を区別できない | `npm view mdast-util-from-markdown version license time.modified deprecated`・`npm view mdast-util-gfm …`・`npm view micromark-extension-gfm …`（2026-11-25） |
 | LIB3 | zod（既存の依存） | 4.6.7 | MIT | 2026-10-12（npm の更新日） | 無し | 満たす。使い方のデータの形と、照合が読む契約のファイルの形を読むのに使う（今の照合と受ける組のデータも zod で読んでいる） | `npm view zod version time.modified`・`packages/contracts/package.json`（2026-11-25） |
 
 ### 確認できなかったこと

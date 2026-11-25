@@ -64,7 +64,7 @@ docs/operations/pipeline-approval.md
 | `packages/contracts/data/ndf-contract-use.generated.json` | 新設 | 固定の点の契約から生成した行と形 | — | — | — |
 | `packages/contracts/src/ndf-contract-use-schema.ts` | 新設 | 使い方の型・データの zod の形・区間の報告から読む項目の名前を持つ。データの JSON を読まない | zod | `ndf-contract-use-schema` | `ndfContractUseData`・`ndfContractUseGenerated`（zod の形）、`REPORT_ITEMS`（定数）、型 `NdfContractUse`・`ReportReading` など（新設） |
 | `packages/contracts/src/ndf-contract-use.ts` | 新設 | データの読み込み・呼び出しの判定・区間の報告の読み取りを持ち、`ndfContractUse` を書き出す。型は `ndf-contract-use-schema.ts` から書き出し直す | `./ndf-contract-use-schema.ts`・`./data.ts`・zod・上の 2 つの JSON | `ndf-contract-use` | `buildContractUse`・`judgeCallWith`・`filePathPattern`・`readReportWith`・`ndfContractUse`（新設） |
-| `packages/contracts/package.json` | 変更 | `exports` に `"./ndf-contract-use": "./src/ndf-contract-use.ts"` と `"./ndf-contract-use-schema": "./src/ndf-contract-use-schema.ts"` を足す | — | — | — |
+| `packages/contracts/package.json` | 変更 | `exports` に `"./ndf-contract-use": "./src/ndf-contract-use.ts"` と `"./ndf-contract-use-schema": "./src/ndf-contract-use-schema.ts"` を足す。`dependencies` に `mdast-util-from-markdown`・`mdast-util-gfm`・`micromark-extension-gfm`（設計書の LIB4）を足す | — | — | — |
 | `package.json` | 変更 | `"ndf-contract:sync": "node tools/checks/src/ndf-contract-check.ts sync"` を足す | — | — | — |
 | `packages/contracts/test/ndf-contract-use.test.ts` | 新設 | 判定・読み取り・網羅・データの組み立ての単体テスト | `../src/ndf-contract-use.ts`・フィクスチャ | — | — |
 | `packages/contracts/test/fixtures/ndf-contract-8d22be7/entrypoint-cases.json` | 新設 | 固定の点のサンプル 26 件の写し（`id`・`entrypoint`・`call`・`env`・`valid` の列だけ） | — | — | — |
@@ -231,7 +231,7 @@ docs/operations/pipeline-approval.md
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `readReportWith` | `packages/contracts/src/ndf-contract-use.ts` | 新設 | `(report: NdfContractUseGenerated["report"], text: string) => ReportReading` | 決定 7 の規則 1〜6 で、応答の文から結果・誤りの一覧・採った項目の値・材料を取り出す。ランナーは検証にも承認資料の組み立てにもこの戻り値だけを使い、応答の文を読み直さない |
+| `readReportWith` | `packages/contracts/src/ndf-contract-use.ts` | 新設 | `(report: NdfContractUseGenerated["report"], text: string) => ReportReading` | 決定 7 の規則 1〜6 で、応答の文から結果・誤りの一覧・採った項目の値・材料を取り出す。ランナーは、区間の報告に由来する値を、検証にも承認資料の組み立てにもこの戻り値から取り、応答の文を読み直さない。報告に由来しない承認資料の項目（対象の課題番号・Pull Request の状態・MVV 判定の助言・費用）は、execution.md の「承認資料」の表に示す出所から補う |
 
 `NdfContractUse.readReport` は、`buildContractUse` が生成の `report` を渡して作る。
 
@@ -261,7 +261,7 @@ docs/operations/pipeline-approval.md
 2. 規則 5: 結果の値の `required` の `always` の項目と、`when` の条件に当たった行の `need` の項目を、要る項目として集める。`when` の条件は、`item` の項目の値が `prefix` で始まるか、`equals` と同じかである。`item` の項目が無ければ条件に当たらない
 3. 規則 5: 要る項目ごとに、無い・空・`無し` なら `item_missing`（その項目の名前）を足す。要る項目の順は、`always` の順の後に `when` の順とし、同じ項目は 1 回だけ確かめる
 4. 規則 6: `material.item`（`材料`）の値が、空でも `無し` でもないときだけ、形を確かめる
-   - 値が `material.body`（`本文`）のとき: 結果の行より前の行を上から読み、フェンスのコードブロックの中か外かを追う。開く行は、行頭から 3 つまでの空白の後に `` ` `` か `~` を 3 つ以上並べた行である。閉じる行は、同じ文字を開いた行の数以上並べ、後ろに空白しか無い行である。コードブロックの外で `material.heading`（`## 判断の材料`）と同じ行を見出しとし、最後の見出しを採る。見出しが無ければ `material_heading_missing`（`材料`）を足す。あれば、見出しの次の行から、コードブロックの外にある次の `# ` か `## ` で始まる行の前まで（無ければ結果の行の前まで）を節とし、`material` を `{ kind: "body", section: 節の行を改行でつないだ文 }` にする
+   - 値が `material.body`（`本文`）のとき: 結果の行より前の文を、`mdast-util-from-markdown` に GFM の拡張（`micromark-extension-gfm` と `mdast-util-gfm`）を渡して解析する（設計書の LIB4）。行を上から追ってフェンスを数える独自の規則は使わない。構文木の根の直下の子（文書の直下）にある `heading` のうち、ATX 見出しで、元の文の該当の行（前後の空白を除く）が `material.heading`（`## 判断の材料`）と同じものを見出しとし、最後の見出しを採る。コードブロック・HTML のブロック・引用・リストの中の行は根の直下の `heading` にならないため、見出しとみなさない。見出しが無ければ `material_heading_missing`（`材料`）を足す。あれば、採った見出しの `position.end.offset` から、それより後ろにある根の直下の `depth` が 1 か 2 の `heading`（ATX と Setext のどちらも）の `position.start.offset` の前まで（無ければ解析した文の終わりまで）を元の文から切り出す。先頭の改行を 1 つ除いた文を節とし、`material` を `{ kind: "body", section: 節の文 }` にする
    - `本文` でないとき: 値を空白で区切った並びのどれもが、`material.url_prefix`（`https://`）で始まり、その後ろに 1 文字以上あるかを確かめる。そうでなければ `material_form_invalid`（`材料`）を足す。そうなら `material` を `{ kind: "urls", urls: 並び }` にする
 5. 材料が無い・空・`無し` のとき、`material` は `{ kind: "none" }` にする。手順の最後に `errors` が空でなければ、`material` を `{ kind: "none" }` に戻す
 
@@ -273,12 +273,13 @@ docs/operations/pipeline-approval.md
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `readReportWith` | 照合のテストに置いた偽物の読み取り・`apps/api` と `infra` の区間の報告の読み手 | `grep -rn "readReport\|- 結果:" packages apps infra tools` | 使えない。テストの偽物は規則 1・2 だけを持つ。ほかの読み手は無い |
+| `readReportWith`（規則 6 の見出しと節） | リポジトリの既存の Markdown の解析器 | `grep -rln "mdast\|micromark\|markdown-it" --include=package.json .` | 無い。設計書の LIB4 を依存に足す |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `readReportWith` | 新しい固定の点の `cases` 16 件で、`result` と `errors` の有無がサンプルと同じ。有効な報告で、`items` の `区分`・`質問`・`Pull Request` と `material` が報告の値と同じ | 結果の行の後ろに `材料` が 2 行あるとき、`items` と `material` が後ろの値になる。`区分` が 2 行あるとき、`items.区分` が後ろの値になる。`## 判断の材料` の見出しが 2 つあるとき、`material.section` が 2 つ目の節で、次の `## ` の見出しの前で終わる。コードブロック（`` ``` `` と `~~~~`）の中の `## 判断の材料` の行を見出しとみなさない。結果の行が 2 つあるとき、最後の行を採る。`完了` と `できなかった` の `材料: 無し` が誤りにならない。URL を空白で区切った並びが誤りにならない | `判断が要る` の `材料: 無し` が `item_missing`。`区分: ndf-gate:…` で `承認ゲート` が無いと `item_missing`。`材料: 本文` で見出しが無いと `material_heading_missing`。見出しがコードブロックの中にしか無くても `material_heading_missing`。材料の欄が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url` のとき、`errors` は `material_form_invalid`・`材料` の 1 件だけで、`JSON.stringify(errors)` が `X-Amz-Signature`・`0000`・`not-a-url` を含まない |
+| `readReportWith` | 新しい固定の点の `cases` 16 件で、`result` と `errors` の有無がサンプルと同じ。有効な報告で、`items` の `区分`・`質問`・`Pull Request` と `material` が報告の値と同じ | 結果の行の後ろに `材料` が 2 行あるとき、`items` と `material` が後ろの値になる。`区分` が 2 行あるとき、`items.区分` が後ろの値になる。`## 判断の材料` の見出しが 2 つあるとき、`material.section` が 2 つ目の節で、次の `## ` の見出しの前で終わる。コードブロック（`` ``` `` と `~~~~`）・HTML のブロック（`<div>` で始まる）・リストの項目の中の `## 判断の材料` の行を見出しとみなさない。節が次の Setext 見出し（`===` か `---` の下線）の前で終わる。結果の行が 2 つあるとき、最後の行を採る。`完了` と `できなかった` の `材料: 無し` が誤りにならない。URL を空白で区切った並びが誤りにならない | `判断が要る` の `材料: 無し` が `item_missing`。`区分: ndf-gate:…` で `承認ゲート` が無いと `item_missing`。`材料: 本文` で見出しが無いと `material_heading_missing`。見出しがコードブロックの中にしか無くても `material_heading_missing`。材料の欄が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url` のとき、`errors` は `material_form_invalid`・`材料` の 1 件だけで、`JSON.stringify(errors)` が `X-Amz-Signature`・`0000`・`not-a-url` を含まない |
 
 ## 契約の照合と生成のコマンド
 
