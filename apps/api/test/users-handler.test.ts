@@ -3,6 +3,7 @@ import { createLogger } from "@nd-factory/core/log";
 import type { APIGatewayProxyEventV2WithJWTAuthorizer } from "aws-lambda";
 import { describe, expect, it, vi } from "vitest";
 import { answerItems, createHandler } from "../src/users-handler.ts";
+import { StoreError } from "../src/user-store.ts";
 import { FakeStore } from "./fake-store.ts";
 
 const NOW = new Date("2026-01-02T03:04:05.000Z");
@@ -142,6 +143,65 @@ describe("handler", () => {
     expect(res.statusCode).toBe(503);
     expect(store.calls).toHaveLength(0);
     expect(JSON.parse(lines[0]!)).toMatchObject({ level: "error", status: 503 });
+  });
+});
+
+// 503 のログの operation と error の分け方を固定する（I-005 の切り出しの前の振る舞い）
+describe("handler の 503 の失敗の分け方", () => {
+  function failing(thrown: () => unknown, opts: { noTable?: boolean } = {}) {
+    const lines: string[] = [];
+    const handler = createHandler({
+      db: () => {
+        throw thrown();
+      },
+      table: () => (opts.noTable ? undefined : "acme-test-accounts"),
+      clock,
+      log: loggerTo(lines),
+    });
+    return { handler, lines };
+  }
+
+  async function failureLog(handler: ReturnType<typeof createHandler>, lines: string[]) {
+    const res = await handler(event('[{"id":"self"}]'));
+    expect(res.statusCode).toBe(503);
+    expect(JSON.parse(res.body ?? "")).toEqual({ reason: "store_unavailable" });
+    expect(lines).toHaveLength(1);
+    const log = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(log).toMatchObject({ level: "error", request_id: "req-1", status: 503 });
+    return { operation: log.operation, error: log.error };
+  }
+
+  it("表の名前が無いときは put と Error", async () => {
+    const { handler, lines } = failing(() => new Error("呼ばれない"), { noTable: true });
+    expect(await failureLog(handler, lines)).toEqual({ operation: "put", error: "Error" });
+  });
+
+  it("StoreError の get はその操作と元の例外の名前", async () => {
+    const cause = new Error("throttled");
+    cause.name = "ProvisionedThroughputExceededException";
+    const { handler, lines } = failing(() => new StoreError("get", cause));
+    expect(await failureLog(handler, lines)).toEqual({ operation: "get", error: "ProvisionedThroughputExceededException" });
+  });
+
+  it("StoreError の元が Error でなければ error は Unknown", async () => {
+    const { handler, lines } = failing(() => new StoreError("put", "文字列"));
+    expect(await failureLog(handler, lines)).toEqual({ operation: "put", error: "Unknown" });
+  });
+
+  it("StoreError でない Error は unknown とその名前", async () => {
+    const { handler, lines } = failing(() => new TypeError("壊れた"));
+    expect(await failureLog(handler, lines)).toEqual({ operation: "unknown", error: "TypeError" });
+  });
+
+  it("Error でない値が投げられたら unknown と Unknown", async () => {
+    const { handler, lines } = failing(() => "文字列");
+    expect(await failureLog(handler, lines)).toEqual({ operation: "unknown", error: "Unknown" });
+  });
+
+  it("ログは status・operation・error のほかに失敗の中身を出さない", async () => {
+    const { handler, lines } = failing(() => new TypeError("秘密の文言"));
+    await failureLog(handler, lines);
+    expect(lines[0]).not.toContain("秘密の文言");
   });
 });
 
