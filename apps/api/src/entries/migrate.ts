@@ -46,7 +46,7 @@ export type MigrateResult = {
 
 type RowOutcome = { readonly kind: "rewritten" | "unchanged" | "skipped" } | { readonly kind: "refused"; readonly reason: MigrateRefusal; readonly rowKind: string };
 
-export function keyOfRow(raw: StoredRow): RowKey {
+function keyOfRow(raw: StoredRow): RowKey {
   const sk = raw["sk"];
   return { pk: String(raw["pk"]), sk: typeof sk === "string" ? sk : null };
 }
@@ -159,11 +159,11 @@ export type MigrateHandlerDeps = Omit<MigrateDeps, "remainingMs"> & {
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 // 起動ごとの識別子（migrate_id・census_id）は UUID v4
-export function isUuidV4(value: unknown): value is string {
+function isUuidV4(value: unknown): value is string {
   return typeof value === "string" && UUID_V4.test(value);
 }
 
-export function isPurpose(value: unknown): value is TablePurpose {
+function isPurpose(value: unknown): value is TablePurpose {
   return typeof value === "string" && (TABLE_PURPOSES as readonly string[]).includes(value);
 }
 
