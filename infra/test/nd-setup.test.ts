@@ -347,9 +347,9 @@ describe("runDiff", () => {
   });
 });
 
-async function diffThen(f: Fake, stacks: Array<"app" | "pipeline"> | null = null): Promise<{ out: string; confirm: string }> {
+async function diffThen(f: Fake): Promise<{ out: string; confirm: string }> {
   const out = tempOut();
-  const code = await runDiff(diffOpts({ out, stacks }), f.deps);
+  const code = await runDiff(diffOpts({ out }), f.deps);
   expect(code).toBe(EXIT.OK);
   return { out, confirm: confirmFrom(f) };
 }
