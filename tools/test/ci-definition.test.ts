@@ -44,22 +44,24 @@ export type Workflow = {
 
 export type LoadedWorkflow = { path: string; text: string; doc: Workflow };
 
+/** 木の根からの相対の `path` の YAML を読み、解いた値と元の文字列を返す。解けないか鍵と値の組でなければ例外 */
+export function loadWorkflowFile(root: string, path: string): LoadedWorkflow {
+  const text = readFileSync(join(root, path), "utf8");
+  // yaml は YAML 1.2 で読むので、鍵 `on` は真偽値にならない。書き誤りと重なった鍵は parse が例外にする
+  const doc: unknown = parse(text);
+  if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
+    throw new Error(`ワークフローが鍵と値の組でない: ${path}`);
+  }
+  return { path, text, doc: doc as Workflow };
+}
+
 /** `.github/workflows/` の `*.yml`・`*.yaml` を読み、解いた値と元の文字列を返す。解けなければ例外 */
 export function loadWorkflows(root: string): LoadedWorkflow[] {
   const dir = join(root, ".github", "workflows");
   return readdirSync(dir)
     .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
     .sort()
-    .map((name) => {
-      const path = join(".github", "workflows", name);
-      const text = readFileSync(join(root, path), "utf8");
-      // yaml は YAML 1.2 で読むので、鍵 `on` は真偽値にならない。書き誤りと重なった鍵は parse が例外にする
-      const doc: unknown = parse(text);
-      if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
-        throw new Error(`ワークフローが鍵と値の組でない: ${path}`);
-      }
-      return { path, text, doc: doc as Workflow };
-    });
+    .map((name) => loadWorkflowFile(root, join(".github", "workflows", name)));
 }
 
 /** `jobs` の鍵の名前を返す */
@@ -78,13 +80,46 @@ export function checkNames(doc: Workflow): string[] {
   });
 }
 
+/** `on` の起動の名前（文字列・配列・鍵の 3 つの書き方）。`on` が無ければ空 */
+export function triggerNames(doc: Workflow): string[] {
+  const on = doc.on;
+  if (typeof on === "string") return [on];
+  if (Array.isArray(on)) return on.filter((name): name is string => typeof name === "string");
+  if (on !== null && typeof on === "object") return Object.keys(on);
+  return [];
+}
+
 /** `on` が `pull_request` を持つか（文字列・配列・鍵の 3 つの書き方） */
 export function triggersPullRequest(doc: Workflow): boolean {
-  const on = doc.on;
-  if (typeof on === "string") return on === "pull_request";
-  if (Array.isArray(on)) return on.includes("pull_request");
-  if (on !== null && typeof on === "object") return Object.hasOwn(on, "pull_request");
-  return false;
+  return triggerNames(doc).includes("pull_request");
+}
+
+/** 秘密を受ける再利用できるワークフローと、検査用の非公開リポジトリへ写す呼び出しのワークフローの見本のパス */
+const SECRET_WORKFLOW_PATH = join(".github", "workflows", "leak-check-secret.yml");
+export const CALLER_PATH = join("docs", "operations", "leak-check-caller.yml");
+
+/**
+ * ワークフローごとに許す起動（#96 #101 の決定 4）。禁止の起動ではなく許す起動を挙げ、点検していない起動
+ * （`pull_request_target`・`workflow_run`・`issue_comment` など）を足すと落とす
+ */
+const ALLOWED_TRIGGERS: { secret: string[]; caller: string[]; others: string[] } = {
+  secret: ["workflow_call"],
+  caller: ["workflow_dispatch"],
+  others: ["push", "pull_request", "schedule", "workflow_dispatch"],
+};
+
+/** 許す起動に無い起動を `<パス>#on.<起動>` の形で返す */
+export function triggerViolations(workflows: LoadedWorkflow[], caller: LoadedWorkflow): string[] {
+  const allowedFor = (workflow: LoadedWorkflow) => {
+    if (workflow === caller) return ALLOWED_TRIGGERS.caller;
+    if (workflow.path === SECRET_WORKFLOW_PATH) return ALLOWED_TRIGGERS.secret;
+    return ALLOWED_TRIGGERS.others;
+  };
+  return [...workflows, caller].flatMap((workflow) =>
+    triggerNames(workflow.doc)
+      .filter((name) => !allowedFor(workflow).includes(name))
+      .map((name) => `${workflow.path}#on.${name}`),
+  );
 }
 
 /** 最上位と各ジョブの `permissions` を、場所と値の組で返す */
@@ -204,6 +239,164 @@ export function leakJobViolations(ci: LoadedWorkflow): string[] {
   if (pushRuns.includes("--range")) found.push("jobs.leak-check-push#range");
   if (!envNamesOf(push).includes("LEAK_CHECK_REQUIRE_PATTERN")) found.push("jobs.leak-check-push#require");
   return found;
+}
+
+/** 秘密を受けるワークフローの `run:` で動かしてよいコマンド（各コマンドの最初の語） */
+const SECRET_WORKFLOW_COMMANDS = [
+  "git",
+  "tools/checks/install-gitleaks.sh",
+  "tools/checks/export-tree.sh",
+  "tools/checks/leak-scan-secret.sh",
+  "echo",
+  "exit",
+  "[[",
+];
+
+/** 秘密を受けるワークフローの `run:` に置かない語 */
+const SECRET_WORKFLOW_FORBIDDEN_WORDS = ["git archive", "tar ", "--details", "setup-node", "npm", "npx"];
+
+/** コマンドの最初の語として読み飛ばす語 */
+const SHELL_KEYWORDS = ["if", "then", "else", "fi", "!"];
+
+/**
+ * `run:` の文字列を行と `;`・`&&`・`||`・`|`・`$(` で区切り、各コマンドの最初の語を返す。
+ * 変数の代入と `if`・`then`・`else`・`fi`・`!` は読み飛ばし、`#` で始まる行は読まない。
+ * 決まった形の `run:` だけを読む簡単な区切りで、シェルの構文を解かない（ヒアドキュメントと関数の定義は呼ぶ側が落とす）
+ */
+export function runCommandWords(run: string): string[] {
+  return run
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("#"))
+    .flatMap((line) => line.split(/&&|\|\||\||;|\$\(/))
+    .flatMap((segment) => {
+      const words = segment.trim().split(/\s+/).filter((word) => word !== "");
+      const first = words.find((word) => !SHELL_KEYWORDS.includes(word) && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
+      return first === undefined ? [] : [first];
+    });
+}
+
+/** 秘密を受ける手順の名前 */
+const SECRET_STEP = "秘密の規則を重ねて探す";
+
+/** ジョブの表示名に入れる 6 つの入力 */
+const SCAN_INPUTS = ["pr_number", "head_sha", "base_sha", "merge_sha", "code_sha", "generation"];
+
+/**
+ * `leak-check-secret.yml` が設計の決定 4 の形を外れた所を、印（`<パス>#<印>`）で返す。
+ * 印は箇条ごとに 1 つで、1 つの箇条だけを壊せば、その印だけが出る
+ */
+export function secretWorkflowViolations(workflow: LoadedWorkflow, _ci: LoadedWorkflow): string[] {
+  const marks = new Set<string>();
+  const doc = workflow.doc;
+  const jobs = Object.entries(doc.jobs ?? {});
+  const steps = jobs.flatMap(([, job]) => job?.steps ?? []);
+  const gitleaksSteps = steps.filter((step) => step.name === GITLEAKS_STEP);
+  const runs = steps.filter((step) => step.name !== GITLEAKS_STEP).flatMap((step) => (typeof step.run === "string" ? [step.run] : []));
+  const allRuns = steps.flatMap((step) => (typeof step.run === "string" ? [step.run] : []));
+  const runText = runs.join("\n");
+
+  if (JSON.stringify(triggerNames(doc)) !== JSON.stringify(ALLOWED_TRIGGERS.secret)) marks.add("on");
+
+  if (jobs.some(([, job]) => job?.uses !== undefined)) marks.add("uses");
+  for (const step of steps) {
+    if (step.uses === undefined) continue;
+    if (typeof step.uses !== "string" || !/^actions\/checkout@[0-9a-f]{40}$/.test(step.uses)) {
+      marks.add("uses");
+      continue;
+    }
+    const options = step.with ?? {};
+    if (
+      options.repository !== "devbasex/nd-factory" ||
+      options.ref !== "${{ inputs.code_sha }}" ||
+      options["persist-credentials"] !== false ||
+      Object.hasOwn(options, "allow-unsafe-pr-checkout")
+    ) {
+      marks.add("checkout");
+    }
+  }
+  if (!steps.some((step) => typeof step.uses === "string" && step.uses.startsWith("actions/checkout@"))) marks.add("checkout");
+
+  const words = runs.flatMap((run) => runCommandWords(run));
+  if (
+    words.some((word) => !SECRET_WORKFLOW_COMMANDS.includes(word)) ||
+    SECRET_WORKFLOW_FORBIDDEN_WORDS.some((word) => runText.includes(word)) ||
+    runText.includes("<<") ||
+    /\w+\s*\(\)\s*\{/.test(runText)
+  ) {
+    marks.add("run");
+  }
+
+  if (gitleaksSteps.length !== 1 || typeof gitleaksSteps[0]?.run !== "string" || gitleaksSteps[0].run.trim() !== GITLEAKS_RUN) {
+    marks.add("gitleaks-install");
+  }
+  if (
+    jobs.some(([, job]) => envNamesOf(job).some((name) => name.startsWith("GITLEAKS_"))) ||
+    workflow.text.includes("github.com/gitleaks/gitleaks/releases")
+  ) {
+    marks.add("gitleaks-env");
+  }
+
+  if (allRuns.some((run) => /GITHUB_ENV|GITHUB_OUTPUT|GITHUB_PATH/.test(run))) marks.add("github-files");
+  if (allRuns.some((run) => run.includes("${{ inputs."))) marks.add("run-inputs");
+
+  const conditional = (item: Job | Step | null | undefined) => item?.if !== undefined || item?.["continue-on-error"] !== undefined;
+  if (jobs.some(([, job]) => conditional(job)) || steps.some((step) => conditional(step))) marks.add("conditions");
+
+  if (!isReadOnly(doc.permissions) || jobs.some(([, job]) => job?.permissions !== undefined)) marks.add("permissions");
+
+  const readsSecret = (env: Record<string, unknown> | null | undefined) => JSON.stringify(env ?? {}).includes("secrets.LEAK_CHECK_PATTERN");
+  if (
+    jobs.some(([, job]) => readsSecret(job?.env)) ||
+    steps.some((step) => step.name !== SECRET_STEP && readsSecret(step.env)) ||
+    !steps.some((step) => step.name === SECRET_STEP && readsSecret(step.env))
+  ) {
+    marks.add("secret-steps");
+  }
+
+  const names = jobs.map(([, job]) => (typeof job?.name === "string" ? job.name : ""));
+  if (names.length !== 1 || SCAN_INPUTS.some((input) => !names[0]?.includes(`\${{ inputs.${input} }}`))) marks.add("name");
+
+  // 分岐点は、表示名に入る base と head の SHA からだけ求める
+  const mergeBases = runText.split("git merge-base").length - 1;
+  const fromInputs = runText.split('git merge-base "$BASE_SHA" "$HEAD_SHA"').length - 1;
+  if (mergeBases === 0 || mergeBases !== fromInputs) marks.add("fork-point");
+  if (!runText.includes("git rev-list --parents")) marks.add("parents");
+
+  const required = [
+    /tools\/checks\/export-tree\.sh "\$MERGE_SHA" "\$RUNNER_TEMP\/merge-tree"/,
+    /tools\/checks\/export-tree\.sh --history "\$fork_point" "\$HEAD_SHA" "\$RUNNER_TEMP\/history"/,
+    /tools\/checks\/leak-scan-secret\.sh dir "\$RUNNER_TEMP\/merge-tree"/,
+    /tools\/checks\/leak-scan-secret\.sh history "\$RUNNER_TEMP\/history"/,
+    /tools\/checks\/leak-scan-secret\.sh git --range "\$fork_point\.\.\$HEAD_SHA"/,
+  ];
+  if (required.some((pattern) => !pattern.test(runText))) marks.add("scans");
+
+  return [...marks].map((mark) => `${workflow.path}#${mark}`);
+}
+
+/** 呼び出しのワークフローの見本が呼ぶ、公開のリポジトリの再利用できるワークフロー */
+const CALLER_USES = "devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main";
+
+/** 呼び出しのワークフローの見本が設計の決定 4 の形を外れた所を、印（`<パス>#<印>`）で返す */
+export function callerViolations(caller: LoadedWorkflow): string[] {
+  const marks: string[] = [];
+  const doc = caller.doc;
+  const scan = doc.jobs?.scan;
+  const generation = doc.jobs?.generation;
+  if (JSON.stringify(triggerNames(doc)) !== JSON.stringify(ALLOWED_TRIGGERS.caller)) marks.push("on");
+  if (scan?.uses !== CALLER_USES) marks.push("uses");
+  if (Object.values(doc.jobs ?? {}).some((job) => job?.secrets === "inherit")) marks.push("secrets-inherit");
+  else if (JSON.stringify(scan?.secrets) !== JSON.stringify({ LEAK_CHECK_PATTERN: "${{ secrets.LEAK_CHECK_PATTERN }}" })) {
+    marks.push("secrets");
+  }
+  const needs = scan?.needs;
+  if (!(needs === "generation" || (Array.isArray(needs) && needs.includes("generation")))) marks.push("needs");
+  const generationText = JSON.stringify(generation ?? {});
+  if (!generationText.includes("vars.LEAK_CHECK_GENERATION") || !generationText.includes("inputs.generation")) {
+    marks.push("generation");
+  }
+  if (!isReadOnly(doc.permissions)) marks.push("permissions");
+  return marks.map((mark) => `${caller.path}#${mark}`);
 }
 
 /** 起動した人で分ける条件の語。漏れの検査のワークフローと見本は持たない（#96 #101 の決定 2） */
@@ -432,6 +625,98 @@ function ciWith(...replacements: [string | RegExp, string][]): LoadedWorkflow {
   return { path: CI_PATH, text, doc: docOf(text) };
 }
 
+describe("triggerNames・triggerViolations", () => {
+  it.each([
+    ["文字列", "on: push\n", ["push"]],
+    ["配列", "on: [push, pull_request]\n", ["push", "pull_request"]],
+    ["鍵", "on:\n  push:\n  pull_request:\n", ["push", "pull_request"]],
+    ["無い", "name: x\n", []],
+  ])("%s の書き方で起動の名前を返す", (_label, text, expected) => {
+    expect(triggerNames(docOf(`${text}jobs:\n  a:\n    runs-on: ubuntu-24.04\n`))).toEqual(expected);
+  });
+
+  const real = () => ({ workflows: loadWorkflows(ROOT), caller: loadWorkflowFile(ROOT, CALLER_PATH) });
+  const replaced = (workflow: LoadedWorkflow, from: string, to: string): LoadedWorkflow => {
+    const text = workflow.text.replace(from, to);
+    if (text === workflow.text) throw new Error(`置き換える元が無い: ${from}`);
+    return { ...workflow, text, doc: docOf(text) };
+  };
+
+  it.each([
+    ["leak-check-secret.yml に pull_request_target を足す", SECRET_WORKFLOW_PATH, "pull_request_target"],
+    ["leak-check-secret.yml に workflow_run を足す", SECRET_WORKFLOW_PATH, "workflow_run"],
+    ["ci.yml に pull_request_target を足す", join(".github", "workflows", "ci.yml"), "pull_request_target"],
+  ])("%s と当たる", (_label, path, trigger) => {
+    const { workflows, caller } = real();
+    const changed = workflows.map((workflow) =>
+      workflow.path === path ? replaced(workflow, "\non:\n", `\non:\n  ${trigger}:\n`) : workflow,
+    );
+    expect(triggerViolations(changed, caller)).toEqual([`${path}#on.${trigger}`]);
+  });
+
+  it("見本に push を足すと当たる", () => {
+    const { workflows, caller } = real();
+    expect(triggerViolations(workflows, replaced(caller, "\non:\n", "\non:\n  push:\n"))).toEqual([`${CALLER_PATH}#on.push`]);
+  });
+});
+
+describe("runCommandWords", () => {
+  it.each([
+    ["a && b | c", ["a", "b", "c"]],
+    ['x="$(git rev-parse y)"', ["git"]],
+    ["if [[ -n \"$x\" ]]; then\n  echo a\nfi", ["[[", "echo"]],
+    ["if ! git fetch origin; then exit 1; fi", ["git", "exit"]],
+    ["# 注\nstatus=0\ntools/checks/export-tree.sh a b || status=1", ["tools/checks/export-tree.sh"]],
+  ])("%s の最初の語を返す", (run, expected) => {
+    expect(runCommandWords(run)).toEqual(expected);
+  });
+});
+
+describe("secretWorkflowViolations・callerViolations", () => {
+  const secret = () => loadWorkflowFile(ROOT, SECRET_WORKFLOW_PATH);
+  const ci = () => loadWorkflowFile(ROOT, CI_PATH);
+  const broken = (base: LoadedWorkflow, from: string | RegExp, to: string): LoadedWorkflow => {
+    const text = base.text.replace(from, to);
+    if (text === base.text) throw new Error(`置き換える元が無い: ${String(from)}`);
+    return { ...base, text, doc: docOf(text) };
+  };
+  const SCAN_STEP = "      - name: 秘密の規則を重ねて探す\n";
+
+  it.each<[string, string | RegExp, string, string]>([
+    ["ref を head にする", "ref: ${{ inputs.code_sha }}", "ref: ${{ inputs.head_sha }}", "checkout"],
+    ["allow-unsafe-pr-checkout を渡す", "          persist-credentials: false\n", "          persist-credentials: false\n          allow-unsafe-pr-checkout: true\n", "checkout"],
+    ["npm ci を足す", SCAN_STEP, `      - run: npm ci\n${SCAN_STEP}`, "run"],
+    ["actions/setup-node を足す", SCAN_STEP, `      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0\n${SCAN_STEP}`, "uses"],
+    ["run: に ${{ inputs.head_sha }} を書く", 'tools/checks/leak-scan-secret.sh dir "$RUNNER_TEMP/merge-tree"', 'echo "${{ inputs.head_sha }}"\n          tools/checks/leak-scan-secret.sh dir "$RUNNER_TEMP/merge-tree"', "run-inputs"],
+    ["continue-on-error: true を足す", SCAN_STEP, `${SCAN_STEP}        continue-on-error: true\n`, "conditions"],
+    ["表示名から head の SHA を外す", " head ${{ inputs.head_sha }}", "", "name"],
+    ["親の確かめを外す", 'git rev-list --parents -n 1 "$MERGE_SHA"', 'git rev-parse "$MERGE_SHA"', "parents"],
+    ["分岐点を別の値から求める", 'fork_point="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"\n          tools/checks/leak-scan-secret.sh', 'fork_point="$(git merge-base "$MERGE_SHA" "$HEAD_SHA")"\n          tools/checks/leak-scan-secret.sh', "fork-point"],
+    ["export-tree.sh --history の呼び出しを外す", /\n {10}tools\/checks\/export-tree\.sh --history [^\n]*/, "", "scans"],
+    ["履歴の history の探しを外す", /\n {10}tools\/checks\/leak-scan-secret\.sh history [^\n]*/, "", "scans"],
+    ["git archive を使う", 'tools/checks/export-tree.sh "$MERGE_SHA" "$RUNNER_TEMP/merge-tree"', 'git archive "$MERGE_SHA" -o "$RUNNER_TEMP/merge.tar"\n          tools/checks/export-tree.sh "$MERGE_SHA" "$RUNNER_TEMP/merge-tree"', "run"],
+    ["--details を足す", 'tools/checks/leak-scan-secret.sh dir "$RUNNER_TEMP/merge-tree"', 'tools/checks/leak-scan-secret.sh dir "$RUNNER_TEMP/merge-tree" --details', "run"],
+    ["GITHUB_OUTPUT に書く", 'tools/checks/leak-scan-secret.sh dir "$RUNNER_TEMP/merge-tree"', 'echo "fork_point=$fork_point" >>"$GITHUB_OUTPUT"\n          tools/checks/leak-scan-secret.sh dir "$RUNNER_TEMP/merge-tree"', "github-files"],
+    ["pull-requests: write を足す", "permissions:\n  contents: read\n", "permissions:\n  contents: read\n  pull-requests: write\n", "permissions"],
+    ["ジョブの env に GITLEAKS_VERSION を足す", "    timeout-minutes: 20\n", "    timeout-minutes: 20\n    env:\n      GITLEAKS_VERSION: 8.30.1\n", "gitleaks-env"],
+    ["gitleaks を置く手順に curl を直に書く", 'run: tools/checks/install-gitleaks.sh "$RUNNER_TEMP/gitleaks"', "run: curl -fsSL -o g.tar.gz https://example.com/g.tar.gz", "gitleaks-install"],
+    ["秘密をほかの手順でも受ける", "      - name: マージコミットの木と履歴の項目を取り出す\n        env:\n", "      - name: マージコミットの木と履歴の項目を取り出す\n        env:\n          LEAK_CHECK_PATTERN: ${{ secrets.LEAK_CHECK_PATTERN }}\n", "secret-steps"],
+    ["pull_request_target を足す", "\non:\n", "\non:\n  pull_request_target:\n", "on"],
+  ])("%s と、その印だけが出る", (_label, from, to, mark) => {
+    expect(secretWorkflowViolations(broken(secret(), from, to), ci())).toEqual([`${SECRET_WORKFLOW_PATH}#${mark}`]);
+  });
+
+  const caller = () => loadWorkflowFile(ROOT, CALLER_PATH);
+  it.each<[string, string | RegExp, string, string]>([
+    ["secrets: inherit を使う", / {4}secrets:\n {6}LEAK_CHECK_PATTERN: .*\n/, "    secrets: inherit\n", "secrets-inherit"],
+    ["@ の後を SHA にする", "leak-check-secret.yml@main", `leak-check-secret.yml@${"a".repeat(40)}`, "uses"],
+    ["世代の確かめを外す", "    needs: generation\n", "", "needs"],
+    ["世代の変数を読まない", "${{ vars.LEAK_CHECK_GENERATION }}", "1", "generation"],
+  ])("見本で %s と当たる", (_label, from, to, mark) => {
+    expect(callerViolations(broken(caller(), from, to))).toContain(`${CALLER_PATH}#${mark}`);
+  });
+});
+
 describe("leakJobViolations・patternSecretReaders・actorConditions", () => {
   it.each<[string, [string | RegExp, string][], string[]]>([
     [
@@ -544,12 +829,32 @@ describe("CI の定義", () => {
     expect(leakJobViolations(ci)).toEqual([]);
   });
 
-  it("秘密 LEAK_CHECK_PATTERN を読むジョブは leak-check-push だけ", () => {
-    expect(patternSecretReaders(workflows)).toEqual([`${CI_PATH}#jobs.leak-check-push`]);
+  it("秘密 LEAK_CHECK_PATTERN を読むジョブは leak-check-push と leak-check-secret だけ", () => {
+    expect(patternSecretReaders(workflows).sort()).toEqual(
+      [`${CI_PATH}#jobs.leak-check-push`, `${SECRET_WORKFLOW_PATH}#jobs.leak-check-secret`].sort(),
+    );
   });
 
-  it("起動した人で分ける条件の語が無い", () => {
-    expect(actorConditions(workflows)).toEqual([]);
+  const caller = loadWorkflowFile(ROOT, CALLER_PATH);
+
+  it("起動した人で分ける条件の語が、ワークフローにも見本にも無い", () => {
+    expect(actorConditions([...workflows, caller])).toEqual([]);
+  });
+
+  it("どのワークフローと見本も、許す起動だけを持つ", () => {
+    expect(triggerViolations(workflows, caller)).toEqual([]);
+  });
+
+  it("leak-check-secret.yml が決定 4 の形を外れない", () => {
+    const secret = workflows.find((workflow) => workflow.path === SECRET_WORKFLOW_PATH);
+    if (!secret || !ci) throw new Error("leak-check-secret.yml か ci.yml を読めない");
+    expect(secretWorkflowViolations(secret, ci)).toEqual([]);
+  });
+
+  it("呼び出しのワークフローの見本が決定 4 の形を外れず、permissions が { contents: read } だけ", () => {
+    expect(callerViolations(caller)).toEqual([]);
+    expect(permissionViolations(caller.doc)).toEqual([]);
+    expect(credentialWords(caller.text)).toEqual([]);
   });
 
   it("最上位の permissions が { contents: read } だけで、ジョブの permissions は持たないか同じ", () => {
