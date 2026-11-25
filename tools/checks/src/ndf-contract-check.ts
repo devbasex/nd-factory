@@ -556,6 +556,18 @@ export type MainOptions = {
   loadUse?: (root: string) => Promise<NdfContractUse | null>;
 };
 
+/** 要約のファイルが指定されていれば要約を追記する。書けなければ理由を出して false を返す（呼び手は終了コード 2 で終える） */
+async function appendSummary(summaryPath: string | undefined, render: () => string): Promise<boolean> {
+  if (summaryPath === undefined) return true;
+  try {
+    await appendFile(summaryPath, render());
+  } catch (error) {
+    process.stderr.write(`error: 要約のファイルに書けない: ${(error as Error).message}\n`);
+    return false;
+  }
+  return true;
+}
+
 /** 取得・照らし・要約・終了コードをつなぐ */
 export async function mainNdfContractCheck(
   argv: string[],
@@ -599,14 +611,7 @@ export async function mainNdfContractCheck(
     const line = `fail: no-contract-use ${pinned}`;
     process.stdout.write(`${line}\n`);
     process.stderr.write(`NDF の契約の使い方の書き出し（${CONTRACT_USE_EXPORT}）が作業の木 ${root} に無い\n`);
-    if (summaryPath !== undefined) {
-      try {
-        await appendFile(summaryPath, renderSummary([], [], [line]));
-      } catch (error) {
-        process.stderr.write(`error: 要約のファイルに書けない: ${(error as Error).message}\n`);
-        return 2;
-      }
-    }
+    if (!(await appendSummary(summaryPath, () => renderSummary([], [], [line])))) return 2;
     return 1;
   }
 
@@ -638,14 +643,7 @@ export async function mainNdfContractCheck(
       ...(tipFindings ?? []).map((f) => formatFinding("tip", f)),
     ];
     process.stdout.write(`${output.join("\n")}\n`);
-    if (summaryPath !== undefined) {
-      try {
-        await appendFile(summaryPath, renderSummary(fixedFindings, tipFindings, lines));
-      } catch (error) {
-        process.stderr.write(`error: 要約のファイルに書けない: ${(error as Error).message}\n`);
-        return 2;
-      }
-    }
+    if (!(await appendSummary(summaryPath, () => renderSummary(fixedFindings, tipFindings, lines)))) return 2;
     if (fixedFindings.length > 0) {
       process.stderr.write(`固定の点 ${fixed.commit} の NDF の契約と形の正本が ${fixedFindings.length} 件食い違う\n`);
     }
