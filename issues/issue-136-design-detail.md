@@ -1,6 +1,6 @@
 # #136 の詳細設計: NDF の固定の点を 11.0.36 へ上げ、契約の照合が 6 項目を必ず実行する
 
-設計書 [issue-136-design.md](./issue-136-design.md) の構成要素を、ファイルと関数の粒度に分けて書いた文書である。新しく作る関数は 2 つ以上あり、既存の関数のシグネチャも変える（`compareContract`・`MainOptions`）。このため、設計書には畳まずに別ファイルにした。
+設計書 [issue-136-design.md](./issue-136-design.md) の構成要素を、ファイルと関数の粒度に分けて書いた文書である。新しく作る関数は 2 つ以上あり、既存の関数のシグネチャも変える（`compareContract`・`MainOptions`）。このため、設計書の中には書かず、別のファイルにした。
 
 構成要素は次の 5 つで、この文書はこの順に書く。
 
@@ -67,10 +67,10 @@ docs/operations/pipeline-approval.md
 | `packages/contracts/test/fixtures/ndf-contract-8d22be7/unattended-report.json` | 新設 | 固定の点の区間の報告の `shape` と `cases` 16 件の写し | — | — | — |
 | `packages/contracts/test/data.test.ts` | 変更 | 受ける組の期待値をバージョン 16 にする | — | — | — |
 | `tools/checks/src/ndf-contract-check.ts` | 変更 | 照合の 1・4・5・6 項目目を広げ、skip の道を消し、生成のコマンドを足す | `@nd-factory/contracts/ndf-contract-use`（型と zod の形）・zod・`node:` | `ndf-contract-check` | `compareContract`・`checkCases`・`checkFiles`・`checkReport`・`checkEntrypoints`・`isContractUse`・`mainNdfContractCheck`（変更）、`generateContractUse`・`mainNdfContractSync`（新設）。`CONTRACT_USE_REQUIRED` と型 `NdfContractUse`・`ReportRequiredRule` のコピーは消す |
-| `tools/test/ndf-contract-check.test.ts` | 変更 | 偽の使い方を新しい型にし、新しい照合と生成のテストを足す | 照合のモジュール・フィクスチャ | — | — |
+| `tools/test/ndf-contract-check.test.ts` | 変更 | テストの偽物の使い方を新しい型にし、新しい照合と生成のテストを足す | 照合のモジュール・フィクスチャ | — | — |
 | `tools/test/fixtures/ndf-contract-752a9cf/` | 削除 | 古い固定の点の写し | — | — | — |
 | `tools/test/fixtures/ndf-contract-8d22be7/*.json` | 新設 | 新しい固定の点の `entrypoints.json`（15 行の `id`・`kind`・`target`・`lead`・`args`・`env`・`files`）・`env.json`（`id`・`set_by`）・`ndf-files.json`（`id`・`path`・`reader`・`fields`）の写し | — | — | — |
-| `docs/design/execution.md` | 変更 | 決定 104 と「契約のバージョンの照合し」の行の値を新しい固定の点にする | — | — | — |
+| `docs/design/execution.md` | 変更 | 決定 104・「契約のバージョンの照合し」・「NDF 11 の名前」の行の値を新しい固定の点にする | — | — | — |
 | `docs/specifications/contracts-and-core.md` | 変更 | 受ける組の値をバージョン 16 にし、使い方の書き出しを足す | — | — | — |
 | `docs/operations/pipeline-approval.md` | 変更 | skip の行で承認してよいとする注記を消す | — | — | — |
 
@@ -134,7 +134,7 @@ docs/operations/pipeline-approval.md
 
 `acceptedVersions` は `NDF_CONTRACTS.accepted` を渡し、データに書かない（決定 3）。
 
-生成のファイルのキーに `ndf_ref` を使わず、`commit` にする。参照の検査は、`ndf_ref` のキーが `ndf-pin.json` の 1 か所だけにあることを確かめるためである。
+生成のファイルのキーに `ndf_ref` を使わず、`commit` にする。参照の検査が、`ndf_ref` のキーは `ndf-pin.json` の 1 か所だけにあることを確かめているためである。
 
 `report.values` は、契約の `shape.values` のキー（結果の値の名前）だけを契約の順で写した文字列の配列にする。`shape.values` の値の側（結果ごとの説明の文）は写さない。設計書の決定 5 は `shape.values` を「そのまま写す」としているが、判定にも読み取りにも使うのは値の名前だけである。説明の文を写すと、参照の検査が探す語を持ち込むおそれがある（今のフィクスチャも説明の文の列を写していない）。照合の 5 項目目は、このキーの並びと契約の `shape.values` のキーの並びを比べる。`required` と `material` は契約の値をそのまま写す。
 
@@ -205,7 +205,7 @@ docs/operations/pipeline-approval.md
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `judgeCallWith` | 照合のテストの偽の判定（`JUDGE_TABLE`） | `grep -n "judgeCall" -r packages tools apps` | 使えない。テストの中の偽物で、種類ごとの規則を持たない |
+| `judgeCallWith` | 照合のテストに置いた偽物の判定（`JUDGE_TABLE`） | `grep -n "judgeCall" -r packages tools apps` | 使えない。テストの中の偽物で、種類ごとの規則を持たない |
 | `filePathPattern` | 正規表現のエスケープの部品 | `grep -rn "escapeRegExp\|RegExp.escape" packages apps tools --include=*.ts` | 当たりが無く、既存の部品は無い。特殊文字の置き換えを 1 行で書く |
 
 ### 単体テストの観点
@@ -243,16 +243,16 @@ docs/operations/pipeline-approval.md
 
 | 条件 | 結果 |
 | --- | --- |
-| `- 結果:` で始まる行が無い | `result` は空文字列。`errors` は `result_line_missing`（`結果`）の 1 件だけで、規則 3〜6 を当てない |
-| 最後の `- 結果:` の行の値（前後の空白を除く）が `report.values` に無い | `result` はその値。`errors` は `result_value_unknown`（`結果`）の 1 件だけで、規則 3〜6 を当てない |
+| `- 結果:` で始まる行が無い（規則 1） | `result` は空文字列。`errors` は `result_line_missing`（`結果`）の 1 件だけで、規則 3〜6 を当てない |
+| 最後の `- 結果:` の行の値（前後の空白を除く）が `report.values` に無い（規則 2） | `result` はその値。`errors` は `result_value_unknown`（`結果`）の 1 件だけで、規則 3〜6 を当てない |
 | 値が `report.values` にある | 規則 3〜6 を当てる |
 
-規則 3〜6 の当て方は次のとおりである。
+規則 3〜6（設計書の決定 7 の番号）の当て方は次のとおりである。手順の番号と規則の番号は違う。
 
-1. 結果の行より後ろの行のうち、`- <項目>: <値>` の形の行を項目として読む。値の前後の空白を除く。同じ名前は後の行で上書きする
-2. 結果の値の `required` の `always` の項目と、`when` の条件に当たった行の `need` の項目を、要る項目として集める。`when` の条件は、`item` の項目の値が `prefix` で始まるか、`equals` と同じかである。`item` の項目が無ければ条件に当たらない
-3. 要る項目ごとに、無い・空・`無し` なら `item_missing`（その項目の名前）を足す。要る項目の順は、`always` の順の後に `when` の順とし、同じ項目は 1 回だけ確かめる
-4. `material.item`（`材料`）の値が、空でも `無し` でもないときだけ、形を確かめる
+1. 規則 3・4: 結果の行より後ろの行のうち、`- <項目>: <値>` の形の行を項目として読む。値の前後の空白を除く。同じ名前は後の行で上書きする
+2. 規則 5: 結果の値の `required` の `always` の項目と、`when` の条件に当たった行の `need` の項目を、要る項目として集める。`when` の条件は、`item` の項目の値が `prefix` で始まるか、`equals` と同じかである。`item` の項目が無ければ条件に当たらない
+3. 規則 5: 要る項目ごとに、無い・空・`無し` なら `item_missing`（その項目の名前）を足す。要る項目の順は、`always` の順の後に `when` の順とし、同じ項目は 1 回だけ確かめる
+4. 規則 6: `material.item`（`材料`）の値が、空でも `無し` でもないときだけ、形を確かめる
    - 値が `material.body`（`本文`）のとき: 結果の行より前に、`material.heading`（`## 判断の材料`）と同じ行があるかを確かめる。無ければ `material_heading_missing`（`材料`）を足す
    - `本文` でないとき: 値を空白で区切った並びのどれもが、`material.url_prefix`（`https://`）で始まり、その後ろに 1 文字以上あるかを確かめる。そうでなければ `material_form_invalid`（`材料`）を足す
 
@@ -263,7 +263,7 @@ docs/operations/pipeline-approval.md
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `readReportWith` | 照合のテストの偽の読み取り・`apps/api` と `infra` の区間の報告の読み手 | `grep -rn "readReport\|- 結果:" packages apps infra tools` | 使えない。テストの偽物は規則 1・2 だけを持つ。ほかの読み手は無い |
+| `readReportWith` | 照合のテストに置いた偽物の読み取り・`apps/api` と `infra` の区間の報告の読み手 | `grep -rn "readReport\|- 結果:" packages apps infra tools` | 使えない。テストの偽物は規則 1・2 だけを持つ。ほかの読み手は無い |
 
 ### 単体テストの観点
 
@@ -282,7 +282,7 @@ docs/operations/pipeline-approval.md
 | `compareContract` | `tools/checks/src/ndf-contract-check.ts` | 変更 | `(files: ContractFiles, use: NdfContractUse, pinned: string) => ContractFinding[]`（今は `(files, use: NdfContractUse \| null)`） | 照合の 1〜6 項目目を実行し、食い違いを返す。使い方が無い場合の扱いは呼び出し元へ移す |
 | `checkCases` | 同上 | 変更（責務） | 今のまま | 1 項目目。先にすべてのサンプルの参照先の id が `entrypoints.json` にあるかを確かめ、その後で使うインタフェースへのサンプルだけを判定へ通す |
 | `checkFiles` | 同上 | 変更（責務） | 今のまま | 4 項目目。今の確かめに加えて、読むファイルの `path` が契約の行の `path` と同じかを比べる |
-| `checkReport` | 同上 | 変更（責務） | 今のまま | 5 項目目。`values`・`required`・`material` は契約の `shape` と同じかを比べ、`items` は含むかを確かめる。サンプルの照合は今のまま |
+| `checkReport` | 同上 | 変更（責務） | 今のまま | 5 項目目。`values`・`required`・`material` は契約の `shape` と同じかを比べる。手で書く `reportItems`（ランナーが読む項目の名前）は、契約の `shape.items` にあるかを確かめる。サンプルの照合は今のまま |
 | `checkEntrypoints` | 同上 | 変更 | `(files: ContractFiles, use: NdfContractUse, pinned: string, findings: ContractFinding[]) => void` | 6 項目目。生成の固定の点を比べた後、使うインタフェースの行が契約にあり、6 つの列が同じかを比べる |
 | `isContractUse` | 同上 | 変更（責務） | 今のまま | 書き出しが新しい `NdfContractUse` の形かを確かめる |
 | `MainOptions` | 同上 | 変更（型） | `{ repoUrl?: string; loadUse?: (root: string) => Promise<NdfContractUse \| null> }`（`required` を消す） | テストが差し替える依存 |
@@ -314,7 +314,7 @@ docs/operations/pipeline-approval.md
 | `mainNdfContractCheck` | `ndf-pin.json` を読めない・書き出しはあるが読めない | 今のまま | 今のまま | 今のまま | 今のまま（終了コード 2） | 今のまま |
 | `checkEntrypoints` | 生成の固定の点が `ndf-pin.json` と違う | 固定の点を上げた後に生成のコマンドを打ち忘れた | `use.pinnedCommit !== pinned` | 6 項目目の食い違いを足し、残りの比較も続ける | `mismatch: <fixed か tip> 6 …ndf-contract-use.generated.json: 生成の固定の点 <値> が ndf-pin.json の <値> と違う`。固定の点の照合なら終了コード 1 | `npm run ndf-contract:sync` を打ち直す |
 | `checkEntrypoints` | 生成の行の列が契約と違う | 生成のファイルの手での書き換え（固定の点）・上流の変更（先端） | 列ごとに `JSON.stringify` で比べる | 列ごとに 1 件の食い違いを足す | `mismatch: … 6 …entrypoints.json <id>: <列> が契約と違う`。値は出さない（契約の値は公開の情報だが、行が長くなるため） | 固定の点なら生成し直す |
-| `checkCases` | 使うインタフェースへのサンプルの参照先が `entrypoints.json` に無い | 上流の契約の誤り | 絞り込みの前の id の確かめ | 1 項目目の食い違いを足し、そのサンプルを判定へ通さない | `mismatch: … 1 …entrypoint-cases.json <サンプルの id>: …`（今の文のまま） | 上流の修正を待つ |
+| `checkCases` | サンプルの参照先が `entrypoints.json` に無い（使うインタフェースへのサンプルに限らず、すべてのサンプルで確かめる） | 上流の契約の誤り | 絞り込みの前の id の確かめ | 1 項目目の食い違いを足し、そのサンプルを判定へ通さない | `mismatch: … 1 …entrypoint-cases.json <サンプルの id>: …`（今の文のまま） | 上流の修正を待つ |
 | `checkFiles` | 読むファイルの `path` が契約と違う | 同上（生成し忘れか上流の変更） | `row.path !== wanted.path` | 4 項目目の食い違いを足す | `mismatch: … 4 …ndf-files.json <id>: path が生成の値と違う` | 固定の点なら生成し直す |
 | `checkReport` | `values`・`required`・`material` が契約の `shape` と違う | 同上 | 正規化した JSON で比べる | 5 項目目の食い違いを、キーごとに 1 件足す | `mismatch: … 5 …unattended-report.json: shape.<キー> が生成の値と違う` | 同上 |
 | `generateContractUse` | 手で書く id が契約の `entrypoints.json` に無い | 手での書き誤り・上流でインタフェースが消えた | id で引けない | `ContractFetchError` でない専用の例外（`ContractUseSyncError`）を投げる | — | — |
