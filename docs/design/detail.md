@@ -253,7 +253,6 @@ nd-factory/
 | `claimIdempotency` | 行があり `fingerprint` が違う | `reused` |
 | `claimIdempotency` | 借りのレコードで期限の前 | `in_progress` |
 | `claimIdempotency` | 借りの行で期限を過ぎた（`fingerprint` が同じ） | 読んだ `version` を条件に新しい借りの行全体を置き換える書き込みに勝てば `fresh`、負ければ `in_progress` |
-| `claimIdempotency` | `replayOnly` が真（`logins.delete` のアイテムの `replay_only`。[API の文書の冪等キー](api.md#冪等キー) の「結果を確かめるだけの送り直し」） | 借りの行を書かない。済みのレコードで `fingerprint` が同じなら `replay`、借りのレコードで期限の前なら `in_progress`、`fingerprint` が違えば `reused`。ほか（行が無い・借りの行で期限を過ぎた・24 時間を過ぎた済みの行）は `missing` で、`dispatch` はハンドラーを呼ばずにアイテムの 404 `replay_missing` にする。`fingerprint` は `replay_only` を除いたアイテムから作る。受け持ちは `logins.delete` の形を決める #4 |
 | `judgeUsage` | 時点が「始める」 | 実行の場所と推論の手段がプランに無ければ `place_not_allowed`・`inference_not_allowed`。上限額があり使った額が上限額以上なら `monthly_cap_reached`（待っても解けない） |
 | `judgeUsage` | 時点が「割り当てる」 | 同時に動くレーンの数がプランの数以上なら `concurrency_full`（待てば解ける）。上限なしの行は照合しない |
 | `judgeUsage` | 時点が「区間の境」 | 使った額が上限額以上なら `monthly_cap_reached`（待てば解ける: 上限額を変えるか月が替わる） |
@@ -284,8 +283,8 @@ nd-factory/
 | --- | --- | --- | --- |
 | `Clock` | 型 | `packages/core`（`clock`） | `{ now(): Date; iso(): string; epochMs(): number }` |
 | `IdKind` | 型（値の集合はスキーマの正本） | `packages/contracts`（ID のプレフィックスの集まり） | `usr`・`team`・`inv`・`prj`・`repo`・`trf`・`spr`・`lane`・`apr`・`qst`・`ntc`・`dst`・`dlg`・`mch`・`key`・`aud`（[値の形](api.md#値の形)） |
-| `IdempotencyClaimInput` | 型 | `packages/core`（`idempotency`） | `{ principalKey, operation, key, fingerprint, requestId }`。`logins.delete` の形を決める #4 で、結果を確かめるだけの送り直しの `replayOnly?: boolean` を足す |
-| `IdempotencyClaim` | 型 | `packages/core`（`idempotency`） | `fresh`・`replay`・`in_progress`・`reused` の 4 つの形。#4 で `replayOnly` を足すとき、`missing` を足して 5 つにする |
+| `IdempotencyClaimInput` | 型 | `packages/core`（`idempotency`） | `{ principalKey, operation, key, fingerprint, requestId }` |
+| `IdempotencyClaim` | 型 | `packages/core`（`idempotency`） | `fresh`・`replay`・`in_progress`・`reused` の 4 つの形 |
 | `IDEMPOTENCY_TTL_SECONDS` | 定数 | `packages/contracts`（操作の規約の値） | 86400（24 時間） |
 | `IDEMPOTENCY_LEASE_MS` | 定数 | `packages/core`（`idempotency`） | API の関数のタイムアウトの 2 倍。タイムアウト値はスキーマの正本にある設定から読み、ここで数を重ねて持たない |
 | `LogContext`・`Logger` | 型 | `packages/core`（`log`） | 文脈は `request_id`・`fn`・`endpoint`（エンドポイント）。項目は `level`・`msg`・`time` と任意の ID と数 |
