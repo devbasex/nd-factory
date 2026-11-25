@@ -3,9 +3,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import useData from "../data/ndf-contract-use.json" with { type: "json" };
 import generatedData from "../data/ndf-contract-use.generated.json" with { type: "json" };
+import { DataFileError, NDF_CONTRACTS } from "../src/data.ts";
 import { ndfContractUseGenerated, type NdfCall, type NdfEntrypointRow } from "../src/ndf-contract-use-schema.ts";
-import { filePathPattern, judgeCallWith, readReportWith } from "../src/ndf-contract-use.ts";
+import { buildContractUse, filePathPattern, judgeCallWith, ndfContractUse, readReportWith } from "../src/ndf-contract-use.ts";
+import { REPORT_ITEMS } from "../src/ndf-contract-use-schema.ts";
 
 /** 固定の点（8d22be7）の契約の写し。説明の文の列は写していない */
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ndf-contract-8d22be7");
@@ -311,5 +314,68 @@ describe("readReportWith", () => {
         expect(() => read(text)).not.toThrow();
       }
     });
+  });
+});
+
+describe("ndfContractUse", () => {
+  it("使うインタフェースの id の集合が、execution.md の表の 11 の id とちょうど同じ（網羅）", () => {
+    expect([...ndfContractUse.entrypoints.map((row) => row.id)].sort()).toEqual([...USED_ENTRYPOINTS].sort());
+    expect(ndfContractUse.entrypoints).toHaveLength(USED_ENTRYPOINTS.length);
+  });
+
+  it("受ける組は NDF_CONTRACTS.accepted そのもの（コピーしない）", () => {
+    expect(ndfContractUse.acceptedVersions).toBe(NDF_CONTRACTS.accepted);
+  });
+
+  it("固定の点・前置き・読む項目・区間の報告の形を生成と手で書くデータから持つ", () => {
+    expect(ndfContractUse.pinnedCommit).toBe(GENERATED.commit);
+    expect(ndfContractUse.skillPrefix).toBe("ndf:");
+    expect(ndfContractUse.reportItems).toBe(REPORT_ITEMS);
+    expect(ndfContractUse.report).toEqual(GENERATED.report);
+  });
+
+  it("judgeCall と readReport は生成のデータで判定し、読む", () => {
+    expect(ndfContractUse.judgeCall(caseById("resume"))).toBe(true);
+    expect(ndfContractUse.judgeCall(caseById("loop-record"))).toBe(false);
+    expect(ndfContractUse.readReport("- 結果: 完了\n").result).toBe("完了");
+  });
+});
+
+describe("buildContractUse", () => {
+  const clone = <T>(value: T): T => structuredClone(value);
+  const build = (data: unknown = useData, generated: unknown = generatedData) => buildContractUse(data, generated, NDF_CONTRACTS.accepted);
+
+  it("読むファイルの行は、生成の path に手で書く fields を id で付けたもの", () => {
+    const use = build();
+    expect(use.files).toContainEqual({ id: "plan-progress", path: "<sprint>/<n>-<plan>-state/progress.jsonl", fields: ["step", "attention"] });
+    expect(use.files).toContainEqual({ id: "gate-rejections", path: "gate-rejections.jsonl", fields: [] });
+    expect(use.files).toContainEqual({ id: "issue-request", path: ".", fields: ["repo", "title", "body", "labels"] });
+  });
+
+  it("手で書くデータの形が違うと DataFileError", () => {
+    expect(() => build({ ...clone(useData), extra: 1 })).toThrow(DataFileError);
+    expect(() => build({ ...clone(useData), skillPrefix: 1 })).toThrow(DataFileError);
+  });
+
+  it("生成のデータの形が違うと DataFileError", () => {
+    expect(() => build(useData, { ...clone(generatedData), commit: "x" })).toThrow(DataFileError);
+  });
+
+  it("手で書く id と生成の行の id が一致しないと、片方にだけある id を並べた DataFileError", () => {
+    const data = { ...clone(useData), entrypoints: [...useData.entrypoints.filter((id) => id !== "block-next"), "file-loop-record"] };
+    const run = () => build(data);
+    expect(run).toThrow(DataFileError);
+    expect(run).toThrow(/block-next/);
+    expect(run).toThrow(/file-loop-record/);
+  });
+
+  it("手で書く files の id が生成の files に無いと DataFileError", () => {
+    const data = { ...clone(useData), files: [...useData.files, { id: "loop-record", fields: [] }] };
+    expect(() => build(data)).toThrow(DataFileError);
+  });
+
+  it("env の entrypoint が使うインタフェースに無いと DataFileError", () => {
+    const data = { ...clone(useData), env: [...useData.env, { entrypoint: "file-loop-record", site: "local", names: [] }] };
+    expect(() => build(data)).toThrow(DataFileError);
   });
 });

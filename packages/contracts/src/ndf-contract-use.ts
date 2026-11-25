@@ -8,10 +8,17 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
+import { z } from "zod";
 
+import useData from "../data/ndf-contract-use.json" with { type: "json" };
+import generatedData from "../data/ndf-contract-use.generated.json" with { type: "json" };
+import { DataFileError, NDF_CONTRACTS } from "./data.ts";
 import {
+  ndfContractUseData,
+  ndfContractUseGenerated,
   REPORT_ITEMS,
   type NdfCall,
+  type NdfContractUse,
   type NdfContractUseGenerated,
   type NdfEntrypointRow,
   type ReportError,
@@ -183,3 +190,56 @@ export function readReportWith(report: ReportShape, text: string): ReportReading
   }
   return { result, errors, items, material: errors.length > 0 ? none : material };
 }
+
+const USE_DATA_FILE = "ndf-contract-use.json";
+const GENERATED_FILE = "ndf-contract-use.generated.json";
+
+function parseData<T extends z.ZodType>(file: string, schema: T, raw: unknown): z.infer<T> {
+  const result = schema.safeParse(raw);
+  if (!result.success) throw new DataFileError(`${file} の形が違う: ${z.prettifyError(result.error)}`);
+  return result.data;
+}
+
+/**
+ * 手で書くデータと生成のデータを形で読み、互いに食い違わないことを確かめて、判定と読み取りの関数を付けた使い方を組み立てる。
+ * 食い違えば `DataFileError`（手で書くデータを直した後に `npm run ndf-contract:sync` を打ち忘れたときなど）
+ */
+export function buildContractUse(data: unknown, generated: unknown, accepted: NdfContractUse["acceptedVersions"]): NdfContractUse {
+  const hand = parseData(USE_DATA_FILE, ndfContractUseData, data);
+  const gen = parseData(GENERATED_FILE, ndfContractUseGenerated, generated);
+  const handIds = new Set(hand.entrypoints);
+  const genIds = new Set(gen.entrypoints.map((row) => row.id));
+  const onlyHand = [...handIds].filter((id) => !genIds.has(id));
+  const onlyGen = [...genIds].filter((id) => !handIds.has(id));
+  if (onlyHand.length > 0 || onlyGen.length > 0 || handIds.size !== hand.entrypoints.length || genIds.size !== gen.entrypoints.length) {
+    throw new DataFileError(
+      `${USE_DATA_FILE} の entrypoints と ${GENERATED_FILE} の行が食い違う（手で書くだけ: ${onlyHand.join(", ") || "無し"}・生成だけ: ${onlyGen.join(", ") || "無し"}）。npm run ndf-contract:sync を打ち直す`,
+    );
+  }
+  const genFiles = new Set(gen.files.map((file) => file.id));
+  const unknownFiles = hand.files.map((file) => file.id).filter((id) => !genFiles.has(id));
+  if (unknownFiles.length > 0) {
+    throw new DataFileError(`${USE_DATA_FILE} の files に、使うインタフェースの読むファイルに無い id がある: ${unknownFiles.join(", ")}`);
+  }
+  const unknownEnv = hand.env.map((pair) => pair.entrypoint).filter((id) => !handIds.has(id));
+  if (unknownEnv.length > 0) {
+    throw new DataFileError(`${USE_DATA_FILE} の env に、使うインタフェースに無い entrypoint がある: ${[...new Set(unknownEnv)].join(", ")}`);
+  }
+  const fields = new Map(hand.files.map((file) => [file.id, file.fields]));
+  return {
+    acceptedVersions: accepted,
+    pinnedCommit: gen.commit,
+    skillPrefix: hand.skillPrefix,
+    entrypoints: gen.entrypoints,
+    env: hand.env,
+    envSetBy: hand.envSetBy,
+    files: gen.files.map((file) => ({ ...file, fields: fields.get(file.id) ?? [] })),
+    reportItems: REPORT_ITEMS,
+    report: gen.report,
+    judgeCall: (call) => judgeCallWith(gen.entrypoints, gen.files, hand.skillPrefix, call),
+    readReport: (text) => readReportWith(gen.report, text),
+  };
+}
+
+/** NDF の契約の使い方の書き出し。照合（`npm run ndf-contract`）とランナーが使う */
+export const ndfContractUse: NdfContractUse = buildContractUse(useData, generatedData, NDF_CONTRACTS.accepted);
