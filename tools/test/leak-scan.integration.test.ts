@@ -1078,6 +1078,14 @@ describe("秘密を使う探し（leak-scan-secret.sh）", () => {
     }
   }, TIMEOUT);
 
+  it("探す木の中の .gitleaks.toml を読まず、チェックアウトの設定で探す", () => {
+    // 探す木の .gitleaks.toml は規則を 1 つも持たない。読まれれば nd-factory の規則の当たりが消える
+    const root = makeTree({ ".gitleaks.toml": 'title = "empty"\n', "docs/a.md": `アカウント ${fakeAccount()}\n` });
+    const result = secretScan(root, ["dir"], { pattern: fakeWord() });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("leak-scan: 当たり nd-aws-account-id file-");
+  }, TIMEOUT);
+
   it("木の根に .gitleaksignore があると 2 で、件数を読めない行を出す", () => {
     const root = makeTree({ "docs/a.md": "中身\n", ".gitleaksignore": "x\n" });
     const result = secretScan(root, ["dir"], { pattern: fakeWord() });

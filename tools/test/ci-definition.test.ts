@@ -237,6 +237,7 @@ export function leakJobViolations(ci: LoadedWorkflow): string[] {
   if (!pushRuns.includes("tools/checks/leak-scan-secret.sh dir --count-only")) found.push("jobs.leak-check-push#scan-dir");
   if (!pushRuns.includes("tools/checks/leak-scan-secret.sh git --count-only")) found.push("jobs.leak-check-push#scan-git");
   if (pushRuns.includes("--range")) found.push("jobs.leak-check-push#range");
+  if (`${prRuns}\n${pushRuns}`.includes("--details") || `${prRuns}\n${pushRuns}`.includes("--paths")) found.push("jobs#details");
   if (!envNamesOf(push).includes("LEAK_CHECK_REQUIRE_PATTERN")) found.push("jobs.leak-check-push#require");
   return found;
 }
@@ -352,6 +353,9 @@ export function secretWorkflowViolations(workflow: LoadedWorkflow, _ci: LoadedWo
   ) {
     marks.add("secret-steps");
   }
+  // 必須の指定は変数で決めず、常に 1 にする（秘密が空なら Pull Request の出所によらず落とす）
+  const scanSteps = steps.filter((step) => step.name === SECRET_STEP);
+  if (scanSteps.length !== 1 || scanSteps[0]?.env?.LEAK_CHECK_REQUIRE_PATTERN !== "1") marks.add("require");
 
   const names = jobs.map(([, job]) => (typeof job?.name === "string" ? job.name : ""));
   if (names.length !== 1 || SCAN_INPUTS.some((input) => !names[0]?.includes(`\${{ inputs.${input} }}`))) marks.add("name");
@@ -702,6 +706,7 @@ describe("secretWorkflowViolations・callerViolations", () => {
     ["gitleaks を置く手順に curl を直に書く", 'run: tools/checks/install-gitleaks.sh "$RUNNER_TEMP/gitleaks"', "run: curl -fsSL -o g.tar.gz https://example.com/g.tar.gz", "gitleaks-install"],
     ["秘密をほかの手順でも受ける", "      - name: マージコミットの木と履歴の項目を取り出す\n        env:\n", "      - name: マージコミットの木と履歴の項目を取り出す\n        env:\n          LEAK_CHECK_PATTERN: ${{ secrets.LEAK_CHECK_PATTERN }}\n", "secret-steps"],
     ["pull_request_target を足す", "\non:\n", "\non:\n  pull_request_target:\n", "on"],
+    ["必須の指定を変数にする", 'LEAK_CHECK_REQUIRE_PATTERN: "1"', "LEAK_CHECK_REQUIRE_PATTERN: ${{ vars.LEAK_CHECK_REQUIRE_PATTERN }}", "require"],
   ])("%s と、その印だけが出る", (_label, from, to, mark) => {
     expect(secretWorkflowViolations(broken(secret(), from, to), ci())).toEqual([`${SECRET_WORKFLOW_PATH}#${mark}`]);
   });
@@ -763,6 +768,16 @@ describe("leakJobViolations・patternSecretReaders・actorConditions", () => {
       "leak-check-push に --range を渡す",
       [["tools/checks/leak-scan-secret.sh git --count-only", 'tools/checks/leak-scan-secret.sh git --count-only --range "$BEFORE..HEAD"']],
       ["jobs.leak-check-push#range"],
+    ],
+    [
+      "leak-check-push に --details を渡す",
+      [["tools/checks/leak-scan-secret.sh git --count-only", "tools/checks/leak-scan-secret.sh git --details"]],
+      ["jobs.leak-check-push#scan-git", "jobs#details"],
+    ],
+    [
+      "leak-check に --paths を渡す",
+      [["tools/checks/leak-scan.sh dir .gitleaks.toml", "tools/checks/leak-scan.sh dir .gitleaks.toml --paths"]],
+      ["jobs#details"],
     ],
     [
       "leak-check-push が必須の変数を受けない",
