@@ -189,6 +189,11 @@ has_nul() {
   [[ "$(LC_ALL=C tr -d '\000' <"$1" | wc -c)" != "$(wc -c <"$1")" ]]
 }
 
+# NUL を含む blob を読める文字にする（標準入力から読み、標準出力へ書く）。タブと印字できるバイトのほかは改行にする
+to_binary_text() {
+  LC_ALL=C tr -c '\11\40-\176\200-\377' '\n'
+}
+
 # 範囲の履歴の項目を出力先に書く。組は、読んだ順に、置ける最も小さい番号の層に置く
 write_history() {
   local base="$1" head="$2" out="$3" path pair sha layer ancestor ok n=0 target
@@ -229,7 +234,7 @@ write_history() {
     if has_nul "$target"; then
       target="$out/binary-text/$layer/$path"
       mkdir -p -- "$(dirname -- "$target")" || die 1 "履歴の項目を書き出せない（${n} 番目）"
-      LC_ALL=C tr -c '\11\40-\176\200-\377' '\n' <"$out/layers/$layer/$path" >"$target" ||
+      to_binary_text <"$out/layers/$layer/$path" >"$target" ||
         die 1 "履歴の項目を書き出せない（${n} 番目）"
     fi
   done <"$work/expected/pairs"
@@ -276,7 +281,7 @@ verify_history() {
     if has_nul "$out/layers/$matched/$path"; then
       nul=$((nul + 1))
       [[ -f "$out/binary-text/$matched/$path" ]] || die 1 "$mismatch"
-      git cat-file blob "$sha" | LC_ALL=C tr -c '\11\40-\176\200-\377' '\n' >"$work/text" || die 1 "$mismatch"
+      git cat-file blob "$sha" | to_binary_text >"$work/text" || die 1 "$mismatch"
       cmp -s -- "$work/text" "$out/binary-text/$matched/$path" || die 1 "$mismatch"
     fi
   done <"$work/check/pairs"
