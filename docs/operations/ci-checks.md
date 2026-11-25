@@ -83,7 +83,12 @@ NDF の認証は、`<非公開リポジトリ>` に対して次の権限を持�
 1. 作り物の値だけを使う検証用の公開リポジトリと非公開リポジトリで、このワークフローを動かして確かめる（設計文書の決定 10 の手順 1 の項目）
 2. 1 本目をマージする前に、公開のリポジトリの環境 `leak-scan`（使えるブランチは main だけ）とその秘密 `LEAK_CHECK_PATTERN` を設定する。変数 `LEAK_CHECK_REQUIRE_PATTERN` は、この時点では `1` にしない
 3. 1 本目の Pull Request を、マージの前に持ち主が手元で探す（下の「1 本目を手元で探す」）。**1 本目のマージから、NDF に非公開の検査の機能が入り、手順 6 で NDF の利用者の設定から非公開の検査を有効にするまで、NDF にほかの Pull Request をマージさせない。** 手で起動した探しの結果でもマージしない（今の NDF は、探した Pull Request の番号・head・マージ先・base の先頭の組を確かめずにマージするため）
-4. 1 本目のマージで起きた main への push の `leak-check-push` の記録で、`dir` と `git` の両方の探しで `leak-scan-secret: nd-real-value: <件数> 件` の行（当たりが無ければ `0 件`）が出ており、`leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が空なので .gitleaks.toml だけで探す` の行が出ていないことを確かめる。確かめられなければ、手順 2 の設定を直し、手元で秘密を渡して `tools/checks/leak-scan-secret.sh git` を打ち、main の到達できるすべてのコミットを探す。確かめた後に、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする
+4. 1 本目のマージで起きた main への push の `leak-check-push` で、秘密の規則を使って当たりなく探し終えたことを確かめる。次の 3 つがすべてそろえば、確かめられたことになる
+   - ジョブが成功している
+   - `dir` と `git` の両方の探しで、`leak-scan-secret: nd-real-value: 0 件` の行が出ている
+   - `leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が空なので .gitleaks.toml だけで探す` の行が出ていない
+
+   秘密が空の行が出ていれば、手順 2 の設定を直す。当たりや検査の失敗があれば、原因を解消する（当たりは「当たりの場所を手元で引く」で場所を引く）。そのうえで、手元で秘密を渡して `tools/checks/leak-scan-secret.sh git` を打ち、main から到達できるすべてのコミットを探し直す。当たりも失敗も無くなるまで、次へ進まない。確かめた後に、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする
 5. `<非公開リポジトリ>` を作り、[`leak-check-caller.yml`](leak-check-caller.yml) を写し、秘密 `LEAK_CHECK_PATTERN` と変数 `LEAK_CHECK_GENERATION`（値は `1`）を登録する。NDF がマージに使う今の認証で、「NDF の認証の権限」の 3 つの API が呼べることを確かめる。続けて、開いている Pull Request の 1 本で探しを手で起動して確かめる（下の「手で起動して確かめる」）。この結果で Pull Request をマージしない
 6. NDF に非公開の検査の機能が入った後、NDF の利用者の設定で非公開の検査を有効にしてから、2 本目の Pull Request を出し、NDF にマージさせる。利用者の設定は、2 本目のマージの後も有効のまま残す
 
@@ -137,7 +142,9 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
    - 履歴の当たりは、`paths/<通し番号>`（そのファイルの中身がパスの名前）か、`layers/<層の番号>/<元のパス>`・`binary-text/<層の番号>/<元のパス>`（中身）で出る
    - 中身の当たりのコミットは、`git hash-object --no-filters <履歴の出力先>/layers/<層の番号>/<元のパス>` で blob の SHA を求め、`git log --find-object=<blob の SHA> <分岐点>..<head の SHA>` で引く
 3. コミットの列がある当たり（`git` の探し）は、`tools/checks/leak-scan-secret.sh git --range <分岐点>..<head の SHA> --details` を打つ
-4. main への push（`leak-check-push`）の当たりも、main の先頭のチェックアウトで `tools/checks/leak-scan-secret.sh dir --details` と `tools/checks/leak-scan-secret.sh git --details` を打って同じく引く
+4. main への push（`leak-check-push`）の当たりは、その実行が探したコミットで探し直して引く。main は記録を確かめる間にも進むので、main の先頭では探さない
+   - 対象の `leak-check-push` の実行の `head_sha`（`gh api repos/devbasex/nd-factory/actions/runs/<実行の ID> --jq .head_sha`）を控え、その SHA をチェックアウトして、`tools/checks/leak-scan-secret.sh dir --details` と `tools/checks/leak-scan-secret.sh git --details` を打つ
+   - 実行の後に環境 `leak-scan` の秘密を変えていた場合は、手元で渡す秘密が当時と同じ規則で探せるかを確かめる。同じ規則で探せなければ、元の当たりを引けないことがある
 5. 出た実際のファイルの名前と行を、記録の当たりの規則と行と突き合わせる。**`--details` の出力は手元の端末にだけ出し、記録・Issue・Pull Request に貼らない。当たりの理由を公開の Pull Request に書かない。** 直しを頼むときは理由を伏せるか、Pull Request を閉じる
 
 ## 正当な当たりを規則単位で外す
@@ -154,7 +161,7 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
 | 対象のある所 | 扱い |
 | --- | --- |
 | Pull Request の途中のコミットだけ | 上の手順のままでよい。規則単位の許可は、履歴の探し（`history` と `git --range`）にも効く |
-| main の木か履歴（規則か gitleaks の版を変えたために、前から在る内容に当たるようになった） | 規則・`tools/checks/gitleaks-default.toml`・gitleaks の版を変える Pull Request に、前から在る内容への許可を同じ Pull Request で入れる。許可を後の Pull Request に分けると、許可の Pull Request のマージコミットの木にも対象があるため、許可の Pull Request 自身が非公開の検査で落ちる。規則を変える Pull Request に許可が欠けていれば、公開の `leak-check` が Pull Request の設定で前から在る内容を探して落ちるので、マージの前に気付ける |
+| main の木か履歴（規則か gitleaks の版を変えたために、前から在る内容に当たるようになった） | 規則・`tools/checks/gitleaks-default.toml`・gitleaks の版を変える Pull Request に、前から在る内容への許可を同じ Pull Request で入れる。許可を後の Pull Request に分けると、許可の Pull Request のマージコミットの木にも対象があるため、許可の Pull Request 自身が非公開の検査で落ちる。公開の `leak-check` が探すのは、マージコミットの木と、分岐点から head までのコミットだけで、main の過去のコミットにだけ残る内容は探さない。そのため、規則か gitleaks の版を変えるときは、マージの前に、その Pull Request のマージコミットをチェックアウトして秘密を渡し、`tools/checks/leak-scan-secret.sh git` で main から到達できる全履歴を変更後の設定で探す。探さずにマージすると、マージ後の `leak-check-push` で初めて当たりに気付く |
 | 実際の値の規則 `nd-real-value` の当たり | 許可を足せない（規則は秘密の中にあり、`[[rules.allowlists]]` を持たない）。誤検知なら、「秘密を変える手順」で秘密の正規表現を直す。実際の値なら、マージせずに「当たりの場所を手元で引く」の手順 5 のとおりに扱う |
 
 ## 見本の写し直し
