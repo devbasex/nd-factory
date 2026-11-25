@@ -34,7 +34,7 @@ graph LR
   - `hooks/unattended-report.json`
 - 照合の 6 項目の中身は、[execution.md の「NDF との契約」](../docs/design/execution.md#ndf-との契約) の表の「何を照合するか」の行にある。この文書は項目を番号（1 項目目〜6 項目目）で指す
 - 照合の 6 項目が相手にするのは、`@nd-factory/contracts/ndf-contract-use` の `ndfContractUse` である。このモジュールは作業ツリーから解決する。照合の側は、その形を型 `NdfContractUse` として自分の中にコピーして持っている（#2 が書き出しを置くときに合わせる前提だった）
-- 書き出しが無いとき、照合は `skip: no-contract-use` を出して終了コード 0 で終わる。定数 `CONTRACT_USE_REQUIRED` が偽だからである。この定数を真にするのは #2 の予定だった（[#1 の設計の K2-6](../docs/design-process/issue-1/design.md)）
+- 書き出しが無いとき、照合は `skip: no-contract-use` を出して終了コード 0 で終わる。定数 `CONTRACT_USE_REQUIRED` が偽だからである。この定数を真にするのは #2（形の正本と横断の部品を作る課題）の予定だった。#1 の設計は、使い方の書き出しを置いて定数を真にする作業を、要件 K2-6 として #2 に割り当てていた（[#1 の設計の K2-6](../docs/design-process/issue-1/design.md)）
 - `packages/contracts` にあるのは、受ける組のデータと答えの語（`src/ndf.ts`）だけである。受ける組のデータは `data/ndf-contracts.json` にあり、`src/data.ts` の `NDF_CONTRACTS` が読む。呼び出しの判定・区間の報告の読み取り・使い方のデータは無い。区間の報告は `hooks/unattended-report.json` が形を定める報告で、execution.md の「[区間と結果の行](../docs/design/execution.md#区間と結果の行)」が扱う
 
 ### 新しい固定の点で契約がどう変わったか
@@ -59,6 +59,7 @@ graph LR
 | `block-next` の `source`（[#47](https://github.com/devbasex/nd-factory/issues/47)） | 無い `forms/ndf-next-block.json` を指す | 照合はインタフェースの行の `source` を読まない |
 | `report-unattended` の `source`（[devbasex/ai-plugins#3947](https://github.com/devbasex/ai-plugins/issues/3947) の依頼 2） | 無い `forms/unattended-report.json` を指す | 同上 |
 | `ask-journal` の `fields`（同じ課題の依頼 1） | `fields` が無い | 使い方のデータに `ask-journal` の項目を載せない（execution.md の決定 106）。`fields` が足されたときの扱いは、表の後の段落にある |
+| `次のコマンド:` の項目（同じ課題の依頼 3） | `shape.items` に無い | 使い方のデータの区間の報告の項目に載せない |
 
 上流が `ask-journal` に `fields` を足しても、照合は失敗にせず、既存の通知の行で知らせるだけにする。この扱いは今の照合の CLI（`contractNotices` と出力の処理）にあり、この変更では作り直さずに維持する。
 
@@ -66,7 +67,6 @@ graph LR
 - 照合の CLI は、固定の点と先端のそれぞれで、`ndf-files.json` の `ask-journal` の行に `fields` があれば、`notice: <コミット> の ask-journal が fields を持つ: <項目>` の行を出す
 - 出力先は標準出力と、`--summary` で指定した要約のファイルの 2 つである
 - この変更で、通知の条件と出力先を変えない
-| `次のコマンド:` の項目（同じ課題の依頼 3） | `shape.items` に無い | 使い方のデータの区間の報告の項目に載せない |
 
 ## 文脈と制約
 
@@ -108,7 +108,18 @@ graph LR
 - 照合は、書き出しが無ければ、契約を取得する前に `fail: no-contract-use` と終了コード 1 で終わる。skip の道と定数 `CONTRACT_USE_REQUIRED` は消す
 - 新しい固定の点で `npm run ndf-contract` が 6 項目を照合し、固定の点の食い違いが 0 件で成功する
 
-照合の 1・4・5・6 項目目の中身を変えるため、execution.md の F23（「契約の照合の定期の検査」の表の「何を照合するか」の行）は、この設計の Pull Request で改訂する。改訂の中身は次の表のとおりである。
+execution.md の変更は、直す時期で 2 つに分かれる。
+
+| 箇所 | 直す Pull Request | 状態 |
+| --- | --- | --- |
+| F23（「契約の照合の定期の検査」の表の「何を照合するか」の行） | この設計の Pull Request | 済み。改訂の中身は下の表 |
+| 「区間と結果の行」（報告の項目の誤りと材料の URL で区間を失敗にする行） | この設計の Pull Request | 済み |
+| 「承認資料」の「材料の URL の受け入れ条件」 | この設計の Pull Request | 済み |
+| 決定 104 と「NDF との契約」の表の「契約のバージョンの照合し」の行（固定の点・受ける組の値） | 実装の Pull Request | 未。固定の点を上げる変更と同じ Pull Request で直す |
+
+「契約のバージョンの照合し」は execution.md の表の行の名前で、そのまま引く。
+
+照合の 1・4・5・6 項目目の中身を変えるため、F23 をこの設計の Pull Request で改訂する。改訂の中身は次の表のとおりである。
 
 | 項目 | 承認済みの F23 | この設計で改訂した後 | 決定 |
 | --- | --- | --- | --- |
@@ -229,7 +240,7 @@ graph LR
   - そこで処理の順を次のようにする。`ndf-pin.json` から固定の点を読み、続けて書き出しを読む。書き出しが無いと分かった時点で、契約を取得せずに `fail: no-contract-use <ndf-pin.json の固定の点>` を標準出力に出し、終了コード 1 で終わる。`read:` の行は出さない
   - `ndf-pin.json` を読めないとき（終了コード 2）と、書き出しはあるが読めないとき（終了コード 2）は、今の振る舞いのまま
 - 採らなかった案: 定数を真にして残す（#1 の設計は真にした後に偽へ戻さないとしており、偽の側の分岐は二度と通らない。使わないコードを残さない Value 13 に合わない）
-- **代償**: #2 の前の段階へ戻す手段が無くなる（戻す理由も無い）。skip を前提にした手順（pipeline-approval.md の承認の注記）を同じ変更で直す
+- **代償**: 書き出しが無くても照合を成功で終える段階（#2 が書き出しを置く前の段階）へ、定数を切り替えて戻す手段が無くなる（戻す理由も無い）。skip を前提にした手順（pipeline-approval.md の承認の注記）を同じ変更で直す
 - 根拠: Value 13（MVV バージョン 3）
 
 ### 決定 7: 承認者に訂正後の値を渡すため、区間の報告の読み取りは契約の `rule` と `shape` に沿う
@@ -271,9 +282,9 @@ graph LR
 | 反映のパイプラインの承認（pipeline-approval.md） | 「skip の行だけなら注記して承認してよい」の手順が古くなる | 同じ変更で、skip の行が出ない前提の手順に直す |
 | 確定仕様 `docs/specifications/contracts-and-core.md` | 受ける組の値がバージョン 8 のまま残る | 同じ変更でバージョン 16 に直す |
 | 照合のテストのフィクスチャ（`tools/test/fixtures/ndf-contract-752a9cf/`） | 古い固定の点のコピーのまま残る | 新しい固定の点のコピーに置き換える |
-| #2 の設計 | K2-6 を重ねて書く | 決定 2 の代償。#2 の設計の時点でこの書き出しを読む |
+| #2 の設計 | #2 の設計が、この課題がすでに置いた使い方の書き出し（#1 の設計が #2 に割り当てた要件 K2-6）を、もう一度設計してしまう | 決定 2 の代償。#2 の設計の時点でこの書き出しを読む |
 | 区間の失敗の理由のコード（`packages/contracts/src/rows/sprints.ts` の `segmentFailureReason`、確定仕様 `docs/specifications/contracts-and-core.md` の区間の行） | 読み取りが項目の誤りを返したときの理由のコード `report_item_invalid` と、材料の URL が受け入れ条件に合わないときの理由のコード `material_url_rejected`（どちらも execution.md の「区間と結果の行」）が値の集まりに無い | この変更では足さない。区間の失敗を書くのはランナーなので、ランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の実装で値の集まりと確定仕様に足し、`npm run generate` の生成物もコミットする |
-| 承認資料の材料の URL（execution.md の「[承認資料](../docs/design/execution.md#承認資料)」） | この変更で、材料に並んだ URL をすべて承認資料に載せる。`材料: 本文` なら「判断の材料」節も載せる。どちらにも署名付き URL や共有リンクが入りうる。入ると、元の資料の閲覧権限が無い承認者や委任のエージェントにも中身を渡す。読み取り（決定 7）は契約に合わせて材料の欄が `https://` で始まるかだけを見るため、これを防がない | execution.md に材料の URL の受け入れ条件を書いた。条件は、スキームを持つ・スキームが `https`・ホストが `github.com` ちょうど・ポートを書かない・ユーザー名やパスワードを持たない・クエリを持たない・パスとフラグメントが Pull Request・Issue・コミット・ファイルとその行やコメントを指す決まった形に一致する・指す資料を GitHub の API で読めて、応答から組み立てた掲載用の URL と一致する、である。条件は表の上から順に当て、最初に合わなかった条件のコードを 1 つだけ出す。条件は、ブラウザーが開く URL に直す前の文字列に当てる。材料の欄の URL と「判断の材料」節の中の URL の両方に当てる。節の URL は、GFM の解釈でリンク先を取り出し、スキームを省いたリンク先・HTML の属性・コードの中の裸の URL も含めて確かめる。承認の依頼を送るのはランナーなので、確かめる処理とテストはランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の実装に置く。テストの中身は下の「ランナーのテストに引き継ぐこと」にある |
+| 承認資料の材料の URL（execution.md の「[承認資料](../docs/design/execution.md#承認資料)」） | この変更で、材料に並んだ URL をすべて承認資料に載せる。`材料: 本文` なら「判断の材料」節も載せる。どちらにも署名付き URL や共有リンクが入りうる。入ると、元の資料の閲覧権限が無い承認者や委任のエージェントにも中身を渡す。読み取り（決定 7）は契約に合わせて材料の欄が `https://` で始まるかだけを見るため、これを防がない | execution.md に材料の URL の受け入れ条件を書いた。条件は、スキームを持つ・スキームが `https`・ホストが `github.com` ちょうど・ポートを書かない・ユーザー名やパスワードを持たない・クエリを持たない・パスとフラグメントが Pull Request・Issue・コミット・ファイルとその行やコメントを指す決まった形に一致する・指す資料を GitHub の API で読めて、応答から組み立てた掲載用の URL と一致する、である。条件は、execution.md の「[承認資料](../docs/design/execution.md#承認資料)」の「確かめる順番」の表の上から順に当て、最初に合わなかった条件の拒否の理由のコードを 1 つだけ出す。条件と理由のコードの対応（たとえば、ホストの条件の順 3 が `host_not_allowed`、クエリの条件の順 6 が `query_present`）は、その表にある。S3 の署名付き URL は順 3 で先に当たるため、`host_not_allowed` になる。条件は、ブラウザーが開く URL に直す前の文字列に当てる。材料の欄の URL と「判断の材料」節の中の URL の両方に当てる。節の URL は、GFM の解釈でリンク先を取り出し、スキームを省いたリンク先・HTML の属性・コードの中の裸の URL も含めて確かめる。承認の依頼を送るのはランナーなので、確かめる処理とテストはランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の実装に置く。テストの中身は下の「ランナーのテストに引き継ぐこと」にある |
 | ランナー（#6） | 判定と読み取りの関数の形を、ランナーの実装の時点で変えたくなる | ランナーは照合と同じ判定と読み取りの関数を使う（#1 の決定 7 のまま）。形を変えるときは照合のテストも同じ変更で直す |
 
 ### ランナーのテストに引き継ぐこと
@@ -291,7 +302,7 @@ graph LR
 | 材料の欄が `https://github.com/acme/app/blob/0123456789abcdef0123456789abcdef01234567/docs/%e8%a8%ad%e8%a8%88.md`（小文字の 16 進数のパーセントエンコード） | 同上 | 理由は、位置と拒否の理由のコード `path_not_allowed` だけを持つ |
 | 材料の欄が `https://github.com/acme/app/pull/1#discussion_r1`・`https://github.com/acme/app/issues/2#issuecomment-3`・`https://github.com/acme/app/commit/0123456789abcdef0123456789abcdef01234567`・`https://github.com/acme/app/blob/0123456789abcdef0123456789abcdef01234567/docs/plan.md#L10-L20`・`https://github.com/acme/app/blob/0123456789abcdef0123456789abcdef01234567/docs/%E8%A8%AD%E8%A8%88%20%E6%9B%B8.md`（日本語と空白を含むファイル名 `docs/設計 書.md`）のどれか、または `材料: 本文` で節の中のリンク先がそれだけ。偽物の GitHub の API は、リポジトリの `full_name` を `acme/app` として、それぞれの資料を返す | 承認の依頼を受ける。承認資料の材料の URL の並びと要約値の材料は、報告に書かれた URL と 1 文字も違わない | — |
 | `材料: 本文` で、「判断の材料」節に上の行の受け入れる URL のほか、インラインのコード `` `node:fs` `` と、`import { readFile } from "node:fs/promises";` と `C/hooks/unattended-report.json` を含むコードブロックを含む | 承認の依頼を受ける | — |
-| 結果の値が `保留 https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000`（読み取りが `result_value_unknown` を返す） | 承認の依頼・問い・承認資料は受けない。区間とレーンを `result_value_unknown` で失敗にする進捗の事象を 1 件受ける | 理由は、コード `result_value_unknown` だけを持つ。`保留` も `X-Amz-Signature=0000` も出ない |
+| 結果の値が `保留 https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000`（読み取りが `result_value_unknown` を返す） | 承認の依頼・問い・承認資料は受けない。区間とレーンを `result_value_unknown` で失敗にする進捗の事象を 1 件受ける（`result_value_unknown` は区間の失敗の理由 `segmentFailureReason` に今ある値で、この変更では足さない。項目の誤りと違い、結果の値そのものが読めないため、`report_item_invalid` に包まない） | 理由は、コード `result_value_unknown` だけを持つ。`保留` も `X-Amz-Signature=0000` も出ない |
 | 材料の欄が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url`（読み取りが `material_form_invalid` を返す） | 承認の依頼・問い・承認資料は受けない。区間とレーンを `report_item_invalid` で失敗にする進捗の事象を 1 件受ける | 理由は、誤りのコード `material_form_invalid` と項目の名前 `材料` だけを持つ。`X-Amz-Signature=0000` も `not-a-url` も出ない |
 
 ## テスト設計
