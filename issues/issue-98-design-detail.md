@@ -363,10 +363,16 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `detect` | `archive.py` | 新設 | `(head: bytes, name: str, source: Callable[[], BinaryIO]) -> Kind \| None` | 先頭の 512 バイトで形式を返し、どれにも当たらなければ末尾の ZIP のディレクトリ情報を `zipfile.is_zipfile` で確かめる。それにも当たらなければ、中身の全体を固定の大きさずつ読んで ZIP のメンバーの先頭を探す（決定 8）。展開できない形式と、メンバーの先頭だけがある ZIP は `UNSUPPORTED` |
+| `detect` | `archive.py` | 新設 | `(head: bytes, name: str, source: Callable[[], BinaryIO]) -> Kind \| None` | 中身と名前から形式を返す。アーカイブでも圧縮でもなければ `None`、展開できないと分かれば `UNSUPPORTED`（決定 8。順は下の `detect` の項目） |
 | `expand` | `archive.py` | 新設 | `(path: str, data: bytes, budget: Budget) -> Iterator[Leaf \| ArchiveError]` | 入れ子をたどり、葉のファイルを評価のパス・報告のパス・中身で返す |
 | `normalize_name` | `archive.py` | 新設 | `(name: str) -> str \| None` | 決定 8 のメンバー名の形にそろえる。使えない名前は `None` |
 
+- `detect`（決定 8）。次の順に判定し、当たった所で返す
+  1. 先頭の 512 バイトで形式を判定する。展開できない形式は `UNSUPPORTED`
+  2. 末尾の ZIP のディレクトリ情報を `zipfile.is_zipfile` で確かめ、当たれば ZIP
+  3. ファイル全体を一定の大きさずつ読み、ZIP のメンバーの先頭（local file header）を探す。見つかれば `UNSUPPORTED`
+  4. ZIP の判定（2 と 3）のどちらにも当たらず、名前が `.br` で終わるときは、中身の全体が NUL の無い UTF-8 のテキストかを確かめる。確かめられなければ `UNSUPPORTED`
+  5. どれにも当たらなければ `None`
 - `expand`
   - 事前条件: `detect` がアーカイブか圧縮と判定した中身
   - 事後条件: 葉は空でない非アーカイブのメンバーだけ。1 つの失敗は値として返して残りのメンバーを続け、ファイルの全体が読めないときはそれで終える。
