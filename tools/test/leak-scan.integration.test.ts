@@ -649,14 +649,19 @@ function forkRepo(): { root: string; base: string } {
   return { root, base: commitAll(root, "base") };
 }
 
+/** `input` を `git mktree` に渡して木を作り、その名前を返す（失敗なら投げる） */
+function mktree(root: string, input: string): string {
+  const tree = spawnSync("git", ["mktree"], { cwd: root, input, encoding: "utf8" });
+  if (tree.status !== 0) throw new Error("git mktree が失敗した");
+  return tree.stdout.trim();
+}
+
 /** `git mktree` で 1 つの項目を持つ木を作り、`dir` の下に置いたコミットを作る（git の作業ツリーでは作れないパスのため） */
 function commitCraftedTree(root: string, dir: string, name: string, parent?: string): string {
   const blob = git(root, "hash-object", "-w", "--stdin");
-  const inner = spawnSync("git", ["mktree"], { cwd: root, input: `100644 blob ${blob}\t${name}\n`, encoding: "utf8" });
-  if (inner.status !== 0) throw new Error("git mktree が失敗した");
-  const outer = spawnSync("git", ["mktree"], { cwd: root, input: `040000 tree ${inner.stdout.trim()}\t${dir}\n`, encoding: "utf8" });
-  if (outer.status !== 0) throw new Error("git mktree が失敗した");
-  return git(root, "commit-tree", outer.stdout.trim(), ...(parent === undefined ? [] : ["-p", parent]), "-m", "crafted");
+  const inner = mktree(root, `100644 blob ${blob}\t${name}\n`);
+  const outer = mktree(root, `040000 tree ${inner}\t${dir}\n`);
+  return git(root, "commit-tree", outer, ...(parent === undefined ? [] : ["-p", parent]), "-m", "crafted");
 }
 
 /** 倉庫に無い blob の名前（`git cat-file blob` が失敗する） */
