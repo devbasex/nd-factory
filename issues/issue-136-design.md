@@ -235,8 +235,10 @@ execution.md の変更は、直す時期で 2 つに分かれる。
 
     | 読む対象 | 許可範囲 | 例 |
     | --- | --- | --- |
-    | `spec` と、`path` が `.` でない `file` | 許可ディレクトリの配下のファイル。許可ディレクトリは、`file` では行の `env` の環境変数にランナーが指定した保存先のディレクトリ、`spec` ではプラグインの根の下の `target` | `file-plan-progress` の `s1/8-release-request-state/progress.jsonl` |
+    | `spec` と、`path` が `.` でない `file` | 許可ディレクトリの配下のファイル。許可ディレクトリは、`file` では行の `target` が指す保存先、`spec` ではプラグインの根の下の `target` | `file-plan-progress` の `s1/8-release-request-state/progress.jsonl` |
     | `path` が `.` の `file` | ランナーが環境変数に指定したファイルそのもの。他のファイルへの付け替え（指定したパスをシンボリックリンクや別のファイルに置き直すなど）は拒否する | `file-issue-request` は、`NDF_ISSUE_REQUEST_FILE` に指定したファイルだけを読む |
+
+    `file` の許可ディレクトリは、行の `env` からは決まらない。`env` は NDF に渡す環境変数の名前の一覧で、保存先を示すとは限らないためである。たとえば `file-plan-progress` の行は、`target` が `ndf-tmp` で、`env` は実行モードを示す `NDF_FACTORY_RUN` だけである。`target` の名前から実際のディレクトリを決める方法は、ランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の設計で決める。
 
     許可範囲の外を開かない方法は、この文書では決めない。ランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の設計 PR で決めて、承認を取る。決めるのは、OS のどの仕組みでファイルを開くか、起票の依頼ファイルを誰がいつ作ってどの権限を付けるか、どんなときに読み取りを失敗にするかである。どれも、ホステッドと手元のマシンの 2 つの実行の場に要る条件や、ファイルの所有と権限を変える決定になるため、この課題の実装の変更には入れない。ランナーの設計は、少なくとも次を満たす。
 
