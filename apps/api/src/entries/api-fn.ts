@@ -8,7 +8,7 @@ import { dispatch, readHttpCall, writeHttpResponse, type DispatchDeps, type Http
 import { createLogger, type LogContext, type Logger } from "@nd-factory/core/log";
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from "aws-lambda";
 
-// HTTP の振り分けの起点（issues/issue-2-design-detail.md の「API の起点と骨組みの移し」）。readHttpCall → dispatch → writeHttpResponse を通す。
+// HTTP の振り分けの起点（docs/specifications/contracts-and-core.md の「API の起点と骨組みの関数」）。readHttpCall → dispatch → writeHttpResponse を通す。
 // アプリのスタックへ入れて PUT /v1/users を置き換えるのは #4（決定 11）で、この課題は反映しない
 
 // 関数の名前（ログの文脈の fn）

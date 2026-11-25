@@ -2,10 +2,10 @@ import { z } from "zod";
 import type { RowKey } from "./rows/common.ts";
 import { sha256 } from "./sha256.ts";
 
-// 行の版の読み手と書き手（issues/issue-2-design-detail.md の「表の移し」、決定 9）。
+// 行の版の読み手と書き手（docs/specifications/contracts-and-core.md の「行の版の読み手と書き手」）。
 // 読み手が受ける版（latest と previous の 2 つ）と、書き手が出す版（writeVersion）を分けて持つ。読み手はどちらの版も latest の形へそろえ、
 // 書き手は writeVersion の形で書く。次の版を読めるが前の版だけを書く 1 段目と、2 段目の後に書き手だけを戻した状態が、同じ値で表せる。
-// 書き換えは読んだ行から作った行全体の置き換えで、rowReplaceOf がその行を作る（issues/issue-2-design-row-writers.md の決定 1・8）
+// 書き換えは読んだ行から作った行全体の置き換えで、rowReplaceOf がその行を作る（docs/specifications/contracts-and-core.md の行の書き手の決定 1・8）
 
 export type PreviousVersion<L> = {
   readonly version: number;
@@ -359,7 +359,7 @@ function incarnationOfKey(pk: string, sk: string | null): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-// 旧形式の補い（U3b、issues/issue-2-design-row-writers.md の決定 8）。U3b より前の書き手が保存した行を読めるよう、
+// 旧形式の補い（U3b、docs/specifications/contracts-and-core.md の行の書き手の決定 8）。U3b より前の書き手が保存した行を読めるよう、
 // 列が無いときだけ incarnation を鍵から決まる値で、opts.version なら version を 1 で補う repair を返す。ほかの列は変えない。
 // 補った値は保存されておらず、readRow の stored はその列を absent で返す（書き手の条件は列が無いことになる）。
 // 鍵の列（pk が文字・sk が文字か無い）を持たない行には incarnation を補わない（形の検査で shape_invalid になる）

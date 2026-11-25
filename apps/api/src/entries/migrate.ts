@@ -6,8 +6,8 @@ import type { Db, Row, RowKey, StoredRow } from "@nd-factory/core/db";
 import type { Logger } from "@nd-factory/core/log";
 import type { Context } from "aws-lambda";
 
-// 表の移し（issues/issue-2-design-detail.md の「表の移し」、受け入れ条件 9）。保存の形が読み手の見る形と違う行を、書き手の版の行全体へ書き直す。
-// 書き手の決まりは issues/issue-2-design-row-writers.md の決定 1〜9。資源（Lambda）と起こし方は最初に形の版を上げる子が足す
+// 表の移し（docs/specifications/contracts-and-core.md の「テーブルの移行と版の数え」、受け入れ条件 9）。保存の形が読み手の見る形と違う行を、書き手の版の行全体へ書き直す。
+// 書き手の決まりは docs/specifications/contracts-and-core.md の行の書き手の決定 1〜9。資源（Lambda）と起こし方は最初に形の版を上げる子が足す
 
 // 行に取りかかる前に、残り時間がこれ以下なら止めて続きの位置を返す
 export const MIGRATE_RESERVE_MS = 10_000;

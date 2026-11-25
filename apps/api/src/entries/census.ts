@@ -3,7 +3,7 @@ import type { RowKey, StoredRow } from "@nd-factory/core/db";
 import type { Context } from "aws-lambda";
 import { addToCount, checkStartEvent, rowKindOf, scanTable, type MigrateDeps } from "./migrate.ts";
 
-// 版の数え（issues/issue-2-design-detail.md の「表の移し」の countRowVersions、版を上げる子の手順の 5）。
+// 版の数え（docs/specifications/contracts-and-core.md の「テーブルの移行と版の数え」の countRowVersions、版を上げる子の手順の 5）。
 // 行の種類の、ある版の読み手を外してよいかを、保存してある schema_version の値だけで確かめる。readRow も repair も narrow も通さず、
 // writeVersion によらずどの行も数える（記録の表も同じ）。書き込まない。資源（表の読みだけの Lambda）は最初に形の版を上げる子が足す
 

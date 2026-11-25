@@ -29,7 +29,7 @@ export const DISPATCH_RESERVE_MS = 1500;
 export const DISPATCH_SUMMARY_MS = 1000;
 
 // 1 つのトランザクションの組み直しの上限（onConflict が rebuild の件だけが外れたとき、ハンドラーを呼び直して組み直す回数。
-// issues/issue-2-design-row-writers.md の決定 6）。外れは並んだ書き手の確定のときだけ起きる
+// docs/specifications/contracts-and-core.md の行の書き手の決定 6）。外れは並んだ書き手の確定のときだけ起きる
 export const DISPATCH_REBUILD_LIMIT = 3;
 
 // 認可の対象を要素の指す行でなく主体の利用者自身にする操作（外したログインの行の有無は、冪等の鍵の照合の後にハンドラーが照らす）

@@ -9,7 +9,7 @@ import type { ItemResult } from "../idempotency.ts";
 import type { Id } from "../ids.ts";
 import type { Logger } from "../log.ts";
 
-// 操作の振り分けの型（docs/design/detail.md の「内部のデータと定数」、issues/issue-2-design-detail.md の項目の並び）。
+// 操作の振り分けの型（docs/design/detail.md の「内部のデータと定数」、docs/specifications/contracts-and-core.md の項目の並び）。
 // MCP の型（McpCall ほか）は #11 が mcp.ts に置く（決定 7）
 
 export type { ItemResult };

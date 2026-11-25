@@ -23,7 +23,7 @@ export type UserRow = z.infer<typeof userRow>;
 export const userKey = (row: UserRow): RowKey => ({ pk: `USER#${row.user_id}`, sk: "USER" });
 
 // ログインの組（USER#<利用者> / LOGIN#<IdP>#<主体>）。上書き（作ると消すのほかは、ログインの付け替えで cognito_sub と bound_auth_time を書き換えるため、
-// issues/issue-2-design-row-writers.md の決定 2 で version を持つ）。
+// docs/specifications/contracts-and-core.md の行の書き手の決定 2 で version を持つ）。
 // cognito_sub は外すときに Cognito の主体の対応の行の鍵を組む値、bound_auth_time は対応の行の bound_auth_time を写した値
 // （結んだ時のサインインの時刻。users.get がログインごとに返し、logins.delete の要素が読んだ値として持って照らす）
 export const loginRow = overwriteRow(1, {
@@ -131,7 +131,7 @@ export const delegationRow = overwriteRow(1, {
 export type DelegationRow = z.infer<typeof delegationRow>;
 export const delegationKey = (row: DelegationRow): RowKey => ({ pk: `USER#${row.user_id}`, sk: `DELEGATION#${row.delegation_id}` });
 
-// 委任の使った時刻（USER#<利用者> / DELEGATION_USED#<委任>。issues/issue-2-design-row-writers.md の決定 10）。上書き。
+// 委任の使った時刻（USER#<利用者> / DELEGATION_USED#<委任>。docs/specifications/contracts-and-core.md の行の書き手の決定 10）。上書き。
 // authenticate が委任の認証に成功した後だけ、委任の行の version と incarnation の照らしと一緒に書く。委任の行と同じ長さ残り、表の期限を持たない
 export const delegationUsedRow = overwriteRow(1, {
   delegation_id: idOf("dlg"),

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// 表の行の共通の列と基の形（docs/design/data.md の「共通の列」、issues/issue-2-design-detail.md の「サービスの表」）。
+// 表の行の共通の列と基の形（docs/design/data.md の「共通の列」、docs/specifications/contracts-and-core.md の「サービスのテーブル」）。
 // 行の zod は z.object で、知らない列を落とす（表の移しの読み手が次の版だけの列を捨てる）。
 // 鍵の列（pk・sk）は行の zod に持たず、行の種類ごとの keyOf だけが行の列から組む（Value 13）
 
@@ -44,7 +44,7 @@ export function seqKey(n: number): string {
   return String(n).padStart(SEQ_DIGITS, "0");
 }
 
-// 行の世代（issues/issue-2-design-row-writers.md の決定 8）。行を作るときに putIfAbsent が UUID v4 を入れ、置き換えと表の移しで変えない。
+// 行の世代（docs/specifications/contracts-and-core.md の行の書き手の決定 8）。行を作るときに putIfAbsent が UUID v4 を入れ、置き換えと表の移しで変えない。
 // 消して同じ鍵で作り直した行を見分ける（version は作り直すと 1 に戻る）。U3b より前の行は repairIdentity が鍵から決まる UUID の形の値で補うため、版の桁を縛らない
 const incarnation = uuid;
 

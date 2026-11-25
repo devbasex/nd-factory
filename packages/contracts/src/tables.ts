@@ -11,7 +11,7 @@ import { laneCodec, segmentCodec, sprintCodec } from "./rows/sprints.ts";
 import { progressEventCodec } from "./rows/events.ts";
 import { TTL_ATTRIBUTE } from "./rows/common.ts";
 
-// サービスの 10 の表の仕様（docs/design/data.md の「表と鍵」、issues/issue-2-design-detail.md の「サービスの表」、決定 8）。
+// サービスの 10 の表の仕様（docs/design/data.md の「表と鍵」、docs/specifications/contracts-and-core.md の「サービスのテーブル」）。
 // infra の ServiceTable がこの仕様から表と索引を作る。表の名前は <prefix>-<environment>-<suffix>
 
 export const TABLE_PURPOSES = ["users", "teams", "projects", "sprints", "events", "decisions", "notices", "usage", "audit", "idempotency"] as const;
@@ -20,7 +20,7 @@ export type TablePurpose = (typeof TABLE_PURPOSES)[number];
 
 // 行の書き方。上書き（作った後に書き換える行の種類はどれも version を持ち、読んだ version と incarnation で照らす）・
 // 作った後に書き換えない（追記だけ・作ると消すだけ・期限で消える。version を持たず、書き直すのは表の移しだけ）。
-// issues/issue-2-design-row-writers.md の決定 2
+// docs/specifications/contracts-and-core.md の行の書き手の決定 2
 export type RowWrites = "overwrite" | "append";
 
 // 索引。鍵は元の行の列そのもので、索引のための写しの列を持たない。どの索引も結果整合で、候補を出すだけに使う（決定 14）

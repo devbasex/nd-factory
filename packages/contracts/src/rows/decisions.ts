@@ -68,7 +68,7 @@ export const answeredBy = z.strictObject({
 
 // 答え（PROJECT#<プロジェクト> / APPROVAL#<依頼>#ANSWER#<答え>・QUESTION#<問い>#ANSWER#<答え>）。上書き。
 // 確定した列を書き換えず、claimed_generation と ndf_event_seqs だけを空のときに 1 回書き足す（I5）。書き足しを読んだ version で照らすため、
-// issues/issue-2-design-row-writers.md の決定 2 で version を持つ
+// docs/specifications/contracts-and-core.md の行の書き手の決定 2 で version を持つ
 export const answerRow = overwriteRow(1, {
   answer_id: uuid,
   project_id: idOf("prj"),
