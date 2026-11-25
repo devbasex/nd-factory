@@ -259,6 +259,18 @@
       "source": "issues/issue-12-design.md"
     },
     {
+      "term": "保留の件",
+      "context": "platform",
+      "meaning": "送らないと決まり、サーバーから結果を受けていない操作。利用者が破棄を確認するまで端末に暗号化して残す",
+      "source": "issues/issue-12-design.md"
+    },
+    {
+      "term": "隔離",
+      "context": "platform",
+      "meaning": "端末のデータベースを消すときに、持ち主が破棄を確認していない操作とそのキーを別の IndexedDB へ移して残すこと。同じ利用者がサインインしたら戻す",
+      "source": "issues/issue-12-design.md"
+    },
+    {
       "term": "そろえ方の回",
       "context": "platform",
       "meaning": "そろえ方（つながったときに端末とサーバーを合わせる処理）1 回分の実行",
