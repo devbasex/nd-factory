@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 秘密の正規表現を重ねた設定を組み、規則ごとに leak-scan.sh を打つ
-# （#96 #101 の決定 3・5・8。中身は issues/issue-96-101-design-detail.md の「秘密を使う探しのスクリプト」）。
+# （#96 #101 の決定 3・5・8。仕様は docs/specifications/leak-check.md の「秘密を使う探しのスクリプト（leak-scan-secret.sh）」）。
 # 重ねた規則 nd-real-value の名前と、重ねた設定を組む処理を持つのは、このスクリプトだけである。
 # 受けた対象を、既定の規則（tools/checks/gitleaks-default.toml）と、秘密を重ねた設定（.gitleaks.toml を [extend] path で読み、
 # 規則 nd-real-value を足したもの。秘密が無く必須でなければ .gitleaks.toml）で 1 回ずつ探す。
