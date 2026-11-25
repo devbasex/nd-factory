@@ -119,6 +119,71 @@ describe("generateContractUse（形の固定）", () => {
     expect(generated.files.map((f) => f.id)).toEqual(["f-b", "f-a"]);
   });
 
+  it("同じ id の 2 行目が持つ列（lead・files）は、最初の行に無くても使わない", () => {
+    const json = contract();
+    json["domains/entrypoints.json"] = {
+      rows: [
+        { id: "dup", kind: "file", target: "t-1", env: [] },
+        { id: "dup", kind: "skill", target: "t-2", lead: "/y", env: ["E9"], files: ["f-c"] },
+      ],
+    };
+    const generated = generateContractUse(files(json), ["dup"]);
+    expect(generated.entrypoints).toEqual([{ id: "dup", kind: "file", target: "t-1", env: [] }]);
+    expect(generated.files).toEqual([]);
+  });
+
+  it("同じ id の行が 3 つ以上あっても、最初の 1 行だけを出す", () => {
+    const json = contract();
+    json["domains/entrypoints.json"] = {
+      rows: [
+        { id: "x", kind: "file", target: "t-other", env: [] },
+        { id: "dup", kind: "file", target: "t-1", env: [], files: ["f-b"] },
+        { id: "dup", kind: "file", target: "t-2", env: [], files: ["f-a"] },
+        { id: "dup", kind: "file", target: "t-3", env: [], files: ["f-c"] },
+      ],
+    };
+    const generated = generateContractUse(files(json), ["dup"]);
+    expect(generated.entrypoints.map((row) => row.target)).toEqual(["t-1"]);
+    expect(generated.files).toEqual([{ id: "f-b", path: "b.json" }]);
+  });
+
+  it("読むファイルの同じ id の行は最初の行の path を使い、空の path でも 2 行目に替えない", () => {
+    const json = contract();
+    json["domains/ndf-files.json"] = {
+      rows: [
+        { id: "f-b", path: "b.json" },
+        { id: "f-a", path: "" },
+        { id: "f-a", path: "a-2.json" },
+        { id: "f-b", path: "b-2.json" },
+      ],
+    };
+    const generated = generateContractUse(files(json), ["alpha"]);
+    expect(generated.files).toEqual([
+      { id: "f-b", path: "b.json" },
+      { id: "f-a", path: "" },
+    ]);
+  });
+
+  it("空の文字列の id も、入口と読むファイルの両方でふつうの id として引く", () => {
+    const json = contract();
+    json["domains/entrypoints.json"] = { rows: [{ id: "", kind: "file", target: "t-empty", env: [], files: [""] }] };
+    json["domains/ndf-files.json"] = { rows: [{ id: "", path: "empty.json" }] };
+    const generated = generateContractUse(files(json), [""]);
+    expect(generated.entrypoints).toEqual([{ id: "", kind: "file", target: "t-empty", env: [], files: [""] }]);
+    expect(generated.files).toEqual([{ id: "", path: "empty.json" }]);
+  });
+
+  it("読むファイルの行が重なっていても、無い id があれば ContractUseSyncError", () => {
+    const json = contract();
+    json["domains/ndf-files.json"] = {
+      rows: [
+        { id: "f-a", path: "a.json" },
+        { id: "f-a", path: "a-2.json" },
+      ],
+    };
+    expect(() => generateContractUse(files(json), ["gamma"])).toThrow(/^契約の ndf-files\.json に無い読むファイル: f-c$/);
+  });
+
   it("手で書く id が空なら行も読むファイルも空で、区間の報告の形は出す", () => {
     const generated = generateContractUse(files(), []);
     expect(generated.entrypoints).toEqual([]);
