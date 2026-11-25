@@ -46,6 +46,11 @@ function isCdk(call: Call, sub: string): boolean {
   return call.args.includes("cdk") && call.args.includes(sub);
 }
 
+// 呼び出しのうち cdk の sub のもの
+function cdkCalls(f: Fake, sub: string): Call[] {
+  return f.calls.filter((c) => isCdk(c, sub));
+}
+
 // スタックの properties。null なら bootstrap の要求を持たない
 function bootstrapProps(required: number | null): { requiresBootstrapStackVersion?: number } {
   return required === null ? {} : { requiresBootstrapStackVersion: required };
@@ -163,7 +168,7 @@ describe("mainSetup", () => {
     const f = fake();
     const code = await mainSetup(["diff", "--profile", "acme-test", "--settings", FIXTURE, "--out", tempOut()], f.deps);
     expect(code).toBe(EXIT.OK);
-    expect(f.calls.some((c) => isCdk(c, "diff"))).toBe(true);
+    expect(cdkCalls(f, "diff").length > 0).toBe(true);
   });
 
   it("deploy を振り分ける", async () => {
@@ -209,7 +214,7 @@ describe("runDiff", () => {
     const code = await runDiff(diffOpts({ out }), f.deps);
     expect(code).toBe(EXIT.OK);
     expect(writes(f)).toBe(0);
-    const diff = f.calls.find((c) => isCdk(c, "diff"))!;
+    const diff = cdkCalls(f, "diff")[0]!;
     expect(diff.args).toEqual(expect.arrayContaining(["--app", out, "--method=template", "acme-test-app", "acme-test-pipeline"]));
     const text = f.out.join("\n");
     expect(text).toContain("acme-test-accounts");
@@ -260,7 +265,7 @@ describe("runDiff", () => {
   it("合成は作り物でない profile の主体とリージョンを合成へ渡す", async () => {
     const f = fake();
     await runDiff(diffOpts(), f.deps);
-    const synth = f.calls.find((c) => isCdk(c, "synth"))!;
+    const synth = cdkCalls(f, "synth")[0]!;
     expect(synth.options.env).toMatchObject({
       ND_SETTINGS: FIXTURE,
       ND_STACKS: "app,pipeline",
@@ -330,7 +335,7 @@ describe("runDiff", () => {
     expect(code).toBe(EXIT.BOOTSTRAP);
     expect(f.err.join("\n")).toMatch(/30/);
     expect(f.err.join("\n")).toMatch(/21/);
-    expect(f.calls.some((c) => isCdk(c, "diff"))).toBe(false);
+    expect(cdkCalls(f, "diff").length > 0).toBe(false);
     expect(writes(f)).toBe(0);
   });
 
@@ -370,7 +375,7 @@ describe("runDeploy", () => {
     const f = fake();
     const code = await runDeploy(deployOpts(out, confirm), f.deps);
     expect(code).toBe(EXIT.OK);
-    const deploys = f.calls.filter((c) => isCdk(c, "deploy"));
+    const deploys = cdkCalls(f, "deploy");
     expect(deploys).toHaveLength(1);
     expect(deploys[0]!.args).toEqual(
       expect.arrayContaining(["--app", out, "--profile", "acme-test", "acme-test-app", "acme-test-pipeline"]),
@@ -436,7 +441,7 @@ describe("runDeploy", () => {
     const { out, confirm } = await diffThen(fake());
     const f = fake({ deployCode: 1 });
     expect(await runDeploy(deployOpts(out, confirm), f.deps)).toBe(EXIT.DEPLOY_FAILED);
-    expect(f.calls.filter((c) => isCdk(c, "deploy"))).toHaveLength(1);
+    expect(cdkCalls(f, "deploy")).toHaveLength(1);
   });
 });
 
