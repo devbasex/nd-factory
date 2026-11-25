@@ -26,7 +26,7 @@
 | --- | --- | --- |
 | `CustomData`（承認の画面の注記） | 準備が書き出したコミット・合成の結果の要約値の先頭 12 桁・スタックの名前 | コミットが、反映するつもりの起点のブランチの先頭か |
 | `ExternalEntityLink`（承認の画面のリンク） | 準備の実行の記録（CodeBuild のビルドの頁）。差分の全文がある | 差分の全文 |
-| `CustomData` のコミットの GitHub の検査 | そのコミットで動いたジョブ `ndf-contract`（NDF の契約の照合。Pull Request・main への push・毎日・手動で起動する）の結論。実行は `.github/workflows/ndf-contract.yml` のものに絞って読む（`gh api "repos/<起点のリポジトリ>/actions/workflows/ndf-contract.yml/runs?head_sha=<コミット>"`。チェックの名前だけでは別のワークフローの同じ名前のチェックと区別できないため） | `conclusion` が `success` の実行が 1 件以上あり、その実行の記録に `checked: fixed <固定の点> 1-6` の行があるか。`skip: no-contract-use` だけなら照合 1〜6 は照らされていない。これを許すのは #2 が NDF の契約の使い方を置く前（照合の定数 `CONTRACT_USE_REQUIRED` が偽のコミット）に限り、承認の注記に「照合 1〜6 は未実施」と書いて承認してよい。#2 の後は書き出しが無いと照合が失敗するので、`skip:` の行だけの成功は起こらない。実行が無い・`failure`・終わっていないなら承認しない。起点のブランチが main でなく push の実行が無いときは、その枝を選んで `ndf-contract` を手動で起こし（`workflow_dispatch`）、成功してから承認する |
+| `CustomData` のコミットの GitHub の検査 | そのコミットで動いたジョブ `ndf-contract`（NDF の契約の照合。Pull Request・main への push・毎日・手動で起動する）の結論。実行は `.github/workflows/ndf-contract.yml` のものに絞って読む（`gh api "repos/<起点のリポジトリ>/actions/workflows/ndf-contract.yml/runs?head_sha=<コミット>"`。チェックの名前だけでは別のワークフローの同じ名前のチェックと区別できないため） | `conclusion` が `success` の実行が 1 件以上あり、その実行の記録に `checked: fixed <固定の点> 1-6` の行があるか。NDF の契約の使い方の書き出しが無いと、照合は `fail: no-contract-use` で失敗する。`checked: fixed` の行が無い成功の実行は無いので、その行が無ければ承認しない。実行が無い・`failure`・終わっていないなら承認しない。起点のブランチが main でなく push の実行が無いときは、その枝を選んで `ndf-contract` を手動で起こし（`workflow_dispatch`）、成功してから承認する |
 
 差分を読むときは次を確かめる。
 
