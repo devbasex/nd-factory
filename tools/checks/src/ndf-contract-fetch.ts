@@ -158,6 +158,16 @@ export const SCHEMAS = {
 
 export type Parsed<P extends ContractPath> = z.infer<(typeof SCHEMAS)[P]>;
 
+/** 契約のファイルを形で読んだ結果。読めなければ最初の issue のパス（`.` でつないだもの）を持つ */
+export type ParseResult<P extends ContractPath> = { ok: true; data: Parsed<P> } | { ok: false; where: string };
+
+/** 契約のファイルを `SCHEMAS` の形で読む。照合・生成・知らせ・差分が共有する */
+export function parseContract<P extends ContractPath>(files: ContractFiles, path: P): ParseResult<P> {
+  const result = SCHEMAS[path].safeParse(files.json[path]);
+  if (result.success) return { ok: true, data: result.data as Parsed<P> };
+  return { ok: false, where: result.error.issues[0]?.path.join(".") ?? "" };
+}
+
 export function missing(wanted: readonly string[], have: Iterable<string>): string[] {
   const set = new Set(have);
   return wanted.filter((name) => !set.has(name));

@@ -22,9 +22,9 @@ import {
 import {
   CONTRACT_DIR,
   NDF_REPO_URL,
-  SCHEMAS,
   list,
   missing,
+  parseContract,
   readPinnedCommit,
   withFixedContract,
   type ContractFiles,
@@ -45,10 +45,9 @@ export class ContractUseSyncError extends Error {
 
 /** 生成のために契約のファイルを読む。読めなければ例外 */
 function readForSync<P extends ContractPath>(files: ContractFiles, path: P): Parsed<P> {
-  const result = SCHEMAS[path].safeParse(files.json[path]);
-  if (result.success) return result.data as Parsed<P>;
-  const where = result.error.issues[0]?.path.join(".") ?? "";
-  throw new ContractUseSyncError(`契約のファイルの形が読めない: ${CONTRACT_DIR}/${path}（${where}）`);
+  const result = parseContract(files, path);
+  if (result.ok) return result.data;
+  throw new ContractUseSyncError(`契約のファイルの形が読めない: ${CONTRACT_DIR}/${path}（${result.where}）`);
 }
 
 /** 契約の行から、使い方が持つ列（id と 6 つの列）だけを決まった順で取り出す */

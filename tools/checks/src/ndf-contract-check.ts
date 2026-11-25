@@ -29,10 +29,10 @@ import {
   ContractFetchError,
   NDF_REPO_URL,
   PIN_FILE,
-  SCHEMAS,
   fetchContract,
   list,
   missing,
+  parseContract,
   readPinnedCommit,
   withFixedContract,
   type ContractFiles,
@@ -80,10 +80,9 @@ function read<P extends ContractPath>(
   check: CheckNumber,
   findings: ContractFinding[],
 ): Parsed<P> | null {
-  const result = SCHEMAS[path].safeParse(files.json[path]);
-  if (result.success) return result.data as Parsed<P>;
-  const where = result.error.issues[0]?.path.join(".") ?? "";
-  findings.push({ check, path: `${CONTRACT_DIR}/${path}`, detail: `契約のファイルの形が読めない（${where}）` });
+  const result = parseContract(files, path);
+  if (result.ok) return result.data;
+  findings.push({ check, path: `${CONTRACT_DIR}/${path}`, detail: `契約のファイルの形が読めない（${result.where}）` });
   return null;
 }
 
@@ -350,8 +349,8 @@ export function compareContract(files: ContractFiles, use: NdfContractUse, pinne
  * 形が読めないときは何も出さない（食い違いは照らすこと 4 が出す）
  */
 export function contractNotices(files: ContractFiles): string[] {
-  const parsed = SCHEMAS["domains/ndf-files.json"].safeParse(files.json["domains/ndf-files.json"]);
-  if (!parsed.success) return [];
+  const parsed = parseContract(files, "domains/ndf-files.json");
+  if (!parsed.ok) return [];
   const row = parsed.data.rows.find((r) => r.id === "ask-journal");
   if (row?.fields === undefined) return [];
   return [`notice: ${files.commit} の ask-journal が fields を持つ: ${list(row.fields)}（#41 の決定 106）`];
@@ -359,10 +358,9 @@ export function contractNotices(files: ContractFiles): string[] {
 
 /** 先端の区間の報告の `shape` を固定の点と比べ、差分の行を返す（通っても並べる） */
 export function reportShapeDiff(fixed: ContractFiles, tip: ContractFiles): string[] {
-  const schema = SCHEMAS["hooks/unattended-report.json"];
-  const before = schema.safeParse(fixed.json["hooks/unattended-report.json"]);
-  const after = schema.safeParse(tip.json["hooks/unattended-report.json"]);
-  if (!before.success || !after.success) return [];
+  const before = parseContract(fixed, "hooks/unattended-report.json");
+  const after = parseContract(tip, "hooks/unattended-report.json");
+  if (!before.ok || !after.ok) return [];
   const lines: string[] = [];
   const setDiff = (name: string, old: string[], now: string[]) => {
     const added = missing(now, old);
