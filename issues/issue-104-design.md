@@ -131,6 +131,21 @@ graph LR
 | 7. CI の `check`・`ref-check`・`leak-check` が通る | スプリントの Pull Request の CI のジョブ | 漏れの検査や参照の検査に当たる値を記録に足すと落ちる |
 | 8. 変更が `docs/design-process/issue-13/` の中だけ | #104 の実装をまとめたコミットを `<C>` として、`git diff --name-only <C>^ <C>` が 6 本だけを返す | `docs/design/` か `docs/specifications/` を 1 行でも変えると落ちる |
 
+## どこを変えるか
+
+詳細設計はこのセクションに畳む。新しく作る関数が 0、シグネチャを変える関数が 0 のためである（足すのは文書だけで、置き換えはその場のコマンドで行い、スクリプトをリポジトリに置かない）。
+
+写す 5 本は、どれも `git show 98fafb0:<元>` の出力に、決定 1 の表の置き換えを `](` の直後だけに当てて作る。#104 の変更は 1 つのコミットにまとめる（「影響と危険」の「受け入れ条件 8 の範囲」）。
+
+| ファイル | 変える中身 | 決定 |
+| --- | --- | --- |
+| `docs/design-process/issue-13/README.md`（新設） | [docs/design-process/issue-1/README.md](../docs/design-process/issue-1/README.md) と同じ並びで書く。並びは、H1・何の記録かと今の正の段落・文書の一覧の表・移した後に直したことの段落・関わる Pull Request の表である。今の正の段落には、記録の時点の `98fafb0`、承認したときのものが設計の Pull Request #45 にあること、後から追わないこと、今の正（`docs/design/`・`app-stack-infrastructure.md`・`db-prep-function.md`）と食い違えば正の側が勝つことを書く。文書の一覧の表には、5 本の行と元のファイルの名前を置く。関わる Pull Request の表は 10 行（#45・#70・#72・#74・#77・#81・#83・#90・#97・#103）にする | 決定 2 |
+| `docs/design-process/issue-13/requirements.md`（新設） | 元は `issues/issue-13-requirements.md`。相対リンクが無いため、元と同じ中身になる | 決定 1 |
+| `docs/design-process/issue-13/design.md`（新設） | 元は `issues/issue-13-design.md`。リンクの飛び先だけを決定 1 の表で置き換える | 決定 1 |
+| `docs/design-process/issue-13/design-detail.md`（新設） | 元は `issues/issue-13-design-detail.md`。リンクの飛び先だけを決定 1 の表で置き換える | 決定 1 |
+| `docs/design-process/issue-13/survey.md`（新設） | 元は `issues/issue-13-design-survey.md`。リンクの飛び先だけを決定 1 の表で置き換える | 決定 1 |
+| `docs/design-process/issue-13/plan.md`（新設） | 元は `issues/issue-13-plan.md`。リンクの飛び先だけを決定 1 の表で置き換える | 決定 1 |
+
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
