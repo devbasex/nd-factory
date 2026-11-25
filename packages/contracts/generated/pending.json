@@ -196,6 +196,10 @@
     "owner": "#8"
   },
   {
+    "operation": "notification_targets.authorize",
+    "owner": "#8"
+  },
+  {
     "operation": "notification_targets.create",
     "owner": "#8"
   },
@@ -280,6 +284,10 @@
     "owner": "#6"
   },
   {
+    "operation": "runner.state_urls.create",
+    "owner": "#6"
+  },
+  {
     "operation": "runner.answers.list",
     "owner": "#6"
   },
@@ -294,13 +302,5 @@
   {
     "operation": "machine.lane_claims.create",
     "owner": "#7"
-  },
-  {
-    "operation": "db_prep.exchanges.create",
-    "owner": "#13"
-  },
-  {
-    "operation": "db_prep.completions.create",
-    "owner": "#13"
   }
 ]

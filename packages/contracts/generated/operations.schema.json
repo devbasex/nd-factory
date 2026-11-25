@@ -295,6 +295,12 @@
     "notification_targets.list.result": {
       "not": {}
     },
+    "notification_targets.authorize.item": {
+      "not": {}
+    },
+    "notification_targets.authorize.result": {
+      "not": {}
+    },
     "notification_targets.create.item": {
       "not": {}
     },
@@ -421,6 +427,12 @@
     "runner.heartbeats.create.result": {
       "not": {}
     },
+    "runner.state_urls.create.item": {
+      "not": {}
+    },
+    "runner.state_urls.create.result": {
+      "not": {}
+    },
     "runner.answers.list.item": {
       "not": {}
     },
@@ -443,18 +455,6 @@
       "not": {}
     },
     "machine.lane_claims.create.result": {
-      "not": {}
-    },
-    "db_prep.exchanges.create.item": {
-      "not": {}
-    },
-    "db_prep.exchanges.create.result": {
-      "not": {}
-    },
-    "db_prep.completions.create.item": {
-      "not": {}
-    },
-    "db_prep.completions.create.result": {
       "not": {}
     }
   }

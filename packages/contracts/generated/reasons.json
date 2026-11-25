@@ -1118,6 +1118,28 @@
         "status": 403
       }
     ],
+    "notification_targets.authorize": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
     "notification_targets.create": [
       {
         "code": "item_invalid",
@@ -1564,6 +1586,28 @@
         "status": 409
       }
     ],
+    "runner.state_urls.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
     "runner.answers.list": [
       {
         "code": "item_invalid",
@@ -1631,50 +1675,6 @@
       }
     ],
     "machine.lane_claims.create": [
-      {
-        "code": "item_invalid",
-        "status": 400
-      },
-      {
-        "code": "not_found",
-        "status": 404
-      },
-      {
-        "code": "role_insufficient",
-        "status": 403
-      },
-      {
-        "code": "version_mismatch",
-        "status": 409
-      },
-      {
-        "code": "state_mismatch",
-        "status": 409
-      }
-    ],
-    "db_prep.exchanges.create": [
-      {
-        "code": "item_invalid",
-        "status": 400
-      },
-      {
-        "code": "not_found",
-        "status": 404
-      },
-      {
-        "code": "role_insufficient",
-        "status": 403
-      },
-      {
-        "code": "version_mismatch",
-        "status": 409
-      },
-      {
-        "code": "state_mismatch",
-        "status": 409
-      }
-    ],
-    "db_prep.completions.create": [
       {
         "code": "item_invalid",
         "status": 400

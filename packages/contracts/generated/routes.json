@@ -295,6 +295,12 @@
   },
   {
     "method": "POST",
+    "path": "/v1/notification_targets/authorize",
+    "operation": "notification_targets.authorize",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
     "path": "/v1/notification_targets/create",
     "operation": "notification_targets.create",
     "endpoint": "user"
@@ -421,6 +427,12 @@
   },
   {
     "method": "POST",
+    "path": "/v1/runner/state_urls/create",
+    "operation": "runner.state_urls.create",
+    "endpoint": "runner"
+  },
+  {
+    "method": "POST",
     "path": "/v1/runner/answers/list",
     "operation": "runner.answers.list",
     "endpoint": "runner"
@@ -442,17 +454,5 @@
     "path": "/v1/machine/lane_claims/create",
     "operation": "machine.lane_claims.create",
     "endpoint": "machine"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/db_prep/exchanges/create",
-    "operation": "db_prep.exchanges.create",
-    "endpoint": "db_prep"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/db_prep/completions/create",
-    "operation": "db_prep.completions.create",
-    "endpoint": "db_prep"
   }
 ]

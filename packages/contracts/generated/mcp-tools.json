@@ -896,34 +896,6 @@
     }
   },
   {
-    "name": "notification_targets.delete",
-    "description": "delete notification_targets",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 100
-        }
-      },
-      "required": [
-        "items"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "not": {}
-      }
-    },
-    "annotations": {
-      "readOnlyHint": false,
-      "idempotentHint": false,
-      "destructiveHint": true
-    }
-  },
-  {
     "name": "delegations.list",
     "description": "list delegations",
     "inputSchema": {
@@ -1008,34 +980,6 @@
     }
   },
   {
-    "name": "model_keys.delete",
-    "description": "delete model_keys",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 100
-        }
-      },
-      "required": [
-        "items"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "not": {}
-      }
-    },
-    "annotations": {
-      "readOnlyHint": false,
-      "idempotentHint": false,
-      "destructiveHint": true
-    }
-  },
-  {
     "name": "machines.list",
     "description": "list machines",
     "inputSchema": {
@@ -1061,34 +1005,6 @@
       "readOnlyHint": true,
       "idempotentHint": false,
       "destructiveHint": false
-    }
-  },
-  {
-    "name": "machines.delete",
-    "description": "delete machines",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 100
-        }
-      },
-      "required": [
-        "items"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "not": {}
-      }
-    },
-    "annotations": {
-      "readOnlyHint": false,
-      "idempotentHint": false,
-      "destructiveHint": true
     }
   },
   {

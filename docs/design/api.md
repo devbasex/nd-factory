@@ -180,7 +180,7 @@ ID の種類のプレフィックス:
 | `sessions.delete` | `/v1/sessions/delete` | F1 | 依頼と材料の読み出しだけ（`users.get`） | `human_only` | 書く |
 | `users.get` | `/v1/users/get` | F1・F2 | ツール | — | 読む（read） |
 | `users.update` | `/v1/users/update` | F2 | ツール | — | 書く（manage） |
-| `login_links.create` | `/v1/login_links/create` | F1 | 依頼と材料の読み出しだけ（`users.get`） | 人だけ | 書く |
+| `login_links.create` | `/v1/login_links/create` | F1 | 依頼と材料の読み出しだけ（`users.get`） | `human_only` | 書く |
 | `logins.create` | `/v1/logins/create` | F1 | 依頼と材料の読み出しだけ（`users.get`） | `human_only` | 書く |
 | `logins.delete` | `/v1/logins/delete` | F1 | 依頼と材料の読み出しだけ（`users.get`） | `human_only` | 書く |
 | `teams.list` | `/v1/teams/list` | F3 | ツール | — | 読む（read） |

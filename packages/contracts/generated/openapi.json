@@ -2264,6 +2264,52 @@
         }
       }
     },
+    "/v1/notification_targets/authorize": {
+      "post": {
+        "operationId": "notification_targets.authorize",
+        "description": "authorize notification_targets",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/notification_targets.authorize.item"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "results per item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/notification_targets.authorize.result"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "request error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/notification_targets/create": {
       "post": {
         "operationId": "notification_targets.create",
@@ -3242,6 +3288,9 @@
       "notification_targets.list.item": {
         "not": {}
       },
+      "notification_targets.authorize.item": {
+        "not": {}
+      },
       "notification_targets.create.item": {
         "not": {}
       },
@@ -3479,6 +3528,9 @@
         "not": {}
       },
       "notification_targets.list.result": {
+        "not": {}
+      },
+      "notification_targets.authorize.result": {
         "not": {}
       },
       "notification_targets.create.result": {

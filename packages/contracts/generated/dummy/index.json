@@ -48,6 +48,7 @@
   "notices.list": null,
   "notices.mark_read": null,
   "notification_targets.list": null,
+  "notification_targets.authorize": null,
   "notification_targets.create": null,
   "notification_targets.test": null,
   "notification_targets.delete": null,
@@ -69,10 +70,9 @@
   "runner.exchanges.create": null,
   "runner.events.create": null,
   "runner.heartbeats.create": null,
+  "runner.state_urls.create": null,
   "runner.answers.list": null,
   "runner.answer_deliveries.create": null,
   "machine.heartbeats.create": null,
-  "machine.lane_claims.create": null,
-  "db_prep.exchanges.create": null,
-  "db_prep.completions.create": null
+  "machine.lane_claims.create": null
 }

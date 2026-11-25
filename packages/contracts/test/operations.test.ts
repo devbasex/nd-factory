@@ -33,7 +33,7 @@ type UserRow = {
   allOrNothing: boolean;
 };
 
-const USER_ROWS: UserRow[] = section("### 利用者向けの操作", "### 人だけにした理由")
+const USER_ROWS: UserRow[] = section("### 利用者向けの操作", "### `human_only` にした理由")
   .filter((l) => l.startsWith("| `"))
   .map((l) => {
     const [name, route, features, mcp, human, rw] = cells(l);
@@ -43,7 +43,7 @@ const USER_ROWS: UserRow[] = section("### 利用者向けの操作", "### 人だ
       name: backticks(name ?? "")[0] ?? "",
       route: backticks(route ?? "")[0] ?? "",
       features: (features ?? "").split("・"),
-      humanOnly: human === "人だけ" ? "always" : human === "—" ? "never" : "per_item",
+      humanOnly: human === "`human_only`" ? "always" : human === "—" ? "never" : "per_item",
       mcpRead,
       access: (rw ?? "").startsWith("読む") ? "read" : "write",
       delegationKind: kind as OperationDef["delegationKind"],
@@ -51,19 +51,18 @@ const USER_ROWS: UserRow[] = section("### 利用者向けの操作", "### 人だ
     };
   });
 
-const SELF_ROUTES: string[] = section("### ランナー・手元のマシン・DB の用意のタスクの HTTP の経路", "### 入出力の変わり目")
+const SELF_ROUTES: string[] = section("### ランナー・手元のマシンの HTTP のルート", "### 入出力の変わり目")
   .filter((l) => l.startsWith("| `/v1/"))
   .map((l) => backticks(cells(l)[0] ?? "")[0] ?? "");
 
 // 受け持つ子の表: エンティティ（`x.*`）・名前（`x.y`）・自分向けの受け口の語から子の番号を引く
-const OWNER_ROWS = section("形の正本へ書くのは次の子の課題である。", "表の列の読み方")
+const OWNER_ROWS = section("スキーマの正本へは次の子の課題が書く。", "表の列の読み方")
   .filter((l) => l.startsWith("| ") && !l.startsWith("| 操作と") && !l.startsWith("| ---"))
   .map((l) => {
     const [ops, owner] = cells(l);
     const endpoints = [
       ...(ops?.includes("ランナー向け") ? ["runner"] : []),
       ...(ops?.includes("手元のマシン向け") ? ["machine"] : []),
-      ...(ops?.includes("DB の用意のタスク向け") ? ["db_prep"] : []),
     ];
     return { refs: backticks(ops ?? ""), endpoints, owner: owner ?? "" };
   });
@@ -75,7 +74,7 @@ function expectedOwner(op: OperationDef): string | undefined {
   return row?.owner;
 }
 
-const IDEMPOTENT_NAMED = backticks(section("### 冪等の鍵", "### ページ送り").find((l) => l.startsWith("| どこに置くか")) ?? "").filter(
+const IDEMPOTENT_NAMED = backticks(section("### 冪等キー", "### ページ送り").find((l) => l.startsWith("| どこに置くか")) ?? "").filter(
   (n) => n !== "idempotency_key",
 );
 
@@ -83,12 +82,12 @@ const userOps = OPERATIONS.filter((op) => op.endpoint === "user");
 const selfOps = OPERATIONS.filter((op) => op.endpoint !== "user");
 
 describe("OPERATIONS", () => {
-  it("利用者向けの 67 と自分向けの 9 を登録する", () => {
-    expect(USER_ROWS).toHaveLength(67);
-    expect(SELF_ROUTES).toHaveLength(9);
-    expect(userOps).toHaveLength(67);
-    expect(selfOps).toHaveLength(9);
-    expect(OPERATIONS).toHaveLength(76);
+  it("利用者向けの 77 と自分向けの 13 を登録する", () => {
+    expect(USER_ROWS).toHaveLength(77);
+    expect(SELF_ROUTES).toHaveLength(13);
+    expect(userOps).toHaveLength(77);
+    expect(selfOps).toHaveLength(13);
+    expect(OPERATIONS).toHaveLength(90);
   });
 
   it("全体の設計の一覧の順に、利用者向け・自分向けの順で並ぶ", () => {
@@ -109,7 +108,7 @@ describe("OPERATIONS", () => {
     expect(actual).toEqual(USER_ROWS);
   });
 
-  it("自分向けの経路は受け口が頭の名前を持ち、機能と委任の種類を持たない", () => {
+  it("自分向けの HTTP のルートは受け口が頭の名前を持ち、機能と委任の種類を持たない", () => {
     for (const op of selfOps) {
       expect(op.route).toBe(`/v1/${op.name.replaceAll(".", "/")}`);
       expect(op.name.startsWith(`${op.endpoint}.`)).toBe(true);
@@ -121,7 +120,7 @@ describe("OPERATIONS", () => {
     // 自分向けの経路の読み書きは動詞で決めない。答えの受け取りは送達の状態を記す書き込み
     expect(selfOps.filter((op) => op.access !== "write").map((op) => op.name)).toEqual([]);
     expect(operationByName("runner.answers.list")?.access).toBe("write");
-    expect(new Set(selfOps.map((op) => op.endpoint))).toEqual(new Set(["runner", "machine", "db_prep"]));
+    expect(new Set(selfOps.map((op) => op.endpoint))).toEqual(new Set(["runner", "machine"]));
   });
 
   it("名前と経路が重ならない", () => {
@@ -135,7 +134,7 @@ describe("OPERATIONS", () => {
     expect([...features].every((f) => /^F([1-9]|1\d|20)$/.test(f))).toBe(true);
   });
 
-  it("読み出しの道具は表にある、人だけでない読む操作を指す", () => {
+  it("読み出しのツールは表にある、`human_only` でない読む操作を指す", () => {
     for (const op of OPERATIONS.filter((o) => o.mcpRead !== null)) {
       const read = operationByName(op.mcpRead ?? "");
       expect(read?.access).toBe("read");
@@ -162,7 +161,7 @@ describe("OPERATIONS", () => {
     ]);
   });
 
-  it("冪等の鍵の決まりが名を挙げる操作は冪等の鍵を持ち、新しいものを作る操作も持つ", () => {
+  it("冪等キーの決まりが名を挙げる操作は冪等キーを持ち、新しいものを作る操作も持つ", () => {
     expect(IDEMPOTENT_NAMED.length).toBeGreaterThan(0);
     for (const name of IDEMPOTENT_NAMED) expect([name, operationByName(name)?.idempotencyKey]).toEqual([name, true]);
     for (const op of userOps.filter((o) => o.verb === "create" || o.verb === "add")) expect([op.name, op.idempotencyKey]).toEqual([op.name, true]);
