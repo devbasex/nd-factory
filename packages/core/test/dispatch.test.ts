@@ -105,9 +105,6 @@ function setup(opts: { handlers?: Record<string, Handler>; delegation?: Delegati
       async lane() {
         return null;
       },
-      async dbPrep() {
-        return null;
-      },
     },
   };
   const scope = fakeScope(table);

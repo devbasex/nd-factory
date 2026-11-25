@@ -75,10 +75,10 @@ export function bodyFaultOf(items: unknown, op: OperationDef | null): BodyFaultR
   return null;
 }
 
-// 受け口は受けた HTTP の経路の頭で決まる（/v1/runner/…・/v1/machine/…・/v1/db_prep/…、ほかは利用者向け）
+// 受け口は受けた HTTP の経路の頭で決まる（/v1/runner/…・/v1/machine/…、ほかは利用者向け）
 function endpointOfPath(path: string): CallEndpoint {
   const head = path.split("/")[2];
-  return head === "runner" || head === "machine" || head === "db_prep" ? head : "user";
+  return head === "runner" || head === "machine" ? head : "user";
 }
 
 function header(event: HttpEvent, name: string): string | null {

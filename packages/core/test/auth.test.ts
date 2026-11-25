@@ -12,7 +12,6 @@ import {
   type AuthDeps,
   type AuthReaders,
   type CognitoBinding,
-  type DbPrepRecord,
   type DelegationRecord,
   type InboundRequest,
   type LaneRecord,
@@ -96,7 +95,6 @@ function signedToken(payload: Record<string, unknown>, key: KeyObject = ed.priva
 }
 
 const laneClaims = (over: Record<string, unknown> = {}) => ({ aud: "lane", token_use: "lane", sub: LANE, project_id: PROJECT, generation: 2, exp: NOW_SEC + 3600, ...over });
-const prepClaims = (over: Record<string, unknown> = {}) => ({ aud: "db_prep", token_use: "exchange", sub: PREP, project_id: PROJECT, exp: NOW_SEC + 600, ...over });
 
 // 委任の行と委任の使った時刻の行（偽の表に置く）。行の世代は作り物の値
 const DELEGATION_KEY = { pk: `USER#${USER}`, sk: `DELEGATION#${DELEGATION}` };
@@ -118,7 +116,6 @@ type World = {
   seats?: number;
   machine?: MachineRecord | null;
   lane?: LaneRecord | null;
-  prep?: DbPrepRecord | null;
   fail?: Error;
   // 結んだ主体（cognito-sub-1）の対応の行の bound_auth_time
   boundAuthTime?: string;
@@ -162,10 +159,6 @@ function readers(world: World): AuthReaders {
     async lane() {
       guard();
       return world.lane ?? null;
-    },
-    async dbPrep() {
-      guard();
-      return world.prep ?? null;
     },
   };
 }
@@ -375,7 +368,7 @@ describe("authenticate: 人（Cognito の access token）", () => {
       idempotencyPrincipalKey({ kind: "delegation", userId: id("usr", 7), delegationId: DELEGATION, scope: { projectIds: [PROJECT], operations: "run" }, clientName: "acme-agent" }, "sprints.create"),
       idempotencyPrincipalKey({ kind: "runner", laneId: LANE, projectId: PROJECT, generation: 2 }, "runner.events.create"),
       idempotencyPrincipalKey({ kind: "machine", teamId: TEAM, machineId: MACHINE }, "machines.heartbeat"),
-      idempotencyPrincipalKey({ kind: "db_prep", projectId: PROJECT, prepId: PREP }, "db_prep.completions.create"),
+      idempotencyPrincipalKey({ kind: "db_prep", projectId: PROJECT, prepId: PREP }, "db_prep.record"),
       idempotencyPrincipalKey({ kind: "github" }, "github.webhooks.create"),
       idempotencyPrincipalKey({ kind: "patrol" }, "patrol.run"),
     ];
@@ -684,58 +677,12 @@ describe("authenticate: ランナー", () => {
     ["終わったレーン", signedToken(laneClaims()), { ...lane, ended: true }],
     ["前の世代", signedToken(laneClaims({ generation: 1 })), lane],
     ["別の鍵の署名", signedToken(laneClaims(), otherEd.privateKey), lane],
-    ["宛先の違い", signedToken(laneClaims({ aud: "db_prep" })), lane],
+    ["宛先の違い", signedToken(laneClaims({ aud: "acme-other" })), lane],
     ["EdDSA でない", signedToken(laneClaims(), ed.privateKey, "none"), lane],
     ["無いレーン", signedToken(laneClaims()), null],
     ["別のプロジェクトのレーン", signedToken(laneClaims()), { ...lane, projectId: id("prj", 7) }],
   ])("%s は unauthorized", async (_label, token, record) => {
     await expect(authenticate(req("runner", token, "runner.events.create"), setup({ lane: record }).deps)).resolves.toEqual(UNAUTHORIZED);
-  });
-});
-
-describe("authenticate: DB の用意のタスク", () => {
-  const prep: DbPrepRecord = { prepId: PREP, inProgress: true, consumed: [] };
-
-  it("引き換えの token は引き換えの経路で 1 回だけ通る", async () => {
-    const token = signedToken(prepClaims());
-    await expect(authenticate(req("db_prep", token, "db_prep.exchanges.create"), setup({ prep }).deps)).resolves.toEqual({
-      ok: true,
-      principal: { kind: "db_prep", projectId: PROJECT, prepId: PREP },
-      sessionRevokedAt: null,
-    });
-    await expect(authenticate(req("db_prep", token, "db_prep.exchanges.create"), setup({ prep: { ...prep, consumed: ["exchange"] } }).deps)).resolves.toEqual(UNAUTHORIZED);
-  });
-
-  it("終わりの報告の経路だけ終わりの報告の token を受ける", async () => {
-    const completion = signedToken(prepClaims({ token_use: "completion" }));
-    await expect(authenticate(req("db_prep", completion, "db_prep.completions.create"), setup({ prep }).deps)).resolves.toMatchObject({ ok: true });
-    await expect(authenticate(req("db_prep", completion, "db_prep.exchanges.create"), setup({ prep }).deps)).resolves.toEqual(UNAUTHORIZED);
-  });
-
-  it("用意の途中でない・別の用意の token は unauthorized", async () => {
-    const token = signedToken(prepClaims());
-    await expect(authenticate(req("db_prep", token, "db_prep.exchanges.create"), setup({ prep: { ...prep, inProgress: false } }).deps)).resolves.toEqual(UNAUTHORIZED);
-    await expect(authenticate(req("db_prep", token, "db_prep.exchanges.create"), setup({ prep: { ...prep, prepId: "prep-acme-2" } }).deps)).resolves.toEqual(UNAUTHORIZED);
-  });
-
-  it("終わりの報告の token は使い終えた後は unauthorized で、引き換えの使い終えには引きずられない", async () => {
-    const completion = signedToken(prepClaims({ token_use: "completion" }));
-    await expect(authenticate(req("db_prep", completion, "db_prep.completions.create"), setup({ prep: { ...prep, consumed: ["exchange"] } }).deps)).resolves.toMatchObject({ ok: true });
-    await expect(authenticate(req("db_prep", completion, "db_prep.completions.create"), setup({ prep: { ...prep, consumed: ["exchange", "completion"] } }).deps)).resolves.toEqual(UNAUTHORIZED);
-  });
-
-  it("token のプロジェクトと読んだ行が食い違えば unauthorized", async () => {
-    const token = signedToken(prepClaims());
-    const { deps } = setup({ prep });
-    const spy = vi.spyOn(deps.readers, "dbPrep").mockImplementation(async (projectId) => (projectId === PROJECT ? prep : null));
-    await expect(authenticate(req("db_prep", signedToken(prepClaims({ project_id: id("prj", 7) })), "db_prep.exchanges.create"), deps)).resolves.toEqual(UNAUTHORIZED);
-    await expect(authenticate(req("db_prep", token, "db_prep.exchanges.create"), deps)).resolves.toMatchObject({ ok: true });
-    expect(spy.mock.calls).toEqual([[id("prj", 7)], [PROJECT]]);
-  });
-
-  it("検証の鍵の無い環境は unauthorized", async () => {
-    const { deps } = setup({ prep });
-    await expect(authenticate(req("db_prep", signedToken(prepClaims()), "db_prep.exchanges.create"), { ...deps, signingKey: null })).resolves.toEqual(UNAUTHORIZED);
   });
 });
 

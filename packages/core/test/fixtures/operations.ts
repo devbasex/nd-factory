@@ -47,6 +47,3 @@ export const runnerEventsAppend = defineOperation({ ...pending, name: "runner.ev
 
 // 手元のマシン向けの経路
 export const machineLanesPull = defineOperation({ ...pending, name: "machine.lanes.pull", endpoint: "machine", access: "read" });
-
-// DB の用意のタスク向けの経路
-export const dbPrepSecretsGet = defineOperation({ ...pending, name: "db_prep.secrets.get", endpoint: "db_prep", access: "read" });

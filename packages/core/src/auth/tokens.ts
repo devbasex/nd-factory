@@ -1,12 +1,9 @@
 import { RETRY_POLICIES } from "@nd-factory/contracts/data";
 import {
-  DB_PREP_AUDIENCE,
-  dbPrepTokenClaims,
   delegationToken,
   machineToken,
   RUNNER_AUDIENCE,
   runnerTokenClaims,
-  type DbPrepTokenClaims,
   type RunnerTokenClaims,
 } from "@nd-factory/contracts/tokens";
 import { CognitoJwtVerifier } from "aws-jwt-verify";
@@ -87,10 +84,10 @@ export function webhookSignatureMatches(rawBody: Uint8Array, secret: string, sig
   return timingSafeEqual(expected, Buffer.from(hex, "hex"));
 }
 
-// nd-factory 自身が Ed25519 で署名する JWT（ランナーと DB の用意のタスク）。aws-jwt-verify を通さず node:crypto の verify で照らす。
-// 主張の形（宛先・期限・用途・sub・project_id、ランナーだけ generation）の正本は形の正本の tokens.ts で、発行する子（#6・#13）も同じ形を読む
-export { DB_PREP_AUDIENCE, RUNNER_AUDIENCE };
-export type { DbPrepTokenClaims, RunnerTokenClaims };
+// nd-factory 自身が Ed25519 で署名する JWT（ランナー）。aws-jwt-verify を通さず node:crypto の verify で照らす。
+// 主張の形（宛先・期限・用途・sub・project_id・generation）の正本は形の正本の tokens.ts で、発行する子（#6）も同じ形を読む
+export { RUNNER_AUDIENCE };
+export type { RunnerTokenClaims };
 
 export type SignedClaims = Readonly<Record<string, unknown>>;
 
@@ -133,11 +130,6 @@ export function verifySignedJwt(token: string, key: KeyObject, audience: string,
 // 署名と宛先と期限を照らした主張を、形の正本の主張の形で読む。形に外れれば null
 export function runnerClaimsOf(claims: SignedClaims): RunnerTokenClaims | null {
   const parsed = runnerTokenClaims.safeParse(claims);
-  return parsed.success ? parsed.data : null;
-}
-
-export function dbPrepClaimsOf(claims: SignedClaims): DbPrepTokenClaims | null {
-  const parsed = dbPrepTokenClaims.safeParse(claims);
   return parsed.success ? parsed.data : null;
 }
 

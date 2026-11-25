@@ -24,11 +24,13 @@ export const projectRow = overwriteRow(1, {
   progress_db_name: z.string().min(1).optional(),
   progress_db_role: z.string().min(1).optional(),
   progress_db_prep_id: z.string().min(1).optional(),
-  progress_db_prep_task: z.string().min(1).optional(),
   progress_db_rotation_seq: z.int().min(0),
   progress_db_rotation_pending: z.boolean(),
   progress_db_rotation_attempts: z.int().min(0),
   progress_db_secret: z.string().min(1).optional(),
+  // 今の用意が DB の役割へ書くパスワードのシークレットのバージョンの ID（docs/design/data.md）。DB セットアップ関数は非同期で呼ぶため、
+  // 呼び出しの印（旧い progress_db_prep_task）を持たない（#13 に合わせて外した）
+  progress_db_secret_version: z.string().min(1).optional(),
   gh_token_max_expiry: utcDateTime.optional(),
   gh_token_generation: z.int().min(0),
   created_at: utcDateTime,

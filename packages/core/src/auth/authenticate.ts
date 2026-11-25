@@ -8,8 +8,6 @@ import type { Db, Row, StoredRow } from "../db.ts";
 import { parseId, type Id } from "../ids.ts";
 import type { Logger } from "../log.ts";
 import {
-  DB_PREP_AUDIENCE,
-  dbPrepClaimsOf,
   isJwtShape,
   parseDelegationToken,
   parseMachineToken,
@@ -26,7 +24,7 @@ import {
   type TokenFault,
 } from "./tokens.ts";
 
-export { createCognitoCheck, DB_PREP_AUDIENCE, RUNNER_AUDIENCE, type CognitoCheck, type CognitoCheckOptions, type CognitoClaims, type CognitoConfig } from "./tokens.ts";
+export { createCognitoCheck, RUNNER_AUDIENCE, type CognitoCheck, type CognitoCheckOptions, type CognitoClaims, type CognitoConfig } from "./tokens.ts";
 
 // 要求の主体を 1 つに決める（docs/design/api.md の「認証と主体」）。受け口の種類と token の種類だけで決め、外から届く頭書きで変えない。
 // 認可の判定（authorize）と操作の記録（audit）が主体を読む
@@ -72,6 +70,8 @@ export type Principal =
   | { readonly kind: "runner"; readonly laneId: Id<"lane">; readonly projectId: Id<"prj">; readonly generation: number }
   | { readonly kind: "machine"; readonly teamId: Id<"team">; readonly machineId: Id<"mch"> }
   | { readonly kind: "github" }
+  // DB セットアップ関数（HTTP のルートも token も持たず、API と定期ジョブが非同期で呼ぶ。#13）。authenticate は作らず、
+  // 関数が呼び出しで渡されたプロジェクトと用意の ID で作り、関数の中の処理の認可の判定と操作の記録の主体にする（docs/design/api.md）
   | { readonly kind: "db_prep"; readonly projectId: Id<"prj">; readonly prepId: string }
   | { readonly kind: "patrol" };
 
@@ -83,7 +83,7 @@ export type AuthResult =
   | { readonly ok: false; readonly reason: "unauthorized" | "session_ended" | "unavailable" };
 
 // 受け口（受けた HTTP の経路の頭で決まる）。見回りは HTTP の経路を持たず、認証を通らない
-export type AuthEndpoint = "user" | "mcp" | "runner" | "machine" | "github" | "db_prep";
+export type AuthEndpoint = "user" | "mcp" | "runner" | "machine" | "github";
 
 export type InboundRequest = {
   readonly endpoint: AuthEndpoint;
@@ -120,16 +120,11 @@ export type MachineRecord = { readonly secretSha256: string; readonly expiresAt:
 // exchangedGeneration は引き換えの token を使い終えた世代（まだなら null）。世代ごとに持つため、世代を上げても消し直さない
 export type LaneRecord = { readonly projectId: Id<"prj">; readonly generation: number; readonly ended: boolean; readonly exchangedGeneration: number | null };
 
-// プロジェクトの進行表の DB の用意の状態（#13）。consumed は今の用意（prepId）の 1 回だけの token のうち使い終えた用途
-export type DbPrepUse = "exchange" | "completion";
-export type DbPrepRecord = { readonly prepId: string; readonly inProgress: boolean; readonly consumed: readonly DbPrepUse[] };
-
-// 1 回だけの token（ランナーの引き換え・DB の用意の引き換えと終わりの報告）の使い終えの印:
+// 1 回だけの token（ランナーの引き換え）の使い終えの印:
 // authenticate は読んだ印で使い終えた token を断つだけで、印を書かない（読むだけでは同じ時の 2 つの要求を分けられない）。
 // 1 回だけを守るのはその経路のハンドラーで、返す値の書き込みと同じ writeAtomically に、印の無いときだけ印を付ける条件つきの書き込みを入れる。
 // 認証の読みの後に行が変わり得るため、その条件には authenticate が照らした状態も同じく入れ直す:
 // - ランナー: レーンが終わっておらず（終了・取り消し済みでない）、今の世代が token の世代と同じで、exchangedGeneration が token の世代でないときだけ token の世代にする
-// - DB の用意: 進行表の DB が作成中か差し替えの途中で、prepId が token の用意と同じで、consumed にその用途が無いときだけ足す
 // 条件に外れたら、authenticate の外れと同じ 401 unauthorized を返し、値を返さない
 
 // 行の読み手（ポート）。どれも表の本体を強い整合で読む。中身は行の持ち主の子が書く（core から apps へ依存しない）
@@ -156,7 +151,6 @@ export type AuthReaders = {
   touchDelegation?(userId: Id<"usr">, delegationId: Id<"dlg">, at: string, ifBefore: string): Promise<void>;
   machine(teamId: Id<"team">, machineId: Id<"mch">): Promise<MachineRecord | null>;
   lane(laneId: Id<"lane">): Promise<LaneRecord | null>;
-  dbPrep(projectId: Id<"prj">): Promise<DbPrepRecord | null>;
 };
 
 export type AuthDeps = {
@@ -195,10 +189,8 @@ export const SESSION_DELETE_EXPIRED_GRACE_MS = 2_592_000_000;
 // 結ぶ要求をその場のサインインの流れに限り、前に漏れた token や外す前のセッションの token で結べないようにする
 export const LOGIN_BIND_FRESH_MS = 300_000;
 
-// 引き換えの token を受ける経路。ほかの経路は用途ごとの token（レーン・終わりの報告）だけを受ける
+// 引き換えの token を受ける経路。ほかの経路はレーンの token だけを受ける
 const RUNNER_EXCHANGE = "runner.exchanges.create";
-const DB_PREP_EXCHANGE = "db_prep.exchanges.create";
-const DB_PREP_COMPLETION = "db_prep.completions.create";
 
 // session_ended の内訳（ログにだけ出す）: 取り消しの行がある・結んだ時より前のサインイン・対応の行が無い
 type SessionEndedFault = "revoked" | "before_bound" | "unbound";
@@ -393,29 +385,6 @@ async function runner(token: string, operation: string, deps: AuthDeps): Promise
   return ok({ kind: "runner", laneId, projectId, generation });
 }
 
-function dbPrepUseOf(operation: string): DbPrepUse | null {
-  if (operation === DB_PREP_EXCHANGE) return "exchange";
-  if (operation === DB_PREP_COMPLETION) return "completion";
-  return null;
-}
-
-async function dbPrep(token: string, operation: string, deps: AuthDeps): Promise<Outcome> {
-  const checked = signedClaims(token, DB_PREP_AUDIENCE, deps);
-  if (!checked.ok) return checked;
-  const claims = checked.value;
-  // 引き換えの経路だけ引き換えの token、終わりの報告の経路だけ終わりの報告の token
-  const use = dbPrepUseOf(operation);
-  if (use === null || claims["token_use"] !== use) return unauthorized("endpoint");
-  const prepClaims = dbPrepClaimsOf(claims);
-  const projectId = prepClaims === null ? null : parseId("prj", prepClaims.project_id);
-  if (prepClaims === null || projectId === null) return unauthorized("shape");
-  const prepId = prepClaims.sub;
-  const prep = await deps.readers.dbPrep(projectId);
-  // 進行表の DB が作成中か差し替えの途中で、token の用意が今の用意と合い、その用途をまだ使っていない（1 回だけ。印を付けるのはハンドラー。上の「使い終えの印」）
-  if (prep === null || !prep.inProgress || prep.prepId !== prepId || prep.consumed.includes(use)) return unauthorized("state");
-  return ok({ kind: "db_prep", projectId, prepId });
-}
-
 function github(req: InboundRequest, deps: AuthDeps): Outcome {
   if (deps.webhookSecret === null || req.rawBody === undefined) return unauthorized("endpoint");
   return webhookSignatureMatches(req.rawBody, deps.webhookSecret, req.signature ?? null) ? ok({ kind: "github" }) : unauthorized("signature");
@@ -437,8 +406,6 @@ async function decide(req: InboundRequest, deps: AuthDeps): Promise<Outcome> {
       return runner(token, req.operation, deps);
     case "machine":
       return token.startsWith("ndfm_") ? machine(token, deps) : unauthorized("endpoint");
-    case "db_prep":
-      return dbPrep(token, req.operation, deps);
   }
 }
 

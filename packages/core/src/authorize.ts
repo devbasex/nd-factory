@@ -114,8 +114,10 @@ function requestReject(principal: Principal, op: OperationDef): "human_only" | "
       return DELEGATION_RANK[principal.scope.operations] >= DELEGATION_RANK[op.delegationKind] ? null : "scope_insufficient";
     case "runner":
     case "machine":
-    case "db_prep":
       return op.endpoint === principal.kind ? null : "scope_insufficient";
+    case "db_prep":
+      // DB セットアップ関数は操作の表の操作を呼ばない（HTTP のルートを持たない。#13）。関数の中の処理の判定は #6 が足す
+      return "scope_insufficient";
     case "newcomer":
       // まだ利用者へ結んでいない人は、利用者を作る sessions.create だけ
       return op.name === SESSIONS_CREATE ? null : "scope_insufficient";

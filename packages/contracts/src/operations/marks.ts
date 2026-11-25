@@ -40,7 +40,7 @@ export function ownedBy(owner: IssueNumber) {
     // 人だけの書く操作。MCP では対になる読み出しの道具（mcpRead）だけを持つ
     human: <const N extends string>(name: N, features: readonly FeatureId[], mcpRead: string, extra: ExtraMarks = {}): PendingOperation<N> =>
       pending(name, { features, access: "write", humanOnly: "always", mcpRead, ...extra }),
-    // ランナー・手元のマシン・DB の用意のタスク向けの HTTP の経路
+    // ランナー・手元のマシン向けの HTTP のルート
     self: <const N extends string>(endpoint: Exclude<Endpoint, "user">, name: N, access: Access): PendingOperation<N> =>
       pending(name, { endpoint, access }),
   };

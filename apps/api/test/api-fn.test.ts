@@ -57,7 +57,6 @@ function setup(handler: Handler = echo) {
       delegation: async () => null,
       machine: async () => null,
       lane: async () => null,
-      dbPrep: async () => null,
     },
   };
   const deps: ApiDeps = {

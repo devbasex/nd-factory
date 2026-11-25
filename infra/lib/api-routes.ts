@@ -11,7 +11,7 @@ import { Construct } from "constructs";
 export type { Endpoint };
 
 // 受け口の集まり（形の正本の operation.ts の Endpoint）。型の集まりと食い違えば、下の照らしが型検査で落ちる
-export const API_ENDPOINTS = ["user", "runner", "machine", "db_prep"] as const satisfies readonly Endpoint[];
+export const API_ENDPOINTS = ["user", "runner", "machine"] as const satisfies readonly Endpoint[];
 type MissingEndpoint = Exclude<Endpoint, (typeof API_ENDPOINTS)[number]>;
 const allEndpoints: [MissingEndpoint] extends [never] ? true : MissingEndpoint = true;
 void allEndpoints;
@@ -45,7 +45,7 @@ export function loadRoutes(raw: unknown): readonly ApiRoute[] {
   });
 }
 
-export const ROUTES: readonly ApiRoute[] = loadRoutes(routesData);
+const ROUTES: readonly ApiRoute[] = loadRoutes(routesData);
 
 export class ApiRoutes extends Construct {
   readonly routes: readonly HttpRoute[];

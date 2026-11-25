@@ -3,7 +3,6 @@ import type { Principal } from "../src/auth/authenticate.ts";
 import { authorize, visibleProjectIds, type AuthzDecision, type ItemAuthz } from "../src/authorize.ts";
 import { createLogger } from "../src/log.ts";
 import {
-  dbPrepSecretsGet,
   delegationsCreate,
   machineLanesPull,
   projectsGet,
@@ -234,7 +233,7 @@ describe("authorize: チームと本人の対象", () => {
   });
 });
 
-describe("authorize: ランナー・手元のマシン・DB の用意のタスク・GitHub・見回り", () => {
+describe("authorize: ランナー・手元のマシン・DB セットアップ関数・GitHub・見回り", () => {
   const runner: Principal = { kind: "runner", laneId: LANE, projectId: P_A, generation: 1 };
 
   it("ランナーは自分向けの経路の、自分のレーンのプロジェクトの要素だけ", async () => {
@@ -253,10 +252,12 @@ describe("authorize: ランナー・手元のマシン・DB の用意のタス�
     expect(items(await authorize(machine, machineLanesPull, [{ project_id: P_B }], scope))).toEqual([NOT_FOUND]);
   });
 
-  it("DB の用意のタスクは token に結んだプロジェクトだけ", async () => {
+  it("DB セットアップ関数は呼び出しで渡されたプロジェクトだけが見え、操作の表の操作を呼べない", async () => {
     const table = world();
     const prep: Principal = { kind: "db_prep", projectId: P_A, prepId: "prep-1" };
-    expect(items(await authorize(prep, dbPrepSecretsGet, [{ project_id: P_A }, { project_id: P_B }], fakeScope(table)))).toEqual([{ decision: "allow", projectId: P_A, role: null }, NOT_FOUND]);
+    expect(await visibleProjectIds(prep, fakeScope(table))).toEqual([P_A]);
+    expect(await authorize(prep, runnerEventsAppend, [{ project_id: P_A }], fakeScope(table))).toEqual({ reject: "scope_insufficient" });
+    expect(await authorize(prep, projectsGet, [{ project_id: P_A }], fakeScope(table))).toEqual({ reject: "scope_insufficient" });
   });
 
   it("まだ結んでいない人は sessions.create だけを通り、見えるプロジェクトを持たない", async () => {

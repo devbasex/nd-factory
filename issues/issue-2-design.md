@@ -74,7 +74,7 @@ graph TB
   owners["#4〜#8・#11・#13・#29"] -.形と handler を足す.-> ops
 ```
 
-- 操作の表は全体の設計の操作の一覧の全行（利用者向けの 66 の操作と、ランナー・手元のマシン・DB の用意のタスクの 9 の HTTP の経路）を印つきで持つ。要素の形がまだ無い操作は「形の未定」の印と受け持つ子の番号を持ち、受け持つ子が形と見本とハンドラーを足す
+- 操作の表は全体の設計の操作の一覧の全行（利用者向けの 66 の操作と、ランナー・手元のマシン・DB の用意のタスクの 9 の HTTP の経路）を印つきで持つ。DB の用意のタスクの 2 つの経路は持たない（#13 に合わせて外した: DB セットアップ関数は HTTP のルートも認証も持たず、API と定期ジョブが非同期で呼ぶ。docs/design/api.md）。要素の形がまだ無い操作は「形の未定」の印と受け持つ子の番号を持ち、受け持つ子が形と見本とハンドラーを足す
 - `npm run generate` が操作の表から生成物を `packages/contracts/generated/` へ書き、`check` が古い生成物を落とす。画面（#12・#28）・検査（#1）・CDK の部品は生成物か操作の表を読む。画面（React 19）は形の正本の呼び出しの口と `z.infer` の型で操作を呼び、ダミーの送り手で生成したダミーデータを読む
 - 横断の部品は `packages/core/` の 1 か所にあり、`apps/` の実行の時のコードは部品を通してだけ時計・ID・ログ・外部の呼び出し・条件つきの書き込みを使う。骨組みの `PUT /v1/users` も部品を通す形に置き換わる
 - サービスの表の 19 の行と 3 つの索引の列が行の形（zod）と表の仕様にあり、表を書く子は `ServiceTable` の部品で表と索引を作る。表の移しの読み手は今と 1 つ前の版を読む
@@ -126,7 +126,7 @@ graph TB
 | 項目 | 型 | 出所 |
 | --- | --- | --- |
 | `name`・`entity`・`verb` | 文字列（`<entity>.<verb>`） | 操作の一覧の名前 |
-| `endpoint` | `user`・`runner`・`machine`・`db_prep` | 足した印。受け口（detail.md の `authenticate` の受け口と同じ集まり） |
+| `endpoint` | `user`・`runner`・`machine` | 足した印。受け口（detail.md の `authenticate` の受け口と同じ集まり）。`db_prep` は外した（#13 に合わせて外した: DB セットアップ関数は HTTP のルートも認証も持たず、API と定期ジョブが非同期で呼ぶ。docs/design/api.md） |
 | `features` | `F1`〜`F20` の配列（F21〜F23 は操作を持たない） | 足した印。操作の一覧の「機能」の列。I14 の機能の対応の検査（F1〜F20 のどれもが操作の表にあるか。#1）が読む |
 | `access` | `read`・`write` | 「読む / 書く」の列 |
 | `humanOnly` | `always`・`per_item`・`never` | 「人だけか」の列 |
@@ -405,7 +405,7 @@ flowchart LR
 - **プロジェクトごとに違うもの**: 無し（環境の値は読まない。表の名前の接頭辞と環境は、表を入れる子が設定のファイルから渡す）
 - **当たるモード**: standard
 - **同じファイルを触る別の変更**:
-  - #13 は `packages/contracts/src/db-prep-api.ts`（新設）に DB の用意のタスクの 2 つの HTTP の経路の形を書く。この課題の操作の表は、その 2 行の `item`・`result` を `db-prep-api.ts` の定義で置き換える（先にマージした方が後の方で行をつなぐ）。`packages/contracts/package.json` の `exports` と `settings.ts` は両方が触る
+  - #13 は `packages/contracts/src/db-prep-api.ts`（新設）に DB の用意のタスクの 2 つの HTTP の経路の形を書く。この課題の操作の表は、その 2 行の `item`・`result` を `db-prep-api.ts` の定義で置き換える（先にマージした方が後の方で行をつなぐ）。この 2 つの経路は #13 が持たない形に決めたため、操作の表から外した（#13 に合わせて外した: DB セットアップ関数は HTTP のルートも認証も持たず、API と定期ジョブが非同期で呼ぶ。docs/design/api.md）。`packages/contracts/package.json` の `exports` と `settings.ts` は両方が触る
   - #1 は `tools/checks/` で生成物を読む。読む生成物の形（`routes.json`・`mcp-tools.json`・`operations.schema.json`）は詳細設計の「形の正本: 生成」の「内部のデータと定数」の表が正本で、#1 へ渡す欠けとして書く
   - #13 は `infra/lib/app-stack.ts` を直す。この課題は `app-stack.ts` を触らない
 - **壊れうる箇所**:

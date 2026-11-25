@@ -1,5 +1,4 @@
 import { type OperationDef, OperationDefinitionError } from "../operation.ts";
-import { DB_PREP_OPERATIONS } from "./db-prep.ts";
 import { DECISION_OPERATIONS } from "./decisions.ts";
 import { AUDIT_OPERATIONS, DELEGATION_OPERATIONS } from "./delegations.ts";
 import { EXECUTION_OPERATIONS } from "./execution.ts";
@@ -13,7 +12,7 @@ import { TEAM_OPERATIONS } from "./teams.ts";
 import { USAGE_OPERATIONS } from "./usage.ts";
 import { USER_OPERATIONS } from "./users.ts";
 
-// 操作の表。全体の設計の操作の一覧の表の順（F1〜F20 の表の上から、続けてランナー・手元のマシン・DB の用意のタスク）に並べる
+// 操作の表。全体の設計の操作の一覧の表の順（F1〜F20 の表の上から、続けてランナー・手元のマシン）に並べる
 export const OPERATIONS = [
   ...USER_OPERATIONS,
   ...TEAM_OPERATIONS,
@@ -28,7 +27,6 @@ export const OPERATIONS = [
   ...AUDIT_OPERATIONS,
   ...RUNNER_OPERATIONS,
   ...MACHINE_ENDPOINT_OPERATIONS,
-  ...DB_PREP_OPERATIONS,
 ] as const;
 
 export type Operation = (typeof OPERATIONS)[number];

@@ -7,7 +7,7 @@ import { auditRecordRow, expireAt, identifier, reasonCode, type RowKey } from ".
 // db-audit の行（操作の記録）。追記だけ（I9）。列は全体の設計（docs/design/data.md の「テーブル定義」）のとおりで、
 // 鍵を列から組むための audit_id・project_id・item_index と、要求の ID（request_id）は横断の部品の audit の書き手の列に合わせた
 
-// 主体。人・委任・ランナー・手元のマシン・GitHub・見回り・DB の用意のタスクで項目が違うため、知らない項目を落とさない。
+// 主体。人・委任・ランナー・手元のマシン・GitHub・見回り・DB セットアップ関数で項目が違うため、知らない項目を落とさない。
 // 主体の決まらない 401 は kind が null
 export const auditActor = z.looseObject({
   kind: identifier.nullable(),

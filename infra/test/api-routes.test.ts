@@ -92,7 +92,7 @@ describe("ApiRoutes", () => {
 
   it("経路はどれも渡した関数へつなぐ 1 つの統合を通す", () => {
     const { stack, api, fn } = scaffold();
-    new ApiRoutes(stack, "Routes", { api, fn, endpoints: ["machine", "db_prep"] });
+    new ApiRoutes(stack, "Routes", { api, fn, endpoints: ["machine", "runner"] });
     const template = Template.fromStack(stack);
     template.resourceCountIs("AWS::ApiGatewayV2::Integration", 1);
     template.hasResourceProperties("AWS::ApiGatewayV2::Integration", { IntegrationType: "AWS_PROXY", PayloadFormatVersion: "2.0" });

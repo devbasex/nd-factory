@@ -29,7 +29,7 @@ packages/contracts/
 │   │   ├── usage.ts            *   usage・usage_records・spend_caps
 │   │   ├── runner.ts           *   ランナー向けの 5 つの HTTP の経路
 │   │   ├── machine-endpoint.ts *   手元のマシン向けの 2 つの HTTP の経路
-│   │   └── db-prep.ts          *   DB の用意のタスク向けの 2 つの HTTP の経路（形は #13 の db-prep-api.ts）
+│   │   └── db-prep.ts          *   DB の用意のタスク向けの 2 つの HTTP の経路（形は #13 の db-prep-api.ts）。#13 に合わせて外した
 │   ├── rows/
 │   │   ├── common.ts           *   共通の列・TTL の列・上書きの行と追記の行の基の形
 │   │   ├── users.ts            *   利用者・ログインの組・IdP の主体の一意の行・委任
@@ -183,7 +183,7 @@ infra/
       - 受け口 `user` の操作で、封筒が上の決まったキーのほかのキーを持つ（ほかの受け口は文書が応答に足す値を持つため、足したキーを許す）
       - 封筒が失敗の要素のキー（`status`・`reason`・`fields`）を持つ
   - 副作用: 無し
-- `operations/index.ts` の `OPERATIONS` は全体の設計の操作の一覧の表の順（F1〜F20 の表の上から、続けてランナー・手元のマシン・DB の用意のタスク）に並べる。名前と経路の重なりは読み込みのときに例外を投げる
+- `operations/index.ts` の `OPERATIONS` は全体の設計の操作の一覧の表の順（F1〜F20 の表の上から、続けてランナー・手元のマシン）に並べる（DB の用意のタスクの経路は #13 に合わせて外した）。名前と経路の重なりは読み込みのときに例外を投げる
 
 ### 内部のデータと定数
 
@@ -193,7 +193,7 @@ infra/
 | --- | --- | --- | --- |
 | 1 | `name` | 文字列 | — |
 | 2 | `entity`・`verb` | 文字列 | 名前から分ける |
-| 3 | `endpoint` | `"user" \| "runner" \| "machine" \| "db_prep"` | `user` |
+| 3 | `endpoint` | `"user" \| "runner" \| "machine"`（`db_prep` は #13 に合わせて外した） | `user` |
 | 4 | `route` | 文字列 | `defineOperation` が作る |
 | 5 | `features` | `` `F${number}`[] `` | 受け口が `user` なら 1 つ以上、ほかは空 |
 | 6 | `access` | `"read" \| "write"` | — |
@@ -470,7 +470,7 @@ detail.md の「内部のデータと定数」の型を、宣言の項目の順�
 | `WriteOutcome` | `conditional-write.ts` | `{ ok: true }` か `{ ok: false; failed: { index; onConflict }[] }` |
 | `Db` | `db.ts` | `get(table, key, consistent)`・`query(table, keyCond, opts)`・`queryIndex(table, index, keyCond, opts)`・`scan(table, opts)`（足す。[表の移し](#表の移し)）・`transactWrite(items)`・`update(table, key, update, condition)` |
 | `Principal` | `auth/authenticate.ts` | 判別の鍵 `kind` を先頭に。`{kind: "human", userId, cognitoSub, sessionId, boundAuthTime, authTime}`（`sessionId` は署名を検証した token の空でない `origin_jti`、`boundAuthTime` は対応の行の `bound_auth_time`、`authTime` は署名を検証した要求の token の `auth_time`。`sessions.create` の冪等の鍵の主体の部分は `authTime` で組む）・`{kind: "newcomer", login: CognitoLogin}`（`sessions.create` だけに渡る）・`{kind: "delegation", userId, delegationId, scope: {projectIds, operations}, clientName}`・`{kind: "runner", laneId, projectId, generation}`・`{kind: "machine", teamId, machineId}`・`{kind: "github"}`・`{kind: "db_prep", projectId, prepId}`・`{kind: "patrol"}` |
-| `InboundRequest` | `auth/authenticate.ts` | `endpoint`（受け口。受けた HTTP の経路の頭で決まる）・`operation`（`OperationName`。`dispatch` が受けた HTTP の経路を形の正本の操作の表で引いた操作の名前で、表に無い経路は `authenticate` を呼ぶ前に 404。要求の本文や頭書きから採らない）・`path`（受けた経路。ランナーと DB の用意の引き換えと報告の経路の見分けに使う）・`headers`・`rawBody`（受けたままのバイト列。`github` の HMAC に使う） |
+| `InboundRequest` | `auth/authenticate.ts` | `endpoint`（受け口。受けた HTTP の経路の頭で決まる）・`operation`（`OperationName`。`dispatch` が受けた HTTP の経路を形の正本の操作の表で引いた操作の名前で、表に無い経路は `authenticate` を呼ぶ前に 404。要求の本文や頭書きから採らない）・`path`（受けた経路。ランナーの引き換えの経路の見分けに使う。DB の用意の経路は #13 に合わせて外した）・`headers`・`rawBody`（受けたままのバイト列。`github` の HMAC に使う） |
 | `AuthResult` | `auth/authenticate.ts` | `{ ok: true; principal: Principal; sessionRevokedAt: string \| null }`・`{ ok: false; reason: "unauthorized" \| "session_ended" \| "unavailable" }`（`session_ended` は署名・claim・期限を通した人の token のセッションが既に断たれているときだけ。断たれているとは、取り消しの行がある・対応の行が無い（`sessions.create` を除く）・`auth_time` が対応の行の `bound_auth_time` より前のどれか。[API の文書の 401 の本文](../docs/design/api.md#エラーの形)）。`principal` は `Principal` のどれか（まだ結んでいない人の `{kind: "newcomer", login: CognitoLogin}` を含み、これを返すのは `operation` が `sessions.create` のときだけ）。`sessionRevokedAt` は、`operation` が `sessions.delete` で要求のセッションの取り消しの行があったときだけその `revoked_at`、ほかは `null`（`sessions.delete` 以外の操作では取り消しの行があれば `session_ended`） |
 | `ScopeReader` | `authorize.ts` | `seatsOf`・`projectsOfTeams`・`projectOfTarget`・`laneOf`・`transferTargetOf`・`isHumanOnlyItem` |
 | `ItemAuthz` | `authorize.ts` | `{decision: "allow", projectId, role}`・`{decision: "deny", status: 404 \| 403, reason}` |

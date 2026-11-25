@@ -10,7 +10,7 @@ export { MAX_ITEMS };
 // 冪等の鍵の済みの行を残す秒（24 時間）
 export const IDEMPOTENCY_TTL_SECONDS = 86400;
 
-export type Endpoint = "user" | "runner" | "machine" | "db_prep";
+export type Endpoint = "user" | "runner" | "machine";
 export type Access = "read" | "write";
 export type HumanOnly = "always" | "per_item" | "never";
 export type DelegationKind = "read" | "run" | "manage";

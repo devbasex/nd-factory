@@ -64,7 +64,6 @@ const closedReaders: AuthReaders = {
   touchDelegation: async () => {},
   machine: async () => null,
   lane: async () => null,
-  dbPrep: async () => null,
 };
 
 // 認可の読み手も同じく、持ち主の子が書くまで何も見せない（ハンドラーの表が空のため、今は呼ばれない）
