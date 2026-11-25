@@ -33,7 +33,7 @@ export type TransferTarget = { readonly projectId: ProjectId; readonly toTeamId:
 
 export type RunnerOrMachine = Extract<Principal, { kind: "runner" } | { kind: "machine" }>;
 
-// 読み手（ポート）。中身は表の持ち主の子が apps/api/src/modules/ に書く（seatsOf は #4、laneOf は #6、isHumanOnlyItem は #8、
+// 読み手（ポート）。中身は表の持ち主の子が apps/api/src/modules/ に書く（seatsOf は #4、laneOf は #6、isHumanOnlyItem は questions.answer を #8・projects.update を #5、
 // projectsOfTeams・projectOfTarget・transferTargetOf は #5）。どれも、見えるべきでないものを返さない
 // （索引の候補は表の本体を強い整合で読み直し、今も成り立つものだけを返す。迷うときは見せない）
 export type ScopeReader = {

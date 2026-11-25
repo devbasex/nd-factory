@@ -16,7 +16,8 @@ export const PROJECT_OPERATIONS = [
   read("projects.list", ["F4", "F7"]),
   read("projects.get", ["F4"]),
   human("projects.create", ["F4"], "teams.list", { ...OWNER_ONLY_IDEMPOTENT, allOrNothing: { maxItems: PROJECTS_CREATE_MAX_ITEMS } }),
-  write("projects.update", ["F4"], "manage", OWNER_ONLY),
+  // ask_human_only を変える要素だけ人だけ（docs/design/api.md の操作一覧）。委任が自分の答えられる問いの範囲を広げないため
+  write("projects.update", ["F4"], "manage", { ...OWNER_ONLY, humanOnly: "per_item" }),
   read("github_installations.list", ["F5"]),
   human("github_installations.link", ["F5"], "github_installations.list"),
   read("repositories.list", ["F5"]),

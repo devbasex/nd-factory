@@ -580,6 +580,10 @@
         "status": 403
       },
       {
+        "code": "human_only",
+        "status": 403
+      },
+      {
         "code": "version_mismatch",
         "status": 409
       },

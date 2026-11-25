@@ -198,7 +198,7 @@ ID の種類のプレフィックス:
 | `projects.list` | `/v1/projects/list` | F4・F7 | ツール | — | 読む（read） |
 | `projects.get` | `/v1/projects/get` | F4 | ツール | — | 読む（read） |
 | `projects.create` | `/v1/projects/create` | F4 | 依頼と材料の読み出しだけ（`teams.list`） | `human_only` | 書く（全部か無か） |
-| `projects.update` | `/v1/projects/update` | F4 | ツール | — | 書く（manage。`ask_human_only` を変えるアイテムは `human_only`。AI エージェントが自分の答えられる範囲を広げないため） |
+| `projects.update` | `/v1/projects/update` | F4 | ツール（`ask_human_only` を変えるアイテムは 403 `human_only`） | `ask_human_only` を変えるアイテムだけ `human_only`。AI エージェントが自分の答えられる範囲を広げないため | 書く（manage） |
 | `github_installations.list` | `/v1/github_installations/list` | F5 | ツール | — | 読む（read） |
 | `github_installations.link` | `/v1/github_installations/link` | F5 | 依頼と材料の読み出しだけ（`github_installations.list`） | `human_only` | 書く |
 | `repositories.list` | `/v1/repositories/list` | F5 | ツール | — | 読む（read） |
@@ -375,6 +375,7 @@ DB セットアップ関数が関数の中から呼ぶプロジェクトのモ�
 | --- | --- |
 | `approvals.answer` | アイテムに `reason`（文字列、0〜10,000 字。差し戻すでは必須、ほかは任意。[承認する以外の答えの理由](#承認する以外の答えの理由)）と `drop_issues`（整数の配列、任意、設計承認ゲートの依頼だけ）を足す。外れたらアイテムの 400 `item_invalid` |
 | `questions.answer` | 問いの「`human_only` か」が真のアイテムを 403 `human_only`。委任でない主体（人）のアイテムは受ける |
+| `projects.update` | `ask_human_only` を変えるアイテムを、委任からは 403 `human_only`。委任でない主体（人）のアイテムは受ける |
 | `sprints.create`・`project_transfers.create` | 移行の間はアイテムの 409 `project_transfer_in_progress`、差し替えの保留の間はアイテムの 409 `credential_rotation_in_progress`（I20）。認可の判定に使った今の割り当ての ID（`current_assign_id`）が書き込みの時点で変わっていれば、存在しないときと同じ 404 で書かない（I20・I2） |
 | `project_transfers.create`・`project_transfers.accept`・`project_transfers.delete` | 作成は移行中のフラグと止める依頼（移す途中の状態の「止め終えたか」が偽）を 1 つの書き込みで書いてから E18 を出す。受け入れは、フラグが対象の移行の ID と同じで「取り下げたか」が偽であることを条件に入れ、割り当てレコードの追加・今の割り当ての差し替え・フラグを空にする更新を 1 つのトランザクションで書いて E17 を出す（条件が外れたら 409 `state_mismatch` で割り当てを変えない）。取り下げは「取り下げたか」を真にし、フラグを空にするのは[全体設計の割り当てを変える流れ](overview.md#割り当てを変える流れ) の条件がそろった後だけ |
 | `/v1/runner/answer_deliveries/create` | リクエストのアイテムに、`ndf answer` の結果の `metrics.seqs`（NDF の答えの事象の番号）を足す（I5） |
