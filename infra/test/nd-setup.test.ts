@@ -366,6 +366,18 @@ describe("runDeploy", () => {
     expect(writes(f)).toBe(0);
   });
 
+  it("置き場とアカウントが同じでも、確認の値だけが違えば 7 で、AWS へ書かない", async () => {
+    const { out, confirm } = await diffThen(fake());
+    const [digest, ...rest] = confirm.split(":");
+    const other = [digest === "0".repeat(12) ? "f".repeat(12) : "0".repeat(12), ...rest].join(":");
+    expect(other).not.toBe(confirm);
+    const f = fake();
+    expect(await runDeploy({ kind: "deploy", profile: "acme-test", assembly: out, confirm: other }, f.deps)).toBe(
+      EXIT.CONFIRM_MISMATCH,
+    );
+    expect(writes(f)).toBe(0);
+  });
+
   it("置き場が無ければ 3", async () => {
     const f = fake();
     expect(await runDeploy({ kind: "deploy", profile: "p", assembly: tempOut(), confirm: "x" }, f.deps)).toBe(EXIT.SETTINGS);
