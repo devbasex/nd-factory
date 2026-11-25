@@ -148,7 +148,7 @@ docs/operations/pipeline-approval.md
 
 | 関数 | 正常 | 異常 |
 | --- | --- | --- |
-| `ndfContractUse` | `entrypoints` の id の集合が、テストに置いた 11 の id のリストとちょうど同じ（決定 4 の網羅）。`acceptedVersions` が `NDF_CONTRACTS.accepted` と同じ | データから `block-next` を消す・`file-loop-record` を足すと落ちる（テストの観点として、リストとの比較が等しさであることを確かめる） |
+| `ndfContractUse` | `entrypoints` の id の集合が、テストに置いた 11 の id のリストとちょうど同じ（決定 4 の網羅）。`acceptedVersions` が `NDF_CONTRACTS.accepted` と同じ | リストとの比べ方を等しさにする（部分集合で比べない）。こうしておくと、データから `block-next` が消えたときも、`file-loop-record` が足されたときもテストが落ちる |
 | `buildContractUse` | 正しい 2 つのデータから組み立てた `files` の行が、生成の `path` と手で書く `fields` を持つ | 形の誤り・id の不一致・`files` の id が生成に無い・`env` の `entrypoint` が使うインタフェースに無い、のそれぞれで `DataFileError` |
 
 ## 呼び出しの判定
