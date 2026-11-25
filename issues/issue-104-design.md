@@ -43,7 +43,7 @@ graph LR
 - ほかの課題の記録のリンクは、次の形で指す（`docs/design-process/issue-1/` と `issue-32/` のリンクを数えた結果）
   - 同じ記録の中のファイル: `design.md` のように名前だけ
   - 全体の設計: `../../design/<名前>.md`
-- README の形の手本は [docs/design-process/issue-1/README.md](../docs/design-process/issue-1/README.md) である。何の記録か・今の正の保存先・文書の一覧・移した後に直したこと・関わる Pull Request を持つ
+- README の形の手本は [docs/design-process/issue-1/README.md](../docs/design-process/issue-1/README.md) である。この README には、何の記録か・今の正の保存先・文書の一覧・移した後に直したこと・関わる Pull Request が書いてある
 
 ## 文脈と制約
 
@@ -57,7 +57,7 @@ graph LR
 
 ```mermaid
 graph LR
-  C["98fafb0 の 5 本"] -->|"git show で取り出す"| X["飛び先の置き換え<br/>（表の 3 つの形だけ）"]
+  C["98fafb0 の 5 本"] -->|"git show で取り出す"| X["飛び先の置き換え<br/>（決定 1 の表の置き換えだけ）"]
   X --> R["requirements.md・design.md・<br/>design-detail.md・survey.md・plan.md"]
   RM["README.md（新設）"] --> R
   RM -->|今の正| D["docs/design/・確定仕様の 2 本"]
@@ -99,7 +99,7 @@ graph LR
 ### 決定 2: ほかの課題の記録と同じ読み方にするため、README を #1 の記録の README と同じ並びで書く
 
 - **質問**: README の並びと中身を、どの記録の README に合わせるか
-- **選んだ案**: [docs/design-process/issue-1/README.md](../docs/design-process/issue-1/README.md) と同じ並びにする。並びは、H1・何の記録かと今の正の段落・文書の一覧の表・移した後に直したことの段落・関わる Pull Request の表である。今の正の段落には、記録の時点が `98fafb0`（実装を終えて確定仕様にする直前）であることと、承認したときのものが設計の Pull Request #45 にあることを足す。移した後に直したことの段落には、リンクの飛び先を決定 1 の表で置き換えたことと、`issue-13-design-survey.md` を `survey.md` にしたように、ファイルの名前から `issue-13-` などを外したことだけを書く。中身の文は直していないことも書く。関わる Pull Request の表は、設計の #45、実装の単位の 8 本（#70・#72・#74・#77・#81・#83・#90・#97）、main へ取り込んだ #103 の 10 行にする
+- **選んだ案**: [docs/design-process/issue-1/README.md](../docs/design-process/issue-1/README.md) と同じ並びにする。並びは、H1・何の記録かと今の正の段落・文書の一覧の表・移した後に直したことの段落・関わる Pull Request の表である。今の正の段落には、記録の時点が `98fafb0`（実装を終えて確定仕様にする直前）であることと、承認したときのものが設計の Pull Request #45 にあることを足す。移した後に直したことの段落には、リンクの飛び先を決定 1 の表で置き換えたことと、`issue-13-design-survey.md` を `survey.md` にしたように、ファイルの名前から `issue-13-` などを外したことだけを書く。中身の文は直していないことも書く。関わる Pull Request の表は、合わせて 10 行にする。設計の #45、実装の単位の 8 本（#70・#72・#74・#77・#81・#83・#90・#97）、main へ取り込んだ #103 である
 - 採らなかった案: 起票の本文が挙げた #41 の記録の README に合わせる（#41 の記録は実装計画を持たず、写す 5 本の一覧の形にならない。#1 の記録は実装計画を含み、同じ 5 本の形である）
 - 採らなかった案: README に、承認したとき（`166b2f2`）から `98fafb0` までに直した点の一覧を書く（記録の中身を README へ写すことになり、同じ事実を 2 か所に持つ。差分は `git diff 166b2f2 98fafb0` と Pull Request #45 で読める）
 - **代償**: #41 の記録の README とは並びが少し違う
@@ -110,7 +110,7 @@ graph LR
 - **働く範囲**: このリポジトリの `docs/design-process/issue-13/` の 6 本だけ。コード・設定・全体の設計・確定仕様は変えない
 - **プロジェクトごとに違うもの**: 無い（このリポジトリの設計の経緯の文書だけを足す）
 - **当たるモード**: `standard`。#104 の本文の「進行」の欄の「モード」に書かれている。設計だけの Pull Request をレビューしてマージしてから、実装へ進む進め方である
-- **受け入れ条件 8 の範囲**: スプリントの Pull Request を `origin/main...HEAD` で比べると、#104 の変更だけを取り出せない。スプリントの Pull Request は、`issues/` のファイルと、同じスプリントの #13（`docs/design/platform.md`・確定仕様）と #105（`docs/design/platform.md`）の変更も含むためである。そこで、#104 の実装は 1 つのコミットにまとめ、そのコミットと親のコミットを比べて範囲を確かめる（「テスト設計」）。要求の検証手段も、この比べ方にそろえた
+- **受け入れ条件 8 の範囲**: スプリントの Pull Request を `origin/main...HEAD` で比べると、#104 の変更だけを取り出せない。スプリントの Pull Request は、`issues/` のファイルと、同じスプリントの #13 の残りの作業と #105 の変更も含むためである。#13 は反映した環境での確認の結果を `docs/design/platform.md` と確定仕様へ書き入れ、#105 は `docs/design/platform.md` を直す。そこで、#104 の実装は 1 つのコミットにまとめ、そのコミットと親のコミットを比べて範囲を確かめる（「テスト設計」）。要求の検証手段も、この比べ方にそろえた
 - **写した後の検査**: 参照の検査（`ref-check`）が探す照合の語（旧い側の名前）は、CI の秘密 `REF_CHECK_TERMS` から受ける。語はリポジトリに書かない決まり（AGENTS.md）のため、手元では読めない。Pull Request #103 の時点から語が増えていれば、写した記録が当たりうる。当たったときは、次のとおりにする
   - Pull Request には、CI の `ref-check` の出力にある検査の種類・ファイルのパス・行の番号だけを書く。照合の語と、当たった行の本文は書かない
   - 記録の中身は直さない（中身を直すと受け入れ条件 2 を破る）
@@ -130,6 +130,21 @@ graph LR
 | 6. README が 5 本の中身と関わる Pull Request を表で書く | 文書の一覧の表に 5 本の行が、関わる Pull Request の表に #45・単位の 8 本・#103 の行がある | 1 本・1 行でも欠けると落ちる |
 | 7. CI の `check`・`ref-check`・`leak-check` が通る | スプリントの Pull Request の CI のジョブ | 漏れの検査や参照の検査に当たる値を記録に足すと落ちる |
 | 8. 変更が `docs/design-process/issue-13/` の中だけ | #104 の実装をまとめたコミットを `<C>` として、`git diff --name-only <C>^ <C>` が 6 本だけを返す | `docs/design/` か `docs/specifications/` を 1 行でも変えると落ちる |
+
+## どこを変えるか
+
+詳細設計はこのセクションに畳む。新しく作る関数が 0、シグネチャを変える関数が 0 のためである（足すのは文書だけで、置き換えはその場のコマンドで行い、スクリプトをリポジトリに置かない）。
+
+写す 5 本は、どれも `git show 98fafb0:<元>` の出力に、決定 1 の表の置き換えを `](` の直後だけに当てて作る。#104 の変更は 1 つのコミットにまとめる（「影響と危険」の「受け入れ条件 8 の範囲」）。
+
+| ファイル | 変える中身 | 決定 |
+| --- | --- | --- |
+| `docs/design-process/issue-13/README.md`（新設） | [docs/design-process/issue-1/README.md](../docs/design-process/issue-1/README.md) と同じ並びで書く。並びは、H1・何の記録かと今の正の段落・文書の一覧の表・移した後に直したことの段落・関わる Pull Request の表である。今の正の段落には、記録の時点の `98fafb0`、承認したときのものが設計の Pull Request #45 にあること、後から追わないこと、今の正（`docs/design/`・`app-stack-infrastructure.md`・`db-prep-function.md`）と食い違えば正の側が勝つことを書く。文書の一覧の表には、5 本の行と元のファイルの名前を置く。関わる Pull Request の表は 10 行（#45・#70・#72・#74・#77・#81・#83・#90・#97・#103）にする | 決定 2 |
+| `docs/design-process/issue-13/requirements.md`（新設） | 元は `issues/issue-13-requirements.md`。相対リンクが無いため、元と同じ中身になる | 決定 1 |
+| `docs/design-process/issue-13/design.md`（新設） | 元は `issues/issue-13-design.md`。リンクの飛び先だけを決定 1 の表で置き換える | 決定 1 |
+| `docs/design-process/issue-13/design-detail.md`（新設） | 元は `issues/issue-13-design-detail.md`。リンクの飛び先だけを決定 1 の表で置き換える | 決定 1 |
+| `docs/design-process/issue-13/survey.md`（新設） | 元は `issues/issue-13-design-survey.md`。リンクの飛び先だけを決定 1 の表で置き換える | 決定 1 |
+| `docs/design-process/issue-13/plan.md`（新設） | 元は `issues/issue-13-plan.md`。リンクの飛び先だけを決定 1 の表で置き換える | 決定 1 |
 
 ## 設計の結果
 
