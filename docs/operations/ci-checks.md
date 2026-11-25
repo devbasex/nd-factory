@@ -88,7 +88,12 @@ NDF の認証は、`<非公開リポジトリ>` に対して次の権限を持�
    - `dir` と `git` の両方の探しで、`leak-scan-secret: nd-real-value: 0 件` の行が出ている
    - `leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が空なので .gitleaks.toml だけで探す` の行が出ていない
 
-   秘密が空の行が出ていれば、手順 2 の設定を直す。当たりや検査の失敗があれば、原因を解消する（当たりは「当たりの場所を手元で引く」で場所を引く）。そのうえで、手元で秘密を渡して `tools/checks/leak-scan-secret.sh git` を打ち、main から到達できるすべてのコミットを探し直す。当たりも失敗も無くなるまで、次へ進まない。確かめた後に、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする
+   3 つのどれかが欠ければ、今の木と履歴の両方で当たりと失敗が無くなるまで次へ進まず、変数 `LEAK_CHECK_REQUIRE_PATTERN` も `1` にしない。
+   - 秘密が空の行が出ていれば、手順 2 の設定を直す
+   - 当たりや検査の失敗があれば、原因を解消する（当たりは「当たりの場所を手元で引く」で場所を引く）
+   - 直した後の main のコミットの SHA を控え、そのコミットを下の「main のコミットを手元で探し直す」で `dir` と `git` の両方で探し直す。両方が成功したときだけ、確かめられたことになる。片方だけの成功では先へ進まない
+
+   確かめた後に、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする
 5. `<非公開リポジトリ>` を作り、[`leak-check-caller.yml`](leak-check-caller.yml) を写し、秘密 `LEAK_CHECK_PATTERN` と変数 `LEAK_CHECK_GENERATION`（値は `1`）を登録する。NDF がマージに使う今の認証で、「NDF の認証の権限」の 3 つの API が呼べることを確かめる。続けて、開いている Pull Request の 1 本で探しを手で起動して確かめる（下の「手で起動して確かめる」）。この結果で Pull Request をマージしない
 6. NDF に非公開の検査の機能が入った後、NDF の利用者の設定で非公開の検査を有効にしてから、2 本目の Pull Request を出し、NDF にマージさせる。利用者の設定は、2 本目のマージの後も有効のまま残す
 
@@ -143,9 +148,26 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
    - 中身の当たりのコミットは、`git hash-object --no-filters <履歴の出力先>/layers/<層の番号>/<元のパス>` で blob の SHA を求め、`git log --find-object=<blob の SHA> <分岐点>..<head の SHA>` で引く
 3. コミットの列がある当たり（`git` の探し）は、`tools/checks/leak-scan-secret.sh git --range <分岐点>..<head の SHA> --details` を打つ
 4. main への push（`leak-check-push`）の当たりは、その実行が探したコミットで探し直して引く。main は記録を確かめる間にも進むので、main の先頭では探さない
-   - 対象の `leak-check-push` の実行の `head_sha`（`gh api repos/devbasex/nd-factory/actions/runs/<実行の ID> --jq .head_sha`）を控え、その SHA をチェックアウトして、`tools/checks/leak-scan-secret.sh dir --details` と `tools/checks/leak-scan-secret.sh git --details` を打つ
+   - 対象の `leak-check-push` の実行の `head_sha`（`gh api repos/devbasex/nd-factory/actions/runs/<実行の ID> --jq .head_sha`）を控え、そのコミットを下の「main のコミットを手元で探し直す」で、`--details` を付けて探す。いつもの作業ディレクトリでは探さない。未追跡のファイルや別の版の gitleaks が混ざり、CI が出した当たりを引けなかったり、関係の無いファイルを当たりと取り違えたりするためである
    - 実行の後に環境 `leak-scan` の秘密を変えていた場合は、手元で渡す秘密が当時と同じ規則で探せるかを確かめる。同じ規則で探せなければ、元の当たりを引けないことがある
 5. 出た実際のファイルの名前と行を、記録の当たりの規則と行と突き合わせる。**`--details` の出力は手元の端末にだけ出し、記録・Issue・Pull Request に貼らない。当たりの理由を公開の Pull Request に書かない。** 直しを頼むときは理由を伏せるか、Pull Request を閉じる
+
+### main のコミットを手元で探し直す
+
+1 つのコミットを、`leak-check-push` と同じ条件（そのコミットの木と、そのコミットから到達できる全履歴を、そのコミットの設定と、そのコミットが固定した gitleaks の版で探す）で手元で探し直す。「導入の順序」の手順 4、上の手順 4、「正当な当たりを規則単位で外す」の表で使う。いつもの作業ディレクトリでは探さない。
+
+1. 探すコミットの SHA を控える（以後「対象のコミット」）
+2. 新しい空のディレクトリに公開のリポジトリを複製し（`git clone https://github.com/devbasex/nd-factory.git <空のディレクトリ>`）、そこへ移る。対象のコミットが main に無いとき（Pull Request のマージコミット）は、`git fetch origin refs/pull/<番号>/merge` で取り込む
+3. `git checkout --detach <対象のコミット>` でチェックアウトし、`git rev-parse HEAD` が対象のコミットと同じこと、`git status --porcelain` が何も出さないことを確かめる
+4. 対象のコミットがまだ main に無いときは、秘密を渡す前に、「1 本目を手元で探す」の手順 2 の 6 つのファイルを読んで確かめる。秘密を受けて動くのは、このチェックアウトのスクリプトだからである
+5. このチェックアウトの `install-gitleaks.sh` で gitleaks を置き、置いた先を `PATH` の先頭に足す。`gitleaks version` が `install-gitleaks.sh` の `GITLEAKS_VERSION` と同じことを確かめる
+
+   ```bash
+   GITHUB_PATH= tools/checks/install-gitleaks.sh "<作業用の空のディレクトリ>/gitleaks"
+   export PATH="<作業用の空のディレクトリ>/gitleaks:$PATH"
+   ```
+6. 秘密を `LEAK_CHECK_PATTERN` に、`LEAK_CHECK_REQUIRE_PATTERN=1` を渡し、`tools/checks/leak-scan-secret.sh dir` と `tools/checks/leak-scan-secret.sh git` の両方を打つ。当たりの場所を引くときは、両方に `--details` を付ける
+7. 両方の終了コードが `0` のときだけ、当たりが無いと判断する。片方でも `0` でなければ、当たりか失敗が残っている
 
 ## 正当な当たりを規則単位で外す
 
@@ -161,7 +183,7 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
 | 対象のある所 | 扱い |
 | --- | --- |
 | Pull Request の途中のコミットだけ | 上の手順のままでよい。規則単位の許可は、履歴の探し（`history` と `git --range`）にも効く |
-| main の木か履歴（規則か gitleaks の版を変えたために、前から在る内容に当たるようになった） | 規則・`tools/checks/gitleaks-default.toml`・gitleaks の版を変える Pull Request に、前から在る内容への許可を同じ Pull Request で入れる。許可を後の Pull Request に分けると、許可の Pull Request のマージコミットの木にも対象があるため、許可の Pull Request 自身が非公開の検査で落ちる。公開の `leak-check` が探すのは、マージコミットの木と、分岐点から head までのコミットだけで、main の過去のコミットにだけ残る内容は探さない。そのため、規則か gitleaks の版を変えるときは、マージの前に、その Pull Request のマージコミットをチェックアウトして秘密を渡し、`tools/checks/leak-scan-secret.sh git` で main から到達できる全履歴を変更後の設定で探す。探さずにマージすると、マージ後の `leak-check-push` で初めて当たりに気付く |
+| main の木か履歴（規則か gitleaks の版を変えたために、前から在る内容に当たるようになった） | 規則・`tools/checks/gitleaks-default.toml`・gitleaks の版を変える Pull Request に、前から在る内容への許可を同じ Pull Request で入れる。許可を後の Pull Request に分けると、許可の Pull Request のマージコミットの木にも対象があるため、許可の Pull Request 自身が非公開の検査で落ちる。公開の `leak-check` が探すのは、マージコミットの木と、分岐点から head までのコミットだけで、main の過去のコミットにだけ残る内容は探さない。そのため、規則か gitleaks の版を変えるときは、マージの前に、その Pull Request のマージコミット（`refs/pull/<番号>/merge` の SHA）を、「当たりの場所を手元で引く」の「main のコミットを手元で探し直す」で探す。そのコミットの設定と gitleaks の版で、そのコミットから到達できる全履歴（main の過去のコミットを含む）と木を探すことになる。手元の `main` に切り替えて探すと、変更前の設定で探すことになる。探さずにマージすると、マージ後の `leak-check-push` で初めて当たりに気付く |
 | 実際の値の規則 `nd-real-value` の当たり | 許可を足せない（規則は秘密の中にあり、`[[rules.allowlists]]` を持たない）。誤検知なら、「秘密を変える手順」で秘密の正規表現を直す。実際の値なら、マージせずに「当たりの場所を手元で引く」の手順 5 のとおりに扱う |
 
 ## 見本の写し直し
