@@ -370,7 +370,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 - `detect`（決定 8）。次の順に判定し、当たった所で返す
   1. 先頭の 512 バイトで形式を判定する。展開できない形式は `UNSUPPORTED`
   2. 末尾の ZIP のディレクトリ情報を `zipfile.is_zipfile` で確かめ、当たれば ZIP
-  3. ファイル全体を一定の大きさずつ読み、ZIP のメンバーの先頭（local file header）を探す。見つかれば `UNSUPPORTED`
+  3. ファイル全体を一定の大きさ（定数 `SCAN_CHUNK`）ずつ読み、ZIP のメンバーの先頭（local file header）を探す。ヘッダーや名前が読み取りの区切りをまたいでも判定できるようにする。見つかれば `UNSUPPORTED`
   4. ZIP の判定（2 と 3）のどちらにも当たらず、名前が `.br` で終わるときは、中身の全体が NUL の無い UTF-8 のテキストかを確かめる。確かめられなければ `UNSUPPORTED`
   5. どれにも当たらなければ `None`
 - `expand`
@@ -406,6 +406,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | `Budget` | 型（残りのバイト。1 回の実行で 1 つ） | `model.py` | 1 GiB |
 | `LEAK_SCAN_EXPAND_LIMIT` | 環境変数（正の整数。小さくする向きだけ効く。形の違う値は無視する） | `archive.py` | 未設定 |
 | 入れ子の上限 | 定数 | `archive.py` | 5 |
+| `SCAN_CHUNK`（`detect` が 1 回に読む大きさ） | 定数 | `archive.py` | 1 MiB |
 
 ## 非公開の検査と gitleaks の設置（leak-scan-secret.sh・install-gitleaks.sh）
 
@@ -461,7 +462,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | `is_binary`・`added_lines`・`attribute`・`merge_findings` | 3 条件の各 1 件 | 行の番号 0、前後の行にまたがる秘密、行の削除だけで成立した秘密、削除で行の番号がずれた既存の秘密、同じ行の 2 つの秘密 | 属性を読めない |
 | `rewrite_log`・中継の `main` | 目印と `commit` の行の書き換え | `\ No newline at end of file`、引用されたパス | 行の数の不一致、Git の失敗 |
 | `install_relay`・`CopyRepo` | 元のパスの当たり | 同じ写しのパスの 2 対象、元のリポジトリの `GIT_DIR` を設定した呼び出し | 決定 4 の条件 4〜8 の各 1 件 |
-| `detect`・`expand`・`normalize_name` | zip（前に別のデータを持つものを含む）・tar（v7 を含む。末尾の近くに zip のメンバーを持つものは tar と見分ける）・gzip・bzip2・xz | `./` のディレクトリ、空のメンバー、入れ子 5 段、上限ちょうど | 切れた・末尾を失った自己展開 ZIP・暗号化・7z・長い名前の上限超過・`..` |
+| `detect`・`expand`・`normalize_name` | zip（前に別のデータを持つものを含む）・tar（v7 を含む。末尾の近くに zip のメンバーを持つものは tar と見分ける）・gzip・bzip2・xz | `./` のディレクトリ、空のメンバー、入れ子 5 段、上限ちょうど、メンバーの先頭が `SCAN_CHUNK` の区切りをまたぐ末尾を失った ZIP | 切れた・末尾を失った自己展開 ZIP・暗号化・7z・長い名前の上限超過・`..` |
 | `run_dir`・`run_git`・`main`・`read_report`・`run_gitleaks`・`write_marker_config` | 当たりの無い範囲が 0 | 探し直しの対象が 0 件 | 内部の `git log` の失敗、JSON でない報告 |
 | `count_failed` | 当たりだけ | — | 新しい 2 つの行と当たりの同時 |
 
