@@ -90,6 +90,7 @@ flowchart TB
 | 呼び出しのワークフローの見本（`docs/operations/leak-check-caller.yml`、新設） | 持ち主が検査用の非公開リポジトリの `.github/workflows/` に置く呼び出しのワークフローの正本。`workflow_dispatch` だけで起動し、入力をそのまま `devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main` に渡し、非公開リポジトリの秘密 `LEAK_CHECK_PATTERN` を名前で渡す。非公開リポジトリの変数 `LEAK_CHECK_GENERATION` が入力の世代と違うか、`0` か空なら、呼ぶ前に失敗する。公開のリポジトリの `.github/workflows/` の外に置くので、公開のリポジトリでは動かない |
 | 秘密を使う探しのスクリプト（`tools/checks/leak-scan-secret.sh`、新設） | 探す対象（`dir` か `git`）を引数で、秘密の正規表現と必須の指定を環境変数で受ける。秘密があれば、一時の設定のファイルを、探す木の外に作る。その設定は `.gitleaks.toml` を `[extend] path` で読み、規則 `nd-real-value` を足す。秘密が空のとき、必須なら失敗する。必須でなければ、「秘密が空なので `.gitleaks.toml` だけで探す」行を記録に出して `.gitleaks.toml` だけで進む（main への push で、持ち主が変数を設定する前だけ起きる。決定 10 の手順 4 で、この行が出ていないことを確かめる）。続けて `leak-scan.sh` を、受けた対象で 2 回打つ。1 回目は既定の規則で、2 回目はその設定で探す。設定のファイルは、スクリプトと同じチェックアウトのものを絶対パスで渡す。`git` で範囲を受ければその範囲、受けなければ到達できるすべてのコミットを探す。`dir` では、探す木のディレクトリを引数で受けられる。秘密があれば、`nd-real-value` の当たりが 0 件でも、件数の行（`nd-real-value: <件数> 件`）を必ず出す。当たりの出し方は、件数だけにするか今の `leak-scan.sh` の形にするかを引数で受ける。今の `leak-scan.sh` は、`--paths` を渡さなければファイルの名前を `file-<番号>` で出す。手元で当たりのファイルを特定するときだけ `--details` を渡し、`leak-scan.sh` に `--paths` を渡して実際のファイルの名前を出す（決定 8）。正規表現を記録に出さない |
 | 木の取り出しのスクリプト（`tools/checks/export-tree.sh`、新設） | コミットと、空の出力先のディレクトリを引数で受ける。`git ls-tree -r -z --full-tree` でコミットの木のすべての項目を読み、ファイルの項目ごとに `git cat-file blob` で Git に保存された内容をそのまま書き出す。`.gitattributes` を読まず、`git archive` の `export-ignore`・`export-subst` も、改行の変換などのフィルタも掛けない。シンボリックリンクの項目は、リンク先の文字列を中身とする普通のファイルとして書き、取り出した木の外を指すリンクを作らない。サブモジュールの項目は中身を持たないので書かない。パスが絶対パスか、`.`・`..`・`.git` の部分を含めば失敗する。書き終えた後に、書いたファイルの数が木のファイルの項目の数と同じで、各ファイルの `git hash-object --no-filters` の値が項目の値と同じことを確かめ、外れれば失敗する。失敗の知らせにパスを出さない（パスが実際の値を含み得るため。決定 8） |
+| gitleaks を置くスクリプト（`tools/checks/install-gitleaks.sh`、新設） | gitleaks の版と要約値（SHA-256）を持つ、このリポジトリで唯一の場所。置く先のディレクトリを引数で受け、固定の版の配布の資産を取り、要約値を確かめて gitleaks を取り出し、`GITHUB_PATH` が在ればそのディレクトリを足す。`ci.yml` の `leak-check`・`leak-check-push` と `leak-check-secret.yml` の 3 つのジョブは、どれもチェックアウトにあるこのスクリプトを 1 行で呼ぶだけにし、版と要約値と手順をワークフローに持たない（決定 4）。gitleaks を上げるときは、このスクリプトの 2 つの定数だけを直す |
 | 今の木と履歴の探しのスクリプト（`tools/checks/leak-scan.sh`） | 変えない。gitleaks の 1 回の探しと、当たりを規則・ファイル・行・コミットだけで出す。探す木の根に `.gitleaksignore` があれば終了コード 2 で失敗する |
 | CI の `leak-check` のジョブ（`.github/workflows/ci.yml`） | Pull Request の実行だけで動く（`if: github.event_name == 'pull_request'`）。必須のチェックの名前 `leak-check` は変えない。環境を持たず、秘密を受けない。`leak-scan.sh` を直に呼び、既定の規則と `.gitleaks.toml` だけで今の木（`dir`）と分岐点から head まで（`git --range`）を探す（今の既定の規則と nd-factory の規則の探しのまま） |
 | CI の `leak-check-push` のジョブ（`.github/workflows/ci.yml`、`leak-check` から分けて新設） | main への push の実行だけで動く（`if: github.event_name == 'push'`）。`environment: leak-scan` を持ち、環境の秘密と変数を受け、秘密を使う探しのスクリプトを `dir` と `git`（範囲なし）で 1 回ずつ呼ぶ。今と同じく、今の木と到達できるすべてのコミットを、それぞれ 2 つの設定で探す。`nd-real-value` の当たりは件数だけを出す。Pull Request の実行では飛ばされ、必須のチェックにもしない |
@@ -133,7 +134,7 @@ flowchart LR
     scan --> def
 ```
 
-図には CI の中で動くものだけを描き、テスト・宣言・文書の行は含めない。`leak-check-secret.yml` が使う設定とスクリプトは、`.gitleaks.toml`・`gitleaks-default.toml` と、`leak-scan-secret.sh`・`leak-scan.sh`・図に無い `export-tree.sh` の 3 本のスクリプトである。どれも、NDF が渡した検査のコードのコミット（公開のリポジトリの main のコミット）のチェックアウトにあるものである。Pull Request のコミットは git の参照として取り込まれ、マージコミットの木はチェックアウトの外のディレクトリへデータとして取り出される。
+図には CI の中で動くものだけを描き、テスト・宣言・文書の行は含めない。`leak-check-secret.yml` が使う設定とスクリプトは、`.gitleaks.toml`・`gitleaks-default.toml` と、`leak-scan-secret.sh`・`leak-scan.sh` と、図に無い `export-tree.sh`・`install-gitleaks.sh` の 4 本のスクリプトである。どれも、NDF が渡した検査のコードのコミット（公開のリポジトリの main のコミット）のチェックアウトにあるものである。Pull Request のコミットは git の参照として取り込まれ、マージコミットの木はチェックアウトの外のディレクトリへデータとして取り出される。
 
 ## 処理の流れ
 
@@ -237,17 +238,21 @@ NDF が受け入れるのは、自分がこのマージのために起動した 
   - ほかのワークフローの `on` に、`push`・`pull_request`・`schedule`・`workflow_dispatch` のほかの起動がある（2026-11-24 の `ci.yml` と `ndf-contract.yml` が使う起動だけを許す）
   - `leak-check-secret.yml` が、次のどれかに当たる
     - `uses:` に、SHA で固定した `actions/checkout` のほかの動作がある
-    - `run:` で、gitleaks を置く手順・`git`・チェックアウトの `tools/checks/export-tree.sh`・チェックアウトの `tools/checks/leak-scan-secret.sh` のほかを動かす。`git archive` か `tar` を使う。`--details` を渡す
+    - `run:` で、`git`・チェックアウトの `tools/checks/install-gitleaks.sh`・チェックアウトの `tools/checks/export-tree.sh`・チェックアウトの `tools/checks/leak-scan-secret.sh` のほかを動かす。`git archive` か `tar` を使う。`--details` を渡す
     - `actions/checkout` の `repository` が `devbasex/nd-factory` でない。`ref` が入力の検査のコードのコミットでない。`allow-unsafe-pr-checkout` を渡す
     - `persist-credentials` が偽でない
     - `setup-node`・`npm`・`npx` を使う
     - `GITHUB_ENV`・`GITHUB_OUTPUT` に書く
-    - gitleaks を置く手順を除いて、`GITHUB_PATH` に書く
+    - `GITHUB_PATH` に書く（`GITHUB_PATH` に足すのは `install-gitleaks.sh` の中だけである）
+    - gitleaks の版か要約値を持つ（`GITLEAKS_` で始まる環境変数・配布の資産の URL）。`ci.yml` の 2 つのジョブにも同じことを求める。3 つのジョブの gitleaks を置く手順は、`install-gitleaks.sh` を 1 行で呼ぶだけにする
     - `${{ inputs.* }}` を `run:` の中に直に書く
     - `if:` か `continue-on-error` がある
     - `permissions` が `contents: read` だけでない
     - 秘密を受ける手順が探しの手順のほかにある
     - ジョブの表示名に、入力の Pull Request の番号・head の SHA・base の SHA・マージコミットの SHA・検査のコードのコミット・世代が入っていない。分岐点を表示名と違う base の SHA から求める。マージコミットの親を確かめる手順が無い（決定 7）
+- **gitleaks を置く処理は、レビューしたスクリプト `tools/checks/install-gitleaks.sh` の 1 か所にだけ置き、許可の一覧にはその呼び出しだけを入れる。** gitleaks を置くジョブは `leak-check`・`leak-check-push`・`leak-check-secret` の 3 つある。版・要約値・手順を各ジョブに写すと、gitleaks を上げるたびに 3 か所を直すことになるためである（Value 13）
+- 採らなかった案: 版・要約値・置く手順を 3 つのジョブに写し、CI の定義のテストで一致を確かめる（テストで食い違いは落とせるが、同じ定数と処理を 3 か所に持ち、上げるたびに 3 か所を直す。Value 13）
+- 採らなかった案: 置く手順を、リポジトリの中の複合の動作（`.github/actions/` の composite action）にする（`leak-check-secret.yml` の `uses:` の許可に動作のパスを足すことになる。複合の動作は中でさらに `uses:` を持てるので、テストは動作の中身まで辿って縛る必要がある。スクリプトなら `run:` の 1 行の許可で済む）
 - 採らなかった案: 呼び出しのワークフローを非公開リポジトリにだけ置き、公開のリポジトリに見本を置かない（形をテストで縛れず、持ち主の手元の写しが正本になる）
 - 採らなかった案: 呼び出しのワークフローから `leak-check-secret.yml` を main のコミットの SHA で固定して呼ぶ。この案は、公開のリポジトリの main に書き込める人が非公開リポジトリの秘密に届く経路（決定 9 の代償）を塞ぐかで比べた。採らない理由は次の 3 つである
   - ワークフローだけを固定しても、経路は塞がらない。固定した版のワークフローも、入力の検査のコードのコミット（main の先頭）からスクリプトと設定をチェックアウトし、秘密つきで動かすためである
@@ -339,7 +344,7 @@ NDF が受け入れるのは、自分がこのマージのために起動した 
      - 世代が手順 1 と同じである
      - head の SHA が手順 2 と同じである
      - base のブランチと先頭の SHA が手順 2 と同じである。探したのは、手順 2 の base の先頭と head を合わせたマージコミットの木なので、base の先頭が進んでいれば、合わせた後の木は探していない
-     - 検査のコードのコミットから今の main の先頭までの間に、探しの設定とコードが変わっていない。探しの設定とコードは、`.github/workflows/leak-check-secret.yml`・`tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml` の 6 つである。比較の API（`GET /repos/{owner}/{repo}/compare/{base}...{head}`）で `<検査のコードのコミット>...<main の先頭>` を比べ、`status` が `identical` か `ahead` で、`files` にこの 6 つのパスが無いことで確かめる。`files` は 300 件で切られる（compare API）ので、300 件あれば変わったとみなす
+     - 検査のコードのコミットから今の main の先頭までの間に、探しの設定とコードが変わっていない。探しの設定とコードは、`.github/workflows/leak-check-secret.yml`・`tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`tools/checks/install-gitleaks.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml` の 7 つである。比較の API（`GET /repos/{owner}/{repo}/compare/{base}...{head}`）で `<検査のコードのコミット>...<main の先頭>` を比べ、`status` が `identical` か `ahead` で、`files` にこの 7 つのパスが無いことで確かめる。`files` は 300 件で切られる（compare API）ので、300 件あれば変わったとみなす
      - 手順 1 から T を過ぎていない
   6. **マージの API を呼んだ後は、手順 7〜9 の照合が済むまで、NDF の記録を閉じない。** マージが成り立っても照合の前に NDF が止まると、検査と違う base へのマージが誰にも知らされないためである。NDF は、Pull Request ごとの記録を NDF の記録に永続化し、次の 3 つの状態で扱う
 
@@ -438,8 +443,8 @@ NDF が受け入れるのは、自分がこのマージのために起動した 
 
      **持ち主は、秘密を渡す前に、秘密を受けて動くスクリプトと設定の一式を読んで確かめ、そのコミットの SHA に固定する。探す対象のコミットは、データとして取り込むだけで、そのチェックアウトのコードは動かさない。** Pull Request の作者は、新しい 2 本のスクリプトのほかに、そこから呼ぶ `leak-scan.sh` と、探しの設定も変えられるためである。持ち主は次の順で探す
      1. 1 本目の Pull Request の head の SHA を控える。以後、この SHA を「確かめたコミット」と呼ぶ
-     2. 確かめたコミットにある次の 5 つのファイルを、main との差分だけでなく全体を読む。`tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml`。秘密を外へ送る処理や、ほかのファイルを動かす処理が無いことを確かめる
-     3. 確かめたコミットを、探す対象とは別のディレクトリにチェックアウトする。秘密を渡して動かすのは、このディレクトリのスクリプトと設定だけである。gitleaks は、今の `leak-check` と同じバージョンと要約値で確かめた物を使う
+     2. 確かめたコミットにある次の 6 つのファイルを、main との差分だけでなく全体を読む。`tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`tools/checks/install-gitleaks.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml`。秘密を外へ送る処理や、ほかのファイルを動かす処理が無いことを確かめる。`install-gitleaks.sh` の版と要約値が、今の `ci.yml` の `leak-check` の値と同じことも確かめる
+     3. 確かめたコミットを、探す対象とは別のディレクトリにチェックアウトする。秘密を渡して動かすのは、このディレクトリのスクリプトと設定だけである。gitleaks は、このディレクトリの `install-gitleaks.sh` の版と要約値で確かめた物を使う
      4. 探す対象は、Pull Request の `refs/pull/<番号>/head` と `refs/pull/<番号>/merge` を取り込んだリポジトリにする。取り込んだ head が確かめたコミットと同じであることと、マージコミットの最初の親が今の main の先頭で、2 つ目の親が確かめたコミットであることを確かめる。違えば、この手元の探しの手順 1 からやり直す
      5. 手順 3 のスクリプトで、マージコミットの木を作業ツリーの外に取り出して `dir` で探し、分岐点から head まで（`git --range`）を探す。設定は、手順 3 のチェックアウトにある 2 つの設定を絶対パスで渡す
      6. 当たりか失敗があれば、マージしない。探した後に head か main の先頭が変われば、マージせずに、この手元の探しの手順 1 からやり直す
@@ -517,7 +522,7 @@ NDF が受け入れるのは、自分がこのマージのために起動した 
 | #96-5・決定 7: 今の head・今の範囲・今の設定で探していない結果ではマージしない | CI の定義のテストで、ジョブの表示名に入力の番号・head の SHA・base の SHA・マージコミットの SHA・検査のコードのコミット・世代が入ること。NDF の側のテストで、次の場合にマージしないこと。起動の API が実行の ID を返さない、ジョブの表示名が渡した値と違う、試行 1 が失敗で再実行の試行 2 が成功、試行 1 が完了してジョブが 1 つも無い、試行 1 の `referenced_workflows` に `leak-check-secret.yml@main` の項目が無いか 2 つ以上あるかその SHA が検査のコードのコミットと違う、結論が成功でない、未完了のまま T を過ぎた、Pull Request の `mergeable` が真でない、世代が `0` か空か読めない、手順 1 と手順 5 の世代が違う、head・base のブランチが変わった、base の先頭が head と関わらないコミットで進んだ、検査のコードのコミットの後に探しの設定とコードが main で変わった。同じ Pull Request の前の実行が成功でも、今回の実行が失敗ならマージしないこと。次の場合はマージの後に人へ戻すこと。読み直しの後にマージ先のブランチを変えた、マージでできたコミットの最初の親が探した base の先頭と違う、マージの後の世代が手順 1 と違う。マージの API の応答が時間切れのときは、結果不明の記録を残し、マージの API を呼び直さず、その後に `merged` が真になったのを見つけたら手順 7〜9 を行うこと。結果不明の記録を永続化した後、応答を受け取る前に NDF を止め、その間に GitHub でマージを成立させてから NDF を起動すると、マージの API を呼び直さずに記録を未検証に変えて手順 7〜9 を行い、外れていれば持ち主へ知らせること。同じく止めた後に Pull Request がマージされないまま残るか閉じられていれば、起動したときに人へ戻すこと。同じ Pull Request を 2 つの実行で同時に処理すると、記録の比べて置き換える操作に成功した 1 つだけがマージの API を呼び、もう 1 つは呼ばずに手を引き、結果不明か未検証の記録を上書きしないこと。未解決の記録の一覧が、このリポジトリの結果不明と未検証の記録をすべて返すこと。公開の場所に書く知らせに、外れ方の分け方が入らないこと。CI の定義のテストで、`leak-check-secret.yml` がマージコミットの親を入力の base の SHA と head の SHA と比べる手順を持つこと。検証用のリポジトリでも確かめる（決定 10 の手順 1） | 表示名から head の SHA・base の SHA・マージコミットの SHA・検査のコードのコミット・世代を外す・マージコミットの親の確かめを外すと落ちる |
 | 決定 7: 秘密の切り替えの間にマージしない | NDF の側のテストで、手順 1 の後に T を過ぎたらマージの API を呼ばないこと。CI の定義のテストで、呼び出しのワークフローの見本が、変数の世代と入力の世代が違うか `0` か空なら呼ぶ前に失敗すること | 見本から世代の確認を外すと落ちる |
 | 決定 10 の手順 6: 検査を必須にする読み取り元に、Pull Request の head の設定を使わない | NDF の側のテストで、利用者の設定で有効にし、base の `.ndf/project.json` に項目が無い Pull Request（2 本目の Pull Request の場合）で、非公開の検査が失敗か未完了ならマージしないこと。head の `.ndf/project.json` から項目を消した Pull Request でも、検査を必須にすること。base の `.ndf/project.json` で有効なのに、利用者の設定に非公開リポジトリが無ければマージしないこと | 判定に head の `.ndf/project.json` を読む・利用者の設定を読まないと落ちる |
-| 決定 4: 秘密を受けるワークフローは決まった起動だけを持ち、信頼できるコードだけを動かす | CI の定義のテストで、ワークフローごとの起動の許可の一覧と、`leak-check-secret.yml` の `uses:`・`run:` の許可の一覧と、呼び出しのワークフローの見本の形に当たらないものが無いこと | `leak-check-secret.yml` に `pull_request_target` か `workflow_run` を足す・ほかのワークフローに `pull_request_target` を足す・`actions/setup-node` を足す・見本で `secrets: inherit` を使うと落ちる |
+| 決定 4: 秘密を受けるワークフローは決まった起動だけを持ち、信頼できるコードだけを動かす。gitleaks の版と要約値は `install-gitleaks.sh` の 1 か所にだけある | CI の定義のテストで、ワークフローごとの起動の許可の一覧と、`leak-check-secret.yml` の `uses:`・`run:` の許可の一覧と、呼び出しのワークフローの見本の形に当たらないものが無いこと。gitleaks を置く 3 つのジョブが `install-gitleaks.sh` を呼び、どのワークフローも版と要約値を持たないこと | `leak-check-secret.yml` に `pull_request_target` か `workflow_run` を足す・ほかのワークフローに `pull_request_target` を足す・`actions/setup-node` を足す・見本で `secrets: inherit` を使う・3 つのジョブのどれかに `GITLEAKS_VERSION` か配布の資産の URL を書く・gitleaks を置く手順を `install-gitleaks.sh` の呼び出しのほかにすると落ちる |
 | 決定 8: 公開の main への push の探しは `nd-real-value` の当たりを件数だけで出し、0 件でも件数の行を出す | 結合のテストで、件数だけを出す指定で、作り物の正規表現に当たるリポジトリを探すと、出力に `nd-real-value` の件数が出て、当たりのファイル・行・コミットが出ない。当たらないリポジトリを探すと、`nd-real-value: 0 件` の行が出る。`--details` を渡したときだけ場所が出る。CI の定義のテストで、`leak-check-push` が件数だけを出す指定で呼び、どのワークフローも `--details` を渡さない | 整形を外して `leak-scan.sh` の出力をそのまま出す・0 件のときに件数の行を出さない・ワークフローに `--details` を足すと落ちる |
 | 決定 9: main への push の探しの秘密は環境 `leak-scan` から受ける | CI の定義のテストで、公開のリポジトリで `secrets.LEAK_CHECK_PATTERN` を読むジョブが `environment: leak-scan` を持つ `leak-check-push` だけであること。`leak-check-secret.yml` は秘密を `workflow_call` の秘密としてだけ受けること。Pull Request の側の実行で環境の秘密が空になることは検証用のリポジトリで確かめる | `environment` を外す・`leak-check` で秘密を読む・`leak-check` に `environment` を付けると落ちる |
 | #96-6: コミットを取れない・探しが途中で失敗すると通らない | 結合のテストで、読めない範囲・gitleaks の失敗で終了コードが 0 以外。CI の定義のテストで、ジョブと手順に `if:` と `continue-on-error` が無く、入力の形の検査と head の SHA の一致を確認する手順がある | `continue-on-error: true` を足す・範囲の読み取りの失敗を 0 で終えると落ちる |
@@ -540,7 +545,7 @@ NDF が受け入れるのは、自分がこのマージのために起動した 
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #96 | 実装する | — | 1 本目（実装）: `.github/workflows/leak-check-secret.yml`（新設）、`.github/workflows/ci.yml`、`tools/checks/leak-scan-secret.sh`（新設）、`tools/checks/export-tree.sh`（新設）、`tools/test/ci-definition.test.ts`、`tools/test/leak-scan.integration.test.ts`、`AGENTS.md`、`docs/operations/ci-checks.md`（新設）、`docs/operations/leak-check-caller.yml`（新設）、`docs/design/platform.md`。2 本目: `.ndf/project.json`（決定 10） |
+| #96 | 実装する | — | 1 本目（実装）: `.github/workflows/leak-check-secret.yml`（新設）、`.github/workflows/ci.yml`、`tools/checks/leak-scan-secret.sh`（新設）、`tools/checks/export-tree.sh`（新設）、`tools/checks/install-gitleaks.sh`（新設）、`tools/test/ci-definition.test.ts`、`tools/test/leak-scan.integration.test.ts`、`AGENTS.md`、`docs/operations/ci-checks.md`（新設）、`docs/operations/leak-check-caller.yml`（新設）、`docs/design/platform.md`。2 本目: `.ndf/project.json`（決定 10） |
 | #101 | マージする | #96 | — |
 
 ## 人へ残す判断

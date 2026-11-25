@@ -19,6 +19,7 @@
 tools/checks/
   export-tree.sh *            コミットの木を Git に保存された内容のまま取り出す
   leak-scan-secret.sh *       秘密の正規表現を重ねた設定を組み、leak-scan.sh を 2 回打つ
+  install-gitleaks.sh *       gitleaks の版と要約値を持ち、固定の版を確かめて置く（3 つのジョブが呼ぶ）
   leak-scan.sh                変えない（呼ばれる側）
 tools/test/
   ci-definition.test.ts       起動の許可・秘密を受けるワークフローの形・漏れの検査のジョブの分け方を縛る
@@ -30,13 +31,14 @@ docs/design/platform.md       設計の決まりを縛る検査の「漏れの�
 AGENTS.md                     秘密とインフラの値を置かない、の行
 ```
 
-依存の向き: ワークフロー → `leak-scan-secret.sh` → `leak-scan.sh` → gitleaks と設定のファイル、の一方向である。`leak-check-secret.yml` だけが `export-tree.sh` を呼び、`export-tree.sh` はほかのスクリプトを呼ばない。`leak-scan-secret.sh` は `export-tree.sh` を呼ばない（木を取り出すのはワークフローの手順で、スクリプトは渡された木を探すだけ）。テストからの依存は 2 本ある。結合のテストは、スクリプトを子のプロセスで動かす。CI の定義のテストは、ワークフローと見本を YAML として読むだけである。スクリプトとワークフローからテストへの依存は無い。循環は無い。要素の関係は設計文書の「構成要素」の図にある。
+依存の向き: ワークフロー → `leak-scan-secret.sh` → `leak-scan.sh` → gitleaks と設定のファイル、の一方向である。gitleaks を置く 3 つのジョブは `install-gitleaks.sh` を呼び、`install-gitleaks.sh` はほかのスクリプトを呼ばない。`leak-check-secret.yml` だけが `export-tree.sh` を呼び、`export-tree.sh` はほかのスクリプトを呼ばない。`leak-scan-secret.sh` は `export-tree.sh` を呼ばない（木を取り出すのはワークフローの手順で、スクリプトは渡された木を探すだけ）。テストからの依存は 2 本ある。結合のテストは、スクリプトを子のプロセスで動かす。CI の定義のテストは、ワークフローと見本を YAML として読むだけである。スクリプトとワークフローからテストへの依存は無い。循環は無い。要素の関係は設計文書の「構成要素」の図にある。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `.github/workflows/leak-check-secret.yml` | 新設 | 渡された Pull Request のマージコミットの木と分岐点から head までを、秘密を重ねた設定で探す | `actions/checkout`・`export-tree.sh`・`leak-scan-secret.sh` | ジョブ `leak-check-secret` | 手順: 入力の形を確かめる・チェックアウト・gitleaks を置く・Pull Request の参照を取り込んで確かめる・マージコミットの木を取り出す・探す（新設） |
-| `.github/workflows/ci.yml` | 変更 | Pull Request の探しから秘密を外し、main への push の探しを環境 `leak-scan` のジョブへ分ける | `leak-scan.sh`・`leak-scan-secret.sh` | ジョブ `leak-check`（変更）・`leak-check-push`（新設） | `leak-check` の手順「今の木と履歴のコミットを探す」（変更）。`leak-check-push` の手順（新設） |
+| `.github/workflows/leak-check-secret.yml` | 新設 | 渡された Pull Request のマージコミットの木と分岐点から head までを、秘密を重ねた設定で探す | `actions/checkout`・`install-gitleaks.sh`・`export-tree.sh`・`leak-scan-secret.sh` | ジョブ `leak-check-secret` | 手順: 入力の形を確かめる・チェックアウト・gitleaks を置く・Pull Request の参照を取り込んで確かめる・マージコミットの木を取り出す・探す（新設） |
+| `.github/workflows/ci.yml` | 変更 | Pull Request の探しから秘密を外し、main への push の探しを環境 `leak-scan` のジョブへ分ける。gitleaks を置く手順を `install-gitleaks.sh` の呼び出しに替え、版と要約値をジョブから消す | `install-gitleaks.sh`・`leak-scan.sh`・`leak-scan-secret.sh` | ジョブ `leak-check`（変更）・`leak-check-push`（新設） | `leak-check` の手順「今の木と履歴のコミットを探す」（変更）。`leak-check-push` の手順（新設） |
 | `tools/checks/leak-scan-secret.sh` | 新設 | 秘密の正規表現から重ねた設定を組み、既定の規則と重ねた設定で 1 回ずつ探し、`nd-real-value` の件数を出す | `leak-scan.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml` | シェルのモジュール | `usage`・`parse_args`・`build_overlay`・`run_scan`・`report_counts`（新設） |
+| `tools/checks/install-gitleaks.sh` | 新設 | gitleaks の版と要約値を 1 か所に持ち、固定の版の配布の資産を要約値で確かめて置く | `curl`・`sha256sum`・`tar` | シェルのモジュール | スクリプト全体（関数を持たない） |
 | `tools/checks/export-tree.sh` | 新設 | コミットの木のすべてのファイルを、属性による加工なしで空のディレクトリへ書き、数と内容の値を確かめる | `git` | シェルのモジュール | `usage`・`check_path`・`write_entries`・`verify_tree`（新設） |
 | `tools/test/ci-definition.test.ts` | 変更 | 起動の許可・`leak-check-secret.yml` と見本の形・漏れの検査のジョブの分け方を、定義から読んで落とす | `yaml`・`.ndf/project.json` | テストのモジュール | `loadWorkflowFile`・`triggerNames`・`triggerViolations`・`runCommandWords`・`secretWorkflowViolations`・`callerViolations`・`leakJobViolations`・`actorConditions`・`patternSecretReaders`（新設）。`pullRequestChecks`・`triggersPullRequest`・`loadWorkflows`（変更） |
 | `tools/test/leak-scan.integration.test.ts` | 変更 | 2 本の新しいスクリプトを、作り物の正規表現と作り物のリポジトリで動かす | `leak-scan-secret.sh`・`export-tree.sh`・gitleaks | テストのモジュール | `secretScan`・`exportTree`・`mergeRepo`（新設） |
@@ -136,6 +138,24 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 | `report_counts` | 当たり 2 件で `nd-real-value: 2 件` | 0 件で `nd-real-value: 0 件` | 2 回目の報告が無いと、件数を読めない行を出して 0 以外 |
 | `--details` | 実際のファイルの名前が出る | — | `--details` なしでは、作り物の値を名前に含むファイルが `file-<番号>` で出て、名前が出力に現れない |
 
+## gitleaks を置くスクリプト（`tools/checks/install-gitleaks.sh`）
+
+満たす決定: 決定 4（gitleaks を置く処理を 1 か所に置く）、#1 の決定 3・5（版と要約値で固定して取る）
+
+gitleaks の版と要約値を持つのは、このスクリプトだけである。`ci.yml` の `leak-check`・`leak-check-push` と `leak-check-secret.yml` は、それぞれのチェックアウトにあるこのスクリプトを 1 行で呼ぶ。gitleaks を上げるときは、このスクリプトの 2 つの定数だけを直す。
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| スクリプト全体 | `tools/checks/install-gitleaks.sh` | 新設 | `install-gitleaks.sh <置く先>`。終了コード 0・1・2 | 固定の版の `linux_x64` の配布の資産を `<置く先>` に取り、要約値を `sha256sum --check --strict` で確かめ、`gitleaks` だけを取り出す。環境変数 `GITHUB_PATH` が空でなければ、`<置く先>` の絶対パスをそのファイルに足す |
+
+- 中身は今の `ci.yml` の手順「gitleaks を固定の版と要約値で置く」の `run:` を移したものである。今のジョブの `env` の注（版と要約値は手で上げる。要約値は配布の資産を取って `sha256sum` で求めた値）も、定数の横へ移す
+- 引数が 1 つでなければ使い方の 1 行を出して 2 で終える。取得・要約値の確かめ・取り出しのどれかが失敗すれば、`set -euo pipefail` で 1 で終える。要約値が合わないときは、取り出す前に止まる
+- 手元で使うとき（設計文書の決定 10 の手順 3 の手元の探し）は、`GITHUB_PATH` を空にして打ち、置いた先のパスを自分で使う
+
+| 名前 | 種類 | 保存先 | 既定値 |
+| --- | --- | --- | --- |
+| `GITLEAKS_VERSION`・`GITLEAKS_SHA256` | 定数 | `tools/checks/install-gitleaks.sh`（このリポジトリで唯一の保存先。ワークフローには持たない） | `8.30.1`・今の要約値 |
+
 ## 木の取り出しのスクリプト（`tools/checks/export-tree.sh`）
 
 満たす決定: 決定 5・8、受け入れ条件 #96-1・#96-6・#96-7
@@ -212,7 +232,7 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 | ジョブ `leak-check-secret` | 同上 | 新設 | `name: leak-check-secret (#${{ inputs.pr_number }} head ${{ inputs.head_sha }} / base ${{ inputs.base_sha }} / merge ${{ inputs.merge_sha }} / code ${{ inputs.code_sha }} / gen ${{ inputs.generation }})`。`runs-on: ubuntu-24.04`・`timeout-minutes: 20`。`if:`・`continue-on-error`・`environment`・`permissions` を持たない | 下の 6 つの手順を順に動かし、どれかが 0 以外で終えれば失敗する |
 | 手順「入力の形を確かめる」 | 同上 | 新設 | 環境変数で 6 つの入力を受ける | 6 つの入力の形を確かめる。`pr_number` と `generation` は正の整数（`^[1-9][0-9]*$`）とする。`head_sha`・`base_sha`・`merge_sha`・`code_sha` の 4 つは、小文字の 16 進数 40 桁（`^[0-9a-f]{40}$`）とする。どれか 1 つでも形が違えば、終了コード 1 で終える |
 | 手順「チェックアウト」 | 同上 | 新設 | `actions/checkout@<SHA> # v7.0.1`。`repository: devbasex/nd-factory`・`ref: ${{ inputs.code_sha }}`・`fetch-depth: 0`・`persist-credentials: false` | 検査のコードのコミットのスクリプトと設定を作業のディレクトリに置く |
-| 手順「gitleaks を固定の版と要約値で置く」 | 同上 | 新設 | `ci.yml` の同じ名前の手順と、手順の `run:` とジョブの `GITLEAKS_VERSION`・`GITLEAKS_SHA256` が同じ | gitleaks を置き、`GITHUB_PATH` に足す |
+| 手順「gitleaks を固定の版と要約値で置く」 | 同上 | 新設 | `run: tools/checks/install-gitleaks.sh "$RUNNER_TEMP/gitleaks"` の 1 行だけ。版と要約値を持たない | 検査のコードのコミットのチェックアウトにある `install-gitleaks.sh` で gitleaks を置き、`GITHUB_PATH` に足す |
 | 手順「Pull Request の参照を取り込んで確かめる」 | 同上 | 新設 | 環境変数 `PR_NUMBER`・`HEAD_SHA`・`BASE_SHA`・`MERGE_SHA` | `git fetch --no-tags --no-recurse-submodules origin +refs/pull/<番号>/head:refs/ndf-scan/head +refs/pull/<番号>/merge:refs/ndf-scan/merge` で取り込み、2 つの参照が入力の SHA と同じこと、マージコミットの親がちょうど 2 つで順に base と head であること、`git merge-base` で分岐点を求められることを確かめる |
 | 手順「マージコミットの木を取り出す」 | 同上 | 新設 | 環境変数 `MERGE_SHA` | `tools/checks/export-tree.sh "$MERGE_SHA" "$RUNNER_TEMP/merge-tree"` を打つ |
 | 手順「秘密の規則を重ねて探す」 | 同上 | 新設 | 環境変数 `LEAK_CHECK_PATTERN: ${{ secrets.LEAK_CHECK_PATTERN }}`・`LEAK_CHECK_REQUIRE_PATTERN: "1"`・`BASE_SHA`・`HEAD_SHA` | 分岐点を求め直し、`leak-scan-secret.sh dir "$RUNNER_TEMP/merge-tree"` と `leak-scan-secret.sh git --range "<分岐点>..$HEAD_SHA"` を打ち、どちらかが 0 以外なら 1 で終える |
@@ -242,7 +262,6 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `GITLEAKS_VERSION`・`GITLEAKS_SHA256` | 定数 | 正は `.github/workflows/ci.yml` の `leak-check`。`leak-check-secret.yml` と `leak-check-push` は写しで、CI の定義のテストが 3 か所の値と手順の `run:` が同じことを確かめる（手順を共有する仕組み（複合の動作）は、`leak-check-secret.yml` の `uses:` を `actions/checkout` だけに限る決定 4 と両立しないため） | `8.30.1`・今の要約値 |
 | 取り出した木の置き場所 | 定数 | `.github/workflows/leak-check-secret.yml` | `$RUNNER_TEMP/merge-tree` |
 | 取り込む参照の名前 | 定数 | 同上 | `refs/ndf-scan/head`・`refs/ndf-scan/merge` |
 
@@ -290,9 +309,10 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 | --- | --- | --- | --- | --- |
 | ジョブ `leak-check` | `.github/workflows/ci.yml` | 変更 | `if: github.event_name == 'pull_request'` を足す。`environment` と秘密を持たない | 既定の規則と `.gitleaks.toml` だけで、今の木と分岐点から head までを探す |
 | 手順「今の木と履歴のコミットを探す」（`leak-check`） | 同上 | 変更 | 環境変数は `BASE_SHA`・`HEAD_SHA` だけ（`LEAK_CHECK_PATTERN`・`LEAK_CHECK_REQUIRE_PATTERN`・`EVENT_NAME` を消す） | `leak-scan.sh` を `dir` と `git --range <分岐点>..<head>` で、それぞれ `tools/checks/gitleaks-default.toml` と `.gitleaks.toml` の 2 回、合わせて 4 回打つ |
-| ジョブ `leak-check-push` | 同上 | 新設 | `if: github.event_name == 'push'`・`environment: leak-scan`・`timeout-minutes: 15`。gitleaks の 2 つの定数をジョブの `env` に持つ。チェックアウト（`fetch-depth: 0`・`persist-credentials: false`）と gitleaks を置く手順は `leak-check` と同じ | main への push で、今の木と到達できるすべてのコミットを、既定の規則と秘密を重ねた設定で探す |
+| ジョブ `leak-check-push` | 同上 | 新設 | `if: github.event_name == 'push'`・`environment: leak-scan`・`timeout-minutes: 15`。チェックアウト（`fetch-depth: 0`・`persist-credentials: false`）と、gitleaks を置く手順（`tools/checks/install-gitleaks.sh "$RUNNER_TEMP/gitleaks"` の 1 行）は `leak-check` と同じ。gitleaks の版と要約値をジョブの `env` に持たない | main への push で、今の木と到達できるすべてのコミットを、既定の規則と秘密を重ねた設定で探す |
 | 手順「今の木と履歴のコミットを探す」（`leak-check-push`） | 同上 | 新設 | 環境変数 `LEAK_CHECK_PATTERN: ${{ secrets.LEAK_CHECK_PATTERN }}`・`LEAK_CHECK_REQUIRE_PATTERN: ${{ vars.LEAK_CHECK_REQUIRE_PATTERN == '1' && '1' \|\| '' }}` | `leak-scan-secret.sh dir --count-only` と `leak-scan-secret.sh git --count-only` を打ち、どちらかが 0 以外なら 1 で終える |
 
+- `leak-check` の手順「gitleaks を固定の版と要約値で置く」は、`tools/checks/install-gitleaks.sh "$RUNNER_TEMP/gitleaks"` の 1 行に替え、ジョブの `env` の `GITLEAKS_VERSION`・`GITLEAKS_SHA256` を消す
 - `leak-check` の手順「gitleaks の設定の結合のテスト」（`setup-node`・`npm ci`・`npm run test:integration -- leak-scan`）は `leak-check` に残す。新しい結合のテストも、ファイルの名前で同じ呼び出しに入る
 - `leak-check-push` は `setup-node` と `npm ci` を持たない。環境 `leak-scan` を持つジョブで、依存の導入の処理を動かさないためである。結合のテストは、main に入る前の Pull Request の `leak-check` で同じ中身に対して通っている。今の `leak-check` は main への push でも結合のテストを打っているので、main への push で打たなくなることは振る舞いの変化として運用の文書に書く
 - 今の式の `github.event.pull_request.head.repo.full_name == github.repository` の条件は、2 つのジョブのどこにも残さない
@@ -333,9 +353,9 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
   - `on` が `workflow_call` だけでない（`triggerViolations` と重ねて見る）
   - `uses:` が、SHA で固定した `actions/checkout` でない
   - `actions/checkout` の `with` が、`repository: devbasex/nd-factory`・`ref: ${{ inputs.code_sha }}`・`persist-credentials: false` でないか、`allow-unsafe-pr-checkout` を持つ
-  - 「gitleaks を固定の版と要約値で置く」の手順を除く `run:` の `runCommandWords` に、`git`・`tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`echo`・`exit`・`[[` のほかがある。`git archive`・`tar`・`--details`・`setup-node`・`npm`・`npx` の語がある
-  - 「gitleaks を固定の版と要約値で置く」の手順の `run:` と、ジョブの 2 つの定数が、`ci.yml` の `leak-check` のものと違う
-  - どの `run:` にも `GITHUB_ENV`・`GITHUB_OUTPUT` があるか、gitleaks の手順のほかに `GITHUB_PATH` がある
+  - `run:` の `runCommandWords` に、`git`・`tools/checks/install-gitleaks.sh`・`tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`echo`・`exit`・`[[` のほかがある。`git archive`・`tar`・`--details`・`setup-node`・`npm`・`npx` の語がある
+  - 「gitleaks を固定の版と要約値で置く」の手順の `run:` が `tools/checks/install-gitleaks.sh "$RUNNER_TEMP/gitleaks"` の 1 行でない。ワークフローのどこかに `GITLEAKS_` で始まる名前か、gitleaks の配布の資産の URL がある
+  - どの `run:` にも `GITHUB_ENV`・`GITHUB_OUTPUT`・`GITHUB_PATH` がある
   - `run:` の中に `${{ inputs.` がある
   - ジョブか手順に `if` か `continue-on-error` がある
   - 最上位の `permissions` が `{ contents: read }` だけでないか、ジョブが `permissions` を持つ
@@ -345,6 +365,7 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
   - `export-tree.sh` の呼び出しが無いか、`leak-scan-secret.sh` の `dir` と `git --range` の呼び出しのどちらかが無い
 - `callerViolations` が返す所: `on` が `workflow_dispatch` だけでない。`uses:` が `devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main` でない。`secrets: inherit` を使う。`scan` が `needs: generation` を持たない。`generation` の手順が `vars.LEAK_CHECK_GENERATION` と `inputs.generation` を読まない。最上位の `permissions` が `{ contents: read }` だけでない
 - `leakJobViolations` が返す所
+  - 両方のジョブ: gitleaks を置く手順の `run:` が `tools/checks/install-gitleaks.sh "$RUNNER_TEMP/gitleaks"` の 1 行でない。ジョブか手順の `env` に `GITLEAKS_` で始まる名前がある
   - `leak-check`: `if` が `github.event_name == 'pull_request'` でない。`environment` か `secrets.` か `LEAK_CHECK_REQUIRE_PATTERN` を持つ。`leak-scan.sh` の `dir` か `git --range` の呼び出しが無い
   - `leak-check-push`: `if` が `github.event_name == 'push'` でない。`environment` が `leak-scan` でない。`leak-scan-secret.sh dir --count-only` か `leak-scan-secret.sh git --count-only` の呼び出しが無い。`--range` を渡す。`LEAK_CHECK_REQUIRE_PATTERN` を受けない
 - `patternSecretReaders` の期待は、公開のリポジトリの `.github/workflows/` のうち `ci.yml#jobs.leak-check-push` と `leak-check-secret.yml#jobs.leak-check-secret` の 2 つだけである。`leak-check-secret.yml` は秘密を `on.workflow_call.secrets` で受ける
@@ -359,7 +380,7 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 | --- | --- | --- | --- |
 | `ALLOWED_TRIGGERS` | 定数 | `tools/test/ci-definition.test.ts` | `leak-check-secret.yml` は `workflow_call`、見本は `workflow_dispatch`、ほかのワークフローは `push`・`pull_request`・`schedule`・`workflow_dispatch` |
 | `NOT_REQUIRED_JOBS` | 定数 | 同上 | `["leak-check-push"]` |
-| `SECRET_WORKFLOW_COMMANDS` | 定数 | 同上 | `git`・`tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`echo`・`exit`・`[[` |
+| `SECRET_WORKFLOW_COMMANDS` | 定数 | 同上 | `git`・`tools/checks/install-gitleaks.sh`・`tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`echo`・`exit`・`[[` |
 | `CALLER_PATH` | 定数 | 同上 | `docs/operations/leak-check-caller.yml` |
 
 ### 既存の部品の再利用
@@ -382,9 +403,9 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 | `triggerViolations` | 実際のワークフローで空 | — | `leak-check-secret.yml` に `pull_request_target` か `workflow_run` を足す・`ci.yml` に `pull_request_target` を足すと当たる |
 | `pullRequestChecks` | 実際の `ci.yml` で、必須のチェックの宣言の 7 つと等しい | — | 必須の宣言に無い Pull Request のジョブを足すと当たる |
 | `runCommandWords` | `a && b \| c`・`x="$(git rev-parse y)"` で `a`・`b`・`c`・`git` | `if [[ ... ]]; then` で `[[` | — |
-| `secretWorkflowViolations` | 実際の `leak-check-secret.yml` で空 | — | 決定 4 の箇条ごとに 1 つずつ壊した作り物で、その印が 1 つだけ出る（`ref` を head にする・`npm ci` を足す・`actions/setup-node` を足す・`run:` に `${{ inputs.head_sha }}` を書く・`continue-on-error: true` を足す・表示名から head の SHA を外す・親の確かめを外す・`git archive` を使う・`--details` を足す・`pull-requests: write` を足す） |
+| `secretWorkflowViolations` | 実際の `leak-check-secret.yml` で空 | — | 決定 4 の箇条ごとに 1 つずつ壊した作り物で、その印が 1 つだけ出る（`ref` を head にする・`npm ci` を足す・`actions/setup-node` を足す・`run:` に `${{ inputs.head_sha }}` を書く・`continue-on-error: true` を足す・表示名から head の SHA を外す・親の確かめを外す・`git archive` を使う・`--details` を足す・`pull-requests: write` を足す・ジョブの `env` に `GITLEAKS_VERSION` を足す・gitleaks を置く手順に `curl` を直に書く） |
 | `callerViolations` | 実際の見本で空 | — | `secrets: inherit`・`@` の後を SHA にする・世代の確かめを外すと当たる |
-| `leakJobViolations` | 実際の `ci.yml` で空 | — | `leak-check` に秘密か `environment` を戻す・`leak-check-push` から `environment` か `dir` の呼び出しを外す・`--range` を渡すと当たる |
+| `leakJobViolations` | 実際の `ci.yml` で空 | — | `leak-check` か `leak-check-push` に `GITLEAKS_SHA256` を戻す・`leak-check` に秘密か `environment` を戻す・`leak-check-push` から `environment` か `dir` の呼び出しを外す・`--range` を渡すと当たる |
 | `actorConditions` | 実際のワークフローで空 | — | `if: github.actor != 'dependabot[bot]'` を足すと当たる |
 | `patternSecretReaders` | 実際のワークフローで 2 つ | — | `leak-check` で秘密を読むと 3 つになる |
 
