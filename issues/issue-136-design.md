@@ -235,7 +235,7 @@ execution.md の変更は、直す時期で 2 つに分かれる。
 
     | 読む対象 | 許可範囲 | 例 |
     | --- | --- | --- |
-    | `spec` と、`path` が `.` でない `file` | 許可ディレクトリの配下のファイル。許可ディレクトリは、`file` では行の `env` の環境変数にランナーが指定した保存先のディレクトリ、`spec` ではプラグインの根の下の `target` | `file-plan-progress` の `s1/8-release-request-state/progress.jsonl` |
+    | `spec` と、`path` が `.` でない `file` | 許可ディレクトリの配下のファイル。許可ディレクトリは、`file` では行の `target` を NDF の契約の保存先の表（固定の点の `contracts/domains/locations.json`）で引いた保存先、`spec` ではプラグインの根の下の `target`。`file-journals`（`mvv-state`）はランナーが `NDF_MVV_STATE_DIR` に指定したディレクトリ、`file-plan-progress`（`ndf-tmp`）は NDF を起動するリポジトリ（作業ディレクトリの worktree）の根の下の `.ndf/tmp` で、無ければランナーが起動前に作る。行の `env` は保存先を示さない（`file-plan-progress` の `env` は `NDF_FACTORY_RUN` だけ） | `file-plan-progress` の `s1/8-release-request-state/progress.jsonl` |
     | `path` が `.` の `file` | ランナーが環境変数に指定したファイルそのもの。他のファイルへの付け替え（指定したパスをシンボリックリンクや別のファイルに置き直すなど）は拒否する | `file-issue-request` は、`NDF_ISSUE_REQUEST_FILE` に指定したファイルだけを読む |
 
     許可範囲の外を開かない方法は、この文書では決めない。ランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の設計 PR で決めて、承認を取る。決めるのは、OS のどの仕組みでファイルを開くか、起票の依頼ファイルを誰がいつ作ってどの権限を付けるか、どんなときに読み取りを失敗にするかである。どれも、ホステッドと手元のマシンの 2 つの実行の場に要る条件や、ファイルの所有と権限を変える決定になるため、この課題の実装の変更には入れない。ランナーの設計は、少なくとも次を満たす。
