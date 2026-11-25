@@ -915,3 +915,325 @@ describe("履歴の取り出し（export-tree.sh --history）", () => {
     }, TIMEOUT);
   });
 });
+
+const SECRET_SCRIPT = join(ROOT, "tools", "checks", "leak-scan-secret.sh");
+const EMPTY_SECRET_LINE = "leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が空なので .gitleaks.toml だけで探す";
+const countLine = (count: number) => `leak-scan-secret: nd-real-value: ${count} 件`;
+
+/**
+ * `leak-scan-secret.sh` を子のプロセスで打ち、標準出力と標準エラーを合わせて返す。
+ * 秘密と必須の指定は引数からだけ渡し、テストを打つ人の環境の値を引き継がない
+ */
+function secretScan(cwd: string, args: string[], { pattern, require }: { pattern?: string; require?: boolean } = {}): RunResult {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => name !== "LEAK_CHECK_PATTERN" && name !== "LEAK_CHECK_REQUIRE_PATTERN"),
+  );
+  if (pattern !== undefined) env.LEAK_CHECK_PATTERN = pattern;
+  if (require === true) env.LEAK_CHECK_REQUIRE_PATTERN = "1";
+  const result = spawnSync("bash", [SECRET_SCRIPT, ...args], { cwd, encoding: "utf8", env });
+  return { status: result.status, output: `${result.stdout}${result.stderr}` };
+}
+
+/**
+ * 共通のコミットから base と head を分け、base の側で `git merge --no-ff` して 2 つの親のマージコミットを作る。
+ * `common` は共通のコミットのファイル、`base` と `head` はそれぞれの枝で置き換えるファイル
+ */
+function mergeRepo(
+  base: Record<string, string>,
+  head: Record<string, string>,
+  common: Record<string, string> = {},
+): { root: string; baseSha: string; headSha: string; mergeSha: string } {
+  const { root } = makeRepo(common, "common");
+  git(root, "checkout", "-q", "-b", "head");
+  for (const [path, body] of Object.entries(head)) write(root, path, body);
+  const headSha = commitAll(root, "head");
+  git(root, "checkout", "-q", "main");
+  for (const [path, body] of Object.entries(base)) write(root, path, body);
+  const baseSha = commitAll(root, "base");
+  git(root, "merge", "-q", "--no-ff", "-m", "merge", "head");
+  const mergeSha = git(root, "rev-parse", "HEAD");
+  return { root, baseSha, headSha, mergeSha };
+}
+
+/** コミットの木を取り出した出力先 */
+function exportedTree(root: string, commit: string): string {
+  const out = join(tempDir("secret-tree-"), "tree");
+  expect(exportTree(root, [commit, out]).status).toBe(0);
+  return out;
+}
+
+/** 範囲の履歴を取り出した出力先 */
+function exportedHistory(root: string, base: string, head: string): string {
+  const out = join(tempDir("secret-history-"), "history");
+  expect(exportTree(root, ["--history", base, head, out]).status).toBe(0);
+  return out;
+}
+
+describe("秘密を使う探し（leak-scan-secret.sh）", () => {
+  it("途中のコミットで足して後で消した値を git --range が当て、件数の行を出し、正規表現と値を出さない", () => {
+    const realWord = fakeWord();
+    const { root, head: base } = makeRepo({ "docs/a.md": "はじめ\n" }, "base");
+    write(root, "docs/a.md", `はじめ\n名前 ${realWord}\n`);
+    commitAll(root, "add");
+    write(root, "docs/a.md", "はじめ\n");
+    commitAll(root, "remove");
+    const result = secretScan(root, ["git", "--range", `${base}..HEAD`], { pattern: realWord, require: true });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("leak-scan: 当たり nd-real-value file-1:2");
+    expect(result.output).toContain(countLine(1));
+    expect(result.output).not.toContain(realWord);
+  }, TIMEOUT);
+
+  it("分岐点より前から在るファイルの、範囲で変えていない行の値を dir <木> が当てる", () => {
+    const realWord = fakeWord();
+    const { root } = makeRepo({ "docs/old.md": `名前 ${realWord}\n` }, "base");
+    write(root, "docs/new.md", "足した\n");
+    commitAll(root, "add");
+    const result = secretScan(tempDir("secret-cwd-"), ["dir", root], { pattern: realWord });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(countLine(1));
+    expect(result.output).not.toContain(realWord);
+  }, TIMEOUT);
+
+  it("当たりが 0 件なら 0 で終え、0 件の行を出す。木を省くと今のディレクトリを探す", () => {
+    const root = makeTree({ "docs/a.md": "中身\n" });
+    expect(secretScan(root, ["dir"], { pattern: fakeWord() })).toEqual({ status: 0, output: `${countLine(0)}\n` });
+  }, TIMEOUT);
+
+  it("既定の規則だけに当たる値で 1 回目が 1 を返しても、2 回目も打ち、件数の行を出す", () => {
+    const root = makeTree({ "docs/token.md": `token ${fakeToken()}\n`, "docs/a.md": `名前 ${fakeWord()}\n` });
+    const realWord = fakeWord();
+    write(root, "docs/b.md", `名前 ${realWord}\n`);
+    const result = secretScan(root, ["dir"], { pattern: realWord });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("leak-scan: 当たり github-pat");
+    expect(result.output).toContain("leak-scan: 当たり nd-real-value");
+    expect(result.output).toContain(countLine(1));
+  }, TIMEOUT);
+
+  it("範囲を読めないと 0 以外で終える", () => {
+    const { root } = makeRepo({ "docs/a.md": "中身\n" }, "base");
+    const result = secretScan(root, ["git", "--range", `${"0".repeat(40)}..HEAD`], { pattern: fakeWord() });
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain("leak-scan-secret: nd-real-value の件数を読めない");
+  }, TIMEOUT);
+
+  it.each([
+    ["知らない対象", ["tree"]],
+    ["git に木", ["git", "."]],
+    ["history で木を省く", ["history"]],
+    ["dir に --range", ["dir", ".", "--range", "a..b"]],
+    ["history に --range", ["history", ".", "--range", "a..b"]],
+    ["--count-only と --details", ["dir", ".", "--count-only", "--details"]],
+    ["知らない引数", ["dir", ".", "--paths"]],
+  ])("引数の誤り（%s）で 2", (_label, args) => {
+    const root = makeTree({ "a.md": "中身\n" });
+    const result = secretScan(root, args, { pattern: fakeWord() });
+    expect(result.status).toBe(2);
+    expect(result.output).toContain("leak-scan-secret: 使い方");
+  });
+
+  it("無い木はパスを出さずに 2", () => {
+    const realWord = fakeWord();
+    const root = makeTree({});
+    const result = secretScan(root, ["dir", join(root, realWord)], { pattern: fakeWord() });
+    expect(result).toEqual({ status: 2, output: "leak-scan-secret: 探す木のディレクトリが無い\n" });
+  });
+
+  it("秘密が空で必須でなければ、空のときの行を出して .gitleaks.toml だけで探し、件数の行を出さない", () => {
+    const root = makeTree({ "docs/a.md": "中身\n" });
+    expect(secretScan(root, ["dir"])).toEqual({ status: 0, output: `${EMPTY_SECRET_LINE}\n` });
+    expect(secretScan(root, ["dir", "--count-only"])).toEqual({ status: 0, output: `${EMPTY_SECRET_LINE}\n` });
+  }, TIMEOUT);
+
+  it("秘密が空で必須なら探さずに 1", () => {
+    const root = makeTree({ "docs/a.md": `アカウント ${fakeAccount()}\n` });
+    expect(secretScan(root, ["dir"], { require: true })).toEqual({
+      status: 1,
+      output: "leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が無い（必須にしている）\n",
+    });
+  });
+
+  it.each([
+    ["'''", (word: string) => `${word}'''`],
+    ["改行", (word: string) => `${word}\n${word}`],
+  ])("%s を含む秘密で 1 になり、秘密の値を出さない", (_label, make) => {
+    const realWord = fakeWord();
+    const root = makeTree({ "docs/a.md": "中身\n" });
+    const result = secretScan(root, ["dir"], { pattern: make(realWord) });
+    expect(result).toEqual({ status: 1, output: "leak-scan-secret: 秘密 LEAK_CHECK_PATTERN に ''' と改行を含めない\n" });
+  });
+
+  it("--count-only では、nd-real-value の当たりは件数だけを出し、既定の規則の当たりは今の形で出す", () => {
+    const realWord = fakeWord();
+    const { root, head } = makeRepo({ "docs/token.md": `token ${fakeToken()}\n`, [`docs/${realWord}.md`]: `名前 ${realWord}\n` }, "first");
+    // dir は取り出した木を探す（.gitleaks.toml は既定の全体の許可を読まないので、作り物のリポジトリの .git/ の索引も探す）
+    for (const args of [["dir", exportedTree(root, head), "--count-only"], ["git", "--count-only"]]) {
+      const result = secretScan(root, args, { pattern: realWord, require: true });
+      expect(result.status).toBe(1);
+      expect(result.output).toContain("leak-scan: 当たり github-pat file-1:1");
+      expect(result.output).not.toContain("nd-real-value file-");
+      expect(result.output).toContain(countLine(1));
+      expect(result.output).not.toContain(realWord);
+    }
+  }, TIMEOUT);
+
+  it("木の根に .gitleaksignore があると 2 で、件数を読めない行を出す", () => {
+    const root = makeTree({ "docs/a.md": "中身\n", ".gitleaksignore": "x\n" });
+    const result = secretScan(root, ["dir"], { pattern: fakeWord() });
+    expect(result.status).toBe(2);
+    expect(result.output).toContain("leak-scan-secret: nd-real-value の件数を読めない");
+  }, TIMEOUT);
+
+  it("当たり 2 件で 2 件の行を出す", () => {
+    const realWord = fakeWord();
+    const root = makeTree({ "docs/a.md": `名前 ${realWord}\n`, "docs/b.md": `名前 ${realWord}\n` });
+    const result = secretScan(root, ["dir", "--count-only"], { pattern: realWord });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(countLine(2));
+  }, TIMEOUT);
+
+  it("--details では実際のファイルの名前を出し、無ければ file-<番号> に替える", () => {
+    const realWord = fakeWord();
+    const root = makeTree({ [`docs/${realWord}.md`]: "中身 nd-detail-marker\n" });
+    const pattern = "nd-detail-marker";
+    expect(secretScan(root, ["dir", "--details"], { pattern }).output).toContain(`docs/${realWord}.md`);
+    const hidden = secretScan(root, ["dir"], { pattern });
+    expect(hidden.status).toBe(1);
+    expect(hidden.output).toContain("leak-scan: 当たり nd-real-value file-1:1");
+    expect(hidden.output).not.toContain(realWord);
+  }, TIMEOUT);
+
+  describe("--count-only の出力が当たった場所によって変わらない", () => {
+    // 既定の規則に当たる行を 1 つ置き、その行と、別のファイルの行に当たる作り物の正規表現で探す
+    const repo = () => {
+      const marks = { same: fakeWord(), other: fakeWord(), second: fakeWord() };
+      const { root, head } = makeRepo(
+        {
+          "docs/token.md": `token ${fakeToken()} ${marks.same}\n`,
+          "docs/other.md": `名前 ${marks.other}\n名前 ${marks.second}\n`,
+        },
+        "first",
+      );
+      return { root, head, marks };
+    };
+    // dir は取り出した木を探す（作り物のリポジトリの .git/ を探さない）
+    const argsOf = (mode: "dir" | "git", root: string, head: string) =>
+      mode === "dir" ? ["dir", exportedTree(root, head), "--count-only"] : ["git", "--count-only"];
+
+    for (const mode of ["dir", "git"] as const) {
+      it(`${mode} で、同じ行に当たる正規表現と別のファイルに当たる正規表現の出力が同じで、当たらなければ件数の行だけが違う`, () => {
+        const { root, head, marks } = repo();
+        const args = argsOf(mode, root, head);
+        const a = secretScan(root, args, { pattern: marks.same });
+        const b = secretScan(root, args, { pattern: marks.other });
+        const c = secretScan(root, args, { pattern: fakeWord() });
+        expect(a.status).toBe(1);
+        expect(a).toEqual(b);
+        expect(c.status).toBe(1);
+        expect(c.output.replace(countLine(0), countLine(1))).toBe(a.output);
+        expect(c.output).not.toBe(a.output);
+      }, TIMEOUT);
+
+      it(`${mode} で、2 件が同じ行に在っても別のファイルに在っても出力が同じ`, () => {
+        const { root, head, marks } = repo();
+        const args = argsOf(mode, root, head);
+        const sameLine = secretScan(root, args, { pattern: `${marks.same}|ghp_` });
+        const otherFile = secretScan(root, args, { pattern: `${marks.other}|${marks.second}` });
+        expect(sameLine.output).toContain(countLine(2));
+        expect(sameLine).toEqual(otherFile);
+      }, TIMEOUT);
+    }
+  });
+});
+
+describe("取り出した木と履歴の探し（export-tree.sh と leak-scan-secret.sh）", () => {
+  it("base と head を合わせた後の木でだけ当たる値が、マージコミットの木の探しで当たる", () => {
+    const first = fakeWord();
+    const second = fakeWord();
+    const pattern = `(?s)${first}.{0,40}${second}`;
+    const common = { "docs/a.md": "一\n二\n三\n四\n五\n" };
+    const { root, baseSha, headSha, mergeSha } = mergeRepo(
+      { "docs/a.md": `${first}\n二\n三\n四\n五\n` },
+      { "docs/a.md": `一\n二\n${second}\n四\n五\n` },
+      common,
+    );
+    expect(git(root, "rev-list", "--parents", "-n", "1", mergeSha).split(" ")).toEqual([mergeSha, baseSha, headSha]);
+    expect(secretScan(root, ["dir", exportedTree(root, baseSha)], { pattern }).output).toContain(countLine(0));
+    expect(secretScan(root, ["dir", exportedTree(root, headSha)], { pattern }).output).toContain(countLine(0));
+    const merged = secretScan(root, ["dir", exportedTree(root, mergeSha)], { pattern });
+    expect(merged.status).toBe(1);
+    expect(merged.output).toContain(countLine(1));
+  }, TIMEOUT);
+
+  it("途中のコミットで足して後で消した、作り物の値を名前に含むファイルとディレクトリのパスが history で当たる", () => {
+    const realWord = fakeWord();
+    const { root, base } = forkRepo();
+    write(root, `docs/${realWord}.md`, "中身\n");
+    write(root, `${realWord}-dir/a.md`, "中身\n");
+    commitAll(root, "add");
+    rmSync(join(root, "docs"), { recursive: true });
+    rmSync(join(root, `${realWord}-dir`), { recursive: true });
+    write(root, "keep.md", "残す\n");
+    const head = commitAll(root, "remove");
+    const out = exportedHistory(root, base, head);
+    expect(secretScan(root, ["dir", exportedTree(root, head)], { pattern: realWord }).status).toBe(0);
+    const result = secretScan(root, ["history", out], { pattern: realWord });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("leak-scan-secret: 履歴 paths を探す");
+    expect(result.output).toContain("leak-scan-secret: 履歴 layers/1 を探す");
+    expect(result.output).toContain(countLine(4));
+    expect(result.output).not.toContain(realWord);
+  }, TIMEOUT);
+
+  it("途中のコミットで足して後で消した、NUL を含み作り物の値を中に持つファイルが binary-text で当たる", () => {
+    const realWord = fakeWord();
+    const { root, base } = forkRepo();
+    writeFileSync(join(root, "bin.dat"), binaryWith(realWord));
+    commitAll(root, "add");
+    rmSync(join(root, "bin.dat"));
+    const head = commitAll(root, "remove");
+    const out = exportedHistory(root, base, head);
+    expect(secretScan(root, ["git", "--range", `${base}..${head}`], { pattern: realWord }).output).toContain(countLine(0));
+    const result = secretScan(root, ["history", out], { pattern: realWord, require: true });
+    expect(result.status).toBe(1);
+    // layers/ の元のファイル（gitleaks がそのまま読める分）と binary-text/ の両方で当たる
+    expect(result.output).toContain("leak-scan-secret: 履歴 binary-text/1 を探す\nleak-scan: 当たり nd-real-value file-1:");
+    expect(result.output).toContain(countLine(2));
+  }, TIMEOUT);
+
+  it("既定の規則がファイルの名前だけで当てるファイルを途中で足して消すと、history で当たる", () => {
+    const { root, base } = forkRepo();
+    write(root, "keys/client.p12", "中身\n");
+    commitAll(root, "add");
+    rmSync(join(root, "keys"), { recursive: true });
+    const head = commitAll(root, "remove");
+    const result = secretScan(root, ["history", exportedHistory(root, base, head), "--details"], { pattern: fakeWord() });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("keys/client.p12");
+  }, TIMEOUT);
+
+  it("既定の全体の許可がパスで外すファイルの値は当てず、同じ中身を外さないパスに置けばそちらだけ当たる", () => {
+    const token = `token ${fakeToken()}\n`;
+    const { root, base } = forkRepo();
+    write(root, "img/logo.png", token);
+    commitAll(root, "png");
+    const pngOnly = commitAll(root, "noop");
+    expect(secretScan(root, ["history", exportedHistory(root, base, pngOnly)], { pattern: fakeWord() }).status).toBe(0);
+    write(root, "docs/a.md", token);
+    commitAll(root, "md");
+    rmSync(join(root, "img"), { recursive: true });
+    rmSync(join(root, "docs"), { recursive: true });
+    const head = commitAll(root, "remove");
+    const result = secretScan(root, ["history", exportedHistory(root, base, head), "--details"], { pattern: fakeWord() });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("leak-scan: 当たり github-pat docs/a.md:1");
+    expect(result.output).not.toContain("logo.png:");
+  }, TIMEOUT);
+
+  it("history に export-tree.sh の範囲が空の出力先を渡すと、引数の誤りにならずに 0", () => {
+    const { root, base } = forkRepo();
+    const result = secretScan(root, ["history", exportedHistory(root, base, base)], { pattern: fakeWord() });
+    expect(result).toEqual({ status: 0, output: `leak-scan-secret: 履歴 paths を探す\n${countLine(0)}\n` });
+  }, TIMEOUT);
+});
