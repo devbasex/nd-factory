@@ -5,6 +5,7 @@ import { EXIT } from "@nd-factory/contracts/exit-codes";
 import { describe, expect, it } from "vitest";
 import { assemblyDigest } from "../lib/assembly-digest.ts";
 import {
+  type DeployArgs,
   type DiffArgs,
   type RunOptions,
   type SetupDeps,
@@ -353,12 +354,16 @@ async function diffThen(f: Fake, stacks: Array<"app" | "pipeline"> | null = null
   return { out, confirm: confirmFrom(f) };
 }
 
+function deployOpts(out: string, confirm: string, overrides: Partial<Pick<DeployArgs, "profile">> = {}): DeployArgs {
+  return { kind: "deploy", profile: overrides.profile ?? "acme-test", assembly: out, confirm };
+}
+
 describe("runDeploy", () => {
   it("確認の値が同じなら、保存した置き場を cdk deploy --app で 1 回だけ反映し、合成しない", async () => {
     const first = fake();
     const { out, confirm } = await diffThen(first);
     const f = fake();
-    const code = await runDeploy({ kind: "deploy", profile: "acme-test", assembly: out, confirm }, f.deps);
+    const code = await runDeploy(deployOpts(out, confirm), f.deps);
     expect(code).toBe(EXIT.OK);
     const deploys = f.calls.filter((c) => isCdk(c, "deploy"));
     expect(deploys).toHaveLength(1);
@@ -372,14 +377,14 @@ describe("runDeploy", () => {
     const { out, confirm } = await diffThen(fake());
     writeFileSync(join(out, "acme-test-app.template.json"), "{}");
     const f = fake();
-    expect(await runDeploy({ kind: "deploy", profile: "acme-test", assembly: out, confirm }, f.deps)).toBe(EXIT.CONFIRM_MISMATCH);
+    expect(await runDeploy(deployOpts(out, confirm), f.deps)).toBe(EXIT.CONFIRM_MISMATCH);
     expect(writes(f)).toBe(0);
   });
 
   it("別のアカウントの profile なら 7 で、AWS へ書かない", async () => {
     const { out, confirm } = await diffThen(fake());
     const f = fake({ target: { profile: "other", account: "210987654321", region: "us-west-2" } });
-    expect(await runDeploy({ kind: "deploy", profile: "other", assembly: out, confirm }, f.deps)).toBe(EXIT.CONFIRM_MISMATCH);
+    expect(await runDeploy(deployOpts(out, confirm, { profile: "other" }), f.deps)).toBe(EXIT.CONFIRM_MISMATCH);
     expect(writes(f)).toBe(0);
   });
 
@@ -389,15 +394,13 @@ describe("runDeploy", () => {
     const other = [digest === "0".repeat(12) ? "f".repeat(12) : "0".repeat(12), ...rest].join(":");
     expect(other).not.toBe(confirm);
     const f = fake();
-    expect(await runDeploy({ kind: "deploy", profile: "acme-test", assembly: out, confirm: other }, f.deps)).toBe(
-      EXIT.CONFIRM_MISMATCH,
-    );
+    expect(await runDeploy(deployOpts(out, other), f.deps)).toBe(EXIT.CONFIRM_MISMATCH);
     expect(writes(f)).toBe(0);
   });
 
   it("置き場が無ければ 3", async () => {
     const f = fake();
-    expect(await runDeploy({ kind: "deploy", profile: "p", assembly: tempOut(), confirm: "x" }, f.deps)).toBe(EXIT.SETTINGS);
+    expect(await runDeploy(deployOpts(tempOut(), "x", { profile: "p" }), f.deps)).toBe(EXIT.SETTINGS);
     expect(f.calls).toHaveLength(0);
   });
 
@@ -406,28 +409,28 @@ describe("runDeploy", () => {
     mkdirSync(out, { recursive: true });
     writeFileSync(join(out, "manifest.json"), "{}");
     const f = fake();
-    expect(await runDeploy({ kind: "deploy", profile: "p", assembly: out, confirm: "x" }, f.deps)).toBe(EXIT.SETTINGS);
+    expect(await runDeploy(deployOpts(out, "x", { profile: "p" }), f.deps)).toBe(EXIT.SETTINGS);
     expect(writes(f)).toBe(0);
   });
 
   it("profile の失敗は 4", async () => {
     const { out, confirm } = await diffThen(fake());
     const f = fake({ profileError: true });
-    expect(await runDeploy({ kind: "deploy", profile: "p", assembly: out, confirm }, f.deps)).toBe(EXIT.PROFILE);
+    expect(await runDeploy(deployOpts(out, confirm, { profile: "p" }), f.deps)).toBe(EXIT.PROFILE);
     expect(writes(f)).toBe(0);
   });
 
   it("bootstrap の失敗は 5", async () => {
     const { out, confirm } = await diffThen(fake());
     const f = fake({ currentBootstrap: 1 });
-    expect(await runDeploy({ kind: "deploy", profile: "acme-test", assembly: out, confirm }, f.deps)).toBe(EXIT.BOOTSTRAP);
+    expect(await runDeploy(deployOpts(out, confirm), f.deps)).toBe(EXIT.BOOTSTRAP);
     expect(writes(f)).toBe(0);
   });
 
   it("cdk deploy の失敗は 8", async () => {
     const { out, confirm } = await diffThen(fake());
     const f = fake({ deployCode: 1 });
-    expect(await runDeploy({ kind: "deploy", profile: "acme-test", assembly: out, confirm }, f.deps)).toBe(EXIT.DEPLOY_FAILED);
+    expect(await runDeploy(deployOpts(out, confirm), f.deps)).toBe(EXIT.DEPLOY_FAILED);
     expect(f.calls.filter((c) => isCdk(c, "deploy"))).toHaveLength(1);
   });
 });
