@@ -359,7 +359,7 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 
 反映は設置のコマンドと反映のパイプラインの 2 つの道筋で行う。VPC・Aurora・ECS・ECR・テーブル・予算は、アプリのスタック（`app`）へ入れ、同じ確認の値と要約値で縛る（決定 89）。手順の正本は [setup.md](../operations/setup.md)・[pipeline-approval.md](../operations/pipeline-approval.md)・[settings.md](../operations/settings.md) である。
 
-運用する環境のアプリのスタックを人の承認を待たずに反映する規則は、商用利用の開始前に当てる（[#164](https://github.com/devbasex/nd-factory/issues/164)）。商用利用を始める前（本番の設置で `launch_declared` を真にする前）に、本番の反映の承認方式を持ち主が決め直し、この表を改める。
+運用する環境のアプリのスタックを人の承認を待たずに反映する規則は、商用利用の開始前に当てる（[#164](https://github.com/devbasex/nd-factory/issues/164)）。商用利用を始める前（本番の設置で `launch_declared` を真にする前）に、本番の反映の承認方式を持ち主が決め直し、この表を改める。反映のパイプラインを使う設置では、宣言した本番へ、設置のコマンドでもアプリのスタックを反映しない（[API の文書の人の確定の段階](api.md#人の確定の段階)）。
 
 | 環境 | 反映の道筋 | 人が確かめること |
 | --- | --- | --- |
