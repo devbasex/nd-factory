@@ -327,7 +327,7 @@ flowchart TD
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
 | STD1 | Git の `git diff` の選択肢 | `--text` は「すべてのファイルをテキストとして扱う」。`--no-textconv` は外部のテキストへの変換を使わない | 決定 2 で `--log-opts` に足す | https://git-scm.com/docs/git-diff （2026-11-25） |
-| STD2 | RFC 2606（予約済みのドメイン名） | `example.com`・`example.net`・`example.org` を例のために予約する | 決定 5 の許可 3 | https://www.rfc-editor.org/rfc/rfc2606.txt （2026-11-25） |
+| STD2 | RFC 2606（予約済みのドメイン名） | `example.com`・`example.net`・`example.org` を例のために予約する | 決定 5 の採らなかった案（予約済みのドメインを許す案）。予約で作り物と言えるのは、そのホスト名自体を調べるときだけである | https://www.rfc-editor.org/rfc/rfc2606.txt （2026-11-25） |
 | STD3 | Amazon S3 の汎用の置き場の名前の規則 | 置き場の名前は小文字・数字・`.`・`-` だけでできる。`amzn-s3-demo-` で始まる名前の置き場は作れず、AWS は例の説明だけにこの接頭辞を使う。名前の末尾の `-s3alias`・`--ol-s3`・`.mrap`・`--x-s3`・`--table-s3` は、別名やほかの種類の置き場のために予約されている | 決定 5 の許可 1。大文字の `EXAMPLE` を含む名前を許さない理由（決定 5 の採らなかった案） | https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html （2026-11-25） |
 | STD4 | Amazon S3 のアクセスポイントの名前と別名 | AWS はアクセスポイントの名前から `<名前>-<メタデータ>-s3alias`（S3 以外のデータを指すときは `-ext-s3alias`）の別名を作る。別名は、データの操作で置き場の名前の代わりに使える | 決定 5 の許可 1 で、接頭辞の後ろに `-`・`.` を許さない理由 | https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-points-naming.html 、https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-points-restrictions-limitations-naming-rules.html （2026-11-25） |
 | STD5 | Amazon Cognito の利用者プールのドメイン | 接頭辞のドメインの名前に `aws`・`amazon`・`cognito` の文字を使えない | 決定 5 の許可 4 | https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-assign-domain.html （2026-11-25） |
