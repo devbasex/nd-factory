@@ -95,7 +95,7 @@ nd-factory/
 
 | 保存先 | 依る先 | 決まり |
 | --- | --- | --- |
-| `packages/contracts` | zod だけ | ほかに何にも依らない |
+| `packages/contracts` | zod だけ | ほかに何にも依らない。NDF の契約の使い方（`src/ndf-contract-use.ts`）だけは、区間の報告の見出しと節を決める GFM の解析器（`mdast-util-from-markdown`・`mdast-util-gfm`・`micromark-extension-gfm`。#136 の設計の LIB4）にも依る。どれも `node:` の組み込みを読まない |
 | `packages/core` | `packages/contracts` だけ | 各コンテキストのテーブルの行を読む所（席・割り当て・委任・マシン・レーン）は、`core` が読み手の型（ポート）だけを持ち、`apps/api/src/modules/` が中身を渡す。これで `core` から `apps` への向きの依存を作らない |
 | `apps/api`・`apps/runner`・`apps/nd-runtime` | `packages/core` と `packages/contracts` | `apps/*` どうしは互いに import しない（ランナーと API は HTTP のルートだけでつながる） |
 | `apps/web` | `packages/contracts` と、`packages/core` のうちブラウザーで動くモジュール（`clock`・`ids`・`redact`・`log`）だけ | — |

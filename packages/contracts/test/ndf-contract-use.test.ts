@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import generatedData from "../data/ndf-contract-use.generated.json" with { type: "json" };
 import { ndfContractUseGenerated, type NdfCall, type NdfEntrypointRow } from "../src/ndf-contract-use-schema.ts";
-import { filePathPattern, judgeCallWith } from "../src/ndf-contract-use.ts";
+import { filePathPattern, judgeCallWith, readReportWith } from "../src/ndf-contract-use.ts";
 
 /** 固定の点（8d22be7）の契約の写し。説明の文の列は写していない */
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ndf-contract-8d22be7");
@@ -15,6 +15,9 @@ type Case = NdfCall & { id: string; valid: boolean };
 const CASES = (readFixture("entrypoint-cases.json") as { rows: Case[] }).rows;
 
 const GENERATED = ndfContractUseGenerated.parse(generatedData);
+
+type ReportCase = { text: string; result: string; errors: string[] };
+const REPORT_CASES = (readFixture("unattended-report.json") as { cases: ReportCase[] }).cases;
 const SKILL_PREFIX = "ndf:";
 
 /** execution.md の「使うインタフェース」の表の 11 の id（表を変えるときに同じ変更で直す） */
@@ -142,5 +145,171 @@ describe("filePathPattern", () => {
     expect(re.test("ask.jsonl")).toBe(true);
     expect(re.test("askxjsonl")).toBe(false);
     expect(filePathPattern("a+(b)[c]").test("a+(b)[c]")).toBe(true);
+  });
+});
+
+describe("readReportWith", () => {
+  const read = (text: string) => readReportWith(GENERATED.report, text);
+
+  /** 結果の行の前に `before` を、後ろに項目の行を置いた区間の報告 */
+  function report(result: string, items: Record<string, string> | [string, string][], before = ""): string {
+    const lines = (Array.isArray(items) ? items : Object.entries(items)).map(([k, v]) => `- ${k}: ${v}`);
+    return `${before}## 区間の報告\n\n- 結果: ${result}\n${lines.join("\n")}\n`;
+  }
+
+  const GATE = { 課題: "#12", 区分: "ndf-ask:cost", 質問: "進めてよいか" };
+
+  it("固定の点の cases は 16 件", () => {
+    expect(REPORT_CASES).toHaveLength(16);
+  });
+
+  it.each(REPORT_CASES.map((c, i) => [i, c] as const))("cases[%i] で result と errors の有無がサンプルと同じ", (_i, sample) => {
+    const got = read(sample.text);
+    expect(got.result).toBe(sample.result);
+    expect(got.errors.length > 0).toBe(sample.errors.length > 0);
+  });
+
+  it("有効な報告で、items の値と URL の並びの material を返す", () => {
+    const got = read(report("判断が要る", { ...GATE, "Pull Request": "無し", 材料: "https://github.com/acme/app/issues/1 https://github.com/acme/app/pull/2" }));
+    expect(got.errors).toEqual([]);
+    expect(got.items).toMatchObject({ 区分: "ndf-ask:cost", 質問: "進めてよいか", "Pull Request": "無し", 課題: "#12" });
+    expect(got.material).toEqual({ kind: "urls", urls: ["https://github.com/acme/app/issues/1", "https://github.com/acme/app/pull/2"] });
+  });
+
+  it("items は REPORT_ITEMS の名前だけを持ち、報告に無い項目のキーを持たない", () => {
+    const got = read(report("完了", { 課題: "#1", 次のコマンド: "/ndf:x" }));
+    expect(got.items).toEqual({ 課題: "#1" });
+  });
+
+  it("同じ項目が 2 行あれば後ろの値を採る（材料・区分）", () => {
+    const got = read(
+      report("判断が要る", [
+        ["区分", "ndf-ask:legal"],
+        ["質問", "進めてよいか"],
+        ["材料", "https://github.com/acme/app/issues/1"],
+        ["材料", "https://github.com/acme/app/issues/2"],
+        ["区分", "ndf-ask:cost"],
+      ]),
+    );
+    expect(got.errors).toEqual([]);
+    expect(got.items.材料).toBe("https://github.com/acme/app/issues/2");
+    expect(got.items.区分).toBe("ndf-ask:cost");
+    expect(got.material).toEqual({ kind: "urls", urls: ["https://github.com/acme/app/issues/2"] });
+  });
+
+  it("結果の行が 2 つあれば最後の行を採り、前の行より前の項目を読まない", () => {
+    const got = read(`- 結果: 判断が要る\n- 理由: 前の理由\n\n${report("完了", { 課題: "#7" })}`);
+    expect(got.result).toBe("完了");
+    expect(got.items).toEqual({ 課題: "#7" });
+  });
+
+  it("完了とできなかったの 材料: 無し は誤りにしない", () => {
+    expect(read(report("完了", { 材料: "無し" })).errors).toEqual([]);
+    expect(read(report("できなかった", { 理由: "外部の系が止まっている", 材料: "無し" })).errors).toEqual([]);
+    expect(read(report("完了", { 材料: "無し" })).material).toEqual({ kind: "none" });
+  });
+
+  describe("材料: 本文 の節", () => {
+    const body = (before: string) => read(report("判断が要る", { ...GATE, 材料: "本文" }, before));
+
+    it("見出しが 2 つあれば最後の見出しの節を返し、節は次の ## の見出しの前で終わる", () => {
+      const got = body("## 判断の材料\n\n古い節。\n\n## 判断の材料\n\n新しい節。\n\n## 別の見出し\n\n外。\n\n");
+      expect(got.errors).toEqual([]);
+      expect(got.material).toEqual({ kind: "body", section: "\n新しい節。\n\n" });
+    });
+
+    it("節は # の見出しの前でも終わり、### の見出しでは終わらない", () => {
+      const got = body("## 判断の材料\n\n節。\n\n### 小見出し\n\n中。\n\n# 別\n\n");
+      expect(got.material).toEqual({ kind: "body", section: "\n節。\n\n### 小見出し\n\n中。\n\n" });
+    });
+
+    it.each([
+      ["=== の Setext 見出し", "別の見出し\n==="],
+      ["--- の Setext 見出し", "別の見出し\n---"],
+    ])("節は次の %s の前で終わる", (_why, setext) => {
+      const got = body(`## 判断の材料\n\n節。\n\n${setext}\n\n外。\n\n`);
+      expect(got.material).toEqual({ kind: "body", section: "\n節。\n\n" });
+    });
+
+    it.each([
+      ["``` のコードブロック", "```\n## 判断の材料\n\nhttps://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf\n```\n\n"],
+      ["~~~~ のコードブロック", "~~~~\n## 判断の材料\n~~~~\n\n"],
+      ["<div> で始まる HTML のブロック", "<div>\n## 判断の材料\nhttps://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf\n</div>\n\n"],
+      ["リストの項目", "- 項目\n  ## 判断の材料\n\n"],
+      ["引用", "> ## 判断の材料\n\n"],
+    ])("%s の中の ## 判断の材料 を見出しとみなさない", (_why, inner) => {
+      expect(body(inner).errors).toEqual([{ code: "material_heading_missing", item: "材料" }]);
+      const got = body(`${inner}## 判断の材料\n\nhttps://github.com/acme/app/issues/3\n\n`);
+      expect(got.errors).toEqual([]);
+      expect(got.material).toEqual({ kind: "body", section: "\nhttps://github.com/acme/app/issues/3\n\n" });
+    });
+
+    it("閉じないフェンスのコードブロックは結果の行の前まで続き、その後ろの見出し風の行を見出しとみなさない", () => {
+      expect(body("```\n\n## 判断の材料\n\n").errors).toEqual([{ code: "material_heading_missing", item: "材料" }]);
+    });
+  });
+
+  describe("誤り", () => {
+    it("結果の行が無ければ result は空で result_line_missing だけ", () => {
+      expect(read("## 確認したいこと\n\n- 材料: 本文\n")).toEqual({
+        result: "",
+        errors: [{ code: "result_line_missing", item: "結果" }],
+        items: {},
+        material: { kind: "none" },
+      });
+    });
+
+    it("結果が 3 つの値のどれでもなければ result_value_unknown だけで、項目を読まない", () => {
+      expect(read(report("保留", { 理由: "無し" }))).toEqual({
+        result: "保留",
+        errors: [{ code: "result_value_unknown", item: "結果" }],
+        items: {},
+        material: { kind: "none" },
+      });
+    });
+
+    it("判断が要るの 材料: 無し は item_missing", () => {
+      expect(read(report("判断が要る", { ...GATE, 材料: "無し" })).errors).toEqual([{ code: "item_missing", item: "材料" }]);
+    });
+
+    it("区分が ndf-gate: で始まり承認ゲートが無いと item_missing", () => {
+      const got = read(report("判断が要る", { ...GATE, 区分: "ndf-gate:1", 材料: "https://github.com/acme/app/issues/1" }));
+      expect(got.errors).toEqual([{ code: "item_missing", item: "承認ゲート" }]);
+      expect(got.material).toEqual({ kind: "none" });
+    });
+
+    it("要る項目は always の後に when の順で、同じ項目は 1 回だけ確かめる", () => {
+      const got = read(report("判断が要る", { 区分: "ndf-gate:1", 承認ゲート: "設計 Pull Request のマージ" }));
+      expect(got.errors).toEqual([
+        { code: "item_missing", item: "質問" },
+        { code: "item_missing", item: "材料" },
+        { code: "item_missing", item: "Pull Request" },
+      ]);
+    });
+
+    it("材料: 本文 で見出しが無いと material_heading_missing", () => {
+      expect(read(report("判断が要る", { ...GATE, 材料: "本文" })).errors).toEqual([
+        { code: "material_heading_missing", item: "材料" },
+      ]);
+    });
+
+    it("材料が URL の並びでないと material_form_invalid の 1 件だけで、誤りの一覧に値を入れない", () => {
+      const value = "https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url";
+      const got = read(report("判断が要る", { ...GATE, 材料: value }));
+      expect(got.errors).toEqual([{ code: "material_form_invalid", item: "材料" }]);
+      const text = JSON.stringify(got.errors);
+      for (const leak of ["X-Amz-Signature", "0000", "not-a-url"]) expect(text).not.toContain(leak);
+      expect(got.material).toEqual({ kind: "none" });
+    });
+
+    it("https:// だけの値は URL とみなさない", () => {
+      expect(read(report("判断が要る", { ...GATE, 材料: "https://" })).errors).toEqual([{ code: "material_form_invalid", item: "材料" }]);
+    });
+
+    it("例外を投げない", () => {
+      for (const text of ["", "\n", "- 結果:", "- 結果: 判断が要る\n- 材料: 本文\n", "```\n- 結果: 完了"]) {
+        expect(() => read(text)).not.toThrow();
+      }
+    });
   });
 });
