@@ -28,7 +28,7 @@
     "ref-check": "node tools/ref-check/src/ref-check.ts",
     "ndf-contract": "node tools/checks/src/ndf-contract-check.ts",
     "ndf-contract:sync": "node tools/checks/src/ndf-contract-check.ts sync",
-    "mock:up": "tar -c tools/mock-viewer/Dockerfile tools/mock-viewer/src docs/design/mock | docker build -q -t nd-factory-mock-viewer -f tools/mock-viewer/Dockerfile - && npm run --silent mock:down && docker run -d --name nd-factory-mock-viewer --network host --restart unless-stopped -e CDP_URL nd-factory-mock-viewer && sleep 3 && docker logs nd-factory-mock-viewer",
+    "mock:up": "tar -c tools/mock-viewer/Dockerfile tools/mock-viewer/src docs/design/mock | docker build -q -t nd-factory-mock-viewer -f tools/mock-viewer/Dockerfile - && npm run --silent mock:down && docker run -d --name nd-factory-mock-viewer --network host --restart unless-stopped -e CDP_URL -e MOCK_START nd-factory-mock-viewer && sleep 3 && docker logs nd-factory-mock-viewer",
     "mock:down": "docker rm -f nd-factory-mock-viewer >/dev/null 2>&1 || true",
     "mock:logs": "docker logs -f nd-factory-mock-viewer"
   },

@@ -273,7 +273,7 @@ erDiagram
 
 ### ログインキャッシュ行に置く項目
 
-ログインキャッシュ行には、`oidc-client-ts` の利用者の値（`User`）を直列化したもの全体を置かない。`User.toStorageString()` は access token と ID token も含める（[oidc-client-ts 3.5.0 の `User`](https://github.com/authts/oidc-client-ts/blob/v3.5.0/src/User.ts#L99-L109)）。しかし、画面の文書の決定 31 は access token をメモリだけに置くと決めている。そこで、ログインのキャッシュの保存は、`userStore` の `set` で受けた値から次の項目だけを取り出して暗号化する。`get` は、この項目から access token の無い利用者の値を組んで返す。開いたときの順序は次のとおりで、access token の取り直しを待ってから写しを描くことはしない（処理の流れの「起動」の行）。
+ログインキャッシュ行には、`oidc-client-ts` の利用者の値（`User`）を直列化したもの全体を置かない。`User.toStorageString()` は access token と ID token も含める（[oidc-client-ts 3.5.0 の `User`](https://github.com/authts/oidc-client-ts/blob/v3.5.0/src/User.ts#L99-L109)）。しかし、画面の文書の決定 31 は access token をメモリだけに置くと決めている。そこで、ログインキャッシュ行には下の表の項目だけを置き、次の順で保存する。`userStore` の `set` は受け取った値をメモリに留めるだけで、IndexedDB へ書かない。サインインを確定するとき、または refresh token で取り直した結果の照合に成功したときに、専用の関数（「サインインを確定する」関数か「取り直しの結果を書く」関数。決定 4）が、留めた値から表の項目だけを取り出して暗号化し、IndexedDB に書く（`refreshExpiresAt` の求め方と保ち方は表のとおり）。`get` は、この項目から access token の無い利用者の値を組んで返す。開いたときの順序は次のとおりで、access token の取り直しを待ってから写しを描くことはしない（処理の流れの「起動」の行）。
 
 1. ログインキャッシュ行を復号し、中の `refreshExpiresAt` が過ぎていないことと、行の `userTag` がキーの行の `ownerTag` と同じことを照合する。access token が無いことは、サインインへ移す理由にしない
 2. 照合が通れば、暗号化した写しを復号して描く。つながっていなくても描く
@@ -542,7 +542,7 @@ sequenceDiagram
 
 ### 段 1 の後の表示の無効化: 記録との照合の表
 
-各表示は、表の上の行から順に当たる行で決める。`fetchSeq` は、その表示を作った読み出しの通し番号である。
+見られるプロジェクトの記録が無ければ、どの表示も照合せずに描く。記録があって `allowedTeamIds` がまだ無ければ、チーム単位の表示だけを照合せずに描き、プロジェクトの表示は表の条件で照合する。それ以外の表示は、表の上の行から順に当たる行で決める。`fetchSeq` は、その表示を作った読み出しの通し番号である。
 
 | 表示の対象 | 記録での位置 | 残す条件 |
 | --- | --- | --- |
@@ -551,7 +551,6 @@ sequenceDiagram
 | プロジェクト | どちらにも無い | `fetchSeq > listedSeq` の読み出しの成功だけ |
 | チーム単位（メンバー・費用など） | `allowedTeamIds` にある | 照合不要（番号によらず残す） |
 | チーム単位 | `allowedTeamIds` に無い | `fetchSeq > teamsSeq` の読み出しの成功だけ |
-| どちらも | 記録が無い、または `allowedTeamIds` がまだ無い | 照合せずに描く |
 
 ### 段 2 の結果ごとの扱い
 
