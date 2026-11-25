@@ -356,50 +356,69 @@ export function contractNotices(files: ContractFiles): string[] {
   return [`notice: ${files.commit} の ask-journal が fields を持つ: ${list(row.fields)}（#41 の決定 106）`];
 }
 
-/** 先端の区間の報告の `shape` を固定の点と比べ、差分の行を返す（通っても並べる） */
-export function reportShapeDiff(fixed: ContractFiles, tip: ContractFiles): string[] {
-  const before = parseContract(fixed, "hooks/unattended-report.json");
-  const after = parseContract(tip, "hooks/unattended-report.json");
-  if (!before.ok || !after.ok) return [];
+type ReportShape = Parsed<"hooks/unattended-report.json">["shape"];
+
+/** 名前の集まりの足された・消えたの差分の行 */
+function setDiffLines(name: string, old: string[], now: string[]): string[] {
   const lines: string[] = [];
-  const setDiff = (name: string, old: string[], now: string[]) => {
-    const added = missing(now, old);
-    const removed = missing(old, now);
-    if (added.length > 0) lines.push(`diff: ${name} に足された: ${list(added)}`);
-    if (removed.length > 0) lines.push(`diff: ${name} から消えた: ${list(removed)}`);
-  };
-  const a = before.data.shape;
-  const b = after.data.shape;
-  setDiff("shape.values", Object.keys(a.values), Object.keys(b.values));
-  setDiff("shape.items", a.items, b.items);
-  setDiff("shape.required", Object.keys(a.required), Object.keys(b.required));
-  // 足された・消えた値と条件も、片側を空として always と条件ごとの need の差分を出す
-  type Rule = (typeof a.required)[string];
+  const added = missing(now, old);
+  const removed = missing(old, now);
+  if (added.length > 0) lines.push(`diff: ${name} に足された: ${list(added)}`);
+  if (removed.length > 0) lines.push(`diff: ${name} から消えた: ${list(removed)}`);
+  return lines;
+}
+
+/** `shape.required` の差分の行。足された・消えた値と条件も、片側を空として always と条件ごとの need の差分を出す */
+function requiredShapeDiff(a: ReportShape["required"], b: ReportShape["required"]): string[] {
+  const lines = setDiffLines("shape.required", Object.keys(a), Object.keys(b));
+  type Rule = ReportShape["required"][string];
   const empty: Rule = { always: [], when: [] };
   const needs = (rules: Rule["when"]) => {
     const byKey = new Map<string, string[]>();
     for (const rule of rules) byKey.set(conditionKey(rule), [...(byKey.get(conditionKey(rule)) ?? []), ...rule.need]);
     return byKey;
   };
-  const valueNames = [...new Set([...Object.keys(a.required), ...Object.keys(b.required)])];
+  const valueNames = [...new Set([...Object.keys(a), ...Object.keys(b)])];
   for (const value of valueNames) {
-    const old = (Object.hasOwn(a.required, value) ? a.required[value] : undefined) ?? empty;
-    const now = (Object.hasOwn(b.required, value) ? b.required[value] : undefined) ?? empty;
-    setDiff(`shape.required.${value}.always`, old.always, now.always);
+    const old = (Object.hasOwn(a, value) ? a[value] : undefined) ?? empty;
+    const now = (Object.hasOwn(b, value) ? b[value] : undefined) ?? empty;
+    lines.push(...setDiffLines(`shape.required.${value}.always`, old.always, now.always));
     const oldWhen = needs(old.when);
     const nowWhen = needs(now.when);
-    setDiff(`shape.required.${value}.when の条件`, [...oldWhen.keys()], [...nowWhen.keys()]);
+    lines.push(...setDiffLines(`shape.required.${value}.when の条件`, [...oldWhen.keys()], [...nowWhen.keys()]));
     for (const key of new Set([...oldWhen.keys(), ...nowWhen.keys()])) {
-      setDiff(`shape.required.${value}.when の条件 ${key} の need`, oldWhen.get(key) ?? [], nowWhen.get(key) ?? []);
-    }
-  }
-  setDiff("shape.material", Object.keys(a.material), Object.keys(b.material));
-  for (const key of Object.keys(b.material)) {
-    if (Object.hasOwn(a.material, key) && JSON.stringify(a.material[key]) !== JSON.stringify(b.material[key])) {
-      lines.push(`diff: shape.material.${key} が変わった: ${JSON.stringify(a.material[key])} から ${JSON.stringify(b.material[key])}`);
+      lines.push(
+        ...setDiffLines(`shape.required.${value}.when の条件 ${key} の need`, oldWhen.get(key) ?? [], nowWhen.get(key) ?? []),
+      );
     }
   }
   return lines;
+}
+
+/** `shape.material` の差分の行。足された・消えた鍵と、両方にある鍵の値の変わりを出す */
+function materialShapeDiff(a: ReportShape["material"], b: ReportShape["material"]): string[] {
+  const lines = setDiffLines("shape.material", Object.keys(a), Object.keys(b));
+  for (const key of Object.keys(b)) {
+    if (Object.hasOwn(a, key) && JSON.stringify(a[key]) !== JSON.stringify(b[key])) {
+      lines.push(`diff: shape.material.${key} が変わった: ${JSON.stringify(a[key])} から ${JSON.stringify(b[key])}`);
+    }
+  }
+  return lines;
+}
+
+/** 先端の区間の報告の `shape` を固定の点と比べ、差分の行を返す（通っても並べる） */
+export function reportShapeDiff(fixed: ContractFiles, tip: ContractFiles): string[] {
+  const before = parseContract(fixed, "hooks/unattended-report.json");
+  const after = parseContract(tip, "hooks/unattended-report.json");
+  if (!before.ok || !after.ok) return [];
+  const a = before.data.shape;
+  const b = after.data.shape;
+  return [
+    ...setDiffLines("shape.values", Object.keys(a.values), Object.keys(b.values)),
+    ...setDiffLines("shape.items", a.items, b.items),
+    ...requiredShapeDiff(a.required, b.required),
+    ...materialShapeDiff(a.material, b.material),
+  ];
 }
 
 function cell(text: string): string {
