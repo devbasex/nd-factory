@@ -74,6 +74,10 @@ secretGroup = 1
 description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<名前>・${名前} の全体。記号の 1 文字だけでは許さない）"
 regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''<[A-Za-z0-9_-]+>''', '''\$\{[^{}\s]+\}''', '''EXAMPLE''']
 
+[[rules.allowlists]]
+description = "S3 の例の置き場（#98 の決定 5 の許可 1）。AWS は amzn-s3-demo- で始まる置き場を作らせない。アクセスポイントの別名を通さないため、接頭辞の後ろは小文字と数字だけ"
+regexes = ['''^amzn-s3-demo-[a-z0-9]+$''']
+
 # AWS の資源の ID（頭と 8 か 17 桁の 16 進）
 [[rules]]
 id = "nd-aws-resource-id"
@@ -98,3 +102,8 @@ secretGroup = 1
 [[rules.allowlists]]
 description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<名前>・${名前} の全体。記号の 1 文字だけでは許さない）"
 regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''<[A-Za-z0-9_-]+>''', '''\$\{[^{}\s]+\}''', '''EXAMPLE''']
+
+[[rules.allowlists]]
+description = "S3 の例の置き場の端点（#98 の決定 5 の許可 1）。AWS は amzn-s3-demo- で始まる置き場を作らせない。アクセスポイントの別名を通さないため、接頭辞の後ろは小文字と数字だけ"
+regexTarget = "match"
+regexes = ['''^amzn-s3-demo-[a-z0-9]+\.s3(?:[.-][^.\s"'`/]+)*\.amazonaws\.com$''']
