@@ -139,3 +139,71 @@ describe("dynamoDocumentClient", () => {
     expect(dynamoDocumentClient()).toBe(dynamoDocumentClient());
   });
 });
+
+// query と queryIndex の Limit・ExclusiveStartKey・ScanIndexForward の組み立て（I-003 の共通化の前に振る舞いを固定する）
+describe("createDb の query・queryIndex の頁の選択肢", () => {
+  const KEY_COND = { partition: { column: "pk", value: "PROJECT#p" } } as const;
+  const variants = [
+    {
+      name: "query",
+      run: (db: ReturnType<typeof createDb>, opts: Parameters<ReturnType<typeof createDb>["queryIndex"]>[3]) => db.query("events", KEY_COND, { ...opts, consistent: false }),
+      base: { TableName: "acme-dev-db-events", KeyConditionExpression: "#kp = :kp", ExpressionAttributeNames: { "#kp": "pk" }, ExpressionAttributeValues: { ":kp": "PROJECT#p" }, ConsistentRead: false },
+    },
+    {
+      name: "queryIndex",
+      run: (db: ReturnType<typeof createDb>, opts: Parameters<ReturnType<typeof createDb>["queryIndex"]>[3]) => db.queryIndex("events", "by-kind", KEY_COND, opts),
+      base: { TableName: "acme-dev-db-events", IndexName: "by-kind", KeyConditionExpression: "#kp = :kp", ExpressionAttributeNames: { "#kp": "pk" }, ExpressionAttributeValues: { ":kp": "PROJECT#p" } },
+    },
+  ] as const;
+
+  for (const variant of variants) {
+    describe(variant.name, () => {
+      it("選択肢が空なら Limit・ExclusiveStartKey・ScanIndexForward を渡さない", async () => {
+        const { sent, client } = fakeClient(() => ({}));
+        await variant.run(createDb(client, NAMES), {});
+        expect(inputOf(sent[0], QueryCommand)).toEqual(variant.base);
+      });
+
+      it("limit・startKey・descending をそろえて渡す", async () => {
+        const { sent, client } = fakeClient(() => ({ Items: [] }));
+        await variant.run(createDb(client, NAMES), { limit: 25, startKey: { pk: "PROJECT#p", sk: "SEQ#9" }, descending: true });
+        expect(inputOf(sent[0], QueryCommand)).toEqual({ ...variant.base, Limit: 25, ExclusiveStartKey: { pk: "PROJECT#p", sk: "SEQ#9" }, ScanIndexForward: false });
+      });
+
+      it("limit が 0 でも Limit を渡す", async () => {
+        const { sent, client } = fakeClient(() => ({ Items: [] }));
+        await variant.run(createDb(client, NAMES), { limit: 0 });
+        expect(inputOf(sent[0], QueryCommand)).toEqual({ ...variant.base, Limit: 0 });
+      });
+
+      it("startKey が null なら ExclusiveStartKey を渡さない", async () => {
+        const { sent, client } = fakeClient(() => ({ Items: [] }));
+        await variant.run(createDb(client, NAMES), { startKey: null });
+        expect(inputOf(sent[0], QueryCommand)).not.toHaveProperty("ExclusiveStartKey");
+      });
+
+      it("startKey は写しを渡し、呼び手の物をそのまま渡さない", async () => {
+        const { sent, client } = fakeClient(() => ({ Items: [] }));
+        const startKey = { pk: "PROJECT#p", sk: "SEQ#3", kind: "x" };
+        await variant.run(createDb(client, NAMES), { startKey });
+        const passed = inputOf(sent[0], QueryCommand)["ExclusiveStartKey"];
+        expect(passed).toEqual(startKey);
+        expect(passed).not.toBe(startKey);
+      });
+
+      it("descending が false なら ScanIndexForward を渡さない", async () => {
+        const { sent, client } = fakeClient(() => ({ Items: [] }));
+        await variant.run(createDb(client, NAMES), { descending: false });
+        expect(inputOf(sent[0], QueryCommand)).not.toHaveProperty("ScanIndexForward");
+      });
+
+      it("Items と LastEvaluatedKey をそのまま返し、無ければ空と null", async () => {
+        const lastKey = { pk: "PROJECT#p", sk: "SEQ#2", kind: "x" };
+        const { client } = fakeClient(() => ({ Items: [{ pk: "PROJECT#p", sk: "SEQ#1" }], LastEvaluatedKey: lastKey }));
+        expect(await variant.run(createDb(client, NAMES), { limit: 1 })).toEqual({ items: [{ pk: "PROJECT#p", sk: "SEQ#1" }], lastKey });
+        const empty = fakeClient(() => ({}));
+        expect(await variant.run(createDb(empty.client, NAMES), {})).toEqual({ items: [], lastKey: null });
+      });
+    });
+  }
+});
