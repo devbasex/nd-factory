@@ -230,7 +230,7 @@ describe("runDiff", () => {
     const f = fake();
     await runDiff(diffOpts(), f.deps);
     const head = f.out.indexOf("足りない設定:");
-    expect(head).toBeGreaterThan(f.out.findIndex((l) => l.startsWith("確認の値: ")));
+    expect(head).toBeGreaterThan(f.out.findIndex((l) => l.startsWith(CONFIRM_PREFIX)));
     // 作り物の設定は Google のクライアントの ID と運用の知らせの宛先を持たない
     const rows = f.out.slice(head + 1);
     expect(rows).toHaveLength(2);
