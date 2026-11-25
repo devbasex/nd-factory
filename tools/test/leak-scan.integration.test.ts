@@ -589,6 +589,104 @@ describe("除外の拒み", () => {
   }, TIMEOUT);
 });
 
+/** `--paths` を渡さないときに、gitleaks の生の出力を伏せたことを知らせる固定の 1 行 */
+const HIDDEN_NOTE = "leak-scan: gitleaks の出力はファイルの名前を含み得るので伏せた。手元で同じ引数に --paths を足して打つと出る";
+/** `--paths` を渡さないときに、当たりのファイルの名前を伏せたことを知らせる固定の 1 行 */
+const NAMES_NOTE = "leak-scan: ファイルの名前は伏せた。手元で同じ引数に --paths を足して打つと出る";
+
+/**
+ * 標準エラーへ `stderrLine` を出し、報告に `report` を書き（`null` なら書かない）、`exitCode` で終える偽の gitleaks を置いた PATH を返す
+ */
+function fakeGitleaksReportPath(stderrLine: string, report: string | null, exitCode: number): string {
+  const bin = tempDir("leak-fake-bin-");
+  const body = [
+    "#!/usr/bin/env bash",
+    'report=""',
+    'while (($# > 0)); do if [[ "$1" == --report-path ]]; then report="$2"; shift 2; else shift; fi; done',
+    `printf '%s\\n' '${stderrLine}' >&2`,
+    ...(report === null ? [] : [`printf '%s' '${report}' >"$report"`]),
+    `exit ${exitCode}`,
+  ].join("\n");
+  writeFileSync(join(bin, "gitleaks"), `${body}\n`, { mode: 0o755 });
+  return `${bin}:${process.env.PATH ?? ""}`;
+}
+
+/** スクリプトを打ち、終了コードと、標準出力・標準エラーそれぞれの `leak-scan:` で始まる行を返す */
+function scanLines(cwd: string, args: string[], env: NodeJS.ProcessEnv): { status: number | null; stdout: string[]; stderr: string[] } {
+  const result = spawnSync("bash", [SCRIPT, ...args], { cwd, encoding: "utf8", env });
+  const lines = (text: string) => text.split("\n").filter((line) => line.startsWith("leak-scan:"));
+  return { status: result.status, stdout: lines(result.stdout), stderr: lines(result.stderr) };
+}
+
+describe("生の出力を伏せた知らせ", () => {
+  for (const mode of ["dir", "git"] as const) {
+    it(`${mode} の探しで報告を読めなければ、--paths を渡さないときだけ、読めない行の直後に伏せた知らせを 1 行出して 1 で終える`, () => {
+      const realWord = fakeWord();
+      const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+      const env = { ...process.env, PATH: fakeGitleaksReportPath(`stderr docs/${realWord}.md`, null, 3) };
+      const hidden = scanLines(root, [mode, ND_CONFIG], env);
+      expect(hidden.status).toBe(1);
+      expect(hidden.stdout).toEqual([]);
+      expect(hidden.stderr).toEqual(["leak-scan: gitleaks の報告を読めない（終了コード 3）", HIDDEN_NOTE]);
+      const shown = scanLines(root, [mode, ND_CONFIG, "--paths"], env);
+      expect(shown.status).toBe(1);
+      expect(shown.stderr).toEqual(["leak-scan: gitleaks の報告を読めない（終了コード 3）"]);
+    }, TIMEOUT);
+  }
+
+  it("報告が配列でなくても、--paths を渡さなければ読めない行の直後に伏せた知らせを出す", () => {
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+    const env = { ...process.env, PATH: fakeGitleaksReportPath("stderr 中身", "{}", 0) };
+    const result = scanLines(root, ["dir", ND_CONFIG], env);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toEqual(["leak-scan: gitleaks の報告を読めない（終了コード 0）", HIDDEN_NOTE]);
+  }, TIMEOUT);
+
+  it("警告か誤りが出れば、--paths を渡さないときだけ、警告か誤りの行の直後に伏せた知らせを 1 行出して 1 で終える", () => {
+    const realWord = fakeWord();
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+    const env = { ...process.env, PATH: fakeGitleaksReportPath(skipLine(`docs/${realWord}.md`), "[]", 0) };
+    const hidden = scanLines(root, ["dir", ND_CONFIG], env);
+    expect(hidden.status).toBe(1);
+    expect(hidden.stdout).toEqual([]);
+    expect(hidden.stderr).toEqual([`${SKIP_MESSAGE}。読めずに飛ばした対象があり得るので、当たり無しとして通さない`, HIDDEN_NOTE]);
+    const shown = scanLines(root, ["dir", ND_CONFIG, "--paths"], env);
+    expect(shown.status).toBe(1);
+    expect(shown.stderr).toEqual([`${SKIP_MESSAGE}。読めずに飛ばした対象があり得るので、当たり無しとして通さない`]);
+  }, TIMEOUT);
+
+  it("警告か誤りと当たりが同時なら、--paths を渡さないとき、警告か誤りの行・伏せた知らせ・件数の行・名前を伏せた知らせの順に出す", () => {
+    const realWord = fakeWord();
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+    const report = JSON.stringify([
+      { RuleID: "nd-aws-account-id", File: `docs/${realWord}.md`, StartLine: 2, EndLine: 2, Commit: "", Match: "x", Secret: "y" },
+    ]);
+    const env = { ...process.env, PATH: fakeGitleaksReportPath(skipLine(`docs/${realWord}.md`), report, 1) };
+    const hidden = scanLines(root, ["dir", ND_CONFIG], env);
+    expect(hidden.status).toBe(1);
+    expect(hidden.stdout).toEqual(["leak-scan: 当たり nd-aws-account-id file-1:2"]);
+    expect(hidden.stderr).toEqual([
+      `${SKIP_MESSAGE}。読めずに飛ばした対象があり得るので、当たり無しとして通さない`,
+      HIDDEN_NOTE,
+      "leak-scan: 当たり 1 件",
+      NAMES_NOTE,
+    ]);
+    const shown = scanLines(root, ["dir", ND_CONFIG, "--paths"], env);
+    expect(shown.status).toBe(1);
+    expect(shown.stdout).toEqual([`leak-scan: 当たり nd-aws-account-id docs/${realWord}.md:2`]);
+    expect(shown.stderr).toEqual([`${SKIP_MESSAGE}。読めずに飛ばした対象があり得るので、当たり無しとして通さない`, "leak-scan: 当たり 1 件"]);
+  }, TIMEOUT);
+
+  it("報告を読めて警告か誤りが無ければ、--paths を渡さなくても伏せた知らせを出さない", () => {
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+    const env = { ...process.env, PATH: fakeGitleaksReportPath("stderr 中身", "[]", 0) };
+    const result = scanLines(root, ["dir", ND_CONFIG], env);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toEqual([]);
+    expect(result.stderr).toEqual([]);
+  }, TIMEOUT);
+});
+
 const EXPORT_SCRIPT = join(ROOT, "tools", "checks", "export-tree.sh");
 
 type RunResult = { status: number | null; output: string };
