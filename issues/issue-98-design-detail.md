@@ -9,6 +9,7 @@
 | 目印 | 各ファイルの差分の末尾に足し、専用の規則で当てる行。当たらなければ gitleaks がそのファイルを読み終えていないと分かる |
 | 全体の許可 | gitleaks の設定の global allowlist（`[allowlist]`） |
 | 置き場 | S3 のバケット |
+| 1 回目・2 回目（写しの探し） | 元の木・履歴をそのまま探す gitleaks の起動・1 回目で探せない対象を写しのリポジトリに置いて探す起動 |
 | 探しの種類の印 | 今の木の探しでは `SKIPPED`、履歴の探しでは `HISTORY`（`Mark`） |
 | 探しの固定の行 | 探しの種類の印に当たる失敗の行（「起動と流れ」の「処理の手順」の順 4・5） |
 
@@ -128,7 +129,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | `Finding` | 型（`rule_id`・`file`・`start_line`・`end_line`・`commit`・`email`・`match`） | `model.py` | — |
 | `Outcome` | 型（`findings`・`marks`・`unreadable_status`・`report_read`） | `model.py` | — |
 | `Mark` | 列挙（`WARNING`・`SKIPPED`・`HISTORY`） | `model.py` | — |
-| 固定の行 | 定数 | `model.py` | 設計書の文言。`leak-scan-secret.sh` が見分ける 4 つの文言と同じにする |
+| 固定の行 | 定数 | `model.py` | 設計書の文言。`leak-scan-secret.sh` が見分ける 4 つの文言（「警告か誤り」「報告を読めない」「飛ばしたファイルを探せない」「履歴を最後まで探し終えたことを確かめられない」）と同じにする |
 
 ### ログと記録の出力
 
@@ -218,11 +219,11 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `list_entries` | `history.py` | 新設 | `(root: Path, range: str \| None, config: Path) -> list[Entry]` | 設計書の「探す対象の一覧」の手順で（コミット、親、パス）と新しい blob を並べる |
-| `check_markers` | `history.py` | 新設 | `(entries, relayed: set[Key], run: Run) -> tuple[list[Entry], set[Mark]]` | 確認 1・2 を行い、全体の許可が外した対象を返し、ほかの欠けに印を立てる |
+| `check_markers` | `history.py` | 新設 | `(entries, relayed: set[Key], run: Run) -> tuple[list[Entry], set[Mark]]` | 設計書の「照らし合わせ」の確認 1・2 を行い、全体の許可が外した対象を返し、ほかの欠けに印を立てる |
 | `is_binary` | `history.py` | 新設 | `(entry: Entry, blob: bytes, numstat_binary: set[Key], unset_diff: set[Key]) -> bool` | 設計書のバイナリの 3 条件を判定する |
 | `added_lines` | `history.py` | 新設 | `(root: Path, entry: Entry) -> list[range]` | そのコミットがその親に対して足した行の番号を返す |
 | `attribute` | `history.py` | 新設 | `(findings: list[Finding], added: list[range]) -> list[Finding]` | 足した行と重ならない当たりを除く（行の番号 0 は残す） |
-| `merge_findings` | `history.py` | 新設 | `(added_pass: list[Finding], blob_pass: list[Finding]) -> list[Finding]` | （規則、コミット、パス、開始の行、終了の行）ごとに max(a, b) 件にする |
+| `merge_findings` | `history.py` | 新設 | `(added_pass: list[Finding], blob_pass: list[Finding]) -> list[Finding]` | （規則、コミット、パス、開始の行、終了の行）が同じ組の当たりが `added_pass` に a 件、`blob_pass` に b 件あれば、max(a, b) 件にする |
 
 - `list_entries`
   - 事前条件: `range` は `leak-scan.sh` が `git rev-list` で確かめた 1 語
