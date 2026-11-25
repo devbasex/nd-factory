@@ -30,7 +30,7 @@
 | `tools/test/fixtures/ndf-contract-8d22be7/*.json`（新設） | 新しい固定の点の `entrypoints.json`・`env.json`・`ndf-files.json` の写し |
 | `docs/design/execution.md` | 決定 104・「契約のバージョンの照合し」・「NDF 11 の名前」の行の値を新しい固定の点にする |
 | `docs/specifications/contracts-and-core.md` | 受ける組の値をバージョン 16 にし、使い方の書き出しを足す |
-| `docs/operations/pipeline-approval.md` | skip の行で承認してよいとする注記を消す |
+| `docs/operations/pipeline-approval.md` | 変えない。2026-11-25 に反映のパイプラインから承認の段を外し（[#164](https://github.com/devbasex/nd-factory/issues/164)）、承認の手順はその前の記録として残すため、今の照合の振る舞いを書き足さない |
 
 ## タスク分解
 
@@ -73,8 +73,8 @@
 
 ### Task 6: 照合が書き出しを必ず読み、6 項目を照合する
 
-- **対象ファイル:** `packages/contracts/package.json`（`./ndf-contract-use` の `exports`）、`tools/checks/src/ndf-contract-check.ts`（`compareContract`・`checkCases`・`checkFiles`・`checkReport`・`checkEntrypoints`・`isContractUse`・`MainOptions`・`mainNdfContractCheck`）、`tools/test/ndf-contract-check.test.ts`、`docs/specifications/contracts-and-core.md`、`docs/operations/pipeline-approval.md`
-- **変更内容:** 詳細設計書の「契約の照合と生成のコマンド」の変更の関数と異常系の表。`CONTRACT_USE_REQUIRED`、照合の側の型 `NdfContractUse`・`ReportRequiredRule` のコピー、skip の道を消す。出力の行の形と `ask-journal` の通知は変えない。確定仕様に使い方の書き出しを足し、承認の手順から skip の注記を消す
+- **対象ファイル:** `packages/contracts/package.json`（`./ndf-contract-use` の `exports`）、`tools/checks/src/ndf-contract-check.ts`（`compareContract`・`checkCases`・`checkFiles`・`checkReport`・`checkEntrypoints`・`isContractUse`・`MainOptions`・`mainNdfContractCheck`）、`tools/test/ndf-contract-check.test.ts`、`docs/specifications/contracts-and-core.md`
+- **変更内容:** 詳細設計書の「契約の照合と生成のコマンド」の変更の関数と異常系の表。`CONTRACT_USE_REQUIRED`、照合の側の型 `NdfContractUse`・`ReportRequiredRule` のコピー、skip の道を消す。出力の行の形と `ask-journal` の通知は変えない。確定仕様に使い方の書き出しを足す。承認の手順（`docs/operations/pipeline-approval.md`）は承認の段を外す前の記録なので変えない
 - **満たす受け入れ条件:** 136:4・136:5・136:6
 - **進め方:** 設計書のテスト設計の表の照合の行（書き出しが無く取得できない `repoUrl` でも終了コード 1 で `read:` を出さない・`no-such-entrypoint` のサンプルで 1 項目目の行・`target`・`path`・`required`・`commit` だけを変えた契約で 6・4・5・6 項目目・`ask-journal` の通知）を先に書く → 実装 → 整理。最後に手元で `npm run ndf-contract` を打ち、`checked: fixed 8d22be7… 1-6` が出て `skip:` が無く、終了コード 0 になることを確かめる
 

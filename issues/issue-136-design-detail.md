@@ -45,7 +45,6 @@ tools/
       ndf-files.json
 docs/design/execution.md
 docs/specifications/contracts-and-core.md
-docs/operations/pipeline-approval.md
 ```
 
 依存の向きは一方向で、循環は無い。
@@ -76,7 +75,7 @@ docs/operations/pipeline-approval.md
 | `tools/test/fixtures/ndf-contract-8d22be7/*.json` | 新設 | 新しい固定の点の `entrypoints.json`（15 行の `id`・`kind`・`target`・`lead`・`args`・`env`・`files`）・`env.json`（`id`・`set_by`）・`ndf-files.json`（`id`・`path`・`reader`・`fields`）の写し | — | — | — |
 | `docs/design/execution.md` | 変更 | 決定 104・「契約のバージョンの照合し」・「NDF 11 の名前」の行の値を新しい固定の点にする | — | — | — |
 | `docs/specifications/contracts-and-core.md` | 変更 | 受ける組の値をバージョン 16 にし、使い方の書き出しを足す | — | — | — |
-| `docs/operations/pipeline-approval.md` | 変更 | skip の行で承認してよいとする注記を消す | — | — | — |
+| `docs/operations/pipeline-approval.md` | 変えない | 変えない。2026-11-25 に反映のパイプラインから承認の段を外し（[#164](https://github.com/devbasex/nd-factory/issues/164)）、承認の手順はその前の記録として残すため、今の照合の振る舞いを書き足さない | — | — | — |
 
 フィクスチャには、説明の文の列（`summary`・`source` など）を写さない。参照の検査が探す語を持ち込まないためである。
 
