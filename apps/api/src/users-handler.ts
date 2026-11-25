@@ -24,12 +24,17 @@ export type HandlerDeps = {
   log: (requestId: string) => Logger;
 };
 
+// 要素の ID が利用者自身を指すか（"self" か token の sub と同じ）
+function isSelf(item: UserRef, sub: string): boolean {
+  return item.id === "self" || item.id === sub;
+}
+
 // 要素ごとに答えを決める。ほかの利用者の ID には表を読まずに not_found を返し、無い ID と見分けられなくする
 export async function answerItems(sub: string, items: UserRef[], self: () => Promise<UserRow>): Promise<UserAnswer[]> {
   let selfRow: Promise<UserRow> | undefined;
   const answers: UserAnswer[] = [];
   for (const item of items) {
-    if (item.id === "self" || item.id === sub) {
+    if (isSelf(item, sub)) {
       selfRow ??= self();
       answers.push({ status: "ok", item: await selfRow });
     } else {
