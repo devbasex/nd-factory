@@ -262,7 +262,7 @@ execution.md の変更は、直す時期で 2 つに分かれる。
      - 文書の直下の ATX 見出しのうち、その行（前後の空白を除く）が `shape.material.heading` と同じものを「判断の材料」の見出しとする。2 つ以上あれば、最後の見出しを採る。項目の後勝ち（規則 4）と同じく、訂正した節を承認者に見せるためである
      - 節は、採った見出しの終わりの位置から、文書の直下にある次のレベル 1 か 2 の見出し（ATX と Setext のどちらも）の始まりの位置の前まで、それが無ければ結果の行の前までとする。節の文は、解析器が返した位置で元の文から切り出す。閉じないフェンスのコードブロックは、GFM の解釈どおり結果の行の前まで続く
 
-  ランナーは、区間の報告に由来する値（結果・区分・質問・承認ゲート・Pull Request・材料・「判断の材料」節）を、検証にも承認資料の組み立てにも読み取りの戻り値から取り、応答の文を読み直さない。承認資料のうち報告に由来しない項目（対象の課題番号・Pull Request の状態・MVV 判定の助言・費用）は、execution.md の「[承認資料](../docs/design/execution.md#承認資料)」の表に示す出所（`plan-progress`・GitHub の API・`ask.jsonl`・API の費用の記録）から補う。読み直すと、検証した値と承認者に見せる値が別の規則で取り出され、訂正前の項目や別の節を見せうるためである。読み取りが返すものは次のとおりである。型はスキーマの正本に置く
+  ランナーは、区間の報告に由来する値（結果・課題・区分・質問・承認ゲート・Pull Request・材料・「判断の材料」節）を、検証にも承認資料の組み立てにも読み取りの戻り値から取り、応答の文を読み直さない。承認資料の対象の課題番号の並びは、戻り値の項目「課題」だけから作る。設計承認ゲートで外す課題（`--drop`）の候補は、この並びのうち `plan-progress` にも載る課題に限る。`plan-progress` だけに載る課題は、この承認の対象ではないため候補にしない（execution.md の「[承認資料](../docs/design/execution.md#承認資料)」の表の「対象の課題番号の並び」の行）。承認資料のうち報告に由来しない項目（Pull Request の状態・MVV 判定の助言・費用）は、同じ表に示す出所（GitHub の API・`ask.jsonl`・API の費用の記録）から補う。読み直すと、検証した値と承認者に見せる値が別の規則で取り出され、訂正前の項目や別の節を見せうるためである。読み取りが返すものは次のとおりである。型はスキーマの正本に置く
 
   | 戻り値の項目 | 中身 |
   | --- | --- |
@@ -324,12 +324,13 @@ execution.md の変更は、直す時期で 2 つに分かれる。
 - 条件は、execution.md の「[承認資料](../docs/design/execution.md#承認資料)」の「確かめる順番」の表の上から順に当てる。最初に合わなかった条件の拒否の理由のコードを 1 つだけ出す
 - 条件と理由のコードの対応は、その表にある。たとえば、ホストの条件の順 3 が `host_not_allowed`、クエリの条件の順 6 が `query_present` である。S3 の署名付き URL は順 3 で先に当たるため、`host_not_allowed` になる
 - 条件は、ブラウザーが開く URL に直す前の文字列に当てる
-- 条件は、材料の欄の URL・「判断の材料」節の中の URL・項目「Pull Request」の URL・項目「区分」「質問」「承認ゲート」の値の中の URL に当てる。区分・質問・承認ゲートは承認資料の区分・問い・題に載る自由な文で、署名付き URL や共有リンクが入りうるためである。この 3 つの欄の URL は「判断の材料」節と同じ取り出し方で探す。項目「Pull Request」は Pull Request そのものを指す形（`/<owner>/<repo>/pull/<n>`。`/files`・`/commits` とフラグメントは付けない）だけを受ける。承認資料の Pull Request の URL には、確かめた掲載用の URL だけを書く
+- 条件は、材料の欄の URL・「判断の材料」節の中の URL・項目「Pull Request」の値・項目「区分」「質問」「承認ゲート」の値の中の URL・`ask.jsonl` から載せる MVV 判定の助言の中の URL に当てる。区分・質問・承認ゲートは承認資料の区分・問い・題に載る自由な文で、MVV 判定の助言も NDF が書く自由な文である。どれにも署名付き URL や共有リンクが入りうる。この 4 つの欄の URL は「判断の材料」節と同じ取り出し方で探す
+- 項目「Pull Request」は、値が「無し」でなければ、値の全体を 1 つの URL として確かめる。`#34` のような URL の形でない値は順 1 の `url_not_absolute` で拒否する。契約はこの項目を承認ゲートが「設計 Pull Request のマージ」のときに必須とするが、必須の検査は欠落・空・`無し` だけを拒否し、値の形を見ないためである。受けるのは Pull Request そのものを指す形（`/<owner>/<repo>/pull/<n>`。`/files`・`/commits` とフラグメントは付けない）だけである。承認資料の Pull Request の URL には、確かめた掲載用の URL だけを書く
 
 「判断の材料」節の中の URL は、次のように取り出す。規則の全体は execution.md の「[承認資料](../docs/design/execution.md#承認資料)」の「判断の材料」節の URL の取り出し方にある。
 
 - 節は、読み取り（決定 7）が返した節の文を使う
-- 節と、区分・質問・承認ゲートの値の中の生の HTML は、`<` を `&lt;` に置き換えてただの文字にしてから確かめ、置き換えた後の本文を保存して配る。HTML の要素を残さないので、`srcset` などの属性を数え上げる必要が無い。置き換えた文字の中の URL は裸の URL として探す
+- 節と、区分・質問・承認ゲートの値と、MVV 判定の助言の中の生の HTML は、`<` を `&lt;` に置き換えてただの文字にしてから確かめ、置き換えた後の本文を保存して配る。HTML の要素を残さないので、`srcset` などの属性を数え上げる必要が無い。置き換えた文字の中の URL は裸の URL として探す
 - GFM の解釈でリンク先を取り出す。スキームを省いたリンク先・コードの中の裸の URL も含めて確かめる
 - リンク先とは別に、リンクの表示文字列・画像の代替テキスト・リンクと画像と参照の定義のタイトルからも裸の URL を探す。これらは配る本文に文字として残るためである
 - スキームの無い裸の文字列を URL とみなすのは、次の 2 つの形だけである。どちらも、直前が行頭・空白・括弧・引用符のときだけ当てる
@@ -355,12 +356,15 @@ execution.md の変更は、直す時期で 2 つに分かれる。
 | 材料の欄が `https://github.com/acme/app/pull/1#discussion_r9`・`https://github.com/acme/app/issues/2#issuecomment-4`・`https://github.com/acme/app/blob/0123456789abcdef0123456789abcdef01234567/docs/plan.md#L30` のどれかで、偽物の GitHub の API が、1 つ目のコメントを「見つからない」と返し、2 つ目のコメントを `.../issues/5` で終わる `issue_url` で返し、ファイルを 20 行の `content` で返す | 承認の依頼・問い・承認資料は受けない。区間とレーンを `material_url_rejected` で失敗にする進捗の事象を 1 件受ける | 理由は、位置と拒否の理由のコード `ref_unverified` だけを持つ。存在しないコメント・別の Issue のコメント・ファイルに無い行を指すリンクを載せない |
 | 材料の欄が `https://github.com/acme/app/pull/1/files#diff-0000000000000000000000000000000000000000000000000000000000000000` か `https://github.com/acme/app/commit/0123456789abcdef0123456789abcdef01234567#issuecomment-1` | 同上 | 理由は、位置と拒否の理由のコード `fragment_not_allowed` だけを持つ。差分の中の位置と、付けられない種類の URL へのフラグメントは受け入れない |
 | 区分が `ndf-gate:1`・承認ゲートが「設計 Pull Request のマージ」・材料の欄が上の受け入れる URL で、項目「Pull Request」が `https://github.com/acme/app/pull/1?token=0000` か `https://github.com/acme/app/pull/1/files` か `https://github.com/acme/app/pull/1#issuecomment-3` | 同上。偽物の GitHub の API は、その Pull Request を読まれない | 理由は、位置（Pull Request の欄）と拒否の理由のコードだけを持つ。コードは順に `query_present`・`path_not_allowed`・`fragment_not_allowed` である。`token=0000` が出ない |
+| 区分が `ndf-gate:1`・承認ゲートが「設計 Pull Request のマージ」・材料の欄が上の受け入れる URL で、項目「Pull Request」が `#34` か `acme/app#34`（読み取りは、必須の項目に値があるので誤りを返さない） | 承認の依頼・問い・承認資料は受けない。区間とレーンを `material_url_rejected` で失敗にする進捗の事象を 1 件受ける。偽物の GitHub の API は、どの Pull Request も読まれない | 理由は、位置（Pull Request の欄）と拒否の理由のコード `url_not_absolute` だけを持つ。項目の値（`#34`・`acme/app#34`）が出ない |
 | 上と同じで、項目「Pull Request」が `https://github.com/acme/app/pull/1` | 承認の依頼を受ける。承認資料の Pull Request の URL は `https://github.com/acme/app/pull/1` で、リポジトリの応答の `full_name` と Pull Request の応答の `number` から組み立てた値と同じ | — |
 | `材料: 本文` で、「判断の材料」節に `<img srcset="https://docs.example.com/share/a.png 1x, https://docs.example.com/share/b.png 2x">` を含む | 承認の依頼・問い・承認資料は受けない。区間とレーンを `material_url_rejected` で失敗にする進捗の事象を 1 件受ける | 理由は、位置と拒否の理由のコード `host_not_allowed` だけを持つ（2 つの URL のそれぞれで 1 件）。`share` も `a.png` も出ない |
 | `材料: 本文` で、「判断の材料」節に受け入れる URL だけと、`<details>` の HTML を含む | 承認の依頼を受ける。承認資料の本文には `<details>` が無く、`&lt;details>` がある | — |
 | `材料: 本文` で、応答の文に `## 判断の材料` の見出しが 2 つある。1 つ目の節は、`https://github.com/acme/app/issues/2` と、`## 判断の材料` の行と `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000` を含むコードブロックを持つ。2 つ目の節は `https://github.com/acme/app/issues/3` だけを含む | 承認の依頼を受ける。承認資料の本文は 2 つ目の節で、読み取りが返した節の文と同じである。`issues/2` の URL も、コードブロックの中の署名付き URL も含まない | — |
 | `材料: 本文` で、「判断の材料」節に `[https://docs.example.com/share/abcd](https://github.com/acme/app/issues/2)`（表示文字列に共有 URL）か `![https://docs.example.com/share/abcd](https://github.com/acme/app/issues/2)`（代替テキスト）か `[計画](https://github.com/acme/app/issues/2 "https://docs.example.com/share/abcd")`（タイトル）を含む。偽物の GitHub の API は `issues/2` を読める形で返す | 承認の依頼・問い・承認資料は受けない。区間とレーンを `material_url_rejected` で失敗にする進捗の事象を 1 件受ける | 理由は、位置と拒否の理由のコード `host_not_allowed` だけを持つ。リンク先が受け入れる URL でも、表示文字列・代替テキスト・タイトルの URL を見つける。`share`・`abcd` が出ない |
 | 材料の欄が上の受け入れる URL で、項目「質問」が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 を見て承認してよいか` か `[計画](https://docs.example.com/share/abcd) を承認してよいか`、または項目「承認ゲート」が `設計 Pull Request のマージ https://github.com/acme/app/pull/1?token=0000`、または項目「区分」が `ndf-ask:cost docs.example.com/share/abcd` | 同上 | 理由は、位置（質問・承認ゲート・区分のどの欄か）と拒否の理由のコードだけを持つ。コードは順に `host_not_allowed`・`host_not_allowed`・`query_present`・`url_not_absolute` である。承認資料の問いと題にも載せない。`X-Amz-Signature=0000`・`abcd`・`token=0000` が出ない |
+| 報告の各欄は受け入れる値だけで、`ask.jsonl` の該当の行の MVV 判定の助言が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 の方針に反する` か `[資料](https://docs.example.com/share/abcd) を参照` を含む | 承認の依頼・問い・承認資料は受けない。区間とレーンを `material_url_rejected` で失敗にする進捗の事象を 1 件受ける | 理由は、位置（MVV 判定の助言）と拒否の理由のコード `host_not_allowed` だけを持つ。URL の全体・ホスト名・`X-Amz-Signature=0000`・`abcd` が、理由にも進捗の事象にもログにも出ない |
+| 区分が `ndf-gate:1` で、項目「課題」が `#12 #13 見て`、`plan-progress` に載る課題が #12 と #14 | 承認の依頼を受ける。承認資料の対象の課題番号の並びは #12 と #13 で、`見て` を含まない。外す課題（`--drop`）の候補は #12 だけである | — |
 | `材料: 本文` で、応答の文に `<div>` で始まる HTML のブロックがあり、その中に `## 判断の材料` の行と `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000` の行がある。HTML のブロックの後に、文書の直下の `## 判断の材料` の見出しと `https://github.com/acme/app/issues/3` だけの節がある | 承認の依頼を受ける。承認資料の本文は文書の直下の見出しの節で、`issues/3` だけを含む。HTML のブロックの中の署名付き URL を含まない | — |
 | `材料: 本文` で、`## 判断の材料` の行がコードブロックの中にしか無い | 承認の依頼・問い・承認資料は受けない。区間とレーンを `report_item_invalid` で失敗にする進捗の事象を 1 件受ける | 理由は、誤りのコード `material_heading_missing` と項目の名前 `材料` だけを持つ |
 | `材料: 本文` で、「判断の材料」節に上の行の受け入れる URL のほか、インラインのコード `` `node:fs` `` と、`import { readFile } from "node:fs/promises";` と `C/hooks/unattended-report.json` を含むコードブロックを含む | 承認の依頼を受ける | — |

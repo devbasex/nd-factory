@@ -231,7 +231,7 @@ docs/operations/pipeline-approval.md
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `readReportWith` | `packages/contracts/src/ndf-contract-use.ts` | 新設 | `(report: NdfContractUseGenerated["report"], text: string) => ReportReading` | 決定 7 の規則 1〜6 で、応答の文から結果・誤りの一覧・採った項目の値・材料を取り出す。ランナーは、区間の報告に由来する値を、検証にも承認資料の組み立てにもこの戻り値から取り、応答の文を読み直さない。報告に由来しない承認資料の項目（対象の課題番号・Pull Request の状態・MVV 判定の助言・費用）は、execution.md の「承認資料」の表に示す出所から補う |
+| `readReportWith` | `packages/contracts/src/ndf-contract-use.ts` | 新設 | `(report: NdfContractUseGenerated["report"], text: string) => ReportReading` | 決定 7 の規則 1〜6 で、応答の文から結果・誤りの一覧・採った項目の値・材料を取り出す。ランナーは、区間の報告に由来する値を、検証にも承認資料の組み立てにもこの戻り値から取り、応答の文を読み直さない。対象の課題番号の並びも戻り値の項目「課題」だけから作り、`--drop` の候補はそのうち `plan-progress` にも載る課題に限る。報告に由来しない承認資料の項目（Pull Request の状態・MVV 判定の助言・費用）は、execution.md の「承認資料」の表に示す出所から補う |
 
 `NdfContractUse.readReport` は、`buildContractUse` が生成の `report` を渡して作る。
 
