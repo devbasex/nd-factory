@@ -28,7 +28,7 @@ module.exports = {
     {
       name: "contracts-ndf-contract-use-depends-on-parser-only",
       comment:
-        "NDF の契約の使い方は、zod と、区間の報告の見出しを決める GFM の解析器（#136 の LIB4）だけに依存する（全体の設計の依存の表）",
+        "NDF の契約の使い方は、zod と、区間の報告の見出しを決める GFM の解析器（確定仕様 docs/specifications/ndf-contract-use.md）だけに依存する（全体の設計の依存の表）",
       severity: "error",
       from: { path: "^packages/contracts/src/ndf-contract-use\\.ts$" },
       to: {

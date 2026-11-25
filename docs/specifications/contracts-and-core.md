@@ -241,23 +241,11 @@ graph LR
 
 ### NDF の契約の使い方
 
-`@nd-factory/contracts/ndf-contract-use` の `ndfContractUse` は、nd-factory が NDF の契約（`plugins/ndf/contracts/`）のうち使う部分だけを持つ書き出しである。型とデータの形は、データを読まない `@nd-factory/contracts/ndf-contract-use-schema` に置く。照合の CLI と生成のコマンドはこちらから形を読み、手で書くデータと生成のデータが食い違っていても起動できる。
-
-| 置き場 | 中身 | 作り方 |
-| --- | --- | --- |
-| `data/ndf-contract-use.json` | 使うインタフェースの id（実行の文書の「使うインタフェース」の 11 行）・Skill の前置き（`ndf:`）・インタフェースと実行の場（`hosted`・`local`）ごとの渡す環境変数・`set_by` が `service` でない名前（`GH_TOKEN`・`NDF_STATE_HOME` の `user`）・読むファイルごとの翻訳が読む項目 | 手で書く |
-| `src/ndf-contract-use-schema.ts` の `REPORT_ITEMS` | 区間の報告からランナーが読む項目の名前。読み取りの戻り値の `items` の型をここから作る | 手で書く |
-| `data/ndf-contract-use.generated.json` | 生成の元にした固定の点のコミット（`commit`）・使うインタフェースの行（`kind`・`target`・`lead`・`args`・`env`・`files`）・その行の `files` が指す読むファイルの `path`・区間の報告の形（`shape.values` のキーの並び・`shape.required`・`shape.material`） | `npm run ndf-contract:sync` が `ndf-pin.json` の固定の点の契約から書く。手で直さない |
-
-`ndfContractUse` はモジュールの読み込みで 2 つのデータを形で検証し、使うインタフェースの id が手で書くデータと生成のデータで同じか、手で書く読むファイルと渡す環境変数のインタフェースが生成のデータにあるかを確かめる。食い違えば `DataFileError` を投げ、`check` が落ちる。受ける組（`acceptedVersions`）は `NDF_CONTRACTS.accepted` をそのまま持つ。
-
-| 関数 | 振る舞い |
-| --- | --- |
-| `judgeCall` | 使うインタフェースへの呼び出しだけを判定し、ほかのインタフェースは偽。呼び出しの環境変数がすべて行の `env` にあることを求める。`skill`・`report`・`command` は引数の全体が `args` のどれかに全体で一致、`block` は任意の `lead`・`/` + 前置き + `target` + 空白の後の引数が `args` に全体で一致、`hook` は `target` と同じ、`file` は読むファイルの `path`（`<名前>` は `/` を含まない 1 文字以上）に一致、`spec` は `target` + `/` の配下のファイル。`file` と `spec` は、`/` で始まる・`\` か制御文字を含む・空か `.` か `..` の成分を含むパスを偽にし、許したディレクトリの外を指す呼び出しを通さない（`file` の全体が `.` のときだけは許す）。読めない正規表現には一致しないとみなし、例外を投げない。検査するのはパスの文字列だけで、シンボリックリンクの先は確かめない。ランナーは、リンクを解決した実際のファイルが許可ディレクトリ内にあることを読み取り時に確かめ、外なら読まない |
-| `readReport` | 最後の `- 結果:` の行の値を結果とし、その後ろの `- <項目>: <値>` を後勝ちで読む。結果の値ごとの要る項目（`always` と、`prefix`・`equals` の条件に当たった `need`）が無い・空・`無し` なら誤り。材料は `本文` か `https://` で始まる URL を空白で区切った並びで、`本文` なら結果の行より前の文書の直下にある最後の `## 判断の材料` の見出し（GFM の構文木で決める。コードブロック・HTML のブロック・引用・リストの中の行は見出しにしない）の節を、次のレベル 1 か 2 の見出しの前まで返す。誤りの一覧はコード（`result_line_missing`・`result_value_unknown`・`item_missing`・`material_form_invalid`・`material_heading_missing`）と項目の名前だけを持ち、報告の中の値を持たない |
+`@nd-factory/contracts/ndf-contract-use` の `ndfContractUse` は、nd-factory が NDF の契約（`plugins/ndf/contracts/`）のうち使う部分だけを持つ書き出しで、呼び出しの判定（`judgeCall`）と区間の報告の読み取り（`readReport`）を出す。型とデータの形は、データを読まない `@nd-factory/contracts/ndf-contract-use-schema` に置く。データは手で書く `data/ndf-contract-use.json` と、`npm run ndf-contract:sync` が固定の点の契約から書く `data/ndf-contract-use.generated.json` に分かれる。受ける組（`acceptedVersions`）は `NDF_CONTRACTS.accepted` をそのまま持つ。
 
 GFM の解析器（`mdast-util-from-markdown`・`mdast-util-gfm`・`micromark-extension-gfm`）に依るのは `src/ndf-contract-use.ts` だけで、依存の規則 `contracts-ndf-contract-use-depends-on-parser-only` がほかへの依存を落とす。
 
+データの中身・判定と読み取りの規則・契約の照合と生成のコマンドは、確定仕様 [NDF の契約の使い方と照合](ndf-contract-use.md) にある。
 
 ### 生成物
 
@@ -619,8 +607,7 @@ sequenceDiagram
 ## 運用
 
 - 形を変えるときは `packages/contracts/` を直し、`npm run generate` で生成物を作り直して同じ変更でコミットする
-- NDF の固定の点を変える PR は、`data/ndf-contracts.json` も同じ PR で直し、`npm run ndf-contract:sync` で `data/ndf-contract-use.generated.json` を作り直してコミットする（打ち忘れは照合の 6 項目目が、生成の固定の点と `ndf-pin.json` の違いとして落とす）
-- 使うインタフェースを足す・外すときは、`data/ndf-contract-use.json` を直して `npm run ndf-contract:sync` を打ち、単体テストの 11 の id のリストも同じ変更で直す
+- NDF の固定の点を変えるときと、使うインタフェースを足す・外すときの手順は、[NDF の契約の使い方と照合](ndf-contract-use.md#運用) にある
 - 再試行の値は、反映した環境のログで使い切りか待ちすぎが見えたときに、`data/retry-policies.json` の 1 か所だけを直す
 
 ### 行の版を上げる手順
@@ -675,5 +662,5 @@ sequenceDiagram
 - データ: [テーブルとキー](../design/data.md#テーブルとキー)・[共通のカラム](../design/data.md#共通のカラム)・[Cognito の主体の対応の行](../design/data.md#cognito-の主体の対応の行)
 - プラットフォーム: [言語と書き方の決まり](../design/platform.md#言語と書き方の決まり)・[横断の部品の保存先の基準](../design/platform.md#横断の部品の保存先の基準)
 - 画面: [ダミーデータで作り切る段](../design/screens.md#ダミーデータで作り切る段)
-- 関連する確定仕様: [DB セットアップ関数](db-prep-function.md)・[アプリのスタックのインフラ](app-stack-infrastructure.md)
+- 関連する確定仕様: [DB セットアップ関数](db-prep-function.md)・[アプリのスタックのインフラ](app-stack-infrastructure.md)・[NDF の契約の使い方と照合](ndf-contract-use.md)
 - 課題: 形の正本と横断の部品（ https://github.com/devbasex/nd-factory/issues/2 ）・実装をまとめた PR（ https://github.com/devbasex/nd-factory/pull/149 ）

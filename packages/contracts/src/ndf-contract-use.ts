@@ -1,5 +1,5 @@
 /**
- * NDF の契約の使い方（#136 の決定 3・4・5・7）。
+ * NDF の契約の使い方（確定仕様 docs/specifications/ndf-contract-use.md）。
  *
  * 呼び出しの判定と区間の報告の読み取りを、固定の点の契約から生成したデータだけを使う純粋な関数として持つ。
  * 照合（`npm run ndf-contract`）とランナー（#6）が同じ関数を使う。`node:` の組み込みは読まない。
@@ -84,7 +84,7 @@ function judgeBlock(row: NdfEntrypointRow, skillPrefix: string, call: string): b
 
 /**
  * 使うインタフェースへの呼び出しが契約に合うかを判定する。判定できない入力はすべて偽を返し、例外を投げない。
- * 規則は設計書の決定 5 の表（種類ごとの呼び出し文字列の照合）による
+ * 規則は確定仕様の「呼び出しの判定」の表（種類ごとの呼び出し文字列の照合）による
  */
 export function judgeCallWith(
   rows: readonly NdfEntrypointRow[],
@@ -162,7 +162,7 @@ function materialSection(before: string, heading: string): string | null {
 }
 
 /**
- * 区間の報告を、契約の `rule` と `shape`（生成のデータの `report`）に沿って読む（設計書の決定 7 の規則 1〜6）。
+ * 区間の報告を、契約の `rule` と `shape`（生成のデータの `report`）に沿って読む（確定仕様の「区間の報告の読み取り」の規則 1〜6）。
  * 例外を投げない。誤りの一覧はコードと項目の名前だけを持ち、報告の中の値を持たない
  */
 export function readReportWith(report: ReportShape, text: string): ReportReading {

@@ -1,5 +1,5 @@
 /**
- * NDF の契約の使い方の型とデータの形（#136 の決定 3・5・7）。
+ * NDF の契約の使い方の型とデータの形（確定仕様 docs/specifications/ndf-contract-use.md）。
  *
  * このモジュールはデータの JSON を読まず、読み込みのときに何も組み立てない。手で書くデータと生成のデータが
  * 食い違った作業の木でも、照合と生成のコマンドがここから形を読んで起動し、生成し直して直せるようにするためである。
@@ -98,7 +98,7 @@ export type NdfContractUseGenerated = z.infer<typeof ndfContractUseGenerated>;
 /** 判定へ渡す呼び出し。`call` は契約のサンプルの `call` の列にあたり、種類ごとに中身が違う */
 export type NdfCall = { entrypoint: string; call: string; env: readonly string[] };
 
-/** 区間の報告の読み取りの誤りのコード（設計書の決定 7 の表） */
+/** 区間の報告の読み取りの誤りのコード（確定仕様の「区間の報告の読み取り」の表） */
 export type ReportErrorCode =
   | "result_line_missing"
   | "result_value_unknown"
