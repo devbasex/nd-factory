@@ -30,7 +30,7 @@ flowchart LR
 | 止める | `npm run mock:down` |
 
 - **モックを直したら `mock:up` を打ち直す。** ファイルはイメージに焼き込むので、打ち直すまで古いまま見える。打つのは worktree の中でよい（その worktree のファイルを焼く）
-- 開くページは既定で `viewer.html#organizer`。変えるときは `MOCK_START=/project/Organizers.dc.html npm run mock:up`
+- 開くページは既定で `viewer.html#foundation`（ページ「画面の基盤（#12）」）。変えるときは `MOCK_START=/project/Organizers.dc.html npm run mock:up`
 - `--restart unless-stopped` で動かすので、ホストの再起動の後も戻る。要らなくなったら `mock:down` で止める
 
 ## 開かないとき

@@ -8,7 +8,7 @@ import { MOCK_ORIGIN, readMockFile } from "./files.ts";
 
 const CDP_URL = new URL(process.env["CDP_URL"] ?? "http://127.0.0.1:9222");
 const MOCK_ROOT = process.env["MOCK_ROOT"] ?? "/srv/mock";
-const START_PATH = process.env["MOCK_START"] ?? "/viewer.html#organizer";
+const START_PATH = process.env["MOCK_START"] ?? "/viewer.html#foundation";
 const RETRY_MS = 10_000;
 
 // Chrome は Host が localhost か IP のときだけ /json/version に答える。中継越しでも Host を localhost にして読む

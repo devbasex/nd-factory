@@ -237,7 +237,37 @@
     {
       "term": "送る列",
       "context": "platform",
-      "meaning": "まだ送れていない操作（キャッシュして送る・確定待ち）を、押した順に端末の IndexedDB へ暗号化して溜めたもの",
+      "meaning": "未送信、または送信したが結果を確認できていない操作（キャッシュして送る・確定待ち）を、押した順に端末の IndexedDB へ暗号化して保持するキュー",
+      "source": "issues/issue-12-design.md"
+    },
+    {
+      "term": "連携ログイン",
+      "context": "identity",
+      "meaning": "アカウントに登録した IdP のサインイン手段。解除には `logins.delete` を使う。端末のログインのキャッシュを消すこととは別の操作",
+      "source": "issues/issue-12-design.md"
+    },
+    {
+      "term": "ログインキャッシュ行",
+      "context": "platform",
+      "meaning": "ログインのキャッシュを置く、端末の IndexedDB の保存レコード（1 件）。消しても連携ログインは解除されない",
+      "source": "issues/issue-12-design.md"
+    },
+    {
+      "term": "写し",
+      "context": "platform",
+      "meaning": "端末のキャッシュに置いた API のレスポンス（または画面の状態）1 件分",
+      "source": "issues/issue-12-design.md"
+    },
+    {
+      "term": "そろえ方の回",
+      "context": "platform",
+      "meaning": "そろえ方（つながったときに端末とサーバーを合わせる処理）1 回分の実行",
+      "source": "issues/issue-12-design.md"
+    },
+    {
+      "term": "錠",
+      "context": "platform",
+      "meaning": "Web Locks API で取るロック。同じ端末のタブの間で、処理を同時に 1 つに限る",
       "source": "issues/issue-12-design.md"
     },
     {
