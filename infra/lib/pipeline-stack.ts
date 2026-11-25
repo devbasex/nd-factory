@@ -6,7 +6,6 @@ import { Artifact, ExecutionMode, Pipeline, PipelineType } from "aws-cdk-lib/aws
 import {
   CodeBuildAction,
   CodeStarConnectionsSourceAction,
-  ManualApprovalAction,
 } from "aws-cdk-lib/aws-codepipeline-actions";
 import { CfnConnection } from "aws-cdk-lib/aws-codestarconnections";
 import { SnsTopic } from "aws-cdk-lib/aws-events-targets";
@@ -19,15 +18,15 @@ import type { Construct } from "constructs";
 import { ASSEMBLY_DIGEST_SHELL } from "./assembly-digest.ts";
 import { applyTags, pipelineResourceNames, settingsParameterName } from "./naming.ts";
 
-// 反映のパイプラインのスタック。取る → 準備 → 承認 → 反映 を CodePipeline で直に組む。
-// 承認の資料に、反映するのと同じ合成の結果の差分を示すため、差分と要約値は準備のアクションが作り、
+// 反映のパイプラインのスタック。取る → 準備 → 反映 を CodePipeline で直に組む。人の承認の段は持たない（持ち主の決定、2026-11-25、#164）。
+// 反映するのと同じ合成の結果の差分を準備の記録に残すため、差分と要約値は準備のアクションが作り、
 // 反映のアクションは同じ合成の結果を照らしてから反映する。反映するのはアプリのスタックだけで、
 // このスタック自身は設置のコマンドで反映する（push だけで反映の役割の権限を広げられないようにする）
 
 // CodeStar の接続の名前の上限
 const MAX_CONNECTION_NAME = 32;
 
-// 準備のアクションの変数の名前空間。承認と反映の設定から #{Prepare.<名前>} で読む
+// 準備のアクションの変数の名前空間。反映の設定から #{Prepare.<名前>} で読む
 const PREPARE_NAMESPACE = "Prepare";
 
 // 既定の qualifier の bootstrap の役割。CodeBuild の役割はこれを引き受けるだけで、ほかの権限を持たない
@@ -88,7 +87,7 @@ export function prepareBuildSpec(s: Settings, appStack: string): BuildSpec {
   });
 }
 
-// 反映のアクションの手順。合成し直さず、受けた合成の結果の要約値を数え直し、承認した値と同じときだけ反映する
+// 反映のアクションの手順。合成し直さず、受けた合成の結果の要約値を数え直し、準備が作った値と同じときだけ反映する
 export function deployBuildSpec(appStack: string, cdkVersion: string): BuildSpec {
   return BuildSpec.fromObject({
     version: "0.2",
@@ -101,8 +100,8 @@ export function deployBuildSpec(appStack: string, cdkVersion: string): BuildSpec
       build: {
         commands: [
           `ACTUAL_DIGEST="$(cd cdk.out && ${ASSEMBLY_DIGEST_SHELL})"`,
-          'echo "承認した要約値 $EXPECTED_DIGEST / 数え直した要約値 $ACTUAL_DIGEST"',
-          'if [ -z "$EXPECTED_DIGEST" ] || [ "$ACTUAL_DIGEST" != "$EXPECTED_DIGEST" ]; then echo "合成の結果が承認したものと違うため反映しない"; exit 1; fi',
+          'echo "準備が作った要約値 $EXPECTED_DIGEST / 数え直した要約値 $ACTUAL_DIGEST"',
+          'if [ -z "$EXPECTED_DIGEST" ] || [ "$ACTUAL_DIGEST" != "$EXPECTED_DIGEST" ]; then echo "合成の結果が準備したものと違うため反映しない"; exit 1; fi',
           `cdk deploy --app cdk.out --require-approval never ${appStack}`,
         ],
       },
@@ -225,17 +224,6 @@ export class PipelineStack extends Stack {
           ],
         },
         { stageName: "Prepare", actions: [prepareAction] },
-        {
-          stageName: "Approve",
-          actions: [
-            new ManualApprovalAction({
-              actionName: "Approve",
-              notificationTopic: topic,
-              additionalInformation: `コミット ${prepareAction.variable("COMMIT")} / 合成の結果 ${prepareAction.variable("DIGEST_PREFIX")} / ${prepareAction.variable("STACKS")}。差分の全文は準備の記録にある`,
-              externalEntityLink: prepareAction.variable("BUILD_URL"),
-            }),
-          ],
-        },
         {
           stageName: "Deploy",
           actions: [
