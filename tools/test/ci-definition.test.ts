@@ -196,16 +196,19 @@ function envNamesOf(job: Job | null | undefined): string[] {
   return names;
 }
 
+/** 手順のうち gitleaks を置く手順がちょうど 1 件で、その `run:` が前後の空白を除いて install-gitleaks.sh の 1 行に一致するか */
+function isGitleaksInstalledOnce(steps: Step[]): boolean {
+  const installs = steps.filter((step) => step.name === GITLEAKS_STEP);
+  return installs.length === 1 && typeof installs[0]?.run === "string" && installs[0].run.trim() === GITLEAKS_RUN;
+}
+
 /**
  * gitleaks を置く手順が install-gitleaks.sh の 1 行でない、ジョブか手順の `env` に `GITLEAKS_` で始まる名前がある所を
  * `<場所>#<印>` で返す
  */
 function gitleaksInstallViolations(scope: string, job: Job | null | undefined): string[] {
   const found: string[] = [];
-  const steps = (job?.steps ?? []).filter((step) => step.name === GITLEAKS_STEP);
-  if (steps.length !== 1 || typeof steps[0]?.run !== "string" || steps[0].run.trim() !== GITLEAKS_RUN) {
-    found.push(`${scope}#gitleaks-install`);
-  }
+  if (!isGitleaksInstalledOnce(job?.steps ?? [])) found.push(`${scope}#gitleaks-install`);
   if (envNamesOf(job).some((name) => name.startsWith("GITLEAKS_"))) found.push(`${scope}#gitleaks-env`);
   return found;
 }
@@ -291,7 +294,6 @@ export function secretWorkflowViolations(workflow: LoadedWorkflow, _ci: LoadedWo
   const doc = workflow.doc;
   const jobs = Object.entries(doc.jobs ?? {});
   const steps = jobs.flatMap(([, job]) => job?.steps ?? []);
-  const gitleaksSteps = steps.filter((step) => step.name === GITLEAKS_STEP);
   const runs = steps.filter((step) => step.name !== GITLEAKS_STEP).flatMap((step) => (typeof step.run === "string" ? [step.run] : []));
   const allRuns = steps.flatMap((step) => (typeof step.run === "string" ? [step.run] : []));
   const runText = runs.join("\n");
@@ -327,9 +329,7 @@ export function secretWorkflowViolations(workflow: LoadedWorkflow, _ci: LoadedWo
     marks.add("run");
   }
 
-  if (gitleaksSteps.length !== 1 || typeof gitleaksSteps[0]?.run !== "string" || gitleaksSteps[0].run.trim() !== GITLEAKS_RUN) {
-    marks.add("gitleaks-install");
-  }
+  if (!isGitleaksInstalledOnce(steps)) marks.add("gitleaks-install");
   if (
     jobs.some(([, job]) => envNamesOf(job).some((name) => name.startsWith("GITLEAKS_"))) ||
     workflow.text.includes("github.com/gitleaks/gitleaks/releases")
