@@ -78,7 +78,18 @@ export const ndfContractUseGenerated = z.strictObject({
   report: z.strictObject({
     values: strings,
     required: z.record(z.string(), reportRequiredRule),
-    material: z.record(z.string(), z.string()),
+    /**
+     * 材料の形（契約の `shape.material` の写し）。読み取りが使う 4 つのキーを必須にし、読み取りの関数に既定の値を持たせない。
+     * 照合の 5 項目目が値の全体を契約と比べるため、ほかのキーも文字列なら捨てずに持つ
+     */
+    material: z
+      .object({
+        item: z.string().min(1),
+        body: z.string().min(1),
+        heading: z.string().min(1),
+        url_prefix: z.string().min(1),
+      })
+      .catchall(z.string()),
   }),
 });
 

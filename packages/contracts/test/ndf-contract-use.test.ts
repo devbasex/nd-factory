@@ -382,6 +382,18 @@ describe("buildContractUse", () => {
     expect(() => build(useData, { ...clone(generatedData), commit: "x" })).toThrow(DataFileError);
   });
 
+  it.each(["item", "body", "heading", "url_prefix"])("生成の材料の形に %s が無いと DataFileError（読み取りは既定の値へ戻らない）", (key) => {
+    const generated = clone(generatedData) as { report: { material: Record<string, string> } };
+    delete generated.report.material[key];
+    expect(() => build(useData, generated)).toThrow(DataFileError);
+  });
+
+  it("生成の材料の形にほかのキーがあっても、値の全体を捨てずに持つ", () => {
+    const generated = clone(generatedData) as { report: { material: Record<string, string> } };
+    generated.report.material.extra = "x";
+    expect(build(useData, generated).report.material).toEqual({ ...generatedData.report.material, extra: "x" });
+  });
+
   it("手で書く id と生成の行の id が一致しないと、片方にだけある id を並べた DataFileError", () => {
     const data = { ...clone(useData), entrypoints: [...useData.entrypoints.filter((id) => id !== "block-next"), "file-loop-record"] };
     const run = () => build(data);

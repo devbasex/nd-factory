@@ -197,7 +197,7 @@ export function readReportWith(report: ReportShape, text: string): ReportReading
   }
 
   // 規則 6: 材料に値があるときだけ形を確かめる
-  const { item: materialItem = "材料", body = "本文", heading = "## 判断の材料", url_prefix: urlPrefix = "https://" } = report.material;
+  const { item: materialItem, body, heading, url_prefix: urlPrefix } = report.material;
   const value = all.get(materialItem);
   let material: ReportMaterial = none;
   if (value !== undefined && !absent(value)) {
