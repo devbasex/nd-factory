@@ -201,7 +201,7 @@ flowchart TD
 | `skipping binary file` | DBG | 探し直す（写しの Git のリポジトリ） | 先頭のバイトの種類で飛ばした。履歴のパッチのテキストとして読めば、種類を判定されない |
 | `skipping archive: exceeds max archive depth` | TRC | 探し直す（写しの Git のリポジトリ） | 名前でアーカイブと見なした。履歴のパッチのテキストとして読めば、名前でアーカイブと見なされない |
 | `skipping file: global allowlist` | DBG・TRC | 決定 6 の対象外のパスなら対象外。ほかは探し直す（写しの Git のリポジトリ） | 設定の全体の許可が名前で外した。中身に秘密があっても探されない（決定 6） |
-| `skipping directory: global allowlist` | DBG | その下の普通のファイルのうち、決定 6 の対象外のパスでないものをすべて探し直す対象にする（依存のディレクトリでは、Git が追跡しているファイルが残る）。空と確かめられたファイルは除く（決定 6）。列挙できないか、ファイルを読めなければ失敗（飛ばしたファイルを探せない） | 全体の許可の一部はパス全体に固定されていないので、依存でないディレクトリもディレクトリごと外れる（決定 6） |
+| `skipping directory: global allowlist` | DBG | 配下の普通のファイルを列挙し、決定 6 の対象外のパスを除いたすべてを探し直す対象にする。依存のディレクトリの下では、探す木の根が Git の作業ツリーの最上位で、追跡していないと確かめられたファイルだけを除く。空と確かめられたファイルも除く（決定 6）。列挙できないか、ファイルを読めなければ失敗（飛ばしたファイルを探せない） | 全体の許可の一部はパス全体に固定されていないので、依存でないディレクトリもディレクトリごと外れる（決定 6） |
 | `skipping file: matches config or baseline path` | TRC | 対象外 | `--config` に渡した設定のファイル自身（基準の報告を渡したときはそのファイルも）を、gitleaks が探す対象から外した（[detect/detect.go](https://github.com/gitleaks/gitleaks/blob/v8.30.1/detect/detect.go#L294-L298)）。CI は木の中の `.gitleaks.toml` を `--config` に渡すので、毎回この行が出る |
 | `skipping file: rule allowlist` | TRC | 対象外 | 規則ごとの許可がパスかコミットで外した。ファイルは読めていて、その規則だけを当てない（[detect/detect.go](https://github.com/gitleaks/gitleaks/blob/v8.30.1/detect/detect.go#L386-L390)） |
 | `skipping finding: …` | TRC | 対象外 | ファイルは読めている。当たりを規則の許可やエントロピーの判定で外した記録である |
