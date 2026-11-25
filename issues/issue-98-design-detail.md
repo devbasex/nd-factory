@@ -23,7 +23,11 @@ tools/checks/
 .gitleaks.toml
 ```
 
-依存の向きは一方向で、循環は無い。`leak-scan.sh` → `main.py` → `history.py` → `tree.py` → `archive.py`・`copyrepo.py` → `gitleaks.py` → `model.py` の順で、左のモジュールは右のモジュールだけを読み込む（`archive.py` は `model.py` だけを読み込む）。`relay.py` は gitleaks が起こす別のプロセスで、ほかのモジュールを読み込まず、読み込まれもしない。本体との受け渡しは、状態のファイルと一覧のファイルだけである。設計書が「`leak-scan.sh` が行う」と書く処理は、`leak-scan.sh` から起動する本体の全体が行う。
+依存の向きは一方向で、循環は無い。向きは次の順である。
+
+`leak-scan.sh` → `main.py` → `history.py` → `tree.py` → `archive.py`・`copyrepo.py` → `gitleaks.py` → `model.py`
+
+左のモジュールは右のモジュールだけを読み込む（`archive.py` は `model.py` だけを読み込む）。`relay.py` は gitleaks が起こす別のプロセスで、ほかのモジュールを読み込まず、読み込まれもしない。本体との受け渡しは、状態のファイルと一覧のファイルだけである。設計書が「`leak-scan.sh` が行う」と書く処理は、`leak-scan.sh` から起動する本体の全体が行う。
 
 本体を Python にするのは、対象の対応表・照らし合わせ・当たりの合わせ方が構造を持つデータの処理で、展開（決定 8）に `python3` が要るためである。起動は `python3 -I -B` とする。`-B` を外すと `__pycache__` が探す木の中にできる。`-I` はスクリプトのディレクトリを読み込みの対象に入れないので、`main.py` が自分のディレクトリだけを `sys.path` に足す。
 
@@ -61,7 +65,8 @@ tools/checks/
 
 - `leak-scan.sh`
   - 事前条件: 引数の形は今のまま
-  - 事後条件: 引数の誤り・設定のファイルの欠け・`.gitleaksignore`・読めない範囲は、今と同じ行と終了コード 2 で終える。通れば `exec python3 -I -B <このスクリプトのディレクトリ>/leak_scan/main.py <mode> <config> <range> <report> <paths>` に替わる
+  - 事後条件: 引数の誤り・設定のファイルの欠け・`.gitleaksignore`・読めない範囲は、今と同じ行と終了コード 2 で終える。
+  - 事後条件（引数が通ったとき）: 通れば `exec python3 -I -B <このスクリプトのディレクトリ>/leak_scan/main.py <mode> <config> <range> <report> <paths>` に替わる
   - 副作用: `python3` が PATH に無ければ、`dir` では「飛ばした」の固定の行、`git` では履歴の固定の行を出して 1。gitleaks は打たない
 - `main`
   - 事後条件: 一時ディレクトリは、例外とシグナル（`SIGINT`・`SIGTERM`・`SIGHUP`）で終えるときも消える。シグナルは `SystemExit` に変える
@@ -215,7 +220,8 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 - `check_markers`
   - 事後条件: 目印は（コミット、パス、`Match` の親の欄）の 3 つで引く。除外の行は（コミット、パス）の組で引き、コミットを読めない行は根拠にしない。返す対象は `is_excluded` でないものだけ
 - `is_binary`・`added_lines`
-  - 副作用: 判定の入力は `git diff-tree --numstat`、`git check-attr --source=<コミット> -z --stdin diff`（コミットごとに 1 回）、`git cat-file --batch` で読む。`added_lines` は `git --literal-pathspecs diff-tree -p -U0 --text --no-renames --no-ext-diff --no-textconv` を打つ
+  - 副作用: 次の Git のコマンドを打つ。判定の入力は `git diff-tree --numstat`、`git check-attr --source=<コミット> -z --stdin diff`（コミットごとに 1 回）、`git cat-file --batch` で読む。
+  - 副作用（足した行）: `added_lines` は `git --literal-pathspecs diff-tree -p -U0 --text --no-renames --no-ext-diff --no-textconv` を打つ
 
 ### 異常系の処理
 
@@ -259,10 +265,12 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 
 - `main`（中継）
   - 事前条件: 環境変数 `LEAK_SCAN_RELAY` が状態の JSON を指す
-  - 事後条件: 本物の Git の終了コードを返す。`log -p` には `-c core.quotePath=true -c diff.noprefix=false -c diff.mnemonicPrefix=false` を `log` の前に足し、利用者の Git の設定で見出しの形が変わらないようにする
+  - 事後条件: 本物の Git の終了コードを返す。
+  - 事後条件（`log -p`）: `log -p` には `-c core.quotePath=true -c diff.noprefix=false -c diff.mnemonicPrefix=false` を `log` の前に足し、利用者の Git の設定で見出しの形が変わらないようにする
   - 副作用: 本物の Git の起動、一覧のファイルへの追記
 - `rewrite_log`
-  - 事後条件: hunk を持ち、新しい側が `/dev/null` でないファイルの末尾に、`@@ -<古い側の末尾>,0 +<新しい側の末尾の次>,1 @@` と `+<目印>-<親の欄>-end` を足し、（コミット、親、パス）を一覧に書く。1 行ずつ流し、出力の全体をメモリに持たない
+  - 事後条件: hunk を持ち、新しい側が `/dev/null` でないファイルの末尾に、`@@ -<古い側の末尾>,0 +<新しい側の末尾の次>,1 @@` と `+<目印>-<親の欄>-end` を足し、（コミット、親、パス）を一覧に書く。
+  - 事後条件（流し方）: 1 行ずつ流し、出力の全体をメモリに持たない
 
 ### 異常系の処理
 
@@ -382,7 +390,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | --- | --- | --- | --- | --- |
 | `count_failed` | `leak-scan-secret.sh` | 変更 | `count_failed <status> <report> <log>`（引数は変えない） | 失敗の文言に「飛ばした」と「履歴」の 2 つを足して見分ける |
 
-`install-gitleaks.sh` は、定数 `GITLEAKS_CONFIG_SHA256` を足し、`v<版>` のタグの `config/gitleaks.toml` を取って要約値を確かめ、`<置く先>/gitleaks.default.toml` に置く。取得か要約値の確かめに失敗すれば今と同じく 1 で終える。引数と終了コードは変えない。`ci-definition.test.ts` が縛る呼び方（1 行）は変わらない。
+`install-gitleaks.sh` は、定数 `GITLEAKS_CONFIG_SHA256` を足す。そして `v<版>` のタグの `config/gitleaks.toml` を取って要約値を確かめ、`<置く先>/gitleaks.default.toml` に置く。取得か要約値の確かめに失敗すれば今と同じく 1 で終える。引数と終了コードは変えない。`ci-definition.test.ts` が縛る呼び方（1 行）は変わらない。
 
 ## 規則と許可（.gitleaks.toml）
 
