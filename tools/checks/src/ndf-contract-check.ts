@@ -9,72 +9,60 @@
  *     node tools/checks/src/ndf-contract-check.ts sync [--root <作業の木>]
  *
  * `sync` は、固定の点の契約から使い方の生成のファイル（`GENERATED_PATH`）を書き直す（#136 の決定 5）。
+ * 生成のコマンドは `ndf-contract-sync.ts`、取得と形は照合と共有の `ndf-contract-fetch.ts` にある。
  * 終了コード: 0 書いた、1 手で書く id が契約に無いなど生成できない、2 引数の誤り・読めない・取得できない・書けない。
  *
  * 終了コード: 0 固定の点で食い違いが無い（先端の食い違いは要約に並べるだけ）、1 固定の点で食い違う・
  * 使い方の書き出しが無い（契約を取得せずに終える）、2 引数の誤り・固定の点の契約を読めない・使い方の書き出しの形が違う。
  */
 
-import { execFile } from "node:child_process";
-import { appendFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { parseArgs, promisify } from "node:util";
-import { z } from "zod";
+import { parseArgs } from "node:util";
+
+import type { NdfContractUse, ReportReading } from "@nd-factory/contracts/ndf-contract-use-schema";
 
 import {
-  ndfContractUseData,
-  ndfContractUseGenerated,
-  ndfEntrypointRowFields,
-  reportRequiredRuleFields,
-  type NdfContractUse,
-  type NdfContractUseGenerated,
-  type NdfEntrypointRow,
-  type ReportReading,
-} from "@nd-factory/contracts/ndf-contract-use-schema";
+  CONTRACT_DIR,
+  ContractFetchError,
+  NDF_REPO_URL,
+  PIN_FILE,
+  SCHEMAS,
+  fetchContract,
+  list,
+  missing,
+  readPinnedCommit,
+  type ContractFiles,
+  type ContractPath,
+  type Parsed,
+} from "./ndf-contract-fetch.ts";
+import { GENERATED_PATH, mainNdfContractSync } from "./ndf-contract-sync.ts";
 
 export type { NdfContractUse } from "@nd-factory/contracts/ndf-contract-use-schema";
-
-/** NDF のリポジトリ（実行の文書の「NDF との契約」） */
-export const NDF_REPO_URL = "https://github.com/devbasex/ai-plugins";
-
-/** NDF のリポジトリの中の契約の置き場（`C/`） */
-export const CONTRACT_DIR = "plugins/ndf/contracts";
+// 取得と形・生成のコマンドは別のモジュールへ分けた。照合のモジュールから今までどおり引けるよう書き出し直す
+export {
+  CONTRACT_DIR,
+  ContractFetchError,
+  NDF_REPO_URL,
+  PIN_FILE,
+  PIN_KEY,
+  fetchContract,
+  type ContractFiles,
+  type ContractRev,
+} from "./ndf-contract-fetch.ts";
+export {
+  ContractUseSyncError,
+  GENERATED_PATH,
+  USE_DATA_PATH,
+  generateContractUse,
+  mainNdfContractSync,
+} from "./ndf-contract-sync.ts";
 
 /** NDF の契約の使い方の書き出し（#136）。書き出しの `ndfContractUse` が `NdfContractUse` の形 */
 export const CONTRACT_USE_EXPORT = "@nd-factory/contracts/ndf-contract-use";
-
-/** 使い方の生成のファイル（作業の木の根からの相対パス）。生成のコマンドだけが書く */
-export const GENERATED_PATH = "packages/contracts/data/ndf-contract-use.generated.json";
-
-/** 使い方の手で書くデータ（作業の木の根からの相対パス） */
-export const USE_DATA_PATH = "packages/contracts/data/ndf-contract-use.json";
-
-/** 固定の点を置く唯一のファイル */
-export const PIN_FILE = "ndf-pin.json";
-
-// 固定の点のキー。参照の検査の版の比べに当たらないよう、この行に比べの記号と矢印の関数を置かない
-export const PIN_KEY = "ndf_ref";
-
-/** 読む契約のファイル（`C/` からの相対パス） */
-const CONTRACT_PATHS = [
-  "version.json",
-  "domains/entrypoint-cases.json",
-  "domains/entrypoints.json",
-  "domains/env.json",
-  "domains/ndf-files.json",
-  "hooks/unattended-report.json",
-] as const;
-
-type ContractPath = (typeof CONTRACT_PATHS)[number];
-
-/** 取るコミット。固定の点はコミットを、先端はリポジトリの既定の枝（`HEAD` が指す枝）を引く */
-export type ContractRev = { kind: "fixed"; commit: string } | { kind: "tip" };
-
-/** 1 つのコミットの契約のファイル。`json` の鍵は `C/` からの相対パス */
-export type ContractFiles = { commit: string; json: Record<string, unknown> };
 
 /** 照らすことの番号（設計の表の 1〜6） */
 export type CheckNumber = 1 | 2 | 3 | 4 | 5 | 6;
@@ -84,93 +72,6 @@ const ENTRYPOINT_COLUMNS = ["kind", "target", "lead", "args", "env", "files"] as
 
 /** 食い違い。`path` は NDF のリポジトリの中の契約のファイルのパス、`id` は見本の id か配列の位置 */
 export type ContractFinding = { check: CheckNumber; path: string; id?: string; detail: string };
-
-/** 契約を取れない・読めない */
-export class ContractFetchError extends Error {
-  name = "ContractFetchError";
-}
-
-const COMMIT = /^[0-9a-f]{40}$/;
-const execFileAsync = promisify(execFile);
-
-async function git(dir: string, args: string[]): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("git", ["-C", dir, ...args], {
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    return stdout;
-  } catch (error) {
-    const stderr = String((error as { stderr?: unknown }).stderr ?? "").trim();
-    throw new ContractFetchError(`git ${args[0] ?? ""} が失敗した${stderr === "" ? "" : `: ${stderr.split("\n")[0]}`}`);
-  }
-}
-
-/** リポジトリの既定の枝（`HEAD` が指す枝）の参照の名前を引く。枝の名前は書き込まない */
-async function defaultBranch(workDir: string, repoUrl: string): Promise<string> {
-  const head = /^ref: (refs\/heads\/\S+)\tHEAD$/m.exec(await git(workDir, ["ls-remote", "--symref", repoUrl, "HEAD"]));
-  if (head?.[1] === undefined) throw new ContractFetchError("既定の枝（HEAD が指す枝）を引けない");
-  return head[1];
-}
-
-/** NDF のリポジトリから 1 つのコミットを深さ 1 で取り、契約のファイルを読む */
-export async function fetchContract(rev: ContractRev, repoUrl: string, workDir: string): Promise<ContractFiles> {
-  if (rev.kind === "fixed" && !COMMIT.test(rev.commit)) {
-    throw new ContractFetchError(`固定の点がコミットの形（40 桁の 16 進）でない: ${rev.commit}`);
-  }
-  await mkdir(workDir, { recursive: true });
-  await git(workDir, ["init", "-q"]);
-  const target = rev.kind === "fixed" ? rev.commit : await defaultBranch(workDir, repoUrl);
-  await git(workDir, ["fetch", "-q", "--depth", "1", "--no-tags", "--", repoUrl, target]);
-  const commit = (await git(workDir, ["rev-parse", "FETCH_HEAD"])).trim();
-  if (rev.kind === "fixed" && commit !== rev.commit) {
-    throw new ContractFetchError(`取ったコミット ${commit} が固定の点 ${rev.commit} と違う`);
-  }
-  const json: Record<string, unknown> = {};
-  for (const path of CONTRACT_PATHS) {
-    const full = `${CONTRACT_DIR}/${path}`;
-    let text: string;
-    try {
-      text = await git(workDir, ["show", `${commit}:${full}`]);
-    } catch {
-      throw new ContractFetchError(`契約のファイルが無い: ${full}`);
-    }
-    try {
-      json[path] = JSON.parse(text);
-    } catch {
-      throw new ContractFetchError(`契約のファイルが JSON でない: ${full}`);
-    }
-  }
-  return { commit, json };
-}
-
-// 契約のファイルの形のうち、照合が読む鍵だけ。ほかの鍵は受け流す
-const strings = z.array(z.string());
-const rowsOf = <T extends z.ZodType>(row: T) => z.object({ rows: z.array(row) });
-const SCHEMAS = {
-  "version.json": z.object({ history: z.array(z.object({ version: z.number(), sha256: z.string() })) }),
-  "domains/entrypoint-cases.json": rowsOf(
-    z.object({ id: z.string(), entrypoint: z.string(), call: z.string(), env: strings, valid: z.boolean() }),
-  ),
-  // 生成のデータと同じ列の定義から作る。上流の説明の列は z.object が捨てる
-  "domains/entrypoints.json": rowsOf(z.object(ndfEntrypointRowFields)),
-  "domains/env.json": rowsOf(z.object({ id: z.string(), set_by: z.string() })),
-  "domains/ndf-files.json": rowsOf(
-    z.object({ id: z.string(), path: z.string(), reader: z.string().optional(), fields: strings.optional() }),
-  ),
-  "hooks/unattended-report.json": z.object({
-    shape: z.object({
-      values: z.record(z.string(), z.unknown()),
-      items: strings,
-      material: z.record(z.string(), z.unknown()),
-      // 生成のデータと同じ規則の定義から作る。条件の鍵（item・prefix・equals など）は catchall で残し、条件ごと照らして差分に出す
-      required: z.record(z.string(), z.object(reportRequiredRuleFields)),
-    }),
-    cases: z.array(z.object({ text: z.string(), result: z.string(), errors: strings })),
-  }),
-} satisfies Record<ContractPath, z.ZodType>;
-
-type Parsed<P extends ContractPath> = z.infer<(typeof SCHEMAS)[P]>;
 
 /** 契約のファイルを照合が読む形で読む。読めなければ食い違いを足して null */
 function read<P extends ContractPath>(
@@ -184,68 +85,6 @@ function read<P extends ContractPath>(
   const where = result.error.issues[0]?.path.join(".") ?? "";
   findings.push({ check, path: `${CONTRACT_DIR}/${path}`, detail: `契約のファイルの形が読めない（${where}）` });
   return null;
-}
-
-function missing(wanted: readonly string[], have: Iterable<string>): string[] {
-  const set = new Set(have);
-  return wanted.filter((name) => !set.has(name));
-}
-
-function list(names: readonly string[]): string {
-  return names.join(", ");
-}
-
-/** 使い方の生成のファイルを作れない（契約に無い id・契約のファイルの形が読めない） */
-export class ContractUseSyncError extends Error {
-  name = "ContractUseSyncError";
-}
-
-/** 生成のために契約のファイルを読む。読めなければ例外 */
-function readForSync<P extends ContractPath>(files: ContractFiles, path: P): Parsed<P> {
-  const result = SCHEMAS[path].safeParse(files.json[path]);
-  if (result.success) return result.data as Parsed<P>;
-  const where = result.error.issues[0]?.path.join(".") ?? "";
-  throw new ContractUseSyncError(`契約のファイルの形が読めない: ${CONTRACT_DIR}/${path}（${where}）`);
-}
-
-/** 契約の行から、使い方が持つ列（id と 6 つの列）だけを決まった順で取り出す */
-function entrypointRow(row: Parsed<"domains/entrypoints.json">["rows"][number]): NdfEntrypointRow {
-  return {
-    id: row.id,
-    kind: row.kind,
-    target: row.target,
-    ...(row.lead === undefined ? {} : { lead: row.lead }),
-    ...(row.args === undefined ? {} : { args: row.args }),
-    env: row.env,
-    ...(row.files === undefined ? {} : { files: row.files }),
-  };
-}
-
-/**
- * 契約のファイルから、手で書く id の行と、その行の `files` が指す読むファイルの `path` と、区間の報告の形を取り出す。
- * 行は手で書く id の順、読むファイルは最初に現れた順に並べ、生成し直しても差分が出ないようにする
- */
-export function generateContractUse(files: ContractFiles, ids: readonly string[]): NdfContractUseGenerated {
-  const entrypoints = readForSync(files, "domains/entrypoints.json");
-  const ndfFiles = readForSync(files, "domains/ndf-files.json");
-  const report = readForSync(files, "hooks/unattended-report.json");
-  const absent = missing(ids, entrypoints.rows.map((row) => row.id));
-  if (absent.length > 0) throw new ContractUseSyncError(`契約の entrypoints.json に無い id: ${list(absent)}`);
-  const rows = ids.flatMap((id) => entrypoints.rows.filter((row) => row.id === id).slice(0, 1).map(entrypointRow));
-  const fileIds = [...new Set(rows.flatMap((row) => row.files ?? []))];
-  const paths = fileIds.flatMap((id) => ndfFiles.rows.filter((row) => row.id === id).slice(0, 1).map((row) => ({ id, path: row.path })));
-  const noPath = missing(fileIds, paths.map((p) => p.id));
-  if (noPath.length > 0) throw new ContractUseSyncError(`契約の ndf-files.json に無い読むファイル: ${list(noPath)}`);
-  const parsed = ndfContractUseGenerated.safeParse({
-    commit: files.commit,
-    entrypoints: rows,
-    files: paths,
-    report: { values: Object.keys(report.shape.values), required: report.shape.required, material: report.shape.material },
-  });
-  if (!parsed.success) {
-    throw new ContractUseSyncError(`生成のデータが形に合わない（${parsed.error.issues[0]?.path.join(".") ?? ""}）`);
-  }
-  return parsed.data;
 }
 
 /**
@@ -670,14 +509,6 @@ export async function loadContractUse(load: () => Promise<unknown>): Promise<Ndf
   return use;
 }
 
-/** 作業の木の `ndf-pin.json` から固定の点のコミットを読む */
-async function readPinnedCommit(root: string): Promise<string> {
-  const parsed: unknown = JSON.parse(await readFile(join(root, PIN_FILE), "utf8"));
-  const commit = (parsed as Record<string, unknown> | null)?.[PIN_KEY];
-  if (typeof commit !== "string") throw new Error(`${PIN_FILE} に固定の点のキーの文字列が無い`);
-  return commit;
-}
-
 function formatFinding(where: "fixed" | "tip", f: ContractFinding): string {
   return `mismatch: ${where} ${f.check} ${f.path}${f.id === undefined ? "" : ` ${f.id}`}: ${f.detail}`;
 }
@@ -792,66 +623,6 @@ export async function mainNdfContractCheck(
       process.stderr.write(`固定の点 ${fixed.commit} の NDF の契約と形の正本が ${fixedFindings.length} 件食い違う\n`);
     }
     return code;
-  } finally {
-    await rm(work, { recursive: true, force: true });
-  }
-}
-
-/** 固定の点の契約を取得し、使い方の生成のファイルを書き直す */
-export async function mainNdfContractSync(
-  argv: string[],
-  env: NodeJS.ProcessEnv,
-  options: { repoUrl?: string } = {},
-): Promise<number> {
-  let rootArg: string | undefined;
-  try {
-    const { values } = parseArgs({ args: argv, options: { root: { type: "string" } }, strict: true });
-    rootArg = values.root;
-  } catch (error) {
-    process.stderr.write(`usage: ndf-contract sync [--root <作業の木>]: ${(error as Error).message}\n`);
-    return 2;
-  }
-  const root = resolve(rootArg ?? process.cwd());
-
-  let pinned: string;
-  let ids: readonly string[];
-  try {
-    pinned = await readPinnedCommit(root);
-    // 手で書くデータは形だけを確かめる。生成のファイルと合わせて組み立てる書き出しは読み込まない（食い違っていても直せるように）
-    const data = ndfContractUseData.safeParse(JSON.parse(await readFile(join(root, USE_DATA_PATH), "utf8")));
-    if (!data.success) throw new Error(`${USE_DATA_PATH} の形が違う: ${z.prettifyError(data.error)}`);
-    ids = data.data.entrypoints;
-  } catch (error) {
-    process.stderr.write(`error: 固定の点か使い方のデータを読めない: ${(error as Error).message}: ${root}\n`);
-    return 2;
-  }
-
-  const work = await mkdtemp(join(env.RUNNER_TEMP ?? tmpdir(), "ndf-contract-sync-"));
-  try {
-    let fixed: ContractFiles;
-    try {
-      fixed = await fetchContract({ kind: "fixed", commit: pinned }, options.repoUrl ?? NDF_REPO_URL, join(work, "fixed"));
-    } catch (error) {
-      if (!(error instanceof ContractFetchError)) throw error;
-      process.stderr.write(`error: 固定の点 ${pinned} の契約を読めない: ${error.message}\n`);
-      return 2;
-    }
-    let generated: NdfContractUseGenerated;
-    try {
-      generated = generateContractUse(fixed, ids);
-    } catch (error) {
-      if (!(error instanceof ContractUseSyncError)) throw error;
-      process.stderr.write(`error: 生成できない: ${error.message}\n`);
-      return 1;
-    }
-    try {
-      await writeFile(join(root, GENERATED_PATH), `${JSON.stringify(generated, null, 2)}\n`);
-    } catch (error) {
-      process.stderr.write(`error: 生成のファイルに書けない: ${(error as Error).message}\n`);
-      return 2;
-    }
-    process.stdout.write(`wrote: ${GENERATED_PATH} ${pinned}\n`);
-    return 0;
   } finally {
     await rm(work, { recursive: true, force: true });
   }
