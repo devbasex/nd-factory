@@ -76,6 +76,27 @@ describe("judgeCallWith", () => {
     expect(judge({ entrypoint: "spec-io", call: "contracts/schemas/io", env: [] })).toBe(false);
   });
 
+  it("spec は target の外を指すパスを偽にする（.. ・ . ・空の成分・\\・制御文字）", () => {
+    for (const call of [
+      "contracts/schemas/io/../../../secrets.json",
+      "contracts/schemas/io/..",
+      "contracts/schemas/io/./check.args.schema.json",
+      "contracts/schemas/io/.",
+      "contracts/schemas/io//etc/passwd",
+      "contracts/schemas/io/..\\x.json",
+      "contracts/schemas/io/a\u0000.json",
+    ]) {
+      expect(judge({ entrypoint: "spec-io", call, env: [] })).toBe(false);
+    }
+  });
+
+  it("file は <名前> に .. や / を含む値を入れたパスを偽にする", () => {
+    const base = caseById("plan-progress");
+    expect(judge({ ...base, call: "../8-release-request-state/progress.jsonl" })).toBe(false);
+    expect(judge({ ...base, call: "s1/../progress.jsonl" })).toBe(false);
+    expect(judge({ ...base, call: "/s1/8-release-request-state/progress.jsonl" })).toBe(false);
+  });
+
   it("file は読むファイルの path の形に一致する（plan-progress・issue-request の .）", () => {
     expect(judge(caseById("plan-progress"))).toBe(true);
     expect(judge(caseById("issue-request"))).toBe(true);

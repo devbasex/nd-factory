@@ -44,6 +44,24 @@ export function filePathPattern(path: string): RegExp {
   return new RegExp(`^${body}$`);
 }
 
+/** 制御文字（U+0000〜U+001F と U+007F）を含むか */
+function hasControlCharacter(text: string): boolean {
+  return [...text].some((char) => {
+    const code = char.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f;
+  });
+}
+
+/**
+ * `path` が、起点のディレクトリの外へ出ない相対パスか。`/` で始まらず、`\` と制御文字を含まず、
+ * `/` で区切った各成分が空でも `.` でも `..` でもない。全体が `.` だけのとき（起点のディレクトリそのもの）は真
+ */
+function isContainedRelativePath(path: string): boolean {
+  if (path === ".") return true;
+  if (path === "" || path.startsWith("/") || path.includes("\\") || hasControlCharacter(path)) return false;
+  return path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
+}
+
 /** `text` の全体が `patterns` のどれか 1 つに一致するか。読めない正規表現には一致しないとみなす */
 function matchesWhole(patterns: readonly string[] | undefined, text: string): boolean {
   return (patterns ?? []).some((pattern) => {
@@ -87,11 +105,16 @@ export function judgeCallWith(
     case "hook":
       return call.call === row.target;
     case "file": {
+      if (!isContainedRelativePath(call.call)) return false;
       const ids = row.files ?? [];
       return files.some((file) => ids.includes(file.id) && filePathPattern(file.path).test(call.call));
     }
-    case "spec":
-      return call.call.startsWith(`${row.target}/`) && call.call.length > row.target.length + 1;
+    case "spec": {
+      const prefix = `${row.target}/`;
+      if (!call.call.startsWith(prefix)) return false;
+      const rest = call.call.slice(prefix.length);
+      return rest !== "." && isContainedRelativePath(rest);
+    }
     default:
       return false;
   }

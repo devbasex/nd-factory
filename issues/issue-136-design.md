@@ -226,8 +226,10 @@ execution.md の変更は、直す時期で 2 つに分かれる。
   | `report` | 結果の行の値 | 文字列全体が、`args` のどれか 1 つに全体で一致する | `完了`（`report-unattended`） |
   | `hook` | hook の事象の名前 | 文字列が `target` と同じ | `Stop`（`hook-unattended-stop`） |
   | `command` | サブコマンドの引数 | 文字列全体が、`args` のどれか 1 つに全体で一致する | `設計承認ゲート`（`gate-record`） |
-  | `file` | 保存先からの相対パス | 行の `files` に載るファイルのどれか 1 つの `path`（生成のファイルにある `ndf-files.json` の `path`）に一致する。`path` の `<名前>` は `/` を含まない 1 文字以上の並びに一致させ、ほかの文字はそのまま比べる。`path` が `.` のときは、文字列も `.` のときだけ一致する | `s1/8-release-request-state/progress.jsonl`（`file-plan-progress` の `<sprint>/<n>-<plan>-state/progress.jsonl`） |
-  | `spec` | プラグインの根からのファイルのパス | 文字列が `target` + `/` で始まり、その後ろに 1 文字以上ある（`target` はディレクトリで、呼び出しはその配下のファイル） | `contracts/schemas/io/check.args.schema.json`（`spec-io`） |
+  | `file` | 保存先からの相対パス | 文字列がパスの境界（下）を守り、行の `files` に載るファイルのどれか 1 つの `path`（生成のファイルにある `ndf-files.json` の `path`）に一致する。`path` の `<名前>` は `/` を含まない 1 文字以上の並びに一致させ、ほかの文字はそのまま比べる。`path` が `.` のときは、文字列も `.` のときだけ一致する | `s1/8-release-request-state/progress.jsonl`（`file-plan-progress` の `<sprint>/<n>-<plan>-state/progress.jsonl`） |
+  | `spec` | プラグインの根からのファイルのパス | 文字列が `target` + `/` で始まり、その後ろの残りが `.` でなく、パスの境界（下）を守る（`target` はディレクトリで、呼び出しはその配下のファイル） | `contracts/schemas/io/check.args.schema.json`（`spec-io`） |
+
+  パスの境界: `file` と `spec` の呼び出しは、パスとして解決しても許したディレクトリの外を指さないものだけを真にする。文字列は `/` で始まらず、`\` と制御文字を含まない。`/` で区切った各成分は、空・`.`・`..` のどれでもない。ただし `file` の文字列の全体が `.` のときは、保存先そのものを指すので許す。文字列の接頭辞だけを見ると、`contracts/schemas/io/../../x` のような許したディレクトリの外を指す入力も真になり、この判定を読み取りの許可に使うランナーが外のファイルを読んでしまうためである
 
   正規表現の一致は、どの種類でも全体の一致にする（`^(?:…)$` で包む）。部分の一致にすると、`loop-bad-budget`・`unknown-flag` のような偽のサンプルが真になる
 - 採らなかった案: 生成のファイルを持たず、ランナーが実行のときにイメージの中の NDF の契約のファイルを読む（照合はスキーマの正本だけを相手にするため、判定が契約のファイルを読むと照合が判定を独立に検査できなくなる。画面と同じ決まりで組み込みを読まない形も崩れる）

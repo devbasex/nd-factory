@@ -253,7 +253,7 @@ graph LR
 
 | 関数 | 振る舞い |
 | --- | --- |
-| `judgeCall` | 使うインタフェースへの呼び出しだけを判定し、ほかのインタフェースは偽。呼び出しの環境変数がすべて行の `env` にあることを求める。`skill`・`report`・`command` は引数の全体が `args` のどれかに全体で一致、`block` は任意の `lead`・`/` + 前置き + `target` + 空白の後の引数が `args` に全体で一致、`hook` は `target` と同じ、`file` は読むファイルの `path`（`<名前>` は `/` を含まない 1 文字以上）に一致、`spec` は `target` + `/` の配下のファイル。読めない正規表現には一致しないとみなし、例外を投げない |
+| `judgeCall` | 使うインタフェースへの呼び出しだけを判定し、ほかのインタフェースは偽。呼び出しの環境変数がすべて行の `env` にあることを求める。`skill`・`report`・`command` は引数の全体が `args` のどれかに全体で一致、`block` は任意の `lead`・`/` + 前置き + `target` + 空白の後の引数が `args` に全体で一致、`hook` は `target` と同じ、`file` は読むファイルの `path`（`<名前>` は `/` を含まない 1 文字以上）に一致、`spec` は `target` + `/` の配下のファイル。`file` と `spec` は、`/` で始まる・`\` か制御文字を含む・空か `.` か `..` の成分を含むパスを偽にし、許したディレクトリの外を指す呼び出しを通さない（`file` の全体が `.` のときだけは許す）。読めない正規表現には一致しないとみなし、例外を投げない |
 | `readReport` | 最後の `- 結果:` の行の値を結果とし、その後ろの `- <項目>: <値>` を後勝ちで読む。結果の値ごとの要る項目（`always` と、`prefix`・`equals` の条件に当たった `need`）が無い・空・`無し` なら誤り。材料は `本文` か `https://` で始まる URL を空白で区切った並びで、`本文` なら結果の行より前の文書の直下にある最後の `## 判断の材料` の見出し（GFM の構文木で決める。コードブロック・HTML のブロック・引用・リストの中の行は見出しにしない）の節を、次のレベル 1 か 2 の見出しの前まで返す。誤りの一覧はコード（`result_line_missing`・`result_value_unknown`・`item_missing`・`material_form_invalid`・`material_heading_missing`）と項目の名前だけを持ち、報告の中の値を持たない |
 
 GFM の解析器（`mdast-util-from-markdown`・`mdast-util-gfm`・`micromark-extension-gfm`）に依るのは `src/ndf-contract-use.ts` だけで、依存の規則 `contracts-ndf-contract-use-depends-on-parser-only` がほかへの依存を落とす。
