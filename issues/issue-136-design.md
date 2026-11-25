@@ -45,14 +45,14 @@ graph LR
 | --- | --- | --- |
 | `domains/entrypoints.json` | 15 行のまま。`spec-ndf_settings` の `files` から `context` が消えた | 無い（`spec-ndf_settings` は使わない） |
 | `domains/entrypoint-cases.json` | 変わらない（26 件） | 無い |
-| `domains/env.json` | 中継・アカウント・推論の手段の名前が増えた。`set_by: service` の 6 つと、`GH_TOKEN`・`NDF_STATE_HOME` の `user` は変わらない | 無い |
+| `domains/env.json` | 中継・アカウント・推論の手段の名前が増えた。`set_by: service` の 6 つは変わらない。`GH_TOKEN`・`NDF_STATE_HOME` の `user` も変わらない | 無い |
 | `domains/ndf-files.json` | `reader: service` の行と `fields` は変わらない。`ask-journal` は `fields` を持たないまま | 無い |
 | `hooks/unattended-report.json` | 変わらない（`shape` とサンプル 16 件） | 無い |
 | `version.json` | バージョン 8 からバージョン 16 へ | 受ける組を直す |
 
 ### #47 と上流の不足 3 件は食い違いにならない
 
-要求の「未決」の 2 つ目への答えである。次の 4 件はどれも新しい固定の点に残る。照合の 6 項目はそれぞれが指す箇所を読まないため、食い違いとして出ない。
+要求の「未決」の 2 つ目への答えである。次の 4 件はどれも新しい固定の点に残る。4 件が残っている箇所は、照合の 6 項目のどれも読まない。このため食い違いとして出ない。
 
 | 件 | 残っている姿（`8d22be7`） | 照合が読まない理由 |
 | --- | --- | --- |
@@ -93,7 +93,7 @@ graph LR
 ```
 
 - 固定の点は `ndf--v11.0.36` のコミット `8d22be7` を指す。受ける組は、バージョン 16 と sha256 `c50ef840…` の 1 組になる。execution.md と確定仕様の値も同じ変更でそろえる
-- スキーマの正本が、使い方の書き出し（`@nd-factory/contracts/ndf-contract-use`）を持つ。データは JSON に置く。データの中身は、使うインタフェースの決まりのコピー・実行の場ごとに渡す環境変数・読むファイルと項目・区間の報告の項目である。呼び出しの判定と区間の報告の読み取りは、そのデータだけを使う純粋な関数にする。受ける組は既存の `NDF_CONTRACTS` を引き、コピーしない
+- スキーマの正本が、使い方の書き出し（`@nd-factory/contracts/ndf-contract-use`）を持つ。データは JSON に置く。データの中身は、使うインタフェースの決まりのコピー・実行の場（ホステッド・手元のマシン）ごとに渡す環境変数・読むファイルと項目・区間の報告の項目である。呼び出しの判定と区間の報告の読み取りは、そのデータだけを使う純粋な関数にする。受ける組は既存の `NDF_CONTRACTS` を引き、コピーしない
 - 型 `NdfContractUse` はスキーマの正本の 1 か所に置き、照合はそれを読み込む
 - 照合は、書き出しが無ければ必ず `fail: no-contract-use` と終了コード 1 で終わる。skip の道と定数 `CONTRACT_USE_REQUIRED` は消す
 - 新しい固定の点で `npm run ndf-contract` が 6 項目を照合し、固定の点の食い違いが 0 件で成功する
