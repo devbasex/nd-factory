@@ -1,5 +1,5 @@
 /**
- * NDF の契約の照合（F23。#1 の決定 6・7、#136 の決定 4・5・6）。
+ * NDF の契約の照合（F23。#1 の決定 6・7、確定仕様 docs/specifications/ndf-contract-use.md）。
  *
  * NDF のリポジトリから、`ndf-pin.json` の固定の点と既定の枝の先端の 2 つのコミットの契約のファイルを取り、
  * 形の正本の NDF の契約の使い方（`@nd-factory/contracts/ndf-contract-use`。呼び出しの判定・区間の報告の読み取り・
@@ -8,7 +8,7 @@
  *     node tools/checks/src/ndf-contract-check.ts [--root <作業の木>] [--summary <要約のファイル>]
  *     node tools/checks/src/ndf-contract-check.ts sync [--root <作業の木>]
  *
- * `sync` は、固定の点の契約から使い方の生成のファイル（`GENERATED_PATH`）を書き直す（#136 の決定 5）。
+ * `sync` は、固定の点の契約から使い方の生成のファイル（`GENERATED_PATH`）を書き直す（確定仕様の「生成のコマンド」）。
  * 生成のコマンドは `ndf-contract-sync.ts`、取得と形は照合と共有の `ndf-contract-fetch.ts` にある。
  * 終了コード: 0 書いた、1 手で書く id が契約に無いなど生成できない、2 引数の誤り・読めない・取得できない・書けない。
  *
@@ -61,7 +61,7 @@ export {
   mainNdfContractSync,
 } from "./ndf-contract-sync.ts";
 
-/** NDF の契約の使い方の書き出し（#136）。書き出しの `ndfContractUse` が `NdfContractUse` の形 */
+/** NDF の契約の使い方の書き出し（確定仕様の「使い方の書き出し」）。書き出しの `ndfContractUse` が `NdfContractUse` の形 */
 export const CONTRACT_USE_EXPORT = "@nd-factory/contracts/ndf-contract-use";
 
 /** 照らすことの番号（設計の表の 1〜6） */

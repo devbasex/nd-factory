@@ -1,5 +1,5 @@
 /**
- * NDF の契約の使い方の生成のコマンド（#136 の決定 5）。
+ * NDF の契約の使い方の生成のコマンド（確定仕様 docs/specifications/ndf-contract-use.md の「生成のコマンド」）。
  *
  *     node tools/checks/src/ndf-contract-check.ts sync [--root <作業の木>]
  *
