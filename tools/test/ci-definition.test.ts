@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -839,6 +839,11 @@ describe("CI の定義", () => {
 
   it("起動した人で分ける条件の語が、ワークフローにも見本にも無い", () => {
     expect(actorConditions([...workflows, caller])).toEqual([]);
+  });
+
+  it("漏れの検査のワークフローが直に打つスクリプトは、実行の権限を持つ", () => {
+    const scripts = SECRET_WORKFLOW_COMMANDS.filter((command) => command.startsWith("tools/"));
+    expect(scripts.filter((script) => (statSync(join(ROOT, script)).mode & 0o100) === 0)).toEqual([]);
   });
 
   it("どのワークフローと見本も、許す起動だけを持つ", () => {
