@@ -214,19 +214,31 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
    - `merge_commit_sha` が、探したマージコミットの SHA と同じである
    - 探したマージコミットの最初の親（`git rev-parse <探したマージコミット>^1`）が、今の main の先頭（`gh api repos/devbasex/nd-factory/commits/main --jq .sha`）と同じである
    - 探したマージコミットの 2 つ目の親（`git rev-parse <探したマージコミット>^2`）が、応答の `head.sha` と同じである
-4. 1 つでも違えば、マージしない。新しいマージコミットを取り込み、「main のコミットを手元で探し直す」で `dir` と `git` の両方を探し直してから、手順 1 からやり直す
-5. 4 つがそろったら、マージ先・base・head の 3 つを探したときのまま固定してマージする。手順 3 の確認の後に別の Pull Request が main に入るか、Pull Request の head かマージ先が変わると、探したのは古い候補になり、変更後の規則で全履歴を探していない候補がマージされうる。GitHub のマージの API は、head が一致すべき SHA（`sha`）を受けるが、base を指定する項目は無い（[マージの API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)）。そのため、base は main を止めて固定し、head は NDF にマージの API の `sha` を渡させて固定する
+4. 1 つでも違えば、マージしない。`base.ref` が `main` 以外なら、この手順を中止する。候補を取り込み直してもマージ先は変わらないので、main 向けの Pull Request を選び直し、そのマージコミットを「main のコミットを手元で探し直す」で探すところからやり直す。マージ先が `main` で、残りの照合が一致しなければ、今のマージコミット（応答の `merge_commit_sha`）を取り込み、「main のコミットを手元で探し直す」で `dir` と `git` の両方を探し直してから、手順 1 に戻る
+5. 4 つがそろったら、照合した Pull Request の番号と探した head を指定してマージする。マージ先は API で指定できないので、main を止め、マージの直前と直後に `base.ref` を確かめて固定する。手順 3 の確認の後に別の Pull Request が main に入るか、Pull Request の head かマージ先が変わると、探したのは古い候補になり、変更後の規則で全履歴を探していない候補がマージされうる
    - main は、マージのコミットを手元で探し直す前から、この Pull Request のマージを終えるまで止めておく。NDF にほかの Pull Request をマージさせず、画面からもマージせず、main へ直に push しない
    - マージを終えるまで、この Pull Request のマージ先を変えない
-   - 手順 3 で確かめた `head.sha` を「探した head」と呼ぶ。マージは、NDF 11.0.35 で確かめた `ndf ci merge` の `--reviewed` で、探した head に固定して行う。`ndf ci merge` は、作業ディレクトリでチェックアウトしているコミットが `--reviewed` の SHA と違えば止まり、同じなら、Pull Request の今の head がそのコミットと一致する場合だけ、その SHA をマージの API の `sha` に渡してマージする。必須のチェックを待つのは `ndf ci watch` である（`ndf ci merge` は待たない）
-     1. 公開のリポジトリの作業ディレクトリを 1 つ用意し、`git checkout --detach <探した head>` で探した head をチェックアウトする。`origin` は公開のリポジトリを指していること
-     2. その作業ディレクトリで `ndf ci watch --pr <番号> --budget <待つ秒数>` に、`.ndf/project.json` の `required_checks` の名前を 1 つずつ `--required <名前>` で付けて打つ。必須のチェックがすべて通った結果が返るまで、次へ進まない
-     3. マージの直前に、この節の手順 1 の `gh api repos/devbasex/nd-factory/pulls/<番号>` を打ち直し、この節の手順 3 の 4 つ（`base.ref` が `main` であることを含む）がそろったままであることを確かめる
-     4. 同じ作業ディレクトリで `ndf ci merge --branch <Pull Request の head のブランチ> --reviewed <探した head> --method squash` を打つ
-     5. マージせずに止まった結果（head の食い違いなど）が返れば、マージせずにこの節の手順 4 に戻る
-   - 使う NDF の `ndf ci merge` に `--reviewed` が無ければ（`ndf ci merge --help` で確かめる）、head を固定できないので、この手順ではマージしない。その間も main は止めたままにし、画面からもマージしない。`--reviewed` を持つ NDF に入れ替えた後に、この節の手順 1 からやり直す
+   - 手順 3 で確かめた `head.sha` を「探した head」と呼ぶ
+   - `ndf ci merge` は使わない。NDF 11.0.35 の `ndf ci merge` は Pull Request の番号を受けず、`--branch` のブランチを head に持つ開いた Pull Request のうち最も新しいものをマージする。そのため、同じブランチから別のマージ先へ向けた Pull Request が開いていると、照合していない Pull Request をマージしうる。また、`ndf ci merge` は非公開の検査を起動せずにマージする
+   - 非公開の検査を有効にする前（「導入の順序」の手順 6 より前）は、この手順でマージしない。その間は「導入の順序」の手順 3 のとおり、ほかの Pull Request をマージしない。1 本目の Pull Request は「1 本目を手元で探す」で扱う
+   - 非公開の検査を有効にした後は、照合した Pull Request への非公開の検査の成功を、マージの前に必ず確かめる。手元の `dir` と `git` の探しは、Pull Request の途中のコミットで足され消されたパスの名前と中身を探さないためである。それらは非公開の検査（`history` の探し）だけが探す
+
+   マージは次の順で行う。
+
+   1. 公開のリポジトリを `origin` に持つ作業ディレクトリで、`ndf ci watch --pr <番号> --budget <待つ秒数>` に、`.ndf/project.json` の `required_checks` の名前を 1 つずつ `--required <名前>` で付けて打つ。必須のチェックがすべて通った結果が返るまで、次へ進まない
+   2. 照合した Pull Request で、「手で起動して確かめる」の手順 1〜3 のとおりに非公開の検査を起動して確かめる。手順 1 で読む値は、番号が照合した番号、`head.sha` が探した head、`base.sha` と検査のコードのコミットが探したマージコミットの最初の親（探した base。main を止めているので main の先頭と同じ）、`merge_commit_sha` が探したマージコミットと同じであることを確かめる。違えば起動せずにこの節の手順 4 に戻る。手順 3 の 4 つがそろわなければマージしない。当たりなら「当たりの場所を手元で引く」で場所を引いて扱い、検査の失敗なら原因を直してから、この 2 を打ち直す
+   3. マージの直前に、この節の手順 1 の `gh api repos/devbasex/nd-factory/pulls/<番号>` を打ち直し、この節の手順 3 の 4 つ（`base.ref` が `main` であることを含む）がそろったままであることを確かめる。1 つでも違えば、マージせずにこの節の手順 4 に戻る
+   4. Pull Request の番号と探した head を指定して、マージの API を打つ。GitHub は、Pull Request の今の head が `sha` と違えばマージしない（[マージの API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)）。NDF が自分でマージするときも同じ API を使う
+
+      ```bash
+      gh api --method PUT repos/devbasex/nd-factory/pulls/<番号>/merge \
+        -f sha='<探した head>' \
+        -f merge_method=squash
+      ```
+   5. マージせずに断られたら（head の食い違いなど）、この節の手順 4 に戻る
    - 止めている間に main が進んでしまったら、マージせずに手順 4 のとおり探し直す
-6. マージの後に、Pull Request を読み直し、マージでできたコミット（`merge_commit_sha`）が探した組み合わせで作られたことを確かめる。NDF は squash でマージする（`.ndf/project.json` の `merge.commit` が `squash`）ので、できたコミットの親は 1 つだけで、取り込んだ head は親にならない。head は手順 5 で `sha` に渡して固定したので、ここでは応答の `head.sha` で確かめる
+6. マージの後に、Pull Request を読み直し、マージでできたコミット（`merge_commit_sha`）が探した組み合わせで作られたことを確かめる。このリポジトリは squash でマージする（`.ndf/project.json` の `merge.commit` が `squash`。手順 5 の `merge_method` も `squash`）ので、できたコミットの親は 1 つだけで、取り込んだ head は親にならない。head は手順 5 で `sha` に渡して固定したので、ここでは応答の `head.sha` で確かめる
+   - 応答の `base.ref` が `main` である
    - できたコミットの親がちょうど 1 つで、その親（`git rev-parse <コミット>^1`）が探したマージコミットの最初の親（探した base）と同じである
    - 応答の `head.sha` が探した head と同じである
    - 木（`git rev-parse <コミット>^{tree}`）が、探したマージコミットの木と同じである
@@ -235,7 +247,7 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
    2. それとは別の新しい空のディレクトリに公開のリポジトリを複製し、実際にマージされたコミットを `git checkout --detach` でチェックアウトする。このチェックアウトのコードは動かさない
    3. 実際にマージされたコミットの規則（`.gitleaks.toml`・`tools/checks/gitleaks-default.toml`）か gitleaks の版（`tools/checks/install-gitleaks.sh`）が、探したマージコミットと違えば、1 の検査のコードではそのコミットの規則と版で探せない。この場合は、4 の代わりに、実際にマージされたコミットの 6 つのファイルを「main のコミットを手元で探し直す」の手順 4 のとおりに読んで確かめてから、そのコミットを「main のコミットを手元で探し直す」で探す
    4. 規則と版が同じなら、実際にマージされたコミットのチェックアウトの中で、1 のディレクトリのスクリプトを絶対パスで打つ。`export-tree.sh <実際にマージされたコミット> <空のディレクトリ>` で木を作業ツリーの外に取り出す。秘密を `LEAK_CHECK_PATTERN` に、`LEAK_CHECK_REQUIRE_PATTERN=1` を渡し、`leak-scan-secret.sh dir <取り出した木> --count-only` と、全履歴を探す `leak-scan-secret.sh git --count-only` を打つ
-   5. `dir` と `git` の両方の終了コードが `0` のときだけ、探し直しを終える。片方でも `0` でなければ、出力で当たりか検査の失敗かを見分ける。当たりなら、`--details` で場所を引き、マージを戻すかを判断する。検査の失敗なら、原因を直してから 4 を打ち直す
+   5. `dir` と `git` の両方の終了コードが `0` のときだけ、探し直しを終える。`dir` と `git` は別々に打ち、それぞれの中でも規則ごとに別々に探すので、当たりと検査の失敗は同時に出ることがある。当たりが出たら、`--details` で場所を引き、マージを戻すかを判断する。検査の失敗が 1 つでもあれば、失敗した探しが対象の木や履歴に別の当たりを見落としている可能性があるので、当たりへの対応と並行して失敗の原因を直し、4 の `dir` と `git` の両方を打ち直す。両方の終了コードが `0` になるまで、打ち直しを続ける
 
 ## 見本の写し直し
 
