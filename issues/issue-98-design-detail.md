@@ -230,7 +230,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 
 - `list_entries`
   - 事前条件: `range` は `leak-scan.sh` が `git rev-list` で確かめた 1 語
-  - 事後条件: サブモジュールと `config` 自身は含まない。空の blob とモードだけの変更は `needs_marker` が偽。パスは `-z` の出力のまま持つ（UTF-8 でないバイトは `surrogateescape`）
+  - 事後条件: 新しい側がサブモジュールの項目と `config` 自身は含まない。古い側がサブモジュールの項目は `old_blob` を空（古い blob が無い）にする。空の blob とモードだけの変更は `needs_marker` が偽。パスは `-z` の出力のまま持つ（UTF-8 でないバイトは `surrogateescape`）
   - 副作用: `git rev-list --parents`・`git diff-tree`
 - `check_markers`
   - 事後条件: 目印の当たりは、コミット、パス、`Match` に残る親の欄（親のコミットのハッシュか `none`）の 3 つで対象に対応づける。
@@ -260,7 +260,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | いいえ | いいえ | いいえ | 足さない | — |
 | どちらでも | どちらでも | はい | 上の行の blob と、変更後の blob を展開した葉のファイル | blob 全体は上の行のとおり。葉の当たりはすべて出す |
 
-変更前の blob の写しは、古い blob が無いか空なら足さない。
+変更前の blob の写しは、古い blob が無いか空なら足さない。古い側がサブモジュールのときも、古い blob が無いものとする。
 
 展開の対象は、一覧のすべての新しい blob である（目印の確かめから除くモードだけの変更も `detect` で調べる）。
 
@@ -450,7 +450,7 @@ gitleaks の終了コードが 0・1 のほかのときの印は、次のとお�
 | `parse_log_line`・`classify_skip` | 表の各文言 | 空白を含む引用の `path`、本文に `WRN` を含む DBG の行 | 知らない `skipping` の行 |
 | `write_rescan_config` | `useDefault` の設定、重ねた設定 | `useDefault` の無い設定 | 既定の設定のファイルが無い |
 | `collect_tree_targets`・`is_excluded` | ELF の頭、`.br` を含む名前、外れたディレクトリ、依存のディレクトリの下の追跡しているファイル | 空のファイル、`node_modules` という名前のファイル | 読めないファイル、展開の失敗 |
-| `list_entries`・`check_markers` | 親ごとの目印 | 空のファイル、モードだけの変更、親の無いコミット、日本語の名前 | 目印の欠け、別のコミットの除外の行 |
+| `list_entries`・`check_markers` | 親ごとの目印 | 空のファイル、モードだけの変更、サブモジュールから通常のファイルへの型変更、親の無いコミット、日本語の名前 | 目印の欠け、別のコミットの除外の行 |
 | `is_binary`・`added_lines`・`attribute`・`merge_findings` | 3 条件の各 1 件 | 行の番号 0、前後の行にまたがる秘密、行の削除だけで成立した秘密、削除で行の番号がずれた既存の秘密、同じ行の 2 つの秘密 | 属性を読めない |
 | `rewrite_log`・中継の `main` | 目印と `commit` の行の書き換え | `\ No newline at end of file`、引用されたパス | 行の数の不一致、Git の失敗 |
 | `install_relay`・`CopyRepo` | 元のパスの当たり | 同じ写しのパスの 2 対象、元のリポジトリの `GIT_DIR` を設定した呼び出し | 決定 4 の条件 4〜8 の各 1 件 |
