@@ -225,7 +225,7 @@ graph TD
 | 状態用 S3 バケット | 公開を止め、暗号化し、TLS だけ。NDF のファイルは 14 日で消す規則 | Value 7・Value 6 |
 | ECR | nd-factory 専用のリポジトリ（イメージごとに 1 つ）。ランナーのイメージは、設置のコマンドと反映のパイプラインが作ってここへ push する。ライフサイクルルールで、push した新しいバージョンを戻せる数より多めに残し、古いバージョンを消す（決定 87・LIB85） | Value 6（保管の費用を抑える）・Value 8（ダイジェストで引き、確認の値で縛る） |
 | Secrets Manager | シークレットは CDK が作り、値は人か API が入れる。名前は `<prefix>/<environment>/<用途>`（決定 90） | Value 7 |
-| HTTP API | 利用者の JWT（利用者プール）と、委任・レーン・マシンの token を受ける。token は API の関数の中の 1 か所で確認、HTTP API の JWT の前段を利用者向けの HTTP のルートに置かない（[API と MCP](api.md#認証と主体)）。CORS は配信の元だけ。画面が API の時刻を読めるよう、`Access-Control-Expose-Headers` に `Date` を入れる（[画面の今のログインを外した後](screens.md#サインアウトで消す)） | Value 4・Value 9 |
+| HTTP API | 利用者の JWT（利用者プール）と、委任・レーン・マシンの token を受ける。token は API の関数の中の 1 か所で確認、HTTP API の JWT の前段を利用者向けの HTTP のルートに置かない（[API と MCP](api.md#認証と主体)）。CORS は配信の元だけ | Value 4・Value 9 |
 | 予算 | AWS Budgets の月の予算と通知（[費用](#費用)） | Value 6 |
 
 ### ECS.2 と公開 IP
