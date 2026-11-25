@@ -8,7 +8,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CONTRACT_DIR,
   ContractFetchError,
+  ContractUseSyncError,
+  GENERATED_PATH,
   PIN_KEY,
+  USE_DATA_PATH,
+  generateContractUse,
+  mainNdfContractSync,
   compareContract,
   contractNotices,
   contractUseLoaderFrom,
@@ -42,11 +47,12 @@ function fakeContract(): Record<string, Json> {
         {
           id: "skill-workflow",
           kind: "skill",
+          target: "development-workflow",
           args: ["#[1-9][0-9]*"],
           env: ["NDF_FACTORY_RUN", READ_WORD, "NDF_PROGRESS_DB", "GH_TOKEN"],
         },
-        { id: "report-unattended", kind: "report", args: ["判断が要る", "完了", "できなかった"], env: ["NDF_FACTORY_RUN"] },
-        { id: "file-journals", kind: "file", env: ["NDF_MVV_STATE_DIR"], files: ["ask-journal"] },
+        { id: "report-unattended", kind: "report", target: "結果", args: ["判断が要る", "完了", "できなかった"], env: ["NDF_FACTORY_RUN"] },
+        { id: "file-journals", kind: "file", target: "mvv-state", env: ["NDF_MVV_STATE_DIR"], files: ["ask-journal"] },
       ],
     },
     "domains/entrypoint-cases.json": {
@@ -68,9 +74,9 @@ function fakeContract(): Record<string, Json> {
     },
     "domains/ndf-files.json": {
       rows: [
-        { id: "plan-progress", reader: "service", fields: ["step", "attention"] },
-        { id: "ask-journal", reader: "service" },
-        { id: "loop-record", reader: "service" },
+        { id: "plan-progress", path: "<sprint>/<n>-<plan>-state/progress.jsonl", reader: "service", fields: ["step", "attention"] },
+        { id: "ask-journal", path: "ask.jsonl", reader: "service" },
+        { id: "loop-record", path: "<loop>/loop.json", reader: "service" },
       ],
     },
     "hooks/unattended-report.json": {
@@ -169,13 +175,37 @@ function reportShape(contract: Record<string, Json>): Shape {
 }
 
 /**
- * 固定の点（752a9cf）の `env.json` と `entrypoints.json` から、ランナーが渡す名前の行と `skill-workflow` の口の行だけを
- * 必要な列で写したもの（説明の文の列は写さない。参照の検査に当たる語を持ち込まないため）
+ * 固定の点（8d22be7）の `entrypoints.json`・`env.json`・`ndf-files.json` を必要な列で写したもの
+ * （説明の文の列は写さない。参照の検査に当たる語を持ち込まないため）
  */
-const PINNED_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ndf-contract-752a9cf");
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const PINNED_DIR = join(REPO_ROOT, "tools", "test", "fixtures", "ndf-contract-8d22be7");
+/** 同じ固定の点のサンプルと区間の報告の写し（スキーマの正本の単体テストと共有する） */
+const PINNED_CONTRACTS_DIR = join(REPO_ROOT, "packages", "contracts", "test", "fixtures", "ndf-contract-8d22be7");
+const readJson = (path: string) => JSON.parse(readFileSync(path, "utf8")) as Json;
+const readPinned = (name: string) => readJson(join(PINNED_DIR, `${name}.json`)) as Rows;
+/** 作業の木の固定の点（ndf-pin.json） */
+const PINNED_COMMIT = String(readJson(join(REPO_ROOT, "ndf-pin.json"))[PIN_KEY]);
+
+/** 固定の点の契約のうち、照合と生成が読む 6 つのファイルを写しから組み立てる */
+function fullPinnedContract(): Record<string, Json> {
+  return {
+    "version.json": { history: [{ version: 16, sha256: "c50ef840a72ab71a15023a46a37d050c36ec3aae6d1be6092b7f9dc7f3c0a726" }] },
+    "domains/entrypoints.json": readPinned("entrypoints"),
+    "domains/env.json": readPinned("env"),
+    "domains/ndf-files.json": readPinned("ndf-files"),
+    "domains/entrypoint-cases.json": readJson(join(PINNED_CONTRACTS_DIR, "entrypoint-cases.json")),
+    "hooks/unattended-report.json": readJson(join(PINNED_CONTRACTS_DIR, "unattended-report.json")),
+  };
+}
+
+/** 作業の木の手で書くデータと生成のデータ */
+const USE_DATA = readJson(join(REPO_ROOT, USE_DATA_PATH)) as { entrypoints: string[] } & Json;
+const GENERATED = readJson(join(REPO_ROOT, GENERATED_PATH));
+
 function pinnedContract(): Record<string, Json> {
   const contract = fakeContract();
-  const read = (name: string) => JSON.parse(readFileSync(join(PINNED_DIR, `${name}.json`), "utf8")) as Rows;
+  const read = readPinned;
   contract["domains/env.json"] = read("env");
   // 口の表は作り物の行（見本と使い方が指す口）を保ち、skill-workflow の行だけを固定の点の行に替える
   const pinned = read("entrypoints").rows;
@@ -944,5 +974,99 @@ describe("mainNdfContractCheck", () => {
   it("引数が違うと 2", async () => {
     capture();
     expect(await mainNdfContractCheck(["--nope"], {})).toBe(2);
+  });
+});
+
+describe("generateContractUse", () => {
+  it("固定の点の契約から、手で書く id の行と path と区間の報告の形を作り、コミットした生成のファイルと同じ", () => {
+    const generated = generateContractUse(asFiles(fullPinnedContract(), PINNED_COMMIT), USE_DATA.entrypoints);
+    expect(generated).toEqual(GENERATED);
+    expect(generated.entrypoints.map((row) => row.id)).toEqual(USE_DATA.entrypoints);
+    expect(generated.files).toContainEqual({ id: "plan-progress", path: "<sprint>/<n>-<plan>-state/progress.jsonl" });
+    expect(generated.report.values).toEqual(["判断が要る", "完了", "できなかった"]);
+  });
+
+  it("使わないインタフェース（file-loop-record・file-organizer など）の行と、その読むファイルが入らない", () => {
+    const generated = generateContractUse(asFiles(fullPinnedContract(), PINNED_COMMIT), USE_DATA.entrypoints);
+    const ids = generated.entrypoints.map((row) => row.id);
+    for (const unused of ["file-loop-record", "file-organizer", "spec-pages", "spec-ndf_settings"]) expect(ids).not.toContain(unused);
+    expect(generated.files.map((f) => f.id)).toEqual(["plan-progress", "ask-journal", "gate-rejections", "issue-request"]);
+  });
+
+  it("契約に無い id があると ContractUseSyncError で、その id を並べる", () => {
+    const run = () => generateContractUse(asFiles(fullPinnedContract(), PINNED_COMMIT), [...USE_DATA.entrypoints, "no-such-entrypoint"]);
+    expect(run).toThrow(ContractUseSyncError);
+    expect(run).toThrow("no-such-entrypoint");
+  });
+
+  it("契約のファイルの形が読めないと ContractUseSyncError", () => {
+    const contract = fullPinnedContract();
+    contract["domains/ndf-files.json"] = { rows: "x" };
+    expect(() => generateContractUse(asFiles(contract, PINNED_COMMIT), USE_DATA.entrypoints)).toThrow(ContractUseSyncError);
+  });
+});
+
+describe("mainNdfContractSync", () => {
+  /** `ndf-pin.json` と手で書くデータと（あれば）前の生成のファイルを持つ作業の木 */
+  function syncRoot(commit: string, data: Json = USE_DATA, previous?: string): string {
+    const root = makeRoot(commit);
+    const dataFile = join(root, USE_DATA_PATH);
+    mkdirSync(dirname(dataFile), { recursive: true });
+    writeFileSync(dataFile, `${JSON.stringify(data, null, 2)}\n`);
+    if (previous !== undefined) writeFileSync(join(root, GENERATED_PATH), previous);
+    return root;
+  }
+
+  it("固定の点の契約を取得して生成のファイルを書き、0 と wrote の行", async () => {
+    const up = makeUpstream(fullPinnedContract(), fakeContract());
+    const root = syncRoot(up.fixed);
+    const io = capture();
+    expect(await mainNdfContractSync(["--root", root], {}, { repoUrl: up.url })).toBe(0);
+    const text = readFileSync(join(root, GENERATED_PATH), "utf8");
+    expect(text.endsWith("}\n")).toBe(true);
+    expect(JSON.parse(text)).toEqual({ ...GENERATED, commit: up.fixed });
+    expect(io.out.join("")).toContain(`wrote: ${GENERATED_PATH} ${up.fixed}`);
+  });
+
+  it("手で書く id を 1 件足して生成のファイルと食い違わせた作業の木でも起動し、書き直して 0", async () => {
+    const up = makeUpstream(fullPinnedContract(), fakeContract());
+    const data = { ...USE_DATA, entrypoints: [...USE_DATA.entrypoints, "file-loop-record"] };
+    const root = syncRoot(up.fixed, data, `${JSON.stringify(GENERATED, null, 2)}\n`);
+    capture();
+    expect(await mainNdfContractSync(["--root", root], {}, { repoUrl: up.url })).toBe(0);
+    const written = JSON.parse(readFileSync(join(root, GENERATED_PATH), "utf8")) as { entrypoints: Json[]; files: Json[] };
+    expect(written.entrypoints.map((row) => row.id)).toContain("file-loop-record");
+    expect(written.files).toContainEqual({ id: "loop-record", path: "<loop>/loop.json" });
+  });
+
+  it("契約に無い id で 1 と生成できない理由を出し、生成のファイルを書き換えない", async () => {
+    const up = makeUpstream(fullPinnedContract(), fakeContract());
+    const data = { ...USE_DATA, entrypoints: [...USE_DATA.entrypoints, "no-such-entrypoint"] };
+    const root = syncRoot(up.fixed, data, "前の生成のファイル\n");
+    const io = capture();
+    expect(await mainNdfContractSync(["--root", root], {}, { repoUrl: up.url })).toBe(1);
+    expect(io.err.join("")).toContain("error: 生成できない");
+    expect(io.err.join("")).toContain("no-such-entrypoint");
+    expect(readFileSync(join(root, GENERATED_PATH), "utf8")).toBe("前の生成のファイル\n");
+  });
+
+  it("固定の点を取得できないと 2", async () => {
+    const up = makeUpstream(fullPinnedContract(), fakeContract());
+    const root = syncRoot("0".repeat(40));
+    const io = capture();
+    expect(await mainNdfContractSync(["--root", root], {}, { repoUrl: up.url })).toBe(2);
+    expect(io.err.join("")).toContain("固定の点");
+  });
+
+  it("手で書くデータの形が違うと 2", async () => {
+    const up = makeUpstream(fullPinnedContract(), fakeContract());
+    const root = syncRoot(up.fixed, { entrypoints: "x" });
+    capture();
+    expect(await mainNdfContractSync(["--root", root], {}, { repoUrl: up.url })).toBe(2);
+  });
+
+  it("引数が違うと 2", async () => {
+    capture();
+    expect(await mainNdfContractSync(["--nope"], {})).toBe(2);
   });
 });

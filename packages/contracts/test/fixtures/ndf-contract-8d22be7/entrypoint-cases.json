@@ -1,0 +1,303 @@
+{
+  "summary": "固定の点 8d22be7 の entrypoint-cases.json の 26 件の id・entrypoint・call・env・valid（ほかの列は写さない）",
+  "columns": [
+    "id",
+    "entrypoint",
+    "call",
+    "env",
+    "valid"
+  ],
+  "rows": [
+    {
+      "id": "new",
+      "entrypoint": "skill-workflow",
+      "call": "#895",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN"
+      ],
+      "valid": true
+    },
+    {
+      "id": "loop",
+      "entrypoint": "skill-workflow",
+      "call": "--loop",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN",
+        "NDF_LOOP_EXCLUDE"
+      ],
+      "valid": true
+    },
+    {
+      "id": "loop-named",
+      "entrypoint": "skill-workflow",
+      "call": "--loop l20261102",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN",
+        "NDF_PROGRESS_DB"
+      ],
+      "valid": true
+    },
+    {
+      "id": "loop-name-case",
+      "entrypoint": "skill-workflow",
+      "call": "--loop Team_A",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN"
+      ],
+      "valid": true
+    },
+    {
+      "id": "loop-options",
+      "entrypoint": "skill-workflow",
+      "call": "--loop l1 --milestones \"01 近い,02\" --budget-laps 2 --budget-usd default",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN"
+      ],
+      "valid": true
+    },
+    {
+      "id": "loop-bad-budget",
+      "entrypoint": "skill-workflow",
+      "call": "--loop l1 --budget-laps many",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN"
+      ],
+      "valid": false
+    },
+    {
+      "id": "resume-loop",
+      "entrypoint": "block-next",
+      "call": "/goal /ndf:development-workflow --loop Team_A -- 終わり: [ndf-loop] stopped Team_A の行を出したとき",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN"
+      ],
+      "valid": true
+    },
+    {
+      "id": "resume",
+      "entrypoint": "block-next",
+      "call": "/ndf:development-workflow #895",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN"
+      ],
+      "valid": true
+    },
+    {
+      "id": "unknown-flag",
+      "entrypoint": "skill-workflow",
+      "call": "--resume 895",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN"
+      ],
+      "valid": false
+    },
+    {
+      "id": "terminal-env",
+      "entrypoint": "skill-workflow",
+      "call": "#895",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN",
+        "NDF_RELAY_NAME"
+      ],
+      "valid": false
+    },
+    {
+      "id": "report-done",
+      "entrypoint": "report-unattended",
+      "call": "完了",
+      "env": [
+        "NDF_FACTORY_RUN"
+      ],
+      "valid": true
+    },
+    {
+      "id": "report-gate",
+      "entrypoint": "report-unattended",
+      "call": "判断が要る",
+      "env": [
+        "NDF_FACTORY_RUN"
+      ],
+      "valid": true
+    },
+    {
+      "id": "report-unknown",
+      "entrypoint": "report-unattended",
+      "call": "保留",
+      "env": [
+        "NDF_FACTORY_RUN"
+      ],
+      "valid": false
+    },
+    {
+      "id": "hook-stop",
+      "entrypoint": "hook-unattended-stop",
+      "call": "Stop",
+      "env": [
+        "NDF_FACTORY_RUN"
+      ],
+      "valid": true
+    },
+    {
+      "id": "gate-design",
+      "entrypoint": "gate-record",
+      "call": "設計承認ゲート",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN"
+      ],
+      "valid": true
+    },
+    {
+      "id": "gate-legacy",
+      "entrypoint": "gate-record",
+      "call": "gate1",
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN"
+      ],
+      "valid": false
+    },
+    {
+      "id": "organizer-request",
+      "entrypoint": "file-organizer",
+      "call": "requests/loop-l20261102-r000000000042.json",
+      "env": [
+        "NDF_ORGANIZER_DIR",
+        "NDF_ORGANIZER_LANE",
+        "NDF_VERSION"
+      ],
+      "valid": true
+    },
+    {
+      "id": "organizer-stray",
+      "entrypoint": "file-organizer",
+      "call": "inbox/x.json",
+      "env": [
+        "NDF_ORGANIZER_DIR"
+      ],
+      "valid": false
+    },
+    {
+      "id": "plan-progress",
+      "entrypoint": "file-plan-progress",
+      "call": "s1/8-release-request-state/progress.jsonl",
+      "env": [
+        "NDF_FACTORY_RUN"
+      ],
+      "valid": true
+    },
+    {
+      "id": "loop-record",
+      "entrypoint": "file-loop-record",
+      "call": "l20261102/loop.json",
+      "env": [
+        "NDF_FACTORY_RUN"
+      ],
+      "valid": true
+    },
+    {
+      "id": "ask-journal",
+      "entrypoint": "file-journals",
+      "call": "ask.jsonl",
+      "env": [
+        "NDF_MVV_STATE_DIR"
+      ],
+      "valid": true
+    },
+    {
+      "id": "issue-request",
+      "entrypoint": "file-issue-request",
+      "call": ".",
+      "env": [
+        "NDF_ISSUE_REQUEST_FILE"
+      ],
+      "valid": true
+    },
+    {
+      "id": "spec-page",
+      "entrypoint": "spec-pages",
+      "call": "docs/contracts/ndf-settings.md",
+      "env": [],
+      "valid": true
+    },
+    {
+      "id": "spec-ndf_settings",
+      "entrypoint": "spec-ndf_settings",
+      "call": "contracts/schemas/ndf-settings/project.schema.json",
+      "env": [],
+      "valid": true
+    },
+    {
+      "id": "spec-io-args",
+      "entrypoint": "spec-io",
+      "call": "contracts/schemas/io/check.args.schema.json",
+      "env": [],
+      "valid": true
+    },
+    {
+      "id": "spec-outside",
+      "entrypoint": "spec-io",
+      "call": "src/ndf/cli.py",
+      "env": [],
+      "valid": false
+    }
+  ]
+}

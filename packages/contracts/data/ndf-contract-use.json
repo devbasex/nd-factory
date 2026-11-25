@@ -1,0 +1,98 @@
+{
+  "entrypoints": [
+    "skill-workflow",
+    "block-next",
+    "report-unattended",
+    "hook-unattended-start",
+    "hook-unattended-stop",
+    "hook-unattended-end",
+    "file-plan-progress",
+    "file-journals",
+    "file-issue-request",
+    "gate-record",
+    "spec-io"
+  ],
+  "skillPrefix": "ndf:",
+  "env": [
+    {
+      "entrypoint": "skill-workflow",
+      "site": "hosted",
+      "names": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN",
+        "NDF_PROGRESS_DB"
+      ]
+    },
+    {
+      "entrypoint": "skill-workflow",
+      "site": "local",
+      "names": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN"
+      ]
+    },
+    {
+      "entrypoint": "block-next",
+      "site": "hosted",
+      "names": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN",
+        "NDF_PROGRESS_DB"
+      ]
+    },
+    {
+      "entrypoint": "block-next",
+      "site": "local",
+      "names": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_MVV_STATE_DIR",
+        "NDF_ISSUE_REQUEST_FILE",
+        "GH_TOKEN"
+      ]
+    }
+  ],
+  "envSetBy": {
+    "GH_TOKEN": "user",
+    "NDF_STATE_HOME": "user"
+  },
+  "files": [
+    {
+      "id": "plan-progress",
+      "fields": [
+        "step",
+        "attention"
+      ]
+    },
+    {
+      "id": "ask-journal",
+      "fields": []
+    },
+    {
+      "id": "gate-rejections",
+      "fields": []
+    },
+    {
+      "id": "issue-request",
+      "fields": [
+        "repo",
+        "title",
+        "body",
+        "labels"
+      ]
+    }
+  ]
+}

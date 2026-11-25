@@ -14,6 +14,7 @@
     "./operation": "./src/operation.ts",
     "./operations": "./src/operations/index.ts",
     "./ndf": "./src/ndf.ts",
+    "./ndf-contract-use-schema": "./src/ndf-contract-use-schema.ts",
     "./data": "./src/data.ts",
     "./client": "./src/client.ts",
     "./row-codec": "./src/row-codec.ts",
