@@ -352,7 +352,7 @@ I10（プロジェクトごとに別のデータベースと役割）は [DB の
 - M4 で打つ `aws` のコマンドは、どれも `--profile <予行の profile> --region <予行のリージョン>` を付けて打ち、既定の profile とリージョン（環境変数 `AWS_PROFILE`・`AWS_REGION` を含む）に頼らない。運用する環境の表には書かない
 - 照合に使う予行のアカウント・リージョン・スタックの名前は、今回の profile で打ったコマンドの出力でなく、予行の環境を立てたときの記録から取る。アカウントとリージョンはそのときに `deploy` へ渡した確認の値の 2 つ目と 3 つ目、スタックの名前はそのときの設定の `prefix` と `environment` から `<prefix>-<environment>-app`、利用者の表の名前は `<prefix>-<environment>-accounts` とする。記録が無いか、記録に `prefix` と `environment`（またはスタックの名前）が無いか、記録と次の照らしの値が 1 つでも違うときは、`put-item`・`delete-item`・`deploy` のどれも打たずに止め、M4 を「保留」（接続先を確かめられない）とする
 - `deploy` の前には毎回、今回の `diff` の出力が記録と同じ予行のスタックだけを対象にしていることを照らす。確認の値の 2 つ目と 3 つ目が記録のアカウントとリージョンと同じ・4 つ目（スタックの一覧）が `app` だけ・「作る資源の名前」の欄のアプリのスタックの名前と利用者の表の名前が記録から決めた名前と同じ、の 3 つで、1 つでも違えば `deploy` を打たずに止める。`--stack` を省くと、設定に `pipeline` があるときはパイプラインのスタックも対象になるため、M4 の `diff` はどれも `--stack app` を付ける
-- `put-item` と `delete-item` の直前には毎回、`aws sts get-caller-identity --query Account` が記録のアカウントと同じこと、`--region` が記録のリージョンと同じこと、記録から決めたスタックの名前で `aws cloudformation list-stack-resources` が返す `AWS::DynamoDB::Table` の物理 ID に利用者の表の名前があることを確かめる
+- `put-item` と `delete-item` の直前には毎回、`aws sts get-caller-identity --query Account` が記録のアカウントと同じこと、`--region` が記録のリージョンと同じこと、記録から決めたスタックの名前で `aws cloudformation list-stack-resources` が返す `AWS::DynamoDB::GlobalTable` の物理 ID に利用者の表の名前があることを確かめる（利用者の表は `TableV2` で作るため、資源の型は `AWS::DynamoDB::Table` でなく `AWS::DynamoDB::GlobalTable` になる）
 - 照合の 3 つは、3 回とも同じコマンドで読む
   - Aurora のクラスタの識別子とリソースの ID: `aws cloudformation list-stack-resources` が返す `AWS::RDS::DBCluster` の物理 ID をクラスタの識別子とし、`aws rds describe-db-clusters --db-cluster-identifier <クラスタの識別子> --query 'DBClusters[0].DbClusterResourceId'` でリソースの ID を読む
   - 項目の数: `aws dynamodb scan --select COUNT --consistent-read`
