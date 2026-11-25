@@ -4,7 +4,7 @@ nd-factory が使う NDF の固定の点は 11.0.12（契約バージョン 8）
 
 ## 今の姿
 
-何が起きたか・目的・受け入れ条件は要求仕様（[issue-136-requirements.md](./issue-136-requirements.md)、正は [#136](https://github.com/devbasex/nd-factory/issues/136) の本文）にある。この文書は「どう解くか」と「なぜその解き方か」だけを書く。
+何が起きたか・目的・受け入れ条件は要求仕様 [issue-136-requirements.md](./issue-136-requirements.md) にある。要求仕様の正は [#136](https://github.com/devbasex/nd-factory/issues/136) の本文である。この文書は「どう解くか」と「なぜその解き方か」だけを書く。
 
 ```mermaid
 graph LR
@@ -39,7 +39,7 @@ graph LR
 
 ### 新しい固定の点で契約がどう変わったか
 
-2026-11-25 時点の最新の配布のタグは `ndf--v11.0.36` である（軽量のタグ。コミット `8d22be728e81983e5051799bcee4637ff65f0071`）。その `version.json` の `history` の最後の行は、バージョン 16・sha256 `c50ef840a72ab71a15023a46a37d050c36ec3aae6d1be6092b7f9dc7f3c0a726` である（外部の調査の STD1）。照合が読む 6 つのファイルを 11.0.12 と比べると、nd-factory が使う部分は変わっていない。
+2026-11-25 時点の最新の配布のタグは `ndf--v11.0.36` である（軽量のタグ。コミット `8d22be728e81983e5051799bcee4637ff65f0071`）。その `version.json` の `history` の最後の行は、バージョン 16 である（外部の調査の STD1）。sha256 は `c50ef840a72ab71a15023a46a37d050c36ec3aae6d1be6092b7f9dc7f3c0a726` である。照合が読む 6 つのファイルを 11.0.12 と比べると、nd-factory が使う部分は変わっていない。
 
 | 契約のファイル | 11.0.12 から 11.0.36 への差 | nd-factory が使う部分への影響 |
 | --- | --- | --- |
@@ -64,7 +64,7 @@ graph LR
 上流が `ask-journal` に `fields` を足しても、照合は失敗にせず、既存の通知の行で知らせるだけにする。この扱いは今の照合の CLI（`contractNotices` と出力の処理）にあり、この変更では作り直さずに維持する。
 
 - 4 項目目の食い違いには数えない。終了コードも変えない
-- 照合の CLI は、固定の点と先端のそれぞれで、`ndf-files.json` の `ask-journal` の行に `fields` があれば、`notice: <コミット> の ask-journal が fields を持つ: <項目>` の行を出す
+- 照合の CLI は、固定の点と先端のそれぞれで、`ndf-files.json` の `ask-journal` の行に `fields` があるかを見る。あれば、`notice: <コミット> の ask-journal が fields を持つ: <項目>` の行を出す
 - 出力先は標準出力と、`--summary` で指定した要約のファイルの 2 つである
 - この変更で、通知の条件と出力先を変えない
 
@@ -75,7 +75,7 @@ graph LR
 - NDF のバージョンの数字を読んで大小を比べる処理を書かない（execution.md の「NDF との契約」の表）
 - スキーマの正本の中で画面が使うモジュールは、`node:` の組み込みを読まない。使い方の書き出しを使うのはランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）と照合だけだが、同じ決まりに従う。組み込みを読まない純粋な関数とデータで作る
 - CI は AWS の資格情報を持たない。照合のワークフロー（`.github/workflows/ndf-contract.yml`）は変えない
-- 反映のパイプラインの承認の手順（[docs/operations/pipeline-approval.md](../docs/operations/pipeline-approval.md)）は、照合の記録の `checked: fixed <固定の点> 1-6` の行を読む。この行の形は変えない
+- 反映のパイプラインの承認の手順は、照合の記録の `checked: fixed <固定の点> 1-6` の行を読む。この行の形は変えない。手順は [docs/operations/pipeline-approval.md](../docs/operations/pipeline-approval.md) にある
 - 範囲に含まないもの（実行の契約の追い付き・上流の不足 3 件・#47・ランナーの起動のときの照合）は、要求の「対象範囲」のとおりである
 
 ## 解き方の全体像
@@ -284,8 +284,39 @@ execution.md の変更は、直す時期で 2 つに分かれる。
 | 照合のテストのフィクスチャ（`tools/test/fixtures/ndf-contract-752a9cf/`） | 古い固定の点のコピーのまま残る | 新しい固定の点のコピーに置き換える |
 | #2 の設計 | #2 の設計が、この課題がすでに置いた使い方の書き出し（#1 の設計が #2 に割り当てた要件 K2-6）を、もう一度設計してしまう | 決定 2 の代償。#2 の設計の時点でこの書き出しを読む |
 | 区間の失敗の理由のコード（`packages/contracts/src/rows/sprints.ts` の `segmentFailureReason`、確定仕様 `docs/specifications/contracts-and-core.md` の区間の行） | 読み取りが項目の誤りを返したときの理由のコード `report_item_invalid` と、材料の URL が受け入れ条件に合わないときの理由のコード `material_url_rejected`（どちらも execution.md の「区間と結果の行」）が値の集まりに無い | この変更では足さない。区間の失敗を書くのはランナーなので、ランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の実装で値の集まりと確定仕様に足し、`npm run generate` の生成物もコミットする |
-| 承認資料の材料の URL（execution.md の「[承認資料](../docs/design/execution.md#承認資料)」） | この変更で、材料に並んだ URL をすべて承認資料に載せる。`材料: 本文` なら「判断の材料」節も載せる。どちらにも署名付き URL や共有リンクが入りうる。入ると、元の資料の閲覧権限が無い承認者や委任のエージェントにも中身を渡す。読み取り（決定 7）は契約に合わせて材料の欄が `https://` で始まるかだけを見るため、これを防がない | execution.md に材料の URL の受け入れ条件を書いた。条件は、スキームを持つ・スキームが `https`・ホストが `github.com` ちょうど・ポートを書かない・ユーザー名やパスワードを持たない・クエリを持たない・パスとフラグメントが Pull Request・Issue・コミット・ファイルとその行やコメントを指す決まった形に一致する・指す資料を GitHub の API で読めて、応答から組み立てた掲載用の URL と一致する、である。条件は、execution.md の「[承認資料](../docs/design/execution.md#承認資料)」の「確かめる順番」の表の上から順に当て、最初に合わなかった条件の拒否の理由のコードを 1 つだけ出す。条件と理由のコードの対応（たとえば、ホストの条件の順 3 が `host_not_allowed`、クエリの条件の順 6 が `query_present`）は、その表にある。S3 の署名付き URL は順 3 で先に当たるため、`host_not_allowed` になる。条件は、ブラウザーが開く URL に直す前の文字列に当てる。材料の欄の URL と「判断の材料」節の中の URL の両方に当てる。節の URL は、GFM の解釈でリンク先を取り出し、スキームを省いたリンク先・HTML の属性・コードの中の裸の URL も含めて確かめる。スキームの無い裸の文字列を URL とみなすのは、`www.` で始まる形と、ホスト名の形（英数字とハイフンのラベルを `.` でつなぎ、最後のラベルが英字だけ）の直後に `/` が続く形だけである。どちらも、直前が行頭・空白・括弧・引用符のときだけ当てる。`node:fs` や `C/hooks/unattended-report.json` はどちらの形にも当たらないので URL とみなさない。`docs.example.com/share/abcd` は後者の形に当たり、条件の順 1（スキームを持つ）で `url_not_absolute` として拒否する。規則の全体は execution.md の「[承認資料](../docs/design/execution.md#承認資料)」の「判断の材料」節の URL の取り出し方にある。承認の依頼を送るのはランナーなので、確かめる処理とテストはランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の実装に置く。テストの中身は下の「ランナーのテストに引き継ぐこと」にある |
+| 承認資料の材料の URL（execution.md の「[承認資料](../docs/design/execution.md#承認資料)」） | この変更で、材料に並んだ URL をすべて承認資料に載せる。`材料: 本文` なら「判断の材料」節も載せる。どちらにも署名付き URL や共有リンクが入りうる。入ると、元の資料の閲覧権限が無い承認者や委任のエージェントにも中身を渡す。読み取り（決定 7）は契約に合わせて材料の欄が `https://` で始まるかだけを見るため、これを防がない | execution.md に材料の URL の受け入れ条件を書いた。条件と当て方は、下の「承認資料の材料の URL の受け入れ条件」にある。承認の依頼を送るのはランナーなので、確かめる処理とテストはランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の実装に置く。テストの中身は下の「ランナーのテストに引き継ぐこと」にある |
 | ランナー（#6） | 判定と読み取りの関数の形を、ランナーの実装の時点で変えたくなる | ランナーは照合と同じ判定と読み取りの関数を使う（#1 の決定 7 のまま）。形を変えるときは照合のテストも同じ変更で直す |
+
+### 承認資料の材料の URL の受け入れ条件
+
+上の表の「承認資料の材料の URL」の行で、execution.md に書いた受け入れ条件の中身である。規則の全体は execution.md の「[承認資料](../docs/design/execution.md#承認資料)」にある。
+
+条件は次の 8 つである。
+
+- スキームを持つ
+- スキームが `https`
+- ホストが `github.com` ちょうど
+- ポートを書かない
+- ユーザー名やパスワードを持たない
+- クエリを持たない
+- パスとフラグメントが、Pull Request・Issue・コミット・ファイルとその行やコメントを指す決まった形に一致する
+- 指す資料を GitHub の API で読めて、応答から組み立てた掲載用の URL と一致する
+
+条件の当て方は次のとおりである。
+
+- 条件は、execution.md の「[承認資料](../docs/design/execution.md#承認資料)」の「確かめる順番」の表の上から順に当てる。最初に合わなかった条件の拒否の理由のコードを 1 つだけ出す
+- 条件と理由のコードの対応は、その表にある。たとえば、ホストの条件の順 3 が `host_not_allowed`、クエリの条件の順 6 が `query_present` である。S3 の署名付き URL は順 3 で先に当たるため、`host_not_allowed` になる
+- 条件は、ブラウザーが開く URL に直す前の文字列に当てる
+- 条件は、材料の欄の URL と「判断の材料」節の中の URL の両方に当てる
+
+「判断の材料」節の中の URL は、次のように取り出す。規則の全体は execution.md の「[承認資料](../docs/design/execution.md#承認資料)」の「判断の材料」節の URL の取り出し方にある。
+
+- GFM の解釈でリンク先を取り出す。スキームを省いたリンク先・HTML の属性・コードの中の裸の URL も含めて確かめる
+- スキームの無い裸の文字列を URL とみなすのは、次の 2 つの形だけである。どちらも、直前が行頭・空白・括弧・引用符のときだけ当てる
+  - `www.` で始まる形
+  - ホスト名の形（英数字とハイフンのラベルを `.` でつなぎ、最後のラベルが英字だけ）の直後に `/` が続く形
+- `node:fs` や `C/hooks/unattended-report.json` はどちらの形にも当たらないので URL とみなさない
+- `docs.example.com/share/abcd` は後者の形に当たる。条件の順 1（スキームを持つ）で `url_not_absolute` として拒否する
 
 ### ランナーのテストに引き継ぐこと
 
@@ -329,7 +360,7 @@ execution.md の変更は、直す時期で 2 つに分かれる。
 
 ## 設計の結果
 
-新しく作る関数が 6 つ（`buildContractUse`・`judgeCallWith`・`filePathPattern`・`readReportWith`・`generateContractUse`・`mainNdfContractSync`）あり、シグネチャを変える関数が 2 つ（`compareContract`・`checkEntrypoints`）と型が 1 つ（`MainOptions`）ある。このため、ファイルと関数の粒度の設計は別ファイルの詳細設計 [issue-136-design-detail.md](./issue-136-design-detail.md) に書いた。
+新しく作る関数は 6 つある（`buildContractUse`・`judgeCallWith`・`filePathPattern`・`readReportWith`・`generateContractUse`・`mainNdfContractSync`）。シグネチャを変えるものは、関数が 2 つ（`compareContract`・`checkEntrypoints`）と型が 1 つ（`MainOptions`）ある。このため、ファイルと関数の粒度の設計は別ファイルの詳細設計 [issue-136-design-detail.md](./issue-136-design-detail.md) に書いた。
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |

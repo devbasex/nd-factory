@@ -47,7 +47,11 @@ docs/specifications/contracts-and-core.md
 docs/operations/pipeline-approval.md
 ```
 
-依存の向きは一方向で、循環は無い。`packages/contracts/src/ndf-contract-use.ts` は、同じパッケージの `data.ts`（`NDF_CONTRACTS`・`DataFileError`）と 2 つの JSON と zod だけを読む。`node:` の組み込みは読まない。`tools/checks/src/ndf-contract-check.ts` は、`@nd-factory/contracts/ndf-contract-use` から型と zod の形を読み込む。書き出しの実体は、今までどおり `--root` の作業ツリーから実行時に解決する。スキーマの正本の側から `tools` は読まない。
+依存の向きは一方向で、循環は無い。
+
+- `packages/contracts/src/ndf-contract-use.ts` が読むのは、同じパッケージの `data.ts`（`NDF_CONTRACTS`・`DataFileError`）と、2 つの JSON と、zod だけである。`node:` の組み込みは読まない
+- `tools/checks/src/ndf-contract-check.ts` は、`@nd-factory/contracts/ndf-contract-use` から型と zod の形を読み込む。書き出しの実体は、今までどおり `--root` の作業ツリーから実行時に解決する
+- スキーマの正本の側から `tools` は読まない
 
 | パス | 種類 | 役割 | 依存する先 | モジュール | 最上位の関数と値（新設 / 変更） |
 | --- | --- | --- | --- | --- | --- |
@@ -248,7 +252,9 @@ docs/operations/pipeline-approval.md
 1. 結果の行より後ろの行のうち、`- <項目>: <値>` の形の行を項目として読む。値の前後の空白を除く。同じ名前は後の行で上書きする
 2. 結果の値の `required` の `always` の項目と、`when` の条件に当たった行の `need` の項目を、要る項目として集める。`when` の条件は、`item` の項目の値が `prefix` で始まるか、`equals` と同じかである。`item` の項目が無ければ条件に当たらない
 3. 要る項目ごとに、無い・空・`無し` なら `item_missing`（その項目の名前）を足す。要る項目の順は、`always` の順の後に `when` の順とし、同じ項目は 1 回だけ確かめる
-4. `material.item`（`材料`）の値が、空でも `無し` でもないときだけ、形を確かめる。値が `material.body`（`本文`）なら、結果の行より前に `material.heading`（`## 判断の材料`）と同じ行があるかを確かめ、無ければ `material_heading_missing`（`材料`）を足す。`本文` でなければ、空白で区切った並びのどれもが `material.url_prefix`（`https://`）で始まり、その後ろに 1 文字以上あることを確かめ、そうでなければ `material_form_invalid`（`材料`）を足す
+4. `material.item`（`材料`）の値が、空でも `無し` でもないときだけ、形を確かめる
+   - 値が `material.body`（`本文`）のとき: 結果の行より前に、`material.heading`（`## 判断の材料`）と同じ行があるかを確かめる。無ければ `material_heading_missing`（`材料`）を足す
+   - `本文` でないとき: 値を空白で区切った並びのどれもが、`material.url_prefix`（`https://`）で始まり、その後ろに 1 文字以上あるかを確かめる。そうでなければ `material_form_invalid`（`材料`）を足す
 
 - 繰り返しの終わる条件: 行の数で終わる
 - 計算量の注意: 行の数に比例する
@@ -286,7 +292,10 @@ docs/operations/pipeline-approval.md
 
 ファイルの末尾の起動の処理は、最初の引数が `sync` なら `mainNdfContractSync` を、それ以外なら `mainNdfContractCheck` を呼ぶ。`sync` を照合と同じファイルに置くのは、取得の処理（`fetchContract`）と契約のファイルの形（`SCHEMAS`）を共有するためである。
 
-`SCHEMAS` の `domains/entrypoints.json` の行に `kind`・`target`・`lead`（任意）・`args`（任意）・`files`（任意）を、`domains/ndf-files.json` の行に `path` を足す。
+`SCHEMAS` には次の列を足す。
+
+- `domains/entrypoints.json` の行に、`kind`・`target`・`lead`（任意）・`args`（任意）・`files`（任意）
+- `domains/ndf-files.json` の行に、`path`
 
 - `compareContract`
   - 事前条件: `pinned` は `ndf-pin.json` の固定の点である。固定の点を照合するときも先端を照合するときも、同じ値を渡す
@@ -294,7 +303,7 @@ docs/operations/pipeline-approval.md
   - 事後条件: 出力の行の形（`read:`・`checked:`・`fail:`・`notice:`・`diff:`・`mismatch:`）は今のまま。`skip:` の行は出さない
   - 副作用: 一時ディレクトリへの `git` の取得（ネットワーク）・標準出力・要約のファイルへの追記
 - `mainNdfContractSync`
-  - 事後条件: `<root>/packages/contracts/data/ndf-contract-use.generated.json` が、`ndfContractUseGenerated` の形に合う JSON（2 つの空白で字下げし、最後に改行を 1 つ置く）になる
+  - 事後条件: `<root>/packages/contracts/data/ndf-contract-use.generated.json` が、`ndfContractUseGenerated` の形に合う JSON になる。JSON は 2 つの空白で字下げし、最後に改行を 1 つ置く
   - 副作用: 一時ディレクトリへの `git` の取得（ネットワーク）・生成のファイルの書き込み・標準出力
 
 ### 異常系の処理
