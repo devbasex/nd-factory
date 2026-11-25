@@ -93,7 +93,10 @@ NDF の認証は、`<非公開リポジトリ>` に対して次の権限を持�
    - 当たりや検査の失敗があれば、原因を解消する（当たりは「当たりの場所を手元で引く」で場所を引く）
    - 当たりや検査の失敗を直した後も、確かめるのは GitHub Actions の `leak-check-push` の記録である。手元の探し（下の「main のコミットを手元で探し直す」）は原因の特定に使い、手元で成功しても先へ進まない。手元の成功では、GitHub Actions でジョブが動き、環境 `leak-scan` から秘密を受け取れたことを確かめられないためである
      - 直すために main へコミットを入れたときは、そのコミットの push で動いた `leak-check-push` の記録で、上の 3 つがすべてそろうことを確かめる。元の実行を再実行しても、探すのは元の SHA のままなので、直した後のコミットを確かめたことにならない（[ワークフローの再実行](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)）
-     - コミットを入れずに GitHub の設定だけを直したときは、元の `leak-check-push` の実行を再実行し、その記録で上の 3 つがすべてそろうことを確かめる
+     - コミットを入れずに GitHub の設定だけを直したときも、確かめるのは今の main の先頭を探した記録である。待つ間に、ほかの変更で main が進んでいることがあるためである
+       - 元の実行の `head_sha`（`gh api repos/devbasex/nd-factory/actions/runs/<実行の ID> --jq .head_sha`）が今の main の先頭（`gh api repos/devbasex/nd-factory/commits/main --jq .sha`）と同じなら、その実行を再実行する
+       - main が進んでいれば、元の実行は再実行しない。今の main の先頭への push で動いた `leak-check-push` の実行を使う
+       - どちらの場合も、使った実行の記録で、上の 3 つがすべてそろうことを確かめる
 
    確かめた後に、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする
 5. `<非公開リポジトリ>` を作り、[`leak-check-caller.yml`](leak-check-caller.yml) を写し、秘密 `LEAK_CHECK_PATTERN` と変数 `LEAK_CHECK_GENERATION`（値は `1`）を登録する。NDF がマージに使う今の認証で、「NDF の認証の権限」の 3 つの API が呼べることを確かめる。続けて、開いている Pull Request の 1 本で探しを手で起動して確かめる（下の「手で起動して確かめる」）。この結果で Pull Request をマージしない
@@ -210,6 +213,13 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
    - 探したマージコミットの最初の親（`git rev-parse <探したマージコミット>^1`）が、今の main の先頭（`gh api repos/devbasex/nd-factory/commits/main --jq .sha`）と同じである
    - 探したマージコミットの 2 つ目の親（`git rev-parse <探したマージコミット>^2`）が、応答の `head.sha` と同じである
 4. 1 つでも違えば、マージしない。新しいマージコミットを取り込み、「main のコミットを手元で探し直す」で `dir` と `git` の両方を探し直してから、手順 1 からやり直す
+5. 3 つがそろっても、この Pull Request のマージを終えるまで main を進めない。手順 3 の確認の後に別の Pull Request が main に入ると、探したのは古い候補になり、新しい main の履歴を変更後の規則で探していないことになる。GitHub のマージの API の `sha` で固定できるのは head だけで、base は固定できないので、main を止めておくしかない（[マージの API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)）
+   - マージのコミットを手元で探し直す前から止めておく。NDF にほかの Pull Request をマージさせず、画面からもマージせず、main へ直に push しない
+   - 止めている間に main が進んでしまったら、マージせずに手順 4 のとおり探し直す
+6. マージの後に、Pull Request を読み直し、マージでできたコミット（`merge_commit_sha`）が探した組み合わせで作られたことを確かめる
+   - 最初の親が探したマージコミットの最初の親（探した base）と同じで、2 つ目の親が探した head と同じである
+   - 木（`git rev-parse <コミット>^{tree}`）が、探したマージコミットの木と同じである
+   - 1 つでも違えば、マージでできたコミットを「main のコミットを手元で探し直す」で探し直す。当たりがあれば、マージを戻すかを判断する
 
 ## 見本の写し直し
 
