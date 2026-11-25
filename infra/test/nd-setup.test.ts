@@ -51,6 +51,18 @@ function bootstrapProps(required: number | null): { requiresBootstrapStackVersio
   return required === null ? {} : { requiresBootstrapStackVersion: required };
 }
 
+// 作り物の合成の結果（manifest と app の template）を置き場 dir へ書く
+function writeFakeAssembly(dir: string, env: RunOptions["env"], required: number | null): void {
+  mkdirSync(dir, { recursive: true });
+  const props = bootstrapProps(required);
+  const stacks = (env?.ND_STACKS ?? "app").split(",");
+  const artifacts = Object.fromEntries(
+    stacks.map((k) => [`acme-test-${k}`, { type: "aws:cloudformation:stack", properties: props }]),
+  );
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify({ version: "1", artifacts }));
+  writeFileSync(join(dir, "acme-test-app.template.json"), JSON.stringify({ env: env?.CDK_DEFAULT_ACCOUNT }));
+}
+
 // AWS と外部コマンドを差し替えた依存。合成は作り物の合成の結果を置き場へ書く
 function fake(o: FakeOptions = {}): Fake {
   const calls: Call[] = [];
@@ -65,15 +77,8 @@ function fake(o: FakeOptions = {}): Fake {
       if (command === "npm" && args.includes("build")) return o.buildCode ?? 0;
       if (isCdk(call, "synth")) {
         const dir = args[args.indexOf("-o") + 1]!;
-        mkdirSync(dir, { recursive: true });
         const required = o.requiredBootstrap === undefined ? 6 : o.requiredBootstrap;
-        const props = bootstrapProps(required);
-        const stacks = (options.env?.ND_STACKS ?? "app").split(",");
-        const artifacts = Object.fromEntries(
-          stacks.map((k) => [`acme-test-${k}`, { type: "aws:cloudformation:stack", properties: props }]),
-        );
-        writeFileSync(join(dir, "manifest.json"), JSON.stringify({ version: "1", artifacts }));
-        writeFileSync(join(dir, "acme-test-app.template.json"), JSON.stringify({ env: options.env?.CDK_DEFAULT_ACCOUNT }));
+        writeFakeAssembly(dir, options.env, required);
         return o.synthCode ?? 0;
       }
       if (isCdk(call, "diff")) return o.diffCode ?? 0;
