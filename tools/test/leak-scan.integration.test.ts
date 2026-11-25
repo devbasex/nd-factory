@@ -484,7 +484,13 @@ function skipLine(path: string): string {
   return `${esc}[90m4:08PM${esc}[0m ${esc}[33mWRN${esc}[0m ${esc}[1mskipping file: permission denied${esc}[0m ${esc}[36mpath=${esc}[0m${path}`;
 }
 
-const SKIP_MESSAGE = "leak-scan: gitleaks が警告か誤りを出した";
+/** gitleaks v8.30.1 が当たりのあるときに標準エラーへ出す件数の 1 行（色の制御の列を含む実物の形） */
+function gitleaksCountLine(count: number): string {
+  const esc = "\u001b";
+  return `${esc}[90m4:08PM${esc}[0m ${esc}[31mWRN${esc}[0m ${esc}[1mleaks found: ${count}${esc}[0m`;
+}
+
+const SKIP_MESSAGE ="leak-scan: gitleaks が警告か誤りを出した";
 
 describe("読めずに飛ばした対象", () => {
   for (const mode of ["dir", "git"] as const) {
@@ -501,6 +507,25 @@ describe("読めずに飛ばした対象", () => {
       expect(shown.output).toContain(SKIP_MESSAGE);
     }, TIMEOUT);
   }
+
+  it("gitleaks が当たりで出す WRN の件数の行（時刻 WRN leaks found: <件数>）だけなら、警告か誤りと見なさない", () => {
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+    const env = { ...process.env, PATH: fakeGitleaksPath("中身", gitleaksCountLine(2)) };
+    const result = scan(root, ["dir", ND_CONFIG], { paths: false, env });
+    expect(result.status).toBe(0);
+    expect(result.output).not.toContain(SKIP_MESSAGE);
+  }, TIMEOUT);
+
+  it("飛ばした対象の警告の末尾がたまたま件数の行と同じ文言でも、当たり無しとして通さない", () => {
+    const realWord = fakeWord();
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+    // 色を外すと「4:08PM WRN skipping file: ... path=docs/<語> WRN leaks found: 2」になり、末尾が件数の行と同じになる
+    const env = { ...process.env, PATH: fakeGitleaksPath("中身", skipLine(`docs/${realWord} WRN leaks found: 2`)) };
+    const result = scan(root, ["dir", ND_CONFIG], { paths: false, env });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(SKIP_MESSAGE);
+    expect(result.output).not.toContain(realWord);
+  }, TIMEOUT);
 
   it("警告の後にパイプの容量を超える出力が続いても、当たり無しとして通さない", () => {
     const realWord = fakeWord();
