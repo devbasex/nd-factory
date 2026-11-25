@@ -95,6 +95,13 @@ log_has_skipped() {
   [[ -s "$log" ]] && sed $'s/\x1b\\[[0-9;]*m//g' "$log" | grep -Ev '^[0-9]{1,2}:[0-9]{2}[AP]M WRN leaks found: [0-9]+$' | grep -E '(^| )(WRN|ERR|FTL)( |$)' >/dev/null
 }
 
+# --paths が無ければ、gitleaks の生の出力を伏せたことを標準エラーへ知らせる
+note_hidden() {
+  if [[ "$paths" == false ]]; then
+    echo "leak-scan: gitleaks の出力はファイルの名前を含み得るので伏せた。手元で同じ引数に --paths を足して打つと出る" >&2
+  fi
+}
+
 # 報告から規則・ファイル・行・コミットだけを取り出し、記録へ出し、--report があればそこへ書く。
 # --paths が無ければ、ファイルの名前を名前の順の file-<番号> に替える（名前に入った秘密の値を記録と報告に残さない）。
 # gitleaks の終了コードを受け、報告を読めなければ 1 で終える
@@ -105,9 +112,7 @@ finish() {
   fi
   if [[ ! -s "$raw_report" ]] || ! jq -e 'type == "array"' "$raw_report" >/dev/null 2>&1; then
     echo "leak-scan: gitleaks の報告を読めない（終了コード ${status}）" >&2
-    if [[ "$paths" == false ]]; then
-      echo "leak-scan: gitleaks の出力はファイルの名前を含み得るので伏せた。手元で同じ引数に --paths を足して打つと出る" >&2
-    fi
+    note_hidden
     exit 1
   fi
   local skipped=false
@@ -125,9 +130,7 @@ finish() {
   fi
   if [[ "$skipped" == true ]]; then
     echo "leak-scan: gitleaks が警告か誤りを出した。読めずに飛ばした対象があり得るので、当たり無しとして通さない" >&2
-    if [[ "$paths" == false ]]; then
-      echo "leak-scan: gitleaks の出力はファイルの名前を含み得るので伏せた。手元で同じ引数に --paths を足して打つと出る" >&2
-    fi
+    note_hidden
   fi
   local count
   count="$(jq 'length' <<<"$findings")"
