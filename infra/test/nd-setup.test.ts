@@ -122,10 +122,12 @@ function tempOut(): string {
   return join(mkdtempSync(join(tmpdir(), "nd-setup-")), "assembly");
 }
 
+const CONFIRM_PREFIX = "確認の値: ";
+
 function confirmFrom(f: Fake): string {
-  const line = f.out.find((l) => l.startsWith("確認の値: "));
+  const line = f.out.find((l) => l.startsWith(CONFIRM_PREFIX));
   if (!line) throw new Error("確認の値が出ていない");
-  return line.slice("確認の値: ".length);
+  return line.slice(CONFIRM_PREFIX.length);
 }
 
 describe("parseArgs", () => {
