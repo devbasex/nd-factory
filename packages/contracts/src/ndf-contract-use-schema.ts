@@ -39,15 +39,20 @@ export type NdfContractUseData = z.infer<typeof ndfContractUseData>;
  * 区間の報告の結果の値ごとの要る項目。`always` は無条件に要る項目、`when` は条件つきで要る項目。
  * `when` の行は `need` のほかのキー（`item`・`prefix`・`equals` など）が条件
  */
-const reportRequiredRule = z.strictObject({
+export const reportRequiredRuleFields = {
   always: strings,
   when: z.array(z.object({ item: z.string(), need: strings }).catchall(z.unknown())),
-});
+};
+
+const reportRequiredRule = z.strictObject(reportRequiredRuleFields);
 
 export type ReportRequiredRule = z.infer<typeof reportRequiredRule>;
 
-/** 生成した使うインタフェースの行 1 つ（契約の `entrypoints.json` の行の 6 つの列と id） */
-export const ndfEntrypointRow = z.strictObject({
+/**
+ * 使うインタフェースの行の列（契約の `entrypoints.json` の行の 6 つの列と id）。
+ * 生成のデータは `z.strictObject` で、照合が上流の契約を読むときは説明の列を捨てる `z.object` で、この列から形を作る
+ */
+export const ndfEntrypointRowFields = {
   id: z.string(),
   kind: z.string(),
   target: z.string(),
@@ -55,7 +60,10 @@ export const ndfEntrypointRow = z.strictObject({
   args: strings.optional(),
   env: strings,
   files: strings.optional(),
-});
+};
+
+/** 生成した使うインタフェースの行 1 つ */
+export const ndfEntrypointRow = z.strictObject(ndfEntrypointRowFields);
 
 export type NdfEntrypointRow = z.infer<typeof ndfEntrypointRow>;
 

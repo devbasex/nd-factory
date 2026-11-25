@@ -27,6 +27,8 @@ import { z } from "zod";
 import {
   ndfContractUseData,
   ndfContractUseGenerated,
+  ndfEntrypointRowFields,
+  reportRequiredRuleFields,
   type NdfContractUse,
   type NdfContractUseGenerated,
   type NdfEntrypointRow,
@@ -150,17 +152,8 @@ const SCHEMAS = {
   "domains/entrypoint-cases.json": rowsOf(
     z.object({ id: z.string(), entrypoint: z.string(), call: z.string(), env: strings, valid: z.boolean() }),
   ),
-  "domains/entrypoints.json": rowsOf(
-    z.object({
-      id: z.string(),
-      kind: z.string(),
-      target: z.string(),
-      lead: z.string().optional(),
-      args: strings.optional(),
-      env: strings,
-      files: strings.optional(),
-    }),
-  ),
+  // 生成のデータと同じ列の定義から作る。上流の説明の列は z.object が捨てる
+  "domains/entrypoints.json": rowsOf(z.object(ndfEntrypointRowFields)),
   "domains/env.json": rowsOf(z.object({ id: z.string(), set_by: z.string() })),
   "domains/ndf-files.json": rowsOf(
     z.object({ id: z.string(), path: z.string(), reader: z.string().optional(), fields: strings.optional() }),
@@ -170,11 +163,8 @@ const SCHEMAS = {
       values: z.record(z.string(), z.unknown()),
       items: strings,
       material: z.record(z.string(), z.unknown()),
-      required: z.record(
-        z.string(),
-        // 条件の鍵（item・prefix・equals など）を捨てずに残し、条件ごと照らして差分に出す
-        z.object({ always: strings, when: z.array(z.object({ item: z.string(), need: strings }).catchall(z.unknown())) }),
-      ),
+      // 生成のデータと同じ規則の定義から作る。条件の鍵（item・prefix・equals など）は catchall で残し、条件ごと照らして差分に出す
+      required: z.record(z.string(), z.object(reportRequiredRuleFields)),
     }),
     cases: z.array(z.object({ text: z.string(), result: z.string(), errors: strings })),
   }),
