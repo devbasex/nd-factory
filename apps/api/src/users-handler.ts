@@ -51,6 +51,13 @@ function json(statusCode: number, body: UserAnswer[] | UsersErrorBody): APIGatew
 // ログは JSON の 1 行で、要求の ID と結果だけを出す。token・本文・利用者の ID は出さない
 type LogFields = { status: number } & Record<string, string | number>;
 
+// 503 の失敗を、ログに出す操作の名前と失敗の名前に分ける
+function describeStoreFailure(e: unknown): { operation: string; error: string } {
+  const operation = e instanceof StoreError ? e.operation : "unknown";
+  const error = e instanceof StoreError ? e.causeName : e instanceof Error ? e.name : "Unknown";
+  return { operation, error };
+}
+
 export function createHandler(deps: HandlerDeps) {
   return async function handle(event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<APIGatewayProxyStructuredResultV2> {
     const requestId = event.requestContext?.requestId ?? "unknown";
@@ -77,8 +84,7 @@ export function createHandler(deps: HandlerDeps) {
       logger.info("利用者の要素に答えた", { status: 200, items: answers.length } satisfies LogFields);
       return json(200, answers);
     } catch (e) {
-      const operation = e instanceof StoreError ? e.operation : "unknown";
-      const error = e instanceof StoreError ? e.causeName : e instanceof Error ? e.name : "Unknown";
+      const { operation, error } = describeStoreFailure(e);
       logger.error("利用者の表に届かない", { status: 503, operation, error } satisfies LogFields);
       return json(503, { reason: STORE_UNAVAILABLE });
     }
