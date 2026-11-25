@@ -5,7 +5,7 @@ import { z } from "zod";
 
 // 資源の名前と利用者プールのドメインの頭に付くため、小文字の英数字とハイフンに限る。
 // 端のハイフンは名前の区切りと紛れるので許さない
-const PREFIX_SHAPE = /^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$/;
+export const PREFIX_SHAPE = /^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$/;
 // 利用者プールのドメインは aws で始められないため、設定の段階で止める
 const PREFIX_NOT_AWS = /^(?!aws)/;
 const ENVIRONMENT_SHAPE = /^[a-z0-9]{2,10}$/;

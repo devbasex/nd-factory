@@ -1,0 +1,176 @@
+import { pino, type Logger as PinoLogger, type LoggerOptions } from "pino";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { redact } from "./redact.ts";
+
+// 1 行の JSON を出すログの書き手。書き手は pino（画面では pino のブラウザー版）で、値の伏せ字は redact だけが持つ
+// （pino の鍵のパスの伏せ字は使わない。同じ規則を 2 か所に置かない）。画面でも動くよう node: の組み込みを読まない（決定 6）
+
+export type LogContext = {
+  request_id: string;
+  fn: string;
+  // 受け口（必須。画面は自分が呼ぶ受け口の名前を渡す）
+  endpoint: string;
+};
+
+export type LogFields = Record<string, unknown>;
+
+export type Logger = {
+  info(msg: string, fields?: LogFields): void;
+  warn(msg: string, fields?: LogFields): void;
+  error(msg: string, fields?: LogFields): void;
+  child(fields: LogFields): Logger;
+};
+
+const UNSERIALIZABLE = "[unserializable]";
+
+// JSON にできない値（bigint・関数・symbol）を替える。redact の写しは素の物と配列と日時と原始の値だけを持つ
+function jsonSafe(value: unknown): unknown {
+  if (typeof value === "bigint" || typeof value === "function" || typeof value === "symbol") return UNSERIALIZABLE;
+  if (value === null || typeof value !== "object" || value instanceof Date) return value;
+  if (Array.isArray(value)) return value.map(jsonSafe);
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, jsonSafe(item)]));
+}
+
+function loggable(value: unknown): Record<string, unknown> {
+  const safe = jsonSafe(redact(value));
+  return safe !== null && typeof safe === "object" && !Array.isArray(safe) ? (safe as Record<string, unknown>) : {};
+}
+
+function loggableText(text: unknown): unknown {
+  return typeof text === "string" ? redact(text) : text;
+}
+
+// ログの欠けは操作の結果を変えない。書き先の例外と JSON にできない値で呼び手を落とさない
+function quietly(write: () => void): void {
+  try {
+    write();
+  } catch {
+    // 捨てる（detail.md の異常系の「書けない」の行）
+  }
+}
+
+// 行の必須の項目。呼び手の項目と child の文脈はこの名前を上書きできない（Node の pino は同じ鍵を 2 度書き、ブラウザー版は後の値で替える）
+const RESERVED = new Set(["time", "level", "msg", "request_id", "fn", "endpoint"]);
+const RESERVED_PREFIX = "field.";
+
+// 伏せた項目の 1 つ。id は上書きを決める元の鍵の識別子、key は伏せた鍵、value は伏せた値
+type Entry = readonly [id: string, key: string, value: unknown];
+
+// 元の鍵から秘密の原文を残さずに同一性を判定する識別子を作る。ロガーごとに作る秘密の鍵で HMAC-SHA-256 を取り、
+// 識別子だけからは鍵の候補を照らせないようにする（固定の種のハッシュでは、URL の利用者名と宿が分かれば合言葉の候補を照らせる）。
+// 画面でも動くよう node:crypto を使わず、同期で要るため Web Crypto の subtle（非同期）も使わず、@noble/hashes の HMAC を使う。
+// 伏せない鍵は名前そのものを識別子にする（頭の "k:" と "h:" で 2 つを分ける）
+// ロガー（createLogger の 1 回）ごとの秘密の鍵。child は親の鍵を受け継ぎ、同じ鍵の上書きの判定を保つ
+function newKeyIdSecret(): Uint8Array {
+  return globalThis.crypto.getRandomValues(new Uint8Array(32));
+}
+
+const encoder = new TextEncoder();
+
+function keyId(secret: Uint8Array, original: string, safeKey: string): string {
+  if (safeKey === original) return `k:${original}`;
+  // UTF-8 にすると孤立サロゲートが U+FFFD にそろい別の鍵が同じ入力になるため、JSON.stringify で \uXXXX の形に保ってから符号にする
+  const digest = hmac(sha256, secret, encoder.encode(JSON.stringify(original)));
+  return `h:${Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+// 項目を伏せた組の並びにする。鍵の名前で伏せる値（token など）も伏せるよう、鍵と値の組で redact に通す。
+// 秘密の形の鍵は "[redacted]" になり、元の鍵は識別子でだけ残す（長く生きる child に原文を持たせない）
+function entries(secret: Uint8Array, fields: LogFields): Entry[] {
+  return Object.entries(fields).map(([key, value]) => {
+    const [safeKey, safe] = Object.entries(loggable({ [key]: value }))[0] ?? [key, undefined];
+    return [keyId(secret, key, safeKey), safeKey, safe] as const;
+  });
+}
+
+function put(out: LogFields, key: string, value: unknown): void {
+  Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
+function freeKey(out: LogFields, base: string): string {
+  let target = base;
+  for (let n = 2; Object.hasOwn(out, target); n += 1) target = `${base}#${n}`;
+  return target;
+}
+
+// child の文脈（先）と呼び出しの項目（後）を 1 つの物へ組む。pino の child の束ねは使わない
+// （Node の pino は束ねと項目の同じ鍵を 2 度書き、JSON を読むと先の値が消えるため）。
+// 上書きは元の鍵の識別子で決め（伏せた鍵では、別の鍵が同じ "[redacted]" に重なる）、必須でない名前は後の値が先の値に勝つ。
+// 残った伏せた鍵の重なりには "[redacted]#2" のように番号を付ける。必須の名前は "field." を頭に付けて残し、避け先が埋まっていれば
+// "field.time#2" のように番号を付ける（黙って落とさない）。避け先は呼び手の鍵を先に置いてから決める
+function reserved(layers: readonly (readonly Entry[])[]): LogFields {
+  const kept = new Map<string, readonly [string, unknown]>();
+  const moved: [string, unknown][] = [];
+  for (const layer of layers) {
+    for (const [id, key, value] of layer) {
+      if (RESERVED.has(key)) moved.push([key, value]);
+      else kept.set(id, [key, value]);
+    }
+  }
+  const out: LogFields = {};
+  for (const [key, value] of kept.values()) put(out, freeKey(out, key), value);
+  for (const [key, value] of moved) put(out, freeKey(out, `${RESERVED_PREFIX}${key}`), value);
+  return out;
+}
+
+function wrap(base: PinoLogger, secret: Uint8Array, bound: readonly (readonly Entry[])[]): Logger {
+  const line = (fields: LogFields | undefined): LogFields => reserved([...bound, entries(secret, fields ?? {})]);
+  return {
+    info: (msg, fields) => quietly(() => base.info(line(fields), msg)),
+    warn: (msg, fields) => quietly(() => base.warn(line(fields), msg)),
+    error: (msg, fields) => quietly(() => base.error(line(fields), msg)),
+    // 子の項目はこの時に鍵と値を伏せた写しを取って持つ。扱えない（読むと投げる getter など）ときは、親のロガーのまま続ける
+    child: (fields) => {
+      try {
+        return wrap(base, secret, [...bound, entries(secret, fields)]);
+      } catch {
+        return wrap(base, secret, bound);
+      }
+    },
+  };
+}
+
+function withoutNewline(line: string): string {
+  return line.endsWith("\n") ? line.slice(0, -1) : line;
+}
+
+type Level = "info" | "warn" | "error";
+
+// ブラウザーの既定の書き先。物でなく 1 行の JSON を、レベルに合う console の口へ渡す
+function consoleLine(line: string, level: unknown): void {
+  const out = globalThis.console;
+  if (level === "error") out.error(line);
+  else if (level === "warn") out.warn(line);
+  else out.info(line);
+}
+
+// sink を渡さなければ既定の書き先（Node では pino の標準出力、ブラウザーでは console へ JSON の 1 行）へ書く
+export function createLogger(context: LogContext, sink?: (line: string) => void): Logger {
+  const emit = (line: string, level?: Level): void => quietly(() => (sink === undefined ? consoleLine(line, level) : sink(line)));
+  const levelLabel = (label: string) => ({ level: label });
+  const options: LoggerOptions = {
+    base: null,
+    timestamp: pino.stdTimeFunctions.isoTime,
+    formatters: { level: levelLabel, bindings: loggable, log: loggable },
+    // Node の pino は err の鍵へ標準のエラーの直列化を掛け、redact が替えた {name, message} を type・stack 付きの形へ変える。
+    // ブラウザー版は掛けないため、ここで止めて両方の出力を redact の写しのままにそろえる
+    serializers: { err: (value: unknown) => value },
+    hooks: {
+      // 文も伏せる。項目は formatters.log、文脈は formatters.bindings が伏せる
+      logMethod(args, method) {
+        const [first, ...rest] = args;
+        method.apply(this, [first, ...rest.map(loggableText)] as Parameters<typeof method>);
+      },
+    },
+    // ブラウザー版は hooks と bindings の整形を持たない。文と文脈も入った 1 つの物を formatters.log で伏せる
+    // write は sink の有無に依らず置き、物でなく JSON の 1 行を書き先へ渡す
+    browser: {
+      asObject: true,
+      formatters: { level: levelLabel, log: loggable },
+      write: (record: object) => quietly(() => emit(JSON.stringify(record), (record as { level?: Level }).level)),
+    },
+  };
+  const root = sink === undefined ? pino(options) : pino(options, { write: (line: string) => emit(withoutNewline(line)) });
+  return wrap(root.child(loggable(context)), newKeyIdSecret(), []);
+}

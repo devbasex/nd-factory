@@ -1,0 +1,545 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "sessions.create.item": {
+      "not": {}
+    },
+    "sessions.create.result": {
+      "not": {}
+    },
+    "sessions.delete.item": {
+      "not": {}
+    },
+    "sessions.delete.result": {
+      "not": {}
+    },
+    "users.get.item": {
+      "not": {}
+    },
+    "users.get.result": {
+      "not": {}
+    },
+    "users.update.item": {
+      "not": {}
+    },
+    "users.update.result": {
+      "not": {}
+    },
+    "login_links.create.item": {
+      "not": {}
+    },
+    "login_links.create.result": {
+      "not": {}
+    },
+    "logins.create.item": {
+      "not": {}
+    },
+    "logins.create.result": {
+      "not": {}
+    },
+    "logins.delete.item": {
+      "not": {}
+    },
+    "logins.delete.result": {
+      "not": {}
+    },
+    "teams.list.item": {
+      "not": {}
+    },
+    "teams.list.result": {
+      "not": {}
+    },
+    "teams.get.item": {
+      "not": {}
+    },
+    "teams.get.result": {
+      "not": {}
+    },
+    "teams.create.item": {
+      "not": {}
+    },
+    "teams.create.result": {
+      "not": {}
+    },
+    "teams.update.item": {
+      "not": {}
+    },
+    "teams.update.result": {
+      "not": {}
+    },
+    "seats.list.item": {
+      "not": {}
+    },
+    "seats.list.result": {
+      "not": {}
+    },
+    "seats.update.item": {
+      "not": {}
+    },
+    "seats.update.result": {
+      "not": {}
+    },
+    "seats.delete.item": {
+      "not": {}
+    },
+    "seats.delete.result": {
+      "not": {}
+    },
+    "invitations.list.item": {
+      "not": {}
+    },
+    "invitations.list.result": {
+      "not": {}
+    },
+    "invitations.create.item": {
+      "not": {}
+    },
+    "invitations.create.result": {
+      "not": {}
+    },
+    "invitations.accept.item": {
+      "not": {}
+    },
+    "invitations.accept.result": {
+      "not": {}
+    },
+    "invitations.delete.item": {
+      "not": {}
+    },
+    "invitations.delete.result": {
+      "not": {}
+    },
+    "projects.list.item": {
+      "not": {}
+    },
+    "projects.list.result": {
+      "not": {}
+    },
+    "projects.get.item": {
+      "not": {}
+    },
+    "projects.get.result": {
+      "not": {}
+    },
+    "projects.create.item": {
+      "not": {}
+    },
+    "projects.create.result": {
+      "not": {}
+    },
+    "projects.update.item": {
+      "not": {}
+    },
+    "projects.update.result": {
+      "not": {}
+    },
+    "github_installations.list.item": {
+      "not": {}
+    },
+    "github_installations.list.result": {
+      "not": {}
+    },
+    "github_installations.link.item": {
+      "not": {}
+    },
+    "github_installations.link.result": {
+      "not": {}
+    },
+    "repositories.list.item": {
+      "not": {}
+    },
+    "repositories.list.result": {
+      "not": {}
+    },
+    "repositories.add.item": {
+      "not": {}
+    },
+    "repositories.add.result": {
+      "not": {}
+    },
+    "repositories.remove.item": {
+      "not": {}
+    },
+    "repositories.remove.result": {
+      "not": {}
+    },
+    "project_transfers.list.item": {
+      "not": {}
+    },
+    "project_transfers.list.result": {
+      "not": {}
+    },
+    "project_transfers.create.item": {
+      "not": {}
+    },
+    "project_transfers.create.result": {
+      "not": {}
+    },
+    "project_transfers.accept.item": {
+      "not": {}
+    },
+    "project_transfers.accept.result": {
+      "not": {}
+    },
+    "project_transfers.delete.item": {
+      "not": {}
+    },
+    "project_transfers.delete.result": {
+      "not": {}
+    },
+    "projects.close.item": {
+      "not": {}
+    },
+    "projects.close.result": {
+      "not": {}
+    },
+    "waiting_counts.get.item": {
+      "not": {}
+    },
+    "waiting_counts.get.result": {
+      "not": {}
+    },
+    "issue_candidates.list.item": {
+      "not": {}
+    },
+    "issue_candidates.list.result": {
+      "not": {}
+    },
+    "sprints.create.item": {
+      "not": {}
+    },
+    "sprints.create.result": {
+      "not": {}
+    },
+    "sprints.list.item": {
+      "not": {}
+    },
+    "sprints.list.result": {
+      "not": {}
+    },
+    "sprints.get.item": {
+      "not": {}
+    },
+    "sprints.get.result": {
+      "not": {}
+    },
+    "lanes.list.item": {
+      "not": {}
+    },
+    "lanes.list.result": {
+      "not": {}
+    },
+    "progress_events.list.item": {
+      "not": {}
+    },
+    "progress_events.list.result": {
+      "not": {}
+    },
+    "sprints.cancel.item": {
+      "not": {}
+    },
+    "sprints.cancel.result": {
+      "not": {}
+    },
+    "approvals.list.item": {
+      "not": {}
+    },
+    "approvals.list.result": {
+      "not": {}
+    },
+    "approvals.get.item": {
+      "not": {}
+    },
+    "approvals.get.result": {
+      "not": {}
+    },
+    "approvals.answer.item": {
+      "not": {}
+    },
+    "approvals.answer.result": {
+      "not": {}
+    },
+    "questions.list.item": {
+      "not": {}
+    },
+    "questions.list.result": {
+      "not": {}
+    },
+    "questions.get.item": {
+      "not": {}
+    },
+    "questions.get.result": {
+      "not": {}
+    },
+    "questions.answer.item": {
+      "not": {}
+    },
+    "questions.answer.result": {
+      "not": {}
+    },
+    "notices.list.item": {
+      "not": {}
+    },
+    "notices.list.result": {
+      "not": {}
+    },
+    "notices.mark_read.item": {
+      "not": {}
+    },
+    "notices.mark_read.result": {
+      "not": {}
+    },
+    "notification_targets.list.item": {
+      "not": {}
+    },
+    "notification_targets.list.result": {
+      "not": {}
+    },
+    "notification_targets.authorize.item": {
+      "not": {}
+    },
+    "notification_targets.authorize.result": {
+      "not": {}
+    },
+    "notification_targets.create.item": {
+      "not": {}
+    },
+    "notification_targets.create.result": {
+      "not": {}
+    },
+    "notification_targets.test.item": {
+      "not": {}
+    },
+    "notification_targets.test.result": {
+      "not": {}
+    },
+    "notification_targets.delete.item": {
+      "not": {}
+    },
+    "notification_targets.delete.result": {
+      "not": {}
+    },
+    "delegations.list.item": {
+      "not": {}
+    },
+    "delegations.list.result": {
+      "not": {}
+    },
+    "delegations.create.item": {
+      "not": {}
+    },
+    "delegations.create.result": {
+      "not": {}
+    },
+    "delegations.revoke.item": {
+      "not": {}
+    },
+    "delegations.revoke.result": {
+      "not": {}
+    },
+    "execution_settings.get.item": {
+      "not": {}
+    },
+    "execution_settings.get.result": {
+      "not": {}
+    },
+    "execution_settings.update.item": {
+      "not": {}
+    },
+    "execution_settings.update.result": {
+      "not": {}
+    },
+    "model_keys.list.item": {
+      "not": {}
+    },
+    "model_keys.list.result": {
+      "not": {}
+    },
+    "model_keys.create.item": {
+      "not": {}
+    },
+    "model_keys.create.result": {
+      "not": {}
+    },
+    "model_keys.delete.item": {
+      "not": {}
+    },
+    "model_keys.delete.result": {
+      "not": {}
+    },
+    "machines.list.item": {
+      "not": {}
+    },
+    "machines.list.result": {
+      "not": {}
+    },
+    "machines.create.item": {
+      "not": {}
+    },
+    "machines.create.result": {
+      "not": {}
+    },
+    "machines.delete.item": {
+      "not": {}
+    },
+    "machines.delete.result": {
+      "not": {}
+    },
+    "usage.get.item": {
+      "not": {}
+    },
+    "usage.get.result": {
+      "not": {}
+    },
+    "usage_records.list.item": {
+      "not": {}
+    },
+    "usage_records.list.result": {
+      "not": {}
+    },
+    "spend_caps.update.item": {
+      "not": {}
+    },
+    "spend_caps.update.result": {
+      "not": {}
+    },
+    "audit_records.list.item": {
+      "not": {}
+    },
+    "audit_records.list.result": {
+      "not": {}
+    },
+    "organizers.list.item": {
+      "not": {}
+    },
+    "organizers.list.result": {
+      "not": {}
+    },
+    "organizers.get.item": {
+      "not": {}
+    },
+    "organizers.get.result": {
+      "not": {}
+    },
+    "organizers.create.item": {
+      "not": {}
+    },
+    "organizers.create.result": {
+      "not": {}
+    },
+    "organizers.close.item": {
+      "not": {}
+    },
+    "organizers.close.result": {
+      "not": {}
+    },
+    "organizers.resume.item": {
+      "not": {}
+    },
+    "organizers.resume.result": {
+      "not": {}
+    },
+    "organizer_messages.list.item": {
+      "not": {}
+    },
+    "organizer_messages.list.result": {
+      "not": {}
+    },
+    "organizer_messages.create.item": {
+      "not": {}
+    },
+    "organizer_messages.create.result": {
+      "not": {}
+    },
+    "organizer_messages.withdraw.item": {
+      "not": {}
+    },
+    "organizer_messages.withdraw.result": {
+      "not": {}
+    },
+    "issue_requests.create.item": {
+      "not": {}
+    },
+    "issue_requests.create.result": {
+      "not": {}
+    },
+    "runner.exchanges.create.item": {
+      "not": {}
+    },
+    "runner.exchanges.create.result": {
+      "not": {}
+    },
+    "runner.events.create.item": {
+      "not": {}
+    },
+    "runner.events.create.result": {
+      "not": {}
+    },
+    "runner.heartbeats.create.item": {
+      "not": {}
+    },
+    "runner.heartbeats.create.result": {
+      "not": {}
+    },
+    "runner.state_urls.create.item": {
+      "not": {}
+    },
+    "runner.state_urls.create.result": {
+      "not": {}
+    },
+    "runner.answers.list.item": {
+      "not": {}
+    },
+    "runner.answers.list.result": {
+      "not": {}
+    },
+    "runner.answer_deliveries.create.item": {
+      "not": {}
+    },
+    "runner.answer_deliveries.create.result": {
+      "not": {}
+    },
+    "runner.organizer_inputs.list.item": {
+      "not": {}
+    },
+    "runner.organizer_inputs.list.result": {
+      "not": {}
+    },
+    "runner.organizer_replies.create.item": {
+      "not": {}
+    },
+    "runner.organizer_replies.create.result": {
+      "not": {}
+    },
+    "runner.organizer_receipts.create.item": {
+      "not": {}
+    },
+    "runner.organizer_receipts.create.result": {
+      "not": {}
+    },
+    "runner.organizer_transcripts.create.item": {
+      "not": {}
+    },
+    "runner.organizer_transcripts.create.result": {
+      "not": {}
+    },
+    "machine.heartbeats.create.item": {
+      "not": {}
+    },
+    "machine.heartbeats.create.result": {
+      "not": {}
+    },
+    "machine.lane_claims.create.item": {
+      "not": {}
+    },
+    "machine.lane_claims.create.result": {
+      "not": {}
+    },
+    "machine.organizer_wipes.create.item": {
+      "not": {}
+    },
+    "machine.organizer_wipes.create.result": {
+      "not": {}
+    }
+  }
+}

@@ -110,14 +110,13 @@ const NON_OPERATION_ROUTES: readonly NonOperationRoute[] = [
 
 /**
  * 照らすこと 8 の期限付きの除外（承認で足したこと 2）。表が空になったとき、照らすこと 8 は合成の経路と、登録の経路と操作でない受け口の経路を合わせた集まりの完全一致になる。
- * #2 の登録にある受け口（user・runner・machine・db_prep）はすべてここに持つ。表に無い受け口の経路は「登録にだけある経路」で落ちる
+ * #2 の登録にある受け口（user・runner・machine）はすべてここに持つ。表に無い受け口の経路は「登録にだけある経路」で落ちる
  */
 const ROUTE_EXCLUSIONS: readonly RouteExclusion[] = [
   { kind: "legacy", route: "PUT /v1/users", until: "#4", why: "骨組みの経路で、操作の表に無い（#2 の設計の「骨組みの経路」の行）" },
   { kind: "endpoint", endpoint: "user", until: "#4", why: "#2 は api-fn と ApiRoutes をスタックへ入れない（#2 の決定 11）" },
   { kind: "endpoint", endpoint: "runner", until: "#4", why: "#2 は api-fn と ApiRoutes をスタックへ入れない（#2 の決定 11）" },
   { kind: "endpoint", endpoint: "machine", until: "#4", why: "#2 は api-fn と ApiRoutes をスタックへ入れない（#2 の決定 11）" },
-  { kind: "endpoint", endpoint: "db_prep", until: "#13", why: "#13 が DB の用意を Lambda へ移し、2 本を操作の表から消す" },
   { kind: "receiver", receiver: "mcp", until: "#4", why: "#2 は api-fn と ApiRoutes をスタックへ入れない（#2 の決定 11）。#4 が api-fn を反映し、F1〜F3 の MCP の道具を出す" },
   { kind: "receiver", receiver: "github", until: "#4", why: "#2 は api-fn と ApiRoutes をスタックへ入れない（#2 の決定 11）" },
 ];
@@ -613,7 +612,7 @@ function operationViews(input: ContractsInput): { views: OperationView[]; issues
   return { views, issues };
 }
 
-const ENDPOINTS = new Set(["user", "runner", "machine", "db_prep"]);
+const ENDPOINTS = new Set(["user", "runner", "machine"]);
 const HUMAN_ONLY = new Set(["always", "per_item", "never"]);
 
 /** 読み込んだ操作の表の形を照らす。形が違えば止める（#2 の `OperationDef` の項目が変わったら写しを直す） */
@@ -941,14 +940,12 @@ function entry(endpoint: string, path: string): RouteEntry {
   return { method: "POST", path, operation: path.replace(/^\/v1\//, "").replaceAll("/", "."), endpoint };
 }
 
-/** #2 の登録の形の作り物。4 つの受け口がそろい、合成には骨組みの旧経路だけがある */
+/** #2 の登録の形の作り物。3 つの受け口がそろい、合成には骨組みの旧経路だけがある */
 const FAKE_REGISTRY: readonly RouteEntry[] = [
   entry("user", "/v1/teams/list"),
   entry("user", "/v1/teams/update"),
   entry("runner", "/v1/runner/jobs/list"),
   entry("machine", "/v1/machine/tokens/create"),
-  entry("db_prep", "/v1/db_prep/exchanges/create"),
-  entry("db_prep", "/v1/db_prep/completions/create"),
 ];
 
 function find(ops: readonly OperationView[], name: string): OperationView {
@@ -1449,9 +1446,9 @@ describe("照らすこと 8: 合成した経路が、除外を引いて経路の
   });
 
   it("除外の受け口が登録に無いと、除外の行が要らないと 1 件", () => {
-    const registry = FAKE_REGISTRY.filter((r) => r.endpoint !== "db_prep");
+    const registry = FAKE_REGISTRY.filter((r) => r.endpoint !== "machine");
     expect(synthRouteIssues(synth, registry, ROUTE_EXCLUSIONS)).toEqual([
-      "除外の行が要らない（#13 が終えた。行を消す）: 受け口 db_prep の経路が登録に無い",
+      "除外の行が要らない（#4 が終えた。行を消す）: 受け口 machine の経路が登録に無い",
     ]);
   });
 

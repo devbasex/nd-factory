@@ -1,10 +1,27 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { GenerateError, generateArtifacts } from "../scripts/generate.ts";
+import { z } from "zod";
+import { DUMMY_DIR, GENERATED_DIR, GenerateError, generateArtifacts, generateArtifactsFor } from "../scripts/generate.ts";
+import { idOf } from "../src/ids.ts";
+import { defineOperation, okItem } from "../src/operation.ts";
+import { OPERATIONS } from "../src/operations/index.ts";
+import { money } from "../src/values.ts";
+import { FIXTURE_OPERATIONS } from "./fixtures/operations.ts";
 
 const OUTPUTS = ["packages/contracts/schema/settings.schema.json", "infra/settings.example.json", "docs/operations/setup.md"];
+// 操作の表からの生成物。今の操作はどれも形の未定のため、ダミーは index.json だけ
+const GENERATED = [
+  `${GENERATED_DIR}/operations.schema.json`,
+  `${GENERATED_DIR}/openapi.json`,
+  `${GENERATED_DIR}/mcp-tools.json`,
+  `${GENERATED_DIR}/routes.json`,
+  `${GENERATED_DIR}/reasons.json`,
+  `${GENERATED_DIR}/pending.json`,
+  `${DUMMY_DIR}/index.json`,
+];
+const FIXTURE_DUMMIES = FIXTURE_OPERATIONS.map((op) => `${DUMMY_DIR}/${op.name}.json`);
 
 let root: string;
 
@@ -22,9 +39,9 @@ describe("generateArtifacts", () => {
     expect(await generateArtifacts(root, "check")).toEqual([]);
   });
 
-  it("何も無い所の check は 3 つのパスを返し、書かない", async () => {
-    expect(await generateArtifacts(root, "check")).toEqual(OUTPUTS);
-    expect(await generateArtifacts(root, "check")).toEqual(OUTPUTS);
+  it("何も無い所の check はすべての生成物のパスを返し、書かない", async () => {
+    expect(await generateArtifacts(root, "check")).toEqual([...OUTPUTS, ...GENERATED]);
+    expect(await generateArtifacts(root, "check")).toEqual([...OUTPUTS, ...GENERATED]);
   });
 
   it("生成物を書き換えると、そのパスだけを返す", async () => {
@@ -68,7 +85,57 @@ describe("generateArtifacts", () => {
       mkdirSync(join(root, p, ".."), { recursive: true });
       cpSync(join(repo, p), join(root, p));
     }
+    cpSync(join(repo, GENERATED_DIR), join(root, GENERATED_DIR), { recursive: true });
     expect(await generateArtifacts(root, "check")).toEqual([]);
+  });
+
+  it("操作の定義を変えて generate を打たずに check を打つと、差のある生成物を返す", async () => {
+    await generateArtifacts(root, "write");
+    const differ = await generateArtifactsFor(root, "check", [...OPERATIONS, ...FIXTURE_OPERATIONS]);
+    expect(differ).toEqual(expect.arrayContaining([`${GENERATED_DIR}/operations.schema.json`, `${GENERATED_DIR}/routes.json`, ...FIXTURE_DUMMIES]));
+    expect(differ).not.toContain(OUTPUTS[0]);
+  });
+
+  it("形のある操作はダミーのファイルを持ち、消えた操作のダミーは check で差になり write で消える", async () => {
+    await generateArtifactsFor(root, "write", [...OPERATIONS, ...FIXTURE_OPERATIONS]);
+    for (const p of FIXTURE_DUMMIES) expect(existsSync(join(root, p))).toBe(true);
+    const index = JSON.parse(readFileSync(join(root, DUMMY_DIR, "index.json"), "utf8")) as Record<string, string | null>;
+    expect(index["fixture_notes.list"]).toBe("fixture_notes.list.json");
+    expect(index["projects.get"]).toBeNull();
+    expect(await generateArtifactsFor(root, "check", OPERATIONS)).toEqual(expect.arrayContaining(FIXTURE_DUMMIES));
+    await generateArtifacts(root, "write");
+    for (const p of FIXTURE_DUMMIES) expect(existsSync(join(root, p))).toBe(false);
+    expect(await generateArtifacts(root, "check")).toEqual([]);
+  });
+
+  it("古いダミーの掃除は生成したダミー JSON だけを消し、サブディレクトリと .json でないファイルを残す", async () => {
+    await generateArtifacts(root, "write");
+    const dir = join(root, DUMMY_DIR);
+    mkdirSync(join(dir, "notes"), { recursive: true });
+    writeFileSync(join(dir, "notes", "keep.json"), "{}\n");
+    writeFileSync(join(dir, "README.md"), "メモ\n");
+    writeFileSync(join(dir, "gone.json"), "{}\n");
+    expect(await generateArtifacts(root, "check")).toEqual([`${DUMMY_DIR}/gone.json`]);
+    await generateArtifacts(root, "write");
+    expect(existsSync(join(dir, "gone.json"))).toBe(false);
+    expect(existsSync(join(dir, "notes", "keep.json"))).toBe(true);
+    expect(existsSync(join(dir, "README.md"))).toBe(true);
+  });
+
+  it("見本の誤り（通貨の無い金額）で書かずに投げる", async () => {
+    const bad = defineOperation({
+      name: "fixture_bills.update",
+      features: ["F1"],
+      access: "write",
+      delegationKind: "manage",
+      item: z.strictObject({ bill_id: idOf("prj") }),
+      result: okItem(z.strictObject({ budget: money })),
+      examples: { normal: [{ ok: true, item: { budget: { amount_minor: 1 } } }] },
+      owner: "#2",
+    });
+    await expect(generateArtifactsFor(root, "write", [...OPERATIONS, bad])).rejects.toBeInstanceOf(GenerateError);
+    expect(existsSync(join(root, GENERATED_DIR))).toBe(false);
+    expect(existsSync(join(root, OUTPUTS[0]!))).toBe(false);
   });
 
   it("見本は JSON Schema の必須のキーを持ち、client_id を持たない", async () => {

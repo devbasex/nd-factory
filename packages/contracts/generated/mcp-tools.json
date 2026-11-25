@@ -1,0 +1,1262 @@
+[
+  {
+    "name": "users.get",
+    "description": "get users",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "users.update",
+    "description": "update users",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "teams.list",
+    "description": "list teams",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "teams.get",
+    "description": "get teams",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "teams.update",
+    "description": "update teams",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "seats.list",
+    "description": "list seats",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "invitations.list",
+    "description": "list invitations",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "projects.list",
+    "description": "list projects",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "projects.get",
+    "description": "get projects",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "projects.update",
+    "description": "update projects",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "github_installations.list",
+    "description": "list github_installations",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "repositories.list",
+    "description": "list repositories",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "repositories.add",
+    "description": "add repositories",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 24
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": true,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "repositories.remove",
+    "description": "remove repositories",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": false,
+      "destructiveHint": true
+    }
+  },
+  {
+    "name": "project_transfers.list",
+    "description": "list project_transfers",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "waiting_counts.get",
+    "description": "get waiting_counts",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "issue_candidates.list",
+    "description": "list issue_candidates",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "sprints.create",
+    "description": "create sprints",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": true,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "sprints.list",
+    "description": "list sprints",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "sprints.get",
+    "description": "get sprints",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "lanes.list",
+    "description": "list lanes",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "progress_events.list",
+    "description": "list progress_events",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "sprints.cancel",
+    "description": "cancel sprints",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": true,
+      "destructiveHint": true
+    }
+  },
+  {
+    "name": "approvals.list",
+    "description": "list approvals",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "approvals.get",
+    "description": "get approvals",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "questions.list",
+    "description": "list questions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "questions.get",
+    "description": "get questions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "questions.answer",
+    "description": "answer questions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": true,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "notices.list",
+    "description": "list notices",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "notices.mark_read",
+    "description": "mark_read notices",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "notification_targets.list",
+    "description": "list notification_targets",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "notification_targets.test",
+    "description": "test notification_targets",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": true,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "delegations.list",
+    "description": "list delegations",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "execution_settings.get",
+    "description": "get execution_settings",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "model_keys.list",
+    "description": "list model_keys",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "machines.list",
+    "description": "list machines",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "usage.get",
+    "description": "get usage",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "usage_records.list",
+    "description": "list usage_records",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "audit_records.list",
+    "description": "list audit_records",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "organizers.list",
+    "description": "list organizers",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "organizers.get",
+    "description": "get organizers",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "organizer_messages.list",
+    "description": "list organizer_messages",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "organizer_messages.create",
+    "description": "create organizer_messages",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": true,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "organizer_messages.withdraw",
+    "description": "withdraw organizer_messages",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "issue_requests.create",
+    "description": "create issue_requests",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": true,
+      "destructiveHint": false
+    }
+  }
+]
