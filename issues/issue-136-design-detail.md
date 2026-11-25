@@ -45,7 +45,6 @@ tools/
       ndf-files.json
 docs/design/execution.md
 docs/specifications/contracts-and-core.md
-docs/operations/pipeline-approval.md
 ```
 
 依存の向きは一方向で、循環は無い。
@@ -76,7 +75,7 @@ docs/operations/pipeline-approval.md
 | `tools/test/fixtures/ndf-contract-8d22be7/*.json` | 新設 | 新しい固定の点の `entrypoints.json`（15 行の `id`・`kind`・`target`・`lead`・`args`・`env`・`files`）・`env.json`（`id`・`set_by`）・`ndf-files.json`（`id`・`path`・`reader`・`fields`）の写し | — | — | — |
 | `docs/design/execution.md` | 変更 | 決定 104・「契約のバージョンの照合し」・「NDF 11 の名前」の行の値を新しい固定の点にする | — | — | — |
 | `docs/specifications/contracts-and-core.md` | 変更 | 受ける組の値をバージョン 16 にし、使い方の書き出しを足す | — | — | — |
-| `docs/operations/pipeline-approval.md` | 変更 | skip の行で承認してよいとする注記を消す | — | — | — |
+| `docs/operations/pipeline-approval.md` | 変えない | 変えない。2026-11-25 に反映のパイプラインから承認の段を外し（[#164](https://github.com/devbasex/nd-factory/issues/164)）、承認の手順はその前の記録として残すため、今の照合の振る舞いを書き足さない | — | — | — |
 
 フィクスチャには、説明の文の列（`summary`・`source` など）を写さない。参照の検査が探す語を持ち込まないためである。
 
@@ -169,6 +168,7 @@ docs/operations/pipeline-approval.md
 | --- | --- | --- | --- | --- |
 | `judgeCallWith` | `packages/contracts/src/ndf-contract-use.ts` | 新設 | `(rows: readonly NdfEntrypointRow[], files: readonly { id: string; path: string }[], skillPrefix: string, call: { entrypoint: string; call: string; env: readonly string[] }) => boolean` | 決定 5 の表の規則で、使うインタフェースへの呼び出しが契約に合うかを判定する |
 | `filePathPattern` | 同上 | 新設 | `(path: string) => RegExp` | 読むファイルの `path`（`<名前>` を含む）を、呼び出しの相対パスに全体で一致させる正規表現にする |
+| `isContainedRelativePath` | 同上（書き出さない） | 新設 | `(path: string) => boolean` | `file` と `spec` の呼び出しが、許したディレクトリの外を指さない相対パスかを確かめる（下のパスの境界） |
 
 `NdfContractUse.judgeCall` は、`buildContractUse` が `judgeCallWith` に生成の行・`files`・`skillPrefix` を渡して作る。
 
@@ -193,9 +193,11 @@ docs/operations/pipeline-approval.md
 | `kind` が `skill`・`report`・`command` | `call.call` の全体が、`args` のどれか 1 つに `^(?:…)$` で一致すれば真。`args` が無ければ偽 |
 | `kind` が `block` | (1) `lead` があり、`call.call` がそれで始まれば取り除く。(2) 残りが `/` + `skillPrefix` + `target` + 空白 1 つで始まらなければ偽。始まれば取り除く。(3) 残りの全体が `args` のどれか 1 つに `^(?:…)$` で一致すれば真 |
 | `kind` が `hook` | `call.call` が `target` と同じなら真 |
-| `kind` が `file` | 行の `files` の id で `files` を引き、どれか 1 つの `path` から作った `filePathPattern` に `call.call` が一致すれば真 |
-| `kind` が `spec` | `call.call` が `target` + `/` で始まり、その後ろに 1 文字以上あれば真 |
+| `kind` が `file` | `call.call` がパスの境界（下）を守らなければ偽。守れば、行の `files` の id で `files` を引き、どれか 1 つの `path` から作った `filePathPattern` に `call.call` が一致すれば真 |
+| `kind` が `spec` | `call.call` が `target` + `/` で始まり、その後ろの残りが `.` でなく、パスの境界（下）を守れば真 |
 | ほかの `kind` | 偽 |
+
+パスの境界は、関数 `isContainedRelativePath` が確かめる。文字列が `/` で始まらず、`\` と制御文字を含まず、`/` で区切った各成分が空・`.`・`..` のどれでもなければ真である。文字列の全体が `.` のときも真にする（`file` の `path` が `.` の読むファイルのため）。この関数はパスの文字列だけを検査し、ファイルシステムを読まないので、シンボリックリンクの先は確かめない。リンクを解決した実際のファイルが許可ディレクトリ内にあることは、ランナーが読み取り時に確かめる（設計書の決定 5 の「パスの境界」）。
 
 `filePathPattern` の規則は次のとおりである。
 
@@ -220,7 +222,7 @@ docs/operations/pipeline-approval.md
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `judgeCallWith` | 新しい固定の点のサンプルのうち、使うインタフェースへの 21 件で、判定が `valid` と同じ | `block-next` の `resume`（`/goal ` が無い）と `resume-loop`（ある）がどちらも真。`spec-io-args` が真で `spec-outside` が偽。`plan-progress` が真。`loop-bad-budget`・`unknown-flag` が偽（全体の一致）。`terminal-env` が偽（`env` の外の名前） | 使わないインタフェース（`file-loop-record` など）の呼び出しが偽。読めない正規表現を持つ行で偽 |
+| `judgeCallWith` | 新しい固定の点のサンプルのうち、使うインタフェースへの 21 件で、判定が `valid` と同じ | `block-next` の `resume`（`/goal ` が無い）と `resume-loop`（ある）がどちらも真。`spec-io-args` が真で `spec-outside` が偽。`spec-io` の `target` の後ろに `..`・`.`・空の成分を含む呼び出しと、`file-plan-progress` の `<sprint>` に `..` を入れた呼び出しが偽。`plan-progress` が真。`loop-bad-budget`・`unknown-flag` が偽（全体の一致）。`terminal-env` が偽（`env` の外の名前） | 使わないインタフェース（`file-loop-record` など）の呼び出しが偽。読めない正規表現を持つ行で偽 |
 | `filePathPattern` | `<sprint>/<n>-<plan>-state/progress.jsonl` が `s1/8-release-request-state/progress.jsonl` に一致する | `.` が `.` だけに一致し、`a` に一致しない。`<名前>` が `/` を含む文字列に一致しない | `path` の中の `.` などの特殊文字が、任意の文字に一致しない |
 
 ## 区間の報告の読み取り

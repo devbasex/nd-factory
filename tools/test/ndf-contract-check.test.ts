@@ -8,7 +8,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CONTRACT_DIR,
   ContractFetchError,
+  ContractUseSyncError,
+  GENERATED_PATH,
   PIN_KEY,
+  USE_DATA_PATH,
+  generateContractUse,
+  mainNdfContractSync,
   compareContract,
   contractNotices,
   contractUseLoaderFrom,
@@ -19,6 +24,8 @@ import {
   reportShapeDiff,
 } from "../checks/src/ndf-contract-check.ts";
 import type { ContractFiles, ContractFinding, NdfContractUse } from "../checks/src/ndf-contract-check.ts";
+import { ndfContractUse } from "@nd-factory/contracts/ndf-contract-use";
+import type { NdfEntrypointRow, ReportError, ReportReading } from "@nd-factory/contracts/ndf-contract-use-schema";
 
 // 版を読む語は、このファイル自身が参照の検査の版の比べに当たらないよう組み立てる
 const READ_WORD = ["NDF", "VERSION"].join("_");
@@ -42,11 +49,12 @@ function fakeContract(): Record<string, Json> {
         {
           id: "skill-workflow",
           kind: "skill",
+          target: "development-workflow",
           args: ["#[1-9][0-9]*"],
           env: ["NDF_FACTORY_RUN", READ_WORD, "NDF_PROGRESS_DB", "GH_TOKEN"],
         },
-        { id: "report-unattended", kind: "report", args: ["判断が要る", "完了", "できなかった"], env: ["NDF_FACTORY_RUN"] },
-        { id: "file-journals", kind: "file", env: ["NDF_MVV_STATE_DIR"], files: ["ask-journal"] },
+        { id: "report-unattended", kind: "report", target: "結果", args: ["判断が要る", "完了", "できなかった"], env: ["NDF_FACTORY_RUN"] },
+        { id: "file-journals", kind: "file", target: "mvv-state", env: ["NDF_MVV_STATE_DIR"], files: ["ask-journal"] },
       ],
     },
     "domains/entrypoint-cases.json": {
@@ -68,9 +76,9 @@ function fakeContract(): Record<string, Json> {
     },
     "domains/ndf-files.json": {
       rows: [
-        { id: "plan-progress", reader: "service", fields: ["step", "attention"] },
-        { id: "ask-journal", reader: "service" },
-        { id: "loop-record", reader: "service" },
+        { id: "plan-progress", path: "<sprint>/<n>-<plan>-state/progress.jsonl", reader: "service", fields: ["step", "attention"] },
+        { id: "ask-journal", path: "ask.jsonl", reader: "service" },
+        { id: "loop-record", path: "<loop>/loop.json", reader: "service" },
       ],
     },
     "hooks/unattended-report.json": {
@@ -106,30 +114,47 @@ const JUDGE_TABLE: Record<string, { args: RegExp[]; env: string[] }> = {
 };
 const REPORT_VALUES = ["判断が要る", "完了", "できなかった"];
 
+/** 作り物の固定の点（`asFiles` の既定のコミット） */
+const FAKE_PIN = "c".repeat(40);
+
+/** 読み取りの誤りの作り物 */
+const ERR = { code: "item_missing", item: "理由" } as const;
+
+/** 作り物の読み取りの戻り値 */
+function reading(result: string, errors: readonly ReportError[] = []): ReportReading {
+  return { result, errors, items: {}, material: { kind: "none" } };
+}
+
+/** 契約の `entrypoints.json` から、使い方が持つ列（id と 6 つの列）で行を写す */
+function rowsFrom(contract: Record<string, Json>, ids: readonly string[]): NdfEntrypointRow[] {
+  return ids.map((id) => {
+    const row = rowById(contract, "domains/entrypoints.json", id);
+    const pick = Object.fromEntries(["id", "kind", "target", "lead", "args", "env", "files"].filter((k) => k in row).map((k) => [k, row[k]]));
+    return pick as NdfEntrypointRow;
+  });
+}
+
 /** 作り物の NDF の契約の使い方。`fakeContract` と照らして食い違いが無い */
 function fakeUse(): NdfContractUse {
+  const shape = reportShape(fakeContract());
   return {
     acceptedVersions: [{ version: 2, sha256: SHA_NEW }],
-    entrypoints: ["skill-workflow", "report-unattended", "file-journals"],
+    pinnedCommit: FAKE_PIN,
+    skillPrefix: "ndf:",
+    entrypoints: rowsFrom(fakeContract(), ["skill-workflow", "report-unattended", "file-journals"]),
     env: [
       { entrypoint: "skill-workflow", site: "hosted", names: ["NDF_FACTORY_RUN", READ_WORD, "NDF_PROGRESS_DB", "GH_TOKEN"] },
       { entrypoint: "skill-workflow", site: "local", names: ["NDF_FACTORY_RUN", READ_WORD, "GH_TOKEN"] },
     ],
     envSetBy: { GH_TOKEN: "user" },
     files: [
-      { id: "plan-progress", fields: ["step", "attention"] },
-      { id: "ask-journal", fields: [] },
+      { id: "plan-progress", path: "<sprint>/<n>-<plan>-state/progress.jsonl", fields: ["step", "attention"] },
+      { id: "ask-journal", path: "ask.jsonl", fields: [] },
     ],
+    reportItems: ["結果", "質問", "材料", "理由"],
     report: {
-      values: REPORT_VALUES,
-      items: ["結果", "質問", "材料", "理由"],
-      required: {
-        判断が要る: {
-          always: ["質問", "材料"],
-          when: [{ item: "承認ゲート", equals: "設計 Pull Request のマージ", need: ["Pull Request"] }],
-        },
-        できなかった: { always: ["理由"], when: [] },
-      },
+      values: Object.keys(shape.values),
+      required: shape.required,
       material: { item: "材料", body: "本文", heading: "## 判断の材料", url_prefix: "https://" },
     },
     judgeCall: ({ entrypoint, call, env }) => {
@@ -140,11 +165,16 @@ function fakeUse(): NdfContractUse {
     readReport: (text) => {
       const lines = text.split("\n").filter((line) => line.startsWith("- 結果:"));
       const last = lines.at(-1);
-      if (last === undefined) return { result: "", errors: ["結果の行が無い"] };
+      if (last === undefined) return reading("", [{ code: "result_line_missing", item: "結果" }]);
       const result = last.slice("- 結果:".length).trim();
-      return { result, errors: REPORT_VALUES.includes(result) ? [] : [`結果の値が違う: ${result}`] };
+      return reading(result, REPORT_VALUES.includes(result) ? [] : [{ code: "result_value_unknown", item: "結果" }]);
     },
   };
+}
+
+/** 照らすこと 1〜6 を作り物の固定の点で照らす */
+function compare(files: ContractFiles, use: NdfContractUse): ContractFinding[] {
+  return compareContract(files, use, FAKE_PIN);
 }
 
 function asFiles(json: Record<string, Json>, commit = "c".repeat(40)): ContractFiles {
@@ -161,7 +191,7 @@ function rowById(contract: Record<string, Json>, path: string, id: string): Json
   return row;
 }
 
-type WhenRule = Json & { need: string[] };
+type WhenRule = Json & { item: string; need: string[] };
 type Shape = { items: string[]; values: Json; required: Record<string, { always: string[]; when: WhenRule[] }> };
 
 function reportShape(contract: Record<string, Json>): Shape {
@@ -169,13 +199,37 @@ function reportShape(contract: Record<string, Json>): Shape {
 }
 
 /**
- * 固定の点（752a9cf）の `env.json` と `entrypoints.json` から、ランナーが渡す名前の行と `skill-workflow` の口の行だけを
- * 必要な列で写したもの（説明の文の列は写さない。参照の検査に当たる語を持ち込まないため）
+ * 固定の点（8d22be7）の `entrypoints.json`・`env.json`・`ndf-files.json` を必要な列で写したもの
+ * （説明の文の列は写さない。参照の検査に当たる語を持ち込まないため）
  */
-const PINNED_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ndf-contract-752a9cf");
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const PINNED_DIR = join(REPO_ROOT, "tools", "test", "fixtures", "ndf-contract-8d22be7");
+/** 同じ固定の点のサンプルと区間の報告の写し（スキーマの正本の単体テストと共有する） */
+const PINNED_CONTRACTS_DIR = join(REPO_ROOT, "packages", "contracts", "test", "fixtures", "ndf-contract-8d22be7");
+const readJson = (path: string) => JSON.parse(readFileSync(path, "utf8")) as Json;
+const readPinned = (name: string) => readJson(join(PINNED_DIR, `${name}.json`)) as Rows;
+/** 作業の木の固定の点（ndf-pin.json） */
+const PINNED_COMMIT = String(readJson(join(REPO_ROOT, "ndf-pin.json"))[PIN_KEY]);
+
+/** 固定の点の契約のうち、照合と生成が読む 6 つのファイルを写しから組み立てる */
+function fullPinnedContract(): Record<string, Json> {
+  return {
+    "version.json": { history: [{ version: 16, sha256: "c50ef840a72ab71a15023a46a37d050c36ec3aae6d1be6092b7f9dc7f3c0a726" }] },
+    "domains/entrypoints.json": readPinned("entrypoints"),
+    "domains/env.json": readPinned("env"),
+    "domains/ndf-files.json": readPinned("ndf-files"),
+    "domains/entrypoint-cases.json": readJson(join(PINNED_CONTRACTS_DIR, "entrypoint-cases.json")),
+    "hooks/unattended-report.json": readJson(join(PINNED_CONTRACTS_DIR, "unattended-report.json")),
+  };
+}
+
+/** 作業の木の手で書くデータと生成のデータ */
+const USE_DATA = readJson(join(REPO_ROOT, USE_DATA_PATH)) as { entrypoints: string[] } & Json;
+const GENERATED = readJson(join(REPO_ROOT, GENERATED_PATH));
+
 function pinnedContract(): Record<string, Json> {
   const contract = fakeContract();
-  const read = (name: string) => JSON.parse(readFileSync(join(PINNED_DIR, `${name}.json`), "utf8")) as Rows;
+  const read = readPinned;
   contract["domains/env.json"] = read("env");
   // 口の表は作り物の行（見本と使い方が指す口）を保ち、skill-workflow の行だけを固定の点の行に替える
   const pinned = read("entrypoints").rows;
@@ -201,6 +255,7 @@ const RUNNER_HOSTED_NAMES = [...RUNNER_LOCAL_NAMES, "NDF_PROGRESS_DB"];
 function pinnedUse(envSetBy: Record<string, string> = { GH_TOKEN: "user", NDF_STATE_HOME: "user" }): NdfContractUse {
   return {
     ...fakeUse(),
+    entrypoints: rowsFrom(pinnedContract(), ["skill-workflow", "report-unattended", "file-journals"]),
     env: [
       { entrypoint: "skill-workflow", site: "hosted", names: RUNNER_HOSTED_NAMES },
       { entrypoint: "skill-workflow", site: "local", names: RUNNER_LOCAL_NAMES },
@@ -291,20 +346,14 @@ function checksOf(findings: ContractFinding[]): number[] {
 
 describe("compareContract", () => {
   it("作り物の契約と使い方で食い違いが 0 件", () => {
-    expect(compareContract(asFiles(fakeContract()), fakeUse())).toEqual([]);
+    expect(compare(asFiles(fakeContract()), fakeUse())).toEqual([]);
     expect(contractNotices(asFiles(fakeContract()))).toEqual([]);
-  });
-
-  it("使い方が null なら照らさない（壊した契約でも食い違いを出さない）", () => {
-    const contract = fakeContract();
-    (contract["version.json"] as { history: Json[] }).history = [];
-    expect(compareContract(asFiles(contract), null)).toEqual([]);
   });
 
   it("ask-journal が fields を持つと知らせの行を出し、食い違いにしない", () => {
     const contract = fakeContract();
     rowById(contract, "domains/ndf-files.json", "ask-journal").fields = ["id", "question"];
-    expect(compareContract(asFiles(contract), fakeUse())).toEqual([]);
+    expect(compare(asFiles(contract), fakeUse())).toEqual([]);
     const notes = contractNotices(asFiles(contract));
     expect(notes).toHaveLength(1);
     expect(notes[0]).toContain("ask-journal");
@@ -314,7 +363,7 @@ describe("compareContract", () => {
   it("1: 見本の valid を判定と逆にすると、見本の id つきで 1 の食い違い", () => {
     const contract = fakeContract();
     rowById(contract, "domains/entrypoint-cases.json", "unknown-flag").valid = true;
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([1]);
     expect(findings[0]).toMatchObject({ check: 1, id: "unknown-flag", path: `${CONTRACT_DIR}/domains/entrypoint-cases.json` });
   });
@@ -322,7 +371,7 @@ describe("compareContract", () => {
   it("1: 見本が口の表に無い口を指すと 1 の食い違い", () => {
     const contract = fakeContract();
     rowById(contract, "domains/entrypoint-cases.json", "new").entrypoint = "skill-gone";
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([1]);
     expect(findings.map((f) => f.id)).toContain("new");
   });
@@ -330,42 +379,45 @@ describe("compareContract", () => {
   it("2: version.json の最後の行の sha256 が受ける組に無いと 2 の食い違い", () => {
     const contract = fakeContract();
     (contract["version.json"] as { history: Json[] }).history.push({ version: 3, sha256: "d".repeat(64) });
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([2]);
     expect(findings[0]?.path).toBe(`${CONTRACT_DIR}/version.json`);
   });
 
-  it("3: 口の env 列から渡す名前を消すと 3 の食い違い", () => {
+  it("3: 口の env 列から渡す名前を消すと 3 の食い違い（生成した行の env 列とも違うので 6 も）", () => {
     const contract = fakeContract();
     const row = rowById(contract, "domains/entrypoints.json", "skill-workflow");
     row.env = (row.env as string[]).filter((name) => name !== "GH_TOKEN");
-    const findings = compareContract(asFiles(contract), fakeUse());
-    expect(checksOf(findings)).toEqual([3]);
-    expect(findings.map((f) => f.id)).toEqual(["skill-workflow/hosted", "skill-workflow/local"]);
+    const findings = compare(asFiles(contract), fakeUse());
+    expect(checksOf(findings)).toEqual([3, 6]);
+    expect(findings.filter((f) => f.check === 3).map((f) => f.id)).toEqual(["skill-workflow/hosted", "skill-workflow/local"]);
+    expect(findings.filter((f) => f.check === 6)).toEqual([
+      { check: 6, path: `${CONTRACT_DIR}/domains/entrypoints.json`, id: "skill-workflow", detail: "env が契約と違う" },
+    ]);
   });
 
   it("3: env.json から渡す名前の行を消すと 3 の食い違い", () => {
     const contract = fakeContract();
     const env = contract["domains/env.json"] as Rows;
     env.rows = env.rows.filter((r) => r.id !== "NDF_PROGRESS_DB");
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([3]);
     expect(findings.map((f) => f.id)).toEqual(["skill-workflow/hosted"]);
   });
 
   it("3: 固定の点の env.json と口の表で、実行の設計どおりのホステッド・手元のマシンの名前が通る（GH_TOKEN・NDF_STATE_HOME は envSetBy の user）", () => {
-    expect(compareContract(asFiles(pinnedContract()), pinnedUse())).toEqual([]);
+    expect(compare(asFiles(pinnedContract()), pinnedUse())).toEqual([]);
   });
 
   it("3: 固定の点のデータで、GH_TOKEN を envSetBy に載せないと 3 の食い違い", () => {
-    const findings = compareContract(asFiles(pinnedContract()), pinnedUse({ NDF_STATE_HOME: "user" }));
+    const findings = compare(asFiles(pinnedContract()), pinnedUse({ NDF_STATE_HOME: "user" }));
     expect(checksOf(findings)).toEqual([3]);
     expect(findings.map((f) => f.id)).toEqual(["skill-workflow/hosted", "skill-workflow/local"]);
     expect(findings[0]?.detail).toContain("GH_TOKEN（set_by: user）");
   });
 
   it("3: 固定の点のデータで、NDF_STATE_HOME を envSetBy に載せないと 3 の食い違い", () => {
-    const findings = compareContract(asFiles(pinnedContract()), pinnedUse({ GH_TOKEN: "user" }));
+    const findings = compare(asFiles(pinnedContract()), pinnedUse({ GH_TOKEN: "user" }));
     expect(checksOf(findings)).toEqual([3]);
     expect(findings).toHaveLength(2);
     expect(findings[0]?.detail).toContain("NDF_STATE_HOME（set_by: user）");
@@ -374,7 +426,7 @@ describe("compareContract", () => {
   it("3: サービスが入れる名前の set_by が user へ移ると 3 の食い違い", () => {
     const contract = pinnedContract();
     rowById(contract, "domains/env.json", "NDF_PROGRESS_DB").set_by = "user";
-    const findings = compareContract(asFiles(contract), pinnedUse());
+    const findings = compare(asFiles(contract), pinnedUse());
     expect(checksOf(findings)).toEqual([3]);
     expect(findings.map((f) => f.id)).toEqual(["skill-workflow/hosted"]);
     expect(findings[0]?.detail).toContain("NDF_PROGRESS_DB（set_by: user）");
@@ -383,7 +435,7 @@ describe("compareContract", () => {
   it("3: envSetBy に user で載せた名前の契約の set_by が service へ変わると 3 の食い違い", () => {
     const contract = pinnedContract();
     rowById(contract, "domains/env.json", "GH_TOKEN").set_by = "service";
-    const findings = compareContract(asFiles(contract), pinnedUse());
+    const findings = compare(asFiles(contract), pinnedUse());
     expect(checksOf(findings)).toEqual([3]);
     expect(findings[0]?.detail).toContain("GH_TOKEN（set_by: service。使い方は user）");
   });
@@ -391,7 +443,7 @@ describe("compareContract", () => {
   it("3: envSetBy に載せた名前の set_by が別の値へ変わると 3 の食い違い", () => {
     const contract = fakeContract();
     rowById(contract, "domains/env.json", "GH_TOKEN").set_by = "ndf";
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([3]);
     expect(findings[0]?.detail).toContain("使い方は user");
   });
@@ -399,7 +451,7 @@ describe("compareContract", () => {
   it("4: 読むファイルの fields から翻訳が読む項目を消すと 4 の食い違い", () => {
     const contract = fakeContract();
     rowById(contract, "domains/ndf-files.json", "plan-progress").fields = ["step"];
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([4]);
     expect(findings[0]).toMatchObject({ id: "plan-progress", path: `${CONTRACT_DIR}/domains/ndf-files.json` });
   });
@@ -407,7 +459,7 @@ describe("compareContract", () => {
   it("4: 読むファイルの行が reader: service でないと 4 の食い違い", () => {
     const contract = fakeContract();
     delete rowById(contract, "domains/ndf-files.json", "ask-journal").reader;
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([4]);
   });
 
@@ -415,7 +467,7 @@ describe("compareContract", () => {
     const contract = fakeContract();
     const shape = reportShape(contract);
     shape.items = shape.items.filter((item) => item !== "理由");
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([5]);
     expect(findings[0]?.path).toBe(`${CONTRACT_DIR}/hooks/unattended-report.json`);
   });
@@ -425,7 +477,7 @@ describe("compareContract", () => {
     const cases = (contract["hooks/unattended-report.json"] as { cases: Json[] }).cases;
     if (cases[0] === undefined) throw new Error("見本が無い");
     cases[0].result = "判断が要る";
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([5]);
     expect(findings[0]?.id).toBe("0");
   });
@@ -434,7 +486,7 @@ describe("compareContract", () => {
     const contract = fakeContract();
     const shape = (contract["hooks/unattended-report.json"] as { shape: { required: Record<string, Json> } }).shape;
     shape.required.判断が要る = { always: ["材料"], when: [] };
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([5]);
   });
 
@@ -443,9 +495,9 @@ describe("compareContract", () => {
     const rule = reportShape(contract).required.判断が要る?.when[1];
     if (rule === undefined) throw new Error("条件の行が無い");
     rule.equals = "実装 Pull Request のマージ";
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([5]);
-    expect(findings[0]?.detail).toContain("Pull Request");
+    expect(findings[0]?.detail).toBe("shape.required が生成の値と違う");
   });
 
   it("5: 無条件に要る項目を条件つきへ移すと 5 の食い違い", () => {
@@ -454,24 +506,44 @@ describe("compareContract", () => {
     if (rule === undefined) throw new Error("値が無い");
     rule.always = rule.always.filter((item) => item !== "質問");
     rule.when.push({ item: "区分", prefix: "ndf-ask:", need: ["質問"] });
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([5]);
-    expect(findings[0]?.detail).toContain("always");
+    expect(findings[0]?.detail).toBe("shape.required が生成の値と違う");
   });
 
-  it("5: 条件つきで要る項目が無条件へ移っても食い違わない", () => {
+  it("5: 条件つきで要る項目が無条件へ移っても、生成の値と違うので 5 の食い違い", () => {
     const contract = fakeContract();
     const rule = reportShape(contract).required.判断が要る;
     if (rule === undefined) throw new Error("値が無い");
     rule.always.push("Pull Request");
     rule.when = rule.when.slice(0, 1);
-    expect(compareContract(asFiles(contract), fakeUse())).toEqual([]);
+    expect(compare(asFiles(contract), fakeUse())).toEqual([
+      { check: 5, path: `${CONTRACT_DIR}/hooks/unattended-report.json`, detail: "shape.required が生成の値と違う" },
+    ]);
+  });
+
+  it("5: required のキーの順だけが違っても食い違わない", () => {
+    const contract = fakeContract();
+    const shape = reportShape(contract);
+    shape.required = Object.fromEntries(Object.entries(shape.required).reverse());
+    expect(compare(asFiles(contract), fakeUse())).toEqual([]);
+  });
+
+  it("5: shape.values のキーの並び・material の値が生成の値と違うと 5 の食い違い", () => {
+    const contract = fakeContract();
+    const shape = reportShape(contract) as Shape & { material: Json };
+    shape.values = Object.fromEntries(Object.entries(shape.values).reverse());
+    shape.material.url_prefix = "http://";
+    expect(compare(asFiles(contract), fakeUse()).map((f) => f.detail)).toEqual([
+      "shape.values が生成の値と違う",
+      "shape.material が生成の値と違う",
+    ]);
   });
 
   it("6: 使う口を口の表から消すと 6 の食い違い", () => {
     const contract = fakeContract();
     rowById(contract, "domains/entrypoints.json", "file-journals").id = "file-journal";
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([6]);
     expect(findings[0]?.id).toBe("file-journals");
   });
@@ -479,7 +551,7 @@ describe("compareContract", () => {
   it("契約のファイルの形が読めないと、そのファイルを読む番号の食い違いにする（例外にしない）", () => {
     const contract = fakeContract();
     contract["domains/ndf-files.json"] = { rows: "x" };
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(checksOf(findings)).toEqual([4]);
   });
 });
@@ -504,15 +576,15 @@ describe("compareContract の 5: 区間の報告の見本の照合", () => {
       texts.push(text);
       return base.readReport(text);
     });
-    expect(compareContract(asFiles(contract), use)).toEqual([]);
+    expect(compare(asFiles(contract), use)).toEqual([]);
     expect(texts).toEqual(casesOf(contract).map((c) => c.text));
   });
 
   it("見本が 0 件なら読み取りを呼ばず、食い違いも出さない", () => {
     const contract = fakeContract();
     (contract["hooks/unattended-report.json"] as { cases: Case[] }).cases = [];
-    const readReport = vi.fn(() => ({ result: "x", errors: [] }));
-    expect(compareContract(asFiles(contract), withReadReport(readReport))).toEqual([]);
+    const readReport = vi.fn(() => reading("x"));
+    expect(compare(asFiles(contract), withReadReport(readReport))).toEqual([]);
     expect(readReport).not.toHaveBeenCalled();
   });
 
@@ -521,7 +593,7 @@ describe("compareContract の 5: 区間の報告の見本の照合", () => {
     const first = casesOf(contract)[0];
     if (first === undefined) throw new Error("見本が無い");
     first.result = "判断が要る";
-    expect(compareContract(asFiles(contract), fakeUse())).toEqual([
+    expect(compare(asFiles(contract), fakeUse())).toEqual([
       {
         check: 5,
         path: REPORT_PATH,
@@ -536,9 +608,9 @@ describe("compareContract の 5: 区間の報告の見本の照合", () => {
     const base = fakeUse();
     const use = withReadReport((text) => {
       const got = base.readReport(text);
-      return got.errors.length > 0 ? { ...got, errors: ["一", "二", "三"] } : got;
+      return got.errors.length > 0 ? { ...got, errors: [ERR, ERR, ERR] } : got;
     });
-    expect(compareContract(asFiles(contract), use)).toEqual([]);
+    expect(compare(asFiles(contract), use)).toEqual([]);
   });
 
   it("result が同じでも errors の有無が違うと食い違い（見本は errors 無し・読み取りは有り）", () => {
@@ -546,9 +618,9 @@ describe("compareContract の 5: 区間の報告の見本の照合", () => {
     const base = fakeUse();
     const use = withReadReport((text) => {
       const got = base.readReport(text);
-      return got.result === "完了" ? { result: "完了", errors: ["余計な誤り"] } : got;
+      return got.result === "完了" ? { ...got, errors: [ERR] } : got;
     });
-    expect(compareContract(asFiles(contract), use)).toEqual([
+    expect(compare(asFiles(contract), use)).toEqual([
       {
         check: 5,
         path: REPORT_PATH,
@@ -563,9 +635,9 @@ describe("compareContract の 5: 区間の報告の見本の照合", () => {
     const base = fakeUse();
     const use = withReadReport((text) => {
       const got = base.readReport(text);
-      return got.result === "保留" ? { result: "保留", errors: [] } : got;
+      return got.result === "保留" ? { ...got, errors: [] } : got;
     });
-    expect(compareContract(asFiles(contract), use)).toEqual([
+    expect(compare(asFiles(contract), use)).toEqual([
       {
         check: 5,
         path: REPORT_PATH,
@@ -581,9 +653,9 @@ describe("compareContract の 5: 区間の報告の見本の照合", () => {
     const use = withReadReport((text) => {
       if (text.includes("保留")) throw new Error("読めない");
       const got = base.readReport(text);
-      return got.result === "" ? { result: "違う", errors: got.errors } : got;
+      return got.result === "" ? { ...got, result: "違う" } : got;
     });
-    expect(compareContract(asFiles(contract), use)).toEqual([
+    expect(compare(asFiles(contract), use)).toEqual([
       { check: 5, path: REPORT_PATH, id: "1", detail: "区間の報告の読み取りが例外を投げた: 読めない" },
       {
         check: 5,
@@ -600,7 +672,7 @@ describe("compareContract の 5: 区間の報告の見本の照合", () => {
     const use = withReadReport(() => {
       throw "文字列";
     });
-    expect(compareContract(asFiles(contract), use)).toEqual([
+    expect(compare(asFiles(contract), use)).toEqual([
       { check: 5, path: REPORT_PATH, id: "0", detail: "区間の報告の読み取りが例外を投げた: undefined" },
     ]);
   });
@@ -608,7 +680,7 @@ describe("compareContract の 5: 区間の報告の見本の照合", () => {
   it("見本ごとに 1 件ずつ、配列の順に食い違いを出す", () => {
     const contract = fakeContract();
     for (const sample of casesOf(contract)) sample.result = "ずれ";
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(findings.map((f) => [f.check, f.id])).toEqual([
       [5, "0"],
       [5, "1"],
@@ -623,7 +695,7 @@ describe("compareContract の 5: 区間の報告の見本の照合", () => {
     const first = casesOf(contract)[0];
     if (first === undefined) throw new Error("見本が無い");
     first.result = "ずれ";
-    const findings = compareContract(asFiles(contract), fakeUse());
+    const findings = compare(asFiles(contract), fakeUse());
     expect(findings).toEqual([
       { check: 5, path: REPORT_PATH, detail: "shape.items に無い項目: 理由" },
       {
@@ -639,8 +711,8 @@ describe("compareContract の 5: 区間の報告の見本の照合", () => {
   it("区間の報告のファイルの形が読めないと 5 の食い違い 1 件だけで、読み取りを呼ばない", () => {
     const contract = fakeContract();
     contract["hooks/unattended-report.json"] = { shape: "x", cases: [] };
-    const readReport = vi.fn(() => ({ result: "", errors: [] }));
-    const findings = compareContract(asFiles(contract), withReadReport(readReport));
+    const readReport = vi.fn(() => reading(""));
+    const findings = compare(asFiles(contract), withReadReport(readReport));
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ check: 5, path: REPORT_PATH });
     expect(findings[0]?.detail).toMatch(/^契約のファイルの形が読めない/);
@@ -695,6 +767,94 @@ describe("reportShapeDiff", () => {
 
   it("形が同じなら差分を出さない", () => {
     expect(reportShapeDiff(asFiles(fakeContract()), asFiles(fakeContract()))).toEqual([]);
+  });
+});
+
+/** I-005 の分割の前の振る舞いの固定。required と material の差分の行と、その並びを丸ごと比べる */
+describe("reportShapeDiff: required と material の差分の行と並び", () => {
+  type Material = Record<string, string>;
+  const materialOf = (contract: Record<string, Json>): Material =>
+    (contract["hooks/unattended-report.json"] as { shape: { material: Material } }).shape.material;
+
+  it("material の値が変わると、変わった値ごとに古い値と新しい値を JSON で出す（キーは先端の順）", () => {
+    const tip = fakeContract();
+    const material = materialOf(tip);
+    material.url_prefix = "https://example.com/";
+    material.heading = "## 材料";
+    expect(reportShapeDiff(asFiles(fakeContract()), asFiles(tip))).toEqual([
+      'diff: shape.material.heading が変わった: "## 判断の材料" から "## 材料"',
+      'diff: shape.material.url_prefix が変わった: "https://" から "https://example.com/"',
+    ]);
+  });
+
+  it("material のキーが足される・消えると、キーの差分を出し、足された・消えたキーの値の変化は出さない", () => {
+    const fixed = fakeContract();
+    materialOf(fixed).old_key = "古い";
+    const tip = fakeContract();
+    materialOf(tip).new_key = "新しい";
+    expect(reportShapeDiff(asFiles(fixed), asFiles(tip))).toEqual([
+      "diff: shape.material に足された: new_key",
+      "diff: shape.material から消えた: old_key",
+    ]);
+  });
+
+  it("material のキーの差分を値の変化より先に出す", () => {
+    const tip = fakeContract();
+    const material = materialOf(tip);
+    material.body = "本文の全体";
+    material.extra = "足した";
+    expect(reportShapeDiff(asFiles(fakeContract()), asFiles(tip))).toEqual([
+      "diff: shape.material に足された: extra",
+      'diff: shape.material.body が変わった: "本文" から "本文の全体"',
+    ]);
+  });
+
+  it("required の値の差分を、values・items の後、material の前に、値ごとに always・条件・need の順で出す", () => {
+    const tip = fakeContract();
+    const shape = reportShape(tip);
+    (shape.values as Record<string, string>).保留 = "待つ";
+    shape.items.push("期限");
+    delete shape.required.できなかった;
+    shape.required.保留 = { always: ["理由"], when: [{ item: "区分", prefix: "ndf-ask:", need: ["質問"] }] };
+    shape.required.判断が要る?.always.push("期限");
+    materialOf(tip).heading = "## 材料";
+    const askKey = JSON.stringify({ item: "区分", prefix: "ndf-ask:" });
+    expect(reportShapeDiff(asFiles(fakeContract()), asFiles(tip))).toEqual([
+      "diff: shape.values に足された: 保留",
+      "diff: shape.items に足された: 期限",
+      "diff: shape.required に足された: 保留",
+      "diff: shape.required から消えた: できなかった",
+      "diff: shape.required.判断が要る.always に足された: 期限",
+      "diff: shape.required.できなかった.always から消えた: 理由",
+      "diff: shape.required.保留.always に足された: 理由",
+      `diff: shape.required.保留.when の条件 に足された: ${askKey}`,
+      `diff: shape.required.保留.when の条件 ${askKey} の need に足された: 質問`,
+      'diff: shape.material.heading が変わった: "## 判断の材料" から "## 材料"',
+    ]);
+  });
+
+  it("required の条件の行は鍵の順によらず同じ条件とみなし、同じ条件の need はまとめて比べる", () => {
+    const fixed = fakeContract();
+    const tip = fakeContract();
+    const rules = reportShape(tip).required.判断が要る;
+    if (rules === undefined) throw new Error("判断が要る の行が無い");
+    // 鍵の順を入れ替えた同じ条件と、同じ条件の 2 行目（need はまとめて比べる）
+    rules.when[0] = { need: ["承認ゲート"], prefix: "ndf-gate:", item: "区分" };
+    rules.when.push({ item: "区分", prefix: "ndf-gate:", need: ["期限"] });
+    const gateKey = JSON.stringify({ item: "区分", prefix: "ndf-gate:" });
+    expect(reportShapeDiff(asFiles(fixed), asFiles(tip))).toEqual([
+      `diff: shape.required.判断が要る.when の条件 ${gateKey} の need に足された: 期限`,
+    ]);
+  });
+
+  it("required の条件が消えると、条件の差分の後にその条件の need の消えた差分を出す", () => {
+    const tip = fakeContract();
+    reportShape(tip).required.判断が要る?.when.splice(1, 1);
+    const key = JSON.stringify({ equals: "設計 Pull Request のマージ", item: "承認ゲート" });
+    expect(reportShapeDiff(asFiles(fakeContract()), asFiles(tip))).toEqual([
+      `diff: shape.required.判断が要る.when の条件 から消えた: ${key}`,
+      `diff: shape.required.判断が要る.when の条件 ${key} の need から消えた: Pull Request`,
+    ]);
   });
 });
 
@@ -841,15 +1001,15 @@ describe("mainNdfContractCheck", () => {
     return contract;
   }
 
-  async function run(up: Upstream, pin: string, use: NdfContractUse | null, required = false) {
+  /** `use` の生成の固定の点は、`pinned` を省けば作業の木の固定の点（`pin`）に合わせる */
+  async function run(up: Upstream | { url: string }, pin: string, use: NdfContractUse | null, pinned = pin) {
     const root = makeRoot(pin);
     const summary = join(tempDir("ndf-summary-"), "summary.md");
     writeFileSync(summary, "# 前の手順の要約\n");
     const io = capture();
     const code = await mainNdfContractCheck(["--root", root, "--summary", summary], {}, {
       repoUrl: up.url,
-      loadUse: () => Promise.resolve(use),
-      required,
+      loadUse: () => Promise.resolve(use === null ? null : { ...use, pinnedCommit: pinned }),
     });
     return { code, out: io.out.join(""), err: io.err.join(""), summary: readFileSync(summary, "utf8") };
   }
@@ -894,21 +1054,33 @@ describe("mainNdfContractCheck", () => {
     expect(result.summary).toContain("次の手");
   });
 
-  it("使い方の書き出しが無いと skip: no-contract-use と 0（checked の行を出さない）", async () => {
-    const up = makeUpstream(brokenCase(), fakeContract());
-    const result = await run(up, up.fixed, null);
-    expect(result.code).toBe(0);
-    expect(result.out).toContain(`skip: no-contract-use ${up.fixed}`);
-    expect(result.out).toContain(`read: tip ${up.tip}`);
-    expect(result.out).not.toContain("checked:");
-    expect(result.summary).toContain(`skip: no-contract-use ${up.fixed}`);
+  it("使い方の書き出しが無いと、取得できない取得先でも取得を試みずに fail: no-contract-use と 1（skip にしない）", async () => {
+    const pin = "d".repeat(40);
+    const result = await run({ url: `file://${join(tempDir("ndf-none-"), "missing")}` }, pin, null);
+    expect(result.code).toBe(1);
+    expect(result.out).toBe(`fail: no-contract-use ${pin}\n`);
+    expect(result.out).not.toContain("read:");
+    expect(result.out).not.toContain("skip:");
+    expect(result.summary).toContain(`fail: no-contract-use ${pin}`);
+    expect(result.err).toContain("書き出し");
   });
 
-  it("使い方が要る（CONTRACT_USE_REQUIRED が真）のに書き出しが無いと fail: no-contract-use と 1", async () => {
+  it("生成の固定の点が ndf-pin.json と違うと 6 の食い違いで 1", async () => {
     const up = makeUpstream(fakeContract(), fakeContract());
-    const result = await run(up, up.fixed, null, true);
+    const result = await run(up, up.fixed, fakeUse(), "e".repeat(40));
     expect(result.code).toBe(1);
-    expect(result.out).toContain(`fail: no-contract-use ${up.fixed}`);
+    expect(result.out).toContain(`mismatch: fixed 6 ${GENERATED_PATH}: 生成の固定の点 ${"e".repeat(40)} が ndf-pin.json の ${up.fixed} と違う`);
+  });
+
+  it("固定の点の ask-journal が fields を持つと notice の行を標準出力と要約に出し、0 のまま", async () => {
+    const fixed = fakeContract();
+    rowById(fixed, "domains/ndf-files.json", "ask-journal").fields = ["id", "question"];
+    const up = makeUpstream(fixed, fakeContract());
+    const result = await run(up, up.fixed, fakeUse());
+    expect(result.code).toBe(0);
+    expect(result.out).toContain(`notice: ${up.fixed} の ask-journal が fields を持つ: id, question`);
+    expect(result.summary).toContain(`notice: ${up.fixed} の ask-journal が fields を持つ: id, question`);
+    expect(result.out).not.toContain("mismatch:");
   });
 
   it("固定の点を取れないと 2 と標準エラーの理由", async () => {
@@ -944,5 +1116,455 @@ describe("mainNdfContractCheck", () => {
   it("引数が違うと 2", async () => {
     capture();
     expect(await mainNdfContractCheck(["--nope"], {})).toBe(2);
+  });
+
+  describe("要約のファイルへの追記", () => {
+    /** 要約のファイルを任意のパスにして走らせる（`summary` を省けば --summary を渡さない） */
+    async function runWith(up: Upstream | { url: string }, pin: string, use: NdfContractUse | null, summary?: string) {
+      const root = makeRoot(pin);
+      const io = capture();
+      const args = ["--root", root, ...(summary === undefined ? [] : ["--summary", summary])];
+      const code = await mainNdfContractCheck(args, {}, {
+        repoUrl: up.url,
+        loadUse: () => Promise.resolve(use === null ? null : { ...use, pinnedCommit: pin }),
+      });
+      return { code, out: io.out.join(""), err: io.err.join("") };
+    }
+
+    /** 書けない要約のファイル（無いディレクトリの下のパス） */
+    function unwritableSummary(): string {
+      return join(tempDir("ndf-summary-"), "no-such-dir", "summary.md");
+    }
+
+    it("食い違いが無いときの要約は、前の中身の後に renderSummary(固定の点, 先端, 行) をそのまま足す", async () => {
+      const up = makeUpstream(fakeContract(), fakeContract());
+      const summary = join(tempDir("ndf-summary-"), "summary.md");
+      writeFileSync(summary, "# 前\n");
+      const result = await runWith(up, up.fixed, fakeUse(), summary);
+      expect(result.code).toBe(0);
+      const lines = [`read: fixed ${up.fixed}`, `read: tip ${up.tip}`, `checked: fixed ${up.fixed} 1-6`, `checked: tip ${up.tip} 1-6`];
+      expect(readFileSync(summary, "utf8")).toBe(`# 前\n${renderSummary([], [], lines)}`);
+    });
+
+    it("使い方の書き出しが無いときの要約は、前の中身の後に renderSummary([], [], [fail の行]) をそのまま足す", async () => {
+      const pin = "d".repeat(40);
+      const summary = join(tempDir("ndf-summary-"), "summary.md");
+      writeFileSync(summary, "# 前\n");
+      const result = await runWith({ url: "file:///nonexistent" }, pin, null, summary);
+      expect(result.code).toBe(1);
+      expect(readFileSync(summary, "utf8")).toBe(`# 前\n${renderSummary([], [], [`fail: no-contract-use ${pin}`])}`);
+    });
+
+    it("要約のファイルが無ければ作って書く", async () => {
+      const up = makeUpstream(fakeContract(), fakeContract());
+      const summary = join(tempDir("ndf-summary-"), "new.md");
+      const result = await runWith(up, up.fixed, fakeUse(), summary);
+      expect(result.code).toBe(0);
+      expect(readFileSync(summary, "utf8")).toContain(`checked: fixed ${up.fixed} 1-6`);
+    });
+
+    it("--summary が無ければ要約を書かず、食い違いが無ければ 0（エラーを出さない）", async () => {
+      const up = makeUpstream(fakeContract(), fakeContract());
+      const result = await runWith(up, up.fixed, fakeUse());
+      expect(result.code).toBe(0);
+      expect(result.err).not.toContain("要約のファイルに書けない");
+    });
+
+    it("--summary が無ければ、使い方の書き出しが無くても 1 のまま（要約を書かない）", async () => {
+      const pin = "d".repeat(40);
+      const result = await runWith({ url: "file:///nonexistent" }, pin, null);
+      expect(result.code).toBe(1);
+      expect(result.out).toBe(`fail: no-contract-use ${pin}\n`);
+      expect(result.err).not.toContain("要約のファイルに書けない");
+    });
+
+    it("使い方の書き出しが無く要約に書けないと、fail の行を出した後に 2 と標準エラーの理由（1 でない）", async () => {
+      const pin = "d".repeat(40);
+      const result = await runWith({ url: "file:///nonexistent" }, pin, null, unwritableSummary());
+      expect(result.code).toBe(2);
+      expect(result.out).toBe(`fail: no-contract-use ${pin}\n`);
+      expect(result.err).toContain("書き出し");
+      expect(result.err).toMatch(/error: 要約のファイルに書けない: .+\n/);
+    });
+
+    it("食い違いが無く要約に書けないと、標準出力の行を出した後に 2 と標準エラーの理由", async () => {
+      const up = makeUpstream(fakeContract(), fakeContract());
+      const result = await runWith(up, up.fixed, fakeUse(), unwritableSummary());
+      expect(result.code).toBe(2);
+      expect(result.out).toContain(`checked: fixed ${up.fixed} 1-6`);
+      expect(result.out).toContain(`checked: tip ${up.tip} 1-6`);
+      expect(result.err).toMatch(/error: 要約のファイルに書けない: .+\n/);
+    });
+
+    it("固定の点で食い違い要約に書けないと 2（1 でない）で、食い違いの件数の行を標準エラーに出さない", async () => {
+      const fixed = fakeContract();
+      rowById(fixed, "domains/entrypoint-cases.json", "unknown-flag").valid = true;
+      const up = makeUpstream(fixed, fakeContract());
+      const result = await runWith(up, up.fixed, fakeUse(), unwritableSummary());
+      expect(result.code).toBe(2);
+      expect(result.out).toContain("unknown-flag");
+      expect(result.err).toMatch(/error: 要約のファイルに書けない: .+\n/);
+      expect(result.err).not.toContain("件食い違う");
+    });
+
+    it("要約のパスがディレクトリでも書けないとして 2", async () => {
+      const up = makeUpstream(fakeContract(), fakeContract());
+      const result = await runWith(up, up.fixed, fakeUse(), tempDir("ndf-summary-dir-"));
+      expect(result.code).toBe(2);
+      expect(result.err).toContain("error: 要約のファイルに書けない: ");
+    });
+
+    it("固定の点で食い違い要約に書けたら、食い違いの件数の行を標準エラーに出して 1", async () => {
+      const fixed = fakeContract();
+      rowById(fixed, "domains/entrypoint-cases.json", "unknown-flag").valid = true;
+      const up = makeUpstream(fixed, fakeContract());
+      const result = await runWith(up, up.fixed, fakeUse(), join(tempDir("ndf-summary-"), "summary.md"));
+      expect(result.code).toBe(1);
+      expect(result.err).toContain(`固定の点 ${up.fixed} の NDF の契約と形の正本が 1 件食い違う\n`);
+      expect(result.err).not.toContain("要約のファイルに書けない");
+    });
+  });
+});
+
+describe("generateContractUse", () => {
+  it("固定の点の契約から、手で書く id の行と path と区間の報告の形を作り、コミットした生成のファイルと同じ", () => {
+    const generated = generateContractUse(asFiles(fullPinnedContract(), PINNED_COMMIT), USE_DATA.entrypoints);
+    expect(generated).toEqual(GENERATED);
+    expect(generated.entrypoints.map((row) => row.id)).toEqual(USE_DATA.entrypoints);
+    expect(generated.files).toContainEqual({ id: "plan-progress", path: "<sprint>/<n>-<plan>-state/progress.jsonl" });
+    expect(generated.report.values).toEqual(["判断が要る", "完了", "できなかった"]);
+  });
+
+  it("使わないインタフェース（file-loop-record・file-organizer など）の行と、その読むファイルが入らない", () => {
+    const generated = generateContractUse(asFiles(fullPinnedContract(), PINNED_COMMIT), USE_DATA.entrypoints);
+    const ids = generated.entrypoints.map((row) => row.id);
+    for (const unused of ["file-loop-record", "file-organizer", "spec-pages", "spec-ndf_settings"]) expect(ids).not.toContain(unused);
+    expect(generated.files.map((f) => f.id)).toEqual(["plan-progress", "ask-journal", "gate-rejections", "issue-request"]);
+  });
+
+  it("契約に無い id があると ContractUseSyncError で、その id を並べる", () => {
+    const run = () => generateContractUse(asFiles(fullPinnedContract(), PINNED_COMMIT), [...USE_DATA.entrypoints, "no-such-entrypoint"]);
+    expect(run).toThrow(ContractUseSyncError);
+    expect(run).toThrow("no-such-entrypoint");
+  });
+
+  it("契約のファイルの形が読めないと ContractUseSyncError", () => {
+    const contract = fullPinnedContract();
+    contract["domains/ndf-files.json"] = { rows: "x" };
+    expect(() => generateContractUse(asFiles(contract, PINNED_COMMIT), USE_DATA.entrypoints)).toThrow(ContractUseSyncError);
+  });
+});
+
+describe("mainNdfContractSync", () => {
+  /** `ndf-pin.json` と手で書くデータと（あれば）前の生成のファイルを持つ作業の木 */
+  function syncRoot(commit: string, data: Json = USE_DATA, previous?: string): string {
+    const root = makeRoot(commit);
+    const dataFile = join(root, USE_DATA_PATH);
+    mkdirSync(dirname(dataFile), { recursive: true });
+    writeFileSync(dataFile, `${JSON.stringify(data, null, 2)}\n`);
+    if (previous !== undefined) writeFileSync(join(root, GENERATED_PATH), previous);
+    return root;
+  }
+
+  it("固定の点の契約を取得して生成のファイルを書き、0 と wrote の行", async () => {
+    const up = makeUpstream(fullPinnedContract(), fakeContract());
+    const root = syncRoot(up.fixed);
+    const io = capture();
+    expect(await mainNdfContractSync(["--root", root], {}, { repoUrl: up.url })).toBe(0);
+    const text = readFileSync(join(root, GENERATED_PATH), "utf8");
+    expect(text.endsWith("}\n")).toBe(true);
+    expect(JSON.parse(text)).toEqual({ ...GENERATED, commit: up.fixed });
+    expect(io.out.join("")).toContain(`wrote: ${GENERATED_PATH} ${up.fixed}`);
+  });
+
+  it("手で書く id を 1 件足して生成のファイルと食い違わせた作業の木でも起動し、書き直して 0", async () => {
+    const up = makeUpstream(fullPinnedContract(), fakeContract());
+    const data = { ...USE_DATA, entrypoints: [...USE_DATA.entrypoints, "file-loop-record"] };
+    const root = syncRoot(up.fixed, data, `${JSON.stringify(GENERATED, null, 2)}\n`);
+    capture();
+    expect(await mainNdfContractSync(["--root", root], {}, { repoUrl: up.url })).toBe(0);
+    const written = JSON.parse(readFileSync(join(root, GENERATED_PATH), "utf8")) as { entrypoints: Json[]; files: Json[] };
+    expect(written.entrypoints.map((row) => row.id)).toContain("file-loop-record");
+    expect(written.files).toContainEqual({ id: "loop-record", path: "<loop>/loop.json" });
+  });
+
+  it("契約に無い id で 1 と生成できない理由を出し、生成のファイルを書き換えない", async () => {
+    const up = makeUpstream(fullPinnedContract(), fakeContract());
+    const data = { ...USE_DATA, entrypoints: [...USE_DATA.entrypoints, "no-such-entrypoint"] };
+    const root = syncRoot(up.fixed, data, "前の生成のファイル\n");
+    const io = capture();
+    expect(await mainNdfContractSync(["--root", root], {}, { repoUrl: up.url })).toBe(1);
+    expect(io.err.join("")).toContain("error: 生成できない");
+    expect(io.err.join("")).toContain("no-such-entrypoint");
+    expect(readFileSync(join(root, GENERATED_PATH), "utf8")).toBe("前の生成のファイル\n");
+  });
+
+  it("固定の点を取得できないと 2", async () => {
+    const up = makeUpstream(fullPinnedContract(), fakeContract());
+    const root = syncRoot("0".repeat(40));
+    const io = capture();
+    expect(await mainNdfContractSync(["--root", root], {}, { repoUrl: up.url })).toBe(2);
+    expect(io.err.join("")).toContain("固定の点");
+  });
+
+  it("手で書くデータの形が違うと 2", async () => {
+    const up = makeUpstream(fullPinnedContract(), fakeContract());
+    const root = syncRoot(up.fixed, { entrypoints: "x" });
+    capture();
+    expect(await mainNdfContractSync(["--root", root], {}, { repoUrl: up.url })).toBe(2);
+  });
+
+  it("引数が違うと 2", async () => {
+    capture();
+    expect(await mainNdfContractSync(["--nope"], {})).toBe(2);
+  });
+});
+
+describe("compareContract（固定の点の写しと作業の木の書き出し）", () => {
+  const ENTRYPOINTS_PATH = `${CONTRACT_DIR}/domains/entrypoints.json`;
+  const compareReal = (contract: Record<string, Json>, use: NdfContractUse = ndfContractUse) =>
+    compareContract(asFiles(contract, PINNED_COMMIT), use, PINNED_COMMIT);
+
+  function withRow(id: string, change: (row: NdfEntrypointRow) => NdfEntrypointRow): NdfContractUse {
+    return { ...ndfContractUse, entrypoints: ndfContractUse.entrypoints.map((row) => (row.id === id ? change(row) : row)) };
+  }
+
+  it("固定の点の契約と書き出しで、6 項目の食い違いが 0 件", () => {
+    expect(compareReal(fullPinnedContract())).toEqual([]);
+  });
+
+  it("1: block-next への見本の口を口の表に無い id に替えると、その見本の id の 1 の行が出る（口の表の行は消さない）", () => {
+    const contract = fullPinnedContract();
+    rowById(contract, "domains/entrypoint-cases.json", "resume").entrypoint = "no-such-entrypoint";
+    expect(compareReal(contract)).toEqual([
+      {
+        check: 1,
+        path: `${CONTRACT_DIR}/domains/entrypoint-cases.json`,
+        id: "resume",
+        detail: "見本の口 no-such-entrypoint が口の表に無い",
+      },
+    ]);
+  });
+
+  it("1: 使わないインタフェースの見本の valid を逆にしても食い違わない", () => {
+    const contract = fullPinnedContract();
+    for (const id of ["loop-record", "organizer-request", "organizer-stray", "spec-page", "spec-ndf_settings"]) {
+      const row = rowById(contract, "domains/entrypoint-cases.json", id);
+      row.valid = row.valid !== true;
+    }
+    expect(compareReal(contract)).toEqual([]);
+  });
+
+  it("6: 生成の spec-io の target だけを変えると 6 の食い違い", () => {
+    const use = withRow("spec-io", (row) => ({ ...row, target: "contracts/schemas/other" }));
+    expect(compareReal(fullPinnedContract(), use)).toEqual([
+      { check: 6, path: ENTRYPOINTS_PATH, id: "spec-io", detail: "target が契約と違う" },
+    ]);
+  });
+
+  it.each(["kind", "lead", "args", "env", "files"] as const)("6: 生成の block-next の %s だけを変えると 6 の食い違い", (column) => {
+    const use = withRow("block-next", (row) => ({ ...row, [column]: column === "kind" || column === "lead" ? "x" : ["x"] }));
+    expect(compareReal(fullPinnedContract(), use)).toContainEqual({
+      check: 6,
+      path: ENTRYPOINTS_PATH,
+      id: "block-next",
+      detail: `${column} が契約と違う`,
+    });
+  });
+
+  it("6: 生成の固定の点だけを変えると 6 の食い違い", () => {
+    const use = { ...ndfContractUse, pinnedCommit: "0".repeat(40) };
+    expect(compareReal(fullPinnedContract(), use)).toEqual([
+      {
+        check: 6,
+        path: GENERATED_PATH,
+        detail: `生成の固定の点 ${"0".repeat(40)} が ndf-pin.json の ${PINNED_COMMIT} と違う`,
+      },
+    ]);
+  });
+
+  it("4: 読むファイルの path だけを変えると 4 の食い違い", () => {
+    const use = {
+      ...ndfContractUse,
+      files: ndfContractUse.files.map((f) => (f.id === "ask-journal" ? { ...f, path: "asks.jsonl" } : f)),
+    };
+    expect(compareReal(fullPinnedContract(), use)).toEqual([
+      { check: 4, path: `${CONTRACT_DIR}/domains/ndf-files.json`, id: "ask-journal", detail: "path が生成の値と違う" },
+    ]);
+  });
+
+  it("5: required の 判断が要る の always だけを変えると 5 の食い違い", () => {
+    const required = structuredClone(ndfContractUse.report.required);
+    const rule = required.判断が要る;
+    if (rule === undefined) throw new Error("値が無い");
+    rule.always = rule.always.filter((item) => item !== "質問");
+    const use = { ...ndfContractUse, report: { ...ndfContractUse.report, required } };
+    expect(compareReal(fullPinnedContract(), use)).toEqual([
+      { check: 5, path: `${CONTRACT_DIR}/hooks/unattended-report.json`, detail: "shape.required が生成の値と違う" },
+    ]);
+  });
+
+  it("作業の木の書き出しを照合の形として読める", async () => {
+    expect(await loadContractUse(contractUseLoaderFrom(REPO_ROOT))).toMatchObject({ pinnedCommit: PINNED_COMMIT });
+  });
+});
+
+describe("mainNdfContractCheck（固定の点の写しと作業の木の書き出し）", () => {
+  async function runReal(use: NdfContractUse) {
+    const up = makeUpstream(fullPinnedContract(), fullPinnedContract());
+    const io = capture();
+    const code = await mainNdfContractCheck(["--root", makeRoot(up.fixed)], {}, {
+      repoUrl: up.url,
+      loadUse: () => Promise.resolve({ ...use, pinnedCommit: up.fixed }),
+    });
+    return { up, code, out: io.out.join("") };
+  }
+
+  it("食い違いが無ければ 0 と checked の行で、skip の行を出さない", async () => {
+    const { up, code, out } = await runReal(ndfContractUse);
+    expect(code).toBe(0);
+    expect(out).toContain(`checked: fixed ${up.fixed} 1-6`);
+    expect(out).toContain(`checked: tip ${up.tip} 1-6`);
+    expect(out).not.toContain("skip:");
+    expect(out).not.toContain("mismatch:");
+  });
+
+  it("生成の spec-io の target だけを変えると、固定の点の 6 の食い違いで 1", async () => {
+    const use = {
+      ...ndfContractUse,
+      entrypoints: ndfContractUse.entrypoints.map((row) => (row.id === "spec-io" ? { ...row, target: "contracts/schemas/other" } : row)),
+    };
+    const { code, out } = await runReal(use);
+    expect(code).toBe(1);
+    expect(out).toContain(`mismatch: fixed 6 ${CONTRACT_DIR}/domains/entrypoints.json spec-io: target が契約と違う`);
+  });
+});
+
+describe("契約のファイルを形で読む（I-001 の振る舞いの固定）", () => {
+  const at = (path: string) => `${CONTRACT_DIR}/${path}`;
+
+  it("形が読めないと、読む番号・契約のパス・最初の誤りの位置を書いた食い違い（id を持たない）", () => {
+    const contract = fakeContract();
+    rowById(contract, "domains/ndf-files.json", "plan-progress").path = 1;
+    const findings = compare(asFiles(contract), fakeUse());
+    expect(findings).toEqual([
+      { check: 4, path: at("domains/ndf-files.json"), detail: "契約のファイルの形が読めない（rows.0.path）" },
+    ]);
+    expect(Object.hasOwn(findings[0] ?? {}, "id")).toBe(false);
+  });
+
+  it("誤りが 2 つあっても最初の誤りの位置だけを書く", () => {
+    const contract = fakeContract();
+    const rows = rowsOf(contract, "domains/ndf-files.json");
+    if (rows[1] === undefined || rows[2] === undefined) throw new Error("行が無い");
+    rows[1].path = 1;
+    rows[2].id = 2;
+    expect(compare(asFiles(contract), fakeUse())).toEqual([
+      { check: 4, path: at("domains/ndf-files.json"), detail: "契約のファイルの形が読めない（rows.1.path）" },
+    ]);
+  });
+
+  it("契約のファイルが無いと、位置の空な形の誤り", () => {
+    const contract = fakeContract();
+    delete contract["version.json"];
+    expect(compare(asFiles(contract), fakeUse())).toEqual([
+      { check: 2, path: at("version.json"), detail: "契約のファイルの形が読めない（）" },
+    ]);
+  });
+
+  it("env.json が読めないと 3 の食い違いだけ", () => {
+    const contract = fakeContract();
+    contract["domains/env.json"] = { rows: [{ id: "X" }] };
+    expect(compare(asFiles(contract), fakeUse())).toEqual([
+      { check: 3, path: at("domains/env.json"), detail: "契約のファイルの形が読めない（rows.0.set_by）" },
+    ]);
+  });
+
+  it("見本の表が読めないと 1 の食い違いだけ", () => {
+    const contract = fakeContract();
+    contract["domains/entrypoint-cases.json"] = { rows: {} };
+    expect(compare(asFiles(contract), fakeUse())).toEqual([
+      { check: 1, path: at("domains/entrypoint-cases.json"), detail: "契約のファイルの形が読めない（rows）" },
+    ]);
+  });
+
+  it("口の表が読めないと、読む番号 1・3・6 の順にそれぞれ食い違いを出す", () => {
+    const contract = fakeContract();
+    contract["domains/entrypoints.json"] = { rows: [{ id: "x" }] };
+    const findings = compare(asFiles(contract), fakeUse());
+    expect(findings.map((f) => f.check)).toEqual([1, 3, 6]);
+    for (const f of findings) {
+      expect(f.path).toBe(at("domains/entrypoints.json"));
+      expect(f.detail).toMatch(/^契約のファイルの形が読めない（rows\.0\.[a-z_]+）$/);
+      expect(Object.hasOwn(f, "id")).toBe(false);
+    }
+    expect(new Set(findings.map((f) => f.detail)).size).toBe(1);
+  });
+
+  it("見本の表と口の表が両方読めないと、1 は見本の表→口の表の順に 2 件出す", () => {
+    const contract = fakeContract();
+    contract["domains/entrypoint-cases.json"] = { rows: "x" };
+    contract["domains/entrypoints.json"] = { rows: "x" };
+    expect(compare(asFiles(contract), fakeUse())).toEqual([
+      { check: 1, path: at("domains/entrypoint-cases.json"), detail: "契約のファイルの形が読めない（rows）" },
+      { check: 1, path: at("domains/entrypoints.json"), detail: "契約のファイルの形が読めない（rows）" },
+      { check: 3, path: at("domains/entrypoints.json"), detail: "契約のファイルの形が読めない（rows）" },
+      { check: 6, path: at("domains/entrypoints.json"), detail: "契約のファイルの形が読めない（rows）" },
+    ]);
+  });
+
+  it("口の表が読めなくても、6 の生成の固定の点の食い違いは形の食い違いより前に出す", () => {
+    const contract = fakeContract();
+    contract["domains/entrypoints.json"] = { rows: "x" };
+    const findings = compareContract(asFiles(contract), fakeUse(), "d".repeat(40));
+    expect(findings.filter((f) => f.check === 6)).toEqual([
+      { check: 6, path: GENERATED_PATH, detail: `生成の固定の点 ${FAKE_PIN} が ndf-pin.json の ${"d".repeat(40)} と違う` },
+      { check: 6, path: at("domains/entrypoints.json"), detail: "契約のファイルの形が読めない（rows）" },
+    ]);
+  });
+
+  it("読めたファイルは形の知らない鍵を捨てて照らす（説明の列があっても食い違わない）", () => {
+    const contract = fakeContract();
+    for (const row of rowsOf(contract, "domains/entrypoints.json")) row.description = "説明";
+    rowById(contract, "domains/ndf-files.json", "ask-journal").note = "x";
+    expect(compare(asFiles(contract), fakeUse())).toEqual([]);
+  });
+
+  it("contractNotices: ndf-files.json が読めない・無いと知らせを出さない（例外にしない）", () => {
+    const broken = fakeContract();
+    broken["domains/ndf-files.json"] = { rows: [{ id: "ask-journal", fields: ["a"] }] };
+    expect(contractNotices(asFiles(broken))).toEqual([]);
+    const absent = fakeContract();
+    delete absent["domains/ndf-files.json"];
+    expect(contractNotices(asFiles(absent))).toEqual([]);
+  });
+
+  it("contractNotices: 知らせの行はコミットと fields をカンマで並べた 1 行", () => {
+    const contract = fakeContract();
+    rowById(contract, "domains/ndf-files.json", "ask-journal").fields = ["id", "question"];
+    expect(contractNotices(asFiles(contract, "e".repeat(40)))).toEqual([
+      `notice: ${"e".repeat(40)} の ask-journal が fields を持つ: id, question（#41 の決定 106）`,
+    ]);
+  });
+
+  it("contractNotices: ask-journal の行が無い・fields を持たないと知らせを出さない", () => {
+    const contract = fakeContract();
+    rowById(contract, "domains/ndf-files.json", "ask-journal").id = "other";
+    expect(contractNotices(asFiles(contract))).toEqual([]);
+    expect(contractNotices(asFiles(fakeContract()))).toEqual([]);
+  });
+
+  it("reportShapeDiff: 固定の点か先端のどちらかの区間の報告が読めない・無いと差分を出さない（例外にしない）", () => {
+    const changed = fakeContract();
+    reportShape(changed).items.push("期限");
+    const broken = fakeContract();
+    broken["hooks/unattended-report.json"] = { shape: "x", cases: [] };
+    const absent = fakeContract();
+    delete absent["hooks/unattended-report.json"];
+    expect(reportShapeDiff(asFiles(fakeContract()), asFiles(changed))).toEqual(["diff: shape.items に足された: 期限"]);
+    expect(reportShapeDiff(asFiles(broken), asFiles(changed))).toEqual([]);
+    expect(reportShapeDiff(asFiles(changed), asFiles(broken))).toEqual([]);
+    expect(reportShapeDiff(asFiles(absent), asFiles(changed))).toEqual([]);
+    expect(reportShapeDiff(asFiles(changed), asFiles(absent))).toEqual([]);
   });
 });

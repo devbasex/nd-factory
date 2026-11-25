@@ -68,6 +68,7 @@ graph LR
 | 値の形と ID | 国や地域で読み違えない値（UTC の日時・通貨つきの金額・言語・時刻帯）と ID・token の形を 1 か所に置く |
 | 操作の表 | 操作の一覧の全行を印つきで持ち、名前とルートで引ける |
 | データのファイル | 再試行の方針・秘密の形・受ける NDF の契約の組・料金プランの既定の行を形で検証して出す |
+| NDF の契約の使い方 | nd-factory が使う NDF のインタフェースの決まりを固定の点の契約から生成して持ち、呼び出しの判定と区間の報告の読み取りを出す。契約の照合（`npm run ndf-contract`）とランナーが同じものを使う |
 | 生成 | 操作の表から生成物を作り、見本を検査し、生成物の古さを `check` で落とす |
 | 操作を呼ぶ口 | 画面・e2e・API のテストが、操作の名前で型を引いて操作を呼ぶ。ダミーデータも同じ口で返す |
 | 行の形とテーブルの仕様 | サービスのテーブルの行ごとの列と、10 のテーブルの鍵・索引・TTL |
@@ -223,7 +224,7 @@ graph LR
 
 | データ | 中身 |
 | --- | --- |
-| 受ける NDF の契約の組（`data/ndf-contracts.json`） | `{"accepted": [{"version": 8, "sha256": "ed8b036584bec284dfc93a2bb5b988e2385b4f8f297d659399f5d3cb91b520c4"}]}`。空でない・版は 1 以上の整数・sha256 は 64 桁の小文字の 16 進・同じ版か同じ sha256 が 2 つ無い。版の大小で選ばず、ランナーは対が集合にあるかだけを見る |
+| 受ける NDF の契約の組（`data/ndf-contracts.json`） | `{"accepted": [{"version": 16, "sha256": "c50ef840a72ab71a15023a46a37d050c36ec3aae6d1be6092b7f9dc7f3c0a726"}]}`（固定の点 `ndf--v11.0.36` の `version.json` の最後の行）。空でない・版は 1 以上の整数・sha256 は 64 桁の小文字の 16 進・同じ版か同じ sha256 が 2 つ無い。版の大小で選ばず、ランナーは対が集合にあるかだけを見る |
 | NDF の答えの語（`ndfAnswerWord`） | `approved`・`rejected`・`request_changes`・`retry`・`finish`・`cancel`（出所は NDF の固定の点の `C/facts/answers.json`） |
 | 再試行の方針（`data/retry-policies.json`） | 7 つの方針。名前ごとに種類を 1 つに固定し、取り違えを読み込みで拒む（下の表） |
 | 秘密の形（`data/secret-shapes.json`） | 鍵の名前に含む語（`authorization`・`token`・`secret`・`password`・`credentials`・`private_key`・`dsn`）と、値の形（`ndfd_`・`ndfm_` の接頭辞・JWT・`ghs_`・`ghp_`・`gho_`・`github_pat_`・秘密鍵の PEM・利用者と合言葉を含む接続の URL・AWS の一時の鍵）。`redact`・生成の見本の検査・漏れの検査が同じデータを読む |
@@ -237,6 +238,26 @@ graph LR
 | `jwks` | `http-idp-keys` | `aws-jwt-verify` の鍵の取り手。`response_timeout_ms` |
 
 `retry_mode` を `standard` にするのは、`adaptive` が実行環境ごとに送る速さを絞り、短く生きる Lambda では絞りの学びが残らないためである。値を変えるのは、反映した環境のログ（再試行の `warn` の行）で使い切りか待ちすぎが見えた後で、変えるのはデータの 1 か所だけにする。
+
+### NDF の契約の使い方
+
+`@nd-factory/contracts/ndf-contract-use` の `ndfContractUse` は、nd-factory が NDF の契約（`plugins/ndf/contracts/`）のうち使う部分だけを持つ書き出しである。型とデータの形は、データを読まない `@nd-factory/contracts/ndf-contract-use-schema` に置く。照合の CLI と生成のコマンドはこちらから形を読み、手で書くデータと生成のデータが食い違っていても起動できる。
+
+| 置き場 | 中身 | 作り方 |
+| --- | --- | --- |
+| `data/ndf-contract-use.json` | 使うインタフェースの id（実行の文書の「使うインタフェース」の 11 行）・Skill の前置き（`ndf:`）・インタフェースと実行の場（`hosted`・`local`）ごとの渡す環境変数・`set_by` が `service` でない名前（`GH_TOKEN`・`NDF_STATE_HOME` の `user`）・読むファイルごとの翻訳が読む項目 | 手で書く |
+| `src/ndf-contract-use-schema.ts` の `REPORT_ITEMS` | 区間の報告からランナーが読む項目の名前。読み取りの戻り値の `items` の型をここから作る | 手で書く |
+| `data/ndf-contract-use.generated.json` | 生成の元にした固定の点のコミット（`commit`）・使うインタフェースの行（`kind`・`target`・`lead`・`args`・`env`・`files`）・その行の `files` が指す読むファイルの `path`・区間の報告の形（`shape.values` のキーの並び・`shape.required`・`shape.material`） | `npm run ndf-contract:sync` が `ndf-pin.json` の固定の点の契約から書く。手で直さない |
+
+`ndfContractUse` はモジュールの読み込みで 2 つのデータを形で検証し、使うインタフェースの id が手で書くデータと生成のデータで同じか、手で書く読むファイルと渡す環境変数のインタフェースが生成のデータにあるかを確かめる。食い違えば `DataFileError` を投げ、`check` が落ちる。受ける組（`acceptedVersions`）は `NDF_CONTRACTS.accepted` をそのまま持つ。
+
+| 関数 | 振る舞い |
+| --- | --- |
+| `judgeCall` | 使うインタフェースへの呼び出しだけを判定し、ほかのインタフェースは偽。呼び出しの環境変数がすべて行の `env` にあることを求める。`skill`・`report`・`command` は引数の全体が `args` のどれかに全体で一致、`block` は任意の `lead`・`/` + 前置き + `target` + 空白の後の引数が `args` に全体で一致、`hook` は `target` と同じ、`file` は読むファイルの `path`（`<名前>` は `/` を含まない 1 文字以上）に一致、`spec` は `target` + `/` の配下のファイル。`file` と `spec` は、`/` で始まる・`\` か制御文字を含む・空か `.` か `..` の成分を含むパスを偽にし、許したディレクトリの外を指す呼び出しを通さない（`file` の全体が `.` のときだけは許す）。読めない正規表現には一致しないとみなし、例外を投げない。検査するのはパスの文字列だけで、シンボリックリンクの先は確かめない。ランナーは、リンクを解決した実際のファイルが許可ディレクトリ内にあることを読み取り時に確かめ、外なら読まない |
+| `readReport` | 最後の `- 結果:` の行の値を結果とし、その後ろの `- <項目>: <値>` を後勝ちで読む。結果の値ごとの要る項目（`always` と、`prefix`・`equals` の条件に当たった `need`）が無い・空・`無し` なら誤り。材料は `本文` か `https://` で始まる URL を空白で区切った並びで、`本文` なら結果の行より前の文書の直下にある最後の `## 判断の材料` の見出し（GFM の構文木で決める。コードブロック・HTML のブロック・引用・リストの中の行は見出しにしない）の節を、次のレベル 1 か 2 の見出しの前まで返す。誤りの一覧はコード（`result_line_missing`・`result_value_unknown`・`item_missing`・`material_form_invalid`・`material_heading_missing`）と項目の名前だけを持ち、報告の中の値を持たない |
+
+GFM の解析器（`mdast-util-from-markdown`・`mdast-util-gfm`・`micromark-extension-gfm`）に依るのは `src/ndf-contract-use.ts` だけで、依存の規則 `contracts-ndf-contract-use-depends-on-parser-only` がほかへの依存を落とす。
+
 
 ### 生成物
 
@@ -564,7 +585,8 @@ sequenceDiagram
 | 画面（#12・#28） | 生成物を読む | `ItemOf`・`ResultOf` の型、`createOperationClient`、`generated/dummy/`、`generated/reasons.json` |
 | MCP の受け口（#11） | 生成物を読む | `generated/mcp-tools.json`。#11 は受け口の 5 つの関数を `packages/core/src/dispatch/mcp.ts` に置き、`dispatch` を呼ぶ |
 | 検査（#1） | 生成物とデータを読む | 操作の一覧と画面と MCP の対応・ルートの登録の検査（`mcp-tools.json`・`routes.json`・`OPERATIONS` の `features`）、境界の検査（`packages/core` の `exports` と、画面が import してよい `clock`・`ids`・`redact`・`log`）、漏れの検査（`data/secret-shapes.json`）。形の往復のテストは CI の `check` で走り、#1 は必須のチェックに `check` が載っていることを CI の定義のテストで見る。骨組みの `PUT /v1/users` は操作の表に無いため、#4 が消すまで、ルートの登録の検査で #4 の印つきで外す |
-| ランナー（#6） | データを読む | `NDF_CONTRACTS` と `ndfAnswerWord` |
+| ランナー（#6） | データを読む | `NDF_CONTRACTS`・`ndfAnswerWord`・`ndfContractUse`（呼び出しの判定と区間の報告の読み取り） |
+| NDF の契約の照合（`npm run ndf-contract`） | 書き出しを読む | 作業の木の `ndfContractUse` を固定の点と先端の契約に照らす。書き出しが無ければ契約を取得せずに `fail: no-contract-use <固定の点>` と終了コード 1 |
 | CDK | 仕様と生成物を読む | `ServiceTable` が `TABLES` を、`ApiRoutes` が `routes.json` を読む |
 | Cognito | 呼ぶ | `authenticate` が `aws-jwt-verify` で access token を検証する。公開鍵の取得のタイムアウトは `http-idp-keys` の `response_timeout_ms` |
 | DynamoDB | 呼ぶ | `createDb` と `writeAtomically`（`TransactWriteCommand`）。再試行は SDK の設定、トランザクションの衝突と書き込みの呼びすぎによる取り消しだけを `p-retry` で繰り返す（SDK はトランザクションの取り消しを繰り返さない） |
@@ -597,7 +619,8 @@ sequenceDiagram
 ## 運用
 
 - 形を変えるときは `packages/contracts/` を直し、`npm run generate` で生成物を作り直して同じ変更でコミットする
-- NDF の固定の点を変える PR は、`data/ndf-contracts.json` も同じ PR で直す
+- NDF の固定の点を変える PR は、`data/ndf-contracts.json` も同じ PR で直し、`npm run ndf-contract:sync` で `data/ndf-contract-use.generated.json` を作り直してコミットする（打ち忘れは照合の 6 項目目が、生成の固定の点と `ndf-pin.json` の違いとして落とす）
+- 使うインタフェースを足す・外すときは、`data/ndf-contract-use.json` を直して `npm run ndf-contract:sync` を打ち、単体テストの 11 の id のリストも同じ変更で直す
 - 再試行の値は、反映した環境のログで使い切りか待ちすぎが見えたときに、`data/retry-policies.json` の 1 か所だけを直す
 
 ### 行の版を上げる手順

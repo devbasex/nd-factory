@@ -67,6 +67,9 @@ const VIOLATIONS: Violation[] = [
     { file: "packages/contracts/src/bad-package.ts", code: 'import pad from "left-pad";\nexport const p = pad;\n', note: "zod の外のパッケージ" },
   ].map((v) => ({ ...v, rule: "contracts-depends-on-zod-only" })),
   ...[
+    { file: "packages/contracts/src/ndf-contract-use.ts", code: 'import pad from "left-pad";\nexport const p = pad;\n', note: "解析器の外のパッケージ" },
+  ].map((v) => ({ ...v, rule: "contracts-ndf-contract-use-depends-on-parser-only" })),
+  ...[
     { file: "packages/core/src/bad-app-name.ts", code: 'import { handler } from "@nd-factory/api/handler";\nexport const h = handler;\n', note: "名前の import" },
     { file: "packages/core/src/bad-app-relative.ts", code: 'import { handler } from "../../../apps/api/src/handler.ts";\nexport const h = handler;\n', note: "相対のパスの import" },
     { file: "packages/core/src/bad-infra-type.ts", code: 'import type { Stack } from "@nd-factory/infra/stack";\nexport type S = Stack;\n', note: "型だけの import" },

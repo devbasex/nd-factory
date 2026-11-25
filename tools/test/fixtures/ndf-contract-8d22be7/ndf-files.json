@@ -1,0 +1,363 @@
+{
+  "summary": "固定の点 8d22be7 の ndf-files.json の行の id・path・reader・fields（ほかの列は写さない）",
+  "columns": [
+    "id",
+    "path",
+    "reader",
+    "fields"
+  ],
+  "rows": [
+    {
+      "id": "project",
+      "path": "project.json"
+    },
+    {
+      "id": "project-measured",
+      "path": "<repo>/project.json"
+    },
+    {
+      "id": "supervise",
+      "path": "supervise.json"
+    },
+    {
+      "id": "release",
+      "path": "release.json"
+    },
+    {
+      "id": "worktree",
+      "path": "worktree.json"
+    },
+    {
+      "id": "worktree-local",
+      "path": "worktree.local.json"
+    },
+    {
+      "id": "glossary",
+      "path": "glossary.json"
+    },
+    {
+      "id": "instructions",
+      "path": "instructions.json"
+    },
+    {
+      "id": "mvv",
+      "path": "mvv.json"
+    },
+    {
+      "id": "mvv-body",
+      "path": "mvv.md"
+    },
+    {
+      "id": "pace",
+      "path": "pace.json"
+    },
+    {
+      "id": "review",
+      "path": "review.json"
+    },
+    {
+      "id": "backlog",
+      "path": "backlog.json"
+    },
+    {
+      "id": "backlog-candidates",
+      "path": "<repo>/candidates.json"
+    },
+    {
+      "id": "backlog-rank",
+      "path": "<repo>/rank.json"
+    },
+    {
+      "id": "backlog-rejected",
+      "path": "<repo>/rejected.json"
+    },
+    {
+      "id": "backlog-estimates",
+      "path": "<repo>/estimates.json"
+    },
+    {
+      "id": "backlog-before",
+      "path": "<repo>/before-<id>.json"
+    },
+    {
+      "id": "backlog-depths",
+      "path": "<repo>/depths.jsonl"
+    },
+    {
+      "id": "backlog-journal",
+      "path": "<repo>/journal.json"
+    },
+    {
+      "id": "runtime-policy",
+      "path": "runtimes.json"
+    },
+    {
+      "id": "ask",
+      "path": "ask.json"
+    },
+    {
+      "id": "estimate",
+      "path": "estimate.json"
+    },
+    {
+      "id": "issue-items",
+      "path": "issue-items.json"
+    },
+    {
+      "id": "projects",
+      "path": "projects.json"
+    },
+    {
+      "id": "code-metrics",
+      "path": "code-metrics.json"
+    },
+    {
+      "id": "handoff",
+      "path": "<id>.md"
+    },
+    {
+      "id": "sprint",
+      "path": "<id>/"
+    },
+    {
+      "id": "parallel",
+      "path": "<id>/"
+    },
+    {
+      "id": "scratch",
+      "path": "<id>/"
+    },
+    {
+      "id": "requirements",
+      "path": "issue-<n>-requirements.md"
+    },
+    {
+      "id": "design",
+      "path": "issue-<n>-design.md"
+    },
+    {
+      "id": "design-detail",
+      "path": "issue-<n>-design-detail.md"
+    },
+    {
+      "id": "approval",
+      "path": "approval-<id>.md"
+    },
+    {
+      "id": "archived-docs",
+      "path": "<name>.md"
+    },
+    {
+      "id": "worker-append-lock",
+      "path": "worker-append.lock"
+    },
+    {
+      "id": "relay-hub-state",
+      "path": "hub.json"
+    },
+    {
+      "id": "relay-hub-registry",
+      "path": "registry.json"
+    },
+    {
+      "id": "relay-hub-request",
+      "path": "requests-v2/<id>.json"
+    },
+    {
+      "id": "relay-hub-result",
+      "path": "results/<id>.json"
+    },
+    {
+      "id": "relay-hub-log",
+      "path": "hub-log.jsonl"
+    },
+    {
+      "id": "plan-progress",
+      "path": "<sprint>/<n>-<plan>-state/progress.jsonl",
+      "reader": "service",
+      "fields": [
+        "step",
+        "attention"
+      ]
+    },
+    {
+      "id": "loop-record",
+      "path": "<loop>/loop.json",
+      "reader": "service"
+    },
+    {
+      "id": "ask-journal",
+      "path": "ask.jsonl",
+      "reader": "service"
+    },
+    {
+      "id": "gate-rejections",
+      "path": "gate-rejections.jsonl",
+      "reader": "service"
+    },
+    {
+      "id": "mvv-validation",
+      "path": "mvv-validation.jsonl"
+    },
+    {
+      "id": "mvv-signals",
+      "path": "mvv-signals.jsonl"
+    },
+    {
+      "id": "reading-checks",
+      "path": "reading-checks.jsonl"
+    },
+    {
+      "id": "mvv-gate-failures",
+      "path": "mvv-gate-failures.jsonl"
+    },
+    {
+      "id": "usage-log-file",
+      "path": "usage.jsonl"
+    },
+    {
+      "id": "organizer-request",
+      "path": "requests/<id>.json",
+      "reader": "service",
+      "fields": [
+        "kind",
+        "id",
+        "lane",
+        "prs",
+        "issues",
+        "sprint_state",
+        "at",
+        "ndf_version"
+      ]
+    },
+    {
+      "id": "organizer-answer",
+      "path": "answers/<id>.json",
+      "fields": [
+        "result"
+      ]
+    },
+    {
+      "id": "organizer-range",
+      "path": "ranges/<n>.json",
+      "fields": [
+        "sha",
+        "version",
+        "prs",
+        "lanes"
+      ]
+    },
+    {
+      "id": "organizer-batch",
+      "path": "batch.json",
+      "fields": [
+        "step",
+        "lanes"
+      ]
+    },
+    {
+      "id": "organizer-presented",
+      "path": "presented/<n>-<k>.json",
+      "reader": "service",
+      "fields": [
+        "k",
+        "auto"
+      ]
+    },
+    {
+      "id": "organizer-progress",
+      "path": "progress/<n>.json",
+      "reader": "service",
+      "fields": [
+        "stages"
+      ]
+    },
+    {
+      "id": "organizer-result",
+      "path": "results/<n>.json",
+      "reader": "service",
+      "fields": [
+        "result"
+      ]
+    },
+    {
+      "id": "issue-request",
+      "path": ".",
+      "reader": "service",
+      "fields": [
+        "repo",
+        "title",
+        "body",
+        "labels"
+      ]
+    },
+    {
+      "id": "relay-wrapper",
+      "path": "<名前>/wrapper.json"
+    },
+    {
+      "id": "relay-wrapper-lock",
+      "path": "<名前>/relay.lock"
+    },
+    {
+      "id": "relay-wrapper-log",
+      "path": "<名前>/log.jsonl"
+    },
+    {
+      "id": "relay-next",
+      "path": "<名前>/next.json"
+    },
+    {
+      "id": "relay-question",
+      "path": "<名前>/question.json"
+    },
+    {
+      "id": "relay-keep",
+      "path": "<名前>/keep-<会話>.json"
+    },
+    {
+      "id": "relay-cache-log",
+      "path": "<名前>/cache-log.jsonl"
+    },
+    {
+      "id": "relay-busy",
+      "path": "<名前>/busy-<起動>.json"
+    },
+    {
+      "id": "relay-shells-ended",
+      "path": "<名前>/shells-ended.json"
+    },
+    {
+      "id": "relay-stop",
+      "path": "<名前>/stop"
+    },
+    {
+      "id": "relay-usage-fetch",
+      "path": ".usage-fetch/<名前>/<世代>.json"
+    },
+    {
+      "id": "relay-auth-held",
+      "path": "held.json"
+    },
+    {
+      "id": "gws-install-material",
+      "path": "install.md"
+    },
+    {
+      "id": "relay-pinned-account",
+      "path": "pinned.json"
+    },
+    {
+      "id": "relay-marker",
+      "path": "<id>.json"
+    },
+    {
+      "id": "relay-copy-launcher",
+      "path": "relay.py"
+    },
+    {
+      "id": "relay-copy-root",
+      "path": "relay.root"
+    }
+  ]
+}

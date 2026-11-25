@@ -1,0 +1,217 @@
+{
+  "summary": "固定の点 8d22be7 の entrypoints.json の 15 行の id・kind・target・lead・args・env・files（ほかの列は写さない）",
+  "columns": [
+    "id",
+    "kind",
+    "target",
+    "lead",
+    "args",
+    "env",
+    "files"
+  ],
+  "rows": [
+    {
+      "id": "skill-workflow",
+      "kind": "skill",
+      "target": "development-workflow",
+      "args": [
+        "#[1-9][0-9]*",
+        "--loop( [0-9A-Za-z][0-9A-Za-z_-]*)?( --milestones ([^ \"]+|\"[^\"]+\")| --budget-(laps|usd|hours) ([0-9]+(\\.[0-9]+)?|default))*( -- 終わり: .+)?"
+      ],
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_LOOP_EXCLUDE",
+        "NDF_ISSUE_REQUEST_FILE",
+        "NDF_MVV_STATE_DIR",
+        "NDF_PROGRESS_DB",
+        "NDF_ORGANIZER_DIR",
+        "NDF_ORGANIZER_LANE",
+        "GH_TOKEN"
+      ]
+    },
+    {
+      "id": "block-next",
+      "kind": "block",
+      "target": "development-workflow",
+      "lead": "/goal ",
+      "args": [
+        "#[1-9][0-9]*",
+        "--loop( [0-9A-Za-z][0-9A-Za-z_-]*)?( --milestones ([^ \"]+|\"[^\"]+\")| --budget-(laps|usd|hours) ([0-9]+(\\.[0-9]+)?|default))*( -- 終わり: .+)?"
+      ],
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_LOOP_EXCLUDE",
+        "NDF_ISSUE_REQUEST_FILE",
+        "NDF_MVV_STATE_DIR",
+        "NDF_PROGRESS_DB",
+        "NDF_ORGANIZER_DIR",
+        "NDF_ORGANIZER_LANE",
+        "GH_TOKEN"
+      ]
+    },
+    {
+      "id": "report-unattended",
+      "kind": "report",
+      "target": "結果",
+      "args": [
+        "判断が要る",
+        "完了",
+        "できなかった"
+      ],
+      "env": [
+        "NDF_FACTORY_RUN"
+      ]
+    },
+    {
+      "id": "hook-unattended-start",
+      "kind": "hook",
+      "target": "UserPromptSubmit",
+      "env": [
+        "NDF_FACTORY_RUN"
+      ]
+    },
+    {
+      "id": "hook-unattended-stop",
+      "kind": "hook",
+      "target": "Stop",
+      "env": [
+        "NDF_FACTORY_RUN"
+      ]
+    },
+    {
+      "id": "hook-unattended-end",
+      "kind": "hook",
+      "target": "SessionEnd",
+      "env": [
+        "NDF_FACTORY_RUN"
+      ]
+    },
+    {
+      "id": "file-organizer",
+      "kind": "file",
+      "target": "organizer",
+      "env": [
+        "NDF_ORGANIZER_DIR",
+        "NDF_ORGANIZER_LANE",
+        "NDF_VERSION",
+        "NDF_FACTORY_RUN"
+      ],
+      "files": [
+        "organizer-request",
+        "organizer-answer",
+        "organizer-range",
+        "organizer-batch",
+        "organizer-presented",
+        "organizer-progress",
+        "organizer-result"
+      ]
+    },
+    {
+      "id": "file-plan-progress",
+      "kind": "file",
+      "target": "ndf-tmp",
+      "env": [
+        "NDF_FACTORY_RUN"
+      ],
+      "files": [
+        "plan-progress"
+      ]
+    },
+    {
+      "id": "file-loop-record",
+      "kind": "file",
+      "target": "ndf-loop",
+      "env": [
+        "NDF_FACTORY_RUN"
+      ],
+      "files": [
+        "loop-record"
+      ]
+    },
+    {
+      "id": "file-journals",
+      "kind": "file",
+      "target": "mvv-state",
+      "env": [
+        "NDF_MVV_STATE_DIR"
+      ],
+      "files": [
+        "ask-journal",
+        "gate-rejections"
+      ]
+    },
+    {
+      "id": "file-issue-request",
+      "kind": "file",
+      "target": "issue-request",
+      "env": [
+        "NDF_ISSUE_REQUEST_FILE"
+      ],
+      "files": [
+        "issue-request"
+      ]
+    },
+    {
+      "id": "gate-record",
+      "kind": "command",
+      "target": "gate",
+      "args": [
+        "設計承認ゲート",
+        "リリース承認ゲート"
+      ],
+      "env": [
+        "NDF_FACTORY_RUN",
+        "NDF_VERSION",
+        "NDF_STATE_HOME",
+        "NDF_LOOP_EXCLUDE",
+        "NDF_ISSUE_REQUEST_FILE",
+        "NDF_MVV_STATE_DIR",
+        "NDF_PROGRESS_DB",
+        "NDF_ORGANIZER_DIR",
+        "NDF_ORGANIZER_LANE",
+        "GH_TOKEN"
+      ]
+    },
+    {
+      "id": "spec-pages",
+      "kind": "spec",
+      "target": "docs/contracts",
+      "env": []
+    },
+    {
+      "id": "spec-ndf_settings",
+      "kind": "spec",
+      "target": "contracts/schemas/ndf-settings",
+      "env": [],
+      "files": [
+        "project",
+        "supervise",
+        "release",
+        "worktree",
+        "glossary",
+        "instructions",
+        "mvv",
+        "mvv-body",
+        "pace",
+        "review",
+        "backlog",
+        "runtime-policy",
+        "ask",
+        "estimate",
+        "issue-items",
+        "projects",
+        "code-metrics"
+      ]
+    },
+    {
+      "id": "spec-io",
+      "kind": "spec",
+      "target": "contracts/schemas/io",
+      "env": []
+    }
+  ]
+}

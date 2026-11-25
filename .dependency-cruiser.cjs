@@ -22,8 +22,22 @@ module.exports = {
       name: "contracts-depends-on-zod-only",
       comment: "形の正本は zod だけに依存する（全体の設計の依存の表）",
       severity: "error",
-      from: { path: "^packages/contracts/src/" },
+      from: { path: "^packages/contracts/src/", pathNot: "^packages/contracts/src/ndf-contract-use\\.ts$" },
       to: { pathNot: ["^packages/contracts/", "^node_modules/zod/"] },
+    },
+    {
+      name: "contracts-ndf-contract-use-depends-on-parser-only",
+      comment:
+        "NDF の契約の使い方は、zod と、区間の報告の見出しを決める GFM の解析器（#136 の LIB4）だけに依存する（全体の設計の依存の表）",
+      severity: "error",
+      from: { path: "^packages/contracts/src/ndf-contract-use\\.ts$" },
+      to: {
+        pathNot: [
+          "^packages/contracts/",
+          "^node_modules/zod/",
+          "^node_modules/(mdast-util-from-markdown|mdast-util-gfm|micromark-extension-gfm)/",
+        ],
+      },
     },
     {
       name: "core-depends-on-contracts-only",
