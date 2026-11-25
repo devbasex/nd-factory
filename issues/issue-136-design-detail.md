@@ -26,6 +26,7 @@ packages/contracts/
     ndf-contract-use.json              *
     ndf-contract-use.generated.json    *
   src/
+    ndf-contract-use-schema.ts         *
     ndf-contract-use.ts                *
   test/
     data.test.ts
@@ -49,8 +50,10 @@ docs/operations/pipeline-approval.md
 
 依存の向きは一方向で、循環は無い。
 
-- `packages/contracts/src/ndf-contract-use.ts` が読むのは、同じパッケージの `data.ts`（`NDF_CONTRACTS`・`DataFileError`）と、2 つの JSON と、zod だけである。`node:` の組み込みは読まない
-- `tools/checks/src/ndf-contract-check.ts` は、`@nd-factory/contracts/ndf-contract-use` から型と zod の形を読み込む。書き出しの実体は、今までどおり `--root` の作業ツリーから実行時に解決する
+- `packages/contracts/src/ndf-contract-use-schema.ts` が読むのは zod だけである。データの JSON を読まず、読み込みのときに何も組み立てない
+- `packages/contracts/src/ndf-contract-use.ts` が読むのは、同じパッケージの `ndf-contract-use-schema.ts`・`data.ts`（`NDF_CONTRACTS`・`DataFileError`）と、2 つの JSON と、zod だけである。`node:` の組み込みは読まない
+- `tools/checks/src/ndf-contract-check.ts` は、`@nd-factory/contracts/ndf-contract-use-schema` から型と zod の形を読み込む。`@nd-factory/contracts/ndf-contract-use` は静的に読み込まない。照合が相手にする書き出しの実体は、今までどおり `--root` の作業ツリーから実行時に解決する
+- 形を JSON を読まないモジュールに分けるのは、`ndf-contract-use.ts` が読み込みのときに `buildContractUse` を実行し、手で書く id と生成の行が食い違えば例外を投げるためである。CLI がそこから形を読むと、食い違った作業ツリーでは照合も生成のコマンドも起動前に止まり、直す手段の `npm run ndf-contract:sync` が動かない
 - スキーマの正本の側から `tools` は読まない
 
 | パス | 種類 | 役割 | 依存する先 | モジュール | 最上位の関数と値（新設 / 変更） |
@@ -59,14 +62,15 @@ docs/operations/pipeline-approval.md
 | `packages/contracts/data/ndf-contracts.json` | 変更 | 受ける組をバージョン 16・`c50ef840…` の 1 組にする | — | — | — |
 | `packages/contracts/data/ndf-contract-use.json` | 新設 | 手で書く使い方のデータ | — | — | — |
 | `packages/contracts/data/ndf-contract-use.generated.json` | 新設 | 固定の点の契約から生成した行と形 | — | — | — |
-| `packages/contracts/src/ndf-contract-use.ts` | 新設 | 使い方の型・データの読み込み・呼び出しの判定・区間の報告の読み取りを持ち、`ndfContractUse` を書き出す | `./data.ts`・zod・上の 2 つの JSON | `ndf-contract-use` | `ndfContractUseData`・`ndfContractUseGenerated`（zod の形）、`buildContractUse`・`judgeCallWith`・`filePathPattern`・`readReportWith`・`ndfContractUse`（新設） |
-| `packages/contracts/package.json` | 変更 | `exports` に `"./ndf-contract-use": "./src/ndf-contract-use.ts"` を足す | — | — | — |
+| `packages/contracts/src/ndf-contract-use-schema.ts` | 新設 | 使い方の型・データの zod の形・区間の報告から読む項目の名前を持つ。データの JSON を読まない | zod | `ndf-contract-use-schema` | `ndfContractUseData`・`ndfContractUseGenerated`（zod の形）、`REPORT_ITEMS`（定数）、型 `NdfContractUse`・`ReportReading` など（新設） |
+| `packages/contracts/src/ndf-contract-use.ts` | 新設 | データの読み込み・呼び出しの判定・区間の報告の読み取りを持ち、`ndfContractUse` を書き出す。型は `ndf-contract-use-schema.ts` から書き出し直す | `./ndf-contract-use-schema.ts`・`./data.ts`・zod・上の 2 つの JSON | `ndf-contract-use` | `buildContractUse`・`judgeCallWith`・`filePathPattern`・`readReportWith`・`ndfContractUse`（新設） |
+| `packages/contracts/package.json` | 変更 | `exports` に `"./ndf-contract-use": "./src/ndf-contract-use.ts"` と `"./ndf-contract-use-schema": "./src/ndf-contract-use-schema.ts"` を足す | — | — | — |
 | `package.json` | 変更 | `"ndf-contract:sync": "node tools/checks/src/ndf-contract-check.ts sync"` を足す | — | — | — |
 | `packages/contracts/test/ndf-contract-use.test.ts` | 新設 | 判定・読み取り・網羅・データの組み立ての単体テスト | `../src/ndf-contract-use.ts`・フィクスチャ | — | — |
 | `packages/contracts/test/fixtures/ndf-contract-8d22be7/entrypoint-cases.json` | 新設 | 固定の点のサンプル 26 件の写し（`id`・`entrypoint`・`call`・`env`・`valid` の列だけ） | — | — | — |
 | `packages/contracts/test/fixtures/ndf-contract-8d22be7/unattended-report.json` | 新設 | 固定の点の区間の報告の `shape` と `cases` 16 件の写し | — | — | — |
 | `packages/contracts/test/data.test.ts` | 変更 | 受ける組の期待値をバージョン 16 にする | — | — | — |
-| `tools/checks/src/ndf-contract-check.ts` | 変更 | 照合の 1・4・5・6 項目目を広げ、skip の道を消し、生成のコマンドを足す | `@nd-factory/contracts/ndf-contract-use`（型と zod の形）・zod・`node:` | `ndf-contract-check` | `compareContract`・`checkCases`・`checkFiles`・`checkReport`・`checkEntrypoints`・`isContractUse`・`mainNdfContractCheck`（変更）、`generateContractUse`・`mainNdfContractSync`（新設）。`CONTRACT_USE_REQUIRED` と型 `NdfContractUse`・`ReportRequiredRule` のコピーは消す |
+| `tools/checks/src/ndf-contract-check.ts` | 変更 | 照合の 1・4・5・6 項目目を広げ、skip の道を消し、生成のコマンドを足す | `@nd-factory/contracts/ndf-contract-use-schema`（型と zod の形）・zod・`node:` | `ndf-contract-check` | `compareContract`・`checkCases`・`checkFiles`・`checkReport`・`checkEntrypoints`・`isContractUse`・`mainNdfContractCheck`（変更）、`generateContractUse`・`mainNdfContractSync`（新設）。`CONTRACT_USE_REQUIRED` と型 `NdfContractUse`・`ReportRequiredRule` のコピーは消す |
 | `tools/test/ndf-contract-check.test.ts` | 変更 | テストの偽物の使い方を新しい型にし、新しい照合と生成のテストを足す | 照合のモジュール・フィクスチャ | — | — |
 | `tools/test/fixtures/ndf-contract-752a9cf/` | 削除 | 古い固定の点の写し | — | — | — |
 | `tools/test/fixtures/ndf-contract-8d22be7/*.json` | 新設 | 新しい固定の点の `entrypoints.json`（15 行の `id`・`kind`・`target`・`lead`・`args`・`env`・`files`）・`env.json`（`id`・`set_by`）・`ndf-files.json`（`id`・`path`・`reader`・`fields`）の写し | — | — | — |
@@ -106,14 +110,14 @@ docs/operations/pipeline-approval.md
 
 - `buildContractUse`
   - 事前条件: 呼ぶ側に求めることは無い。入力は `unknown` で受け、形は中で確かめる
-  - 事後条件: 返す `entrypoints` の id の集合は、手で書く id の一覧と生成の行の id の集合の両方と同じである。`files` の行は、生成の `files` の行（`id`・`path`）に、手で書く `fields` を id で付けたものである。`acceptedVersions` は引数の `accepted` と同じ参照である
+  - 事後条件: 返す `entrypoints` の id の集合は、手で書く id の一覧と生成の行の id の集合の両方と同じである。`files` の行は、生成の `files` の行（`id`・`path`）に、手で書く `fields` を id で付けたものである。`acceptedVersions` は引数の `accepted` と同じ参照である。`reportItems` は `REPORT_ITEMS` である
   - 副作用: 無い
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `buildContractUse` | 手で書くデータか生成のデータが形に合わない | JSON の手での書き誤り・生成のファイルの手での書き換え | zod の `safeParse` | `DataFileError` を投げる（`data.ts` の既存の例外） | モジュールの読み込みが失敗する。`npm run check` の単体テストと型検査が落ちる。照合は「書き出しを読めない」で終了コード 2 | データを直して打ち直す |
+| `buildContractUse` | 手で書くデータか生成のデータが形に合わない | JSON の手での書き誤り・生成のファイルの手での書き換え | zod の `safeParse` | `DataFileError` を投げる（`data.ts` の既存の例外） | モジュールの読み込みが失敗する。`npm run check` の単体テストと型検査が落ちる。照合は「書き出しを読めない」で終了コード 2。生成のコマンドは `ndf-contract-use.ts` を読み込まないので起動できる | データを直して打ち直す |
 | `buildContractUse` | 手で書く id と生成の行の id が一致しない | 手で書く一覧を直した後に生成のコマンドを打ち忘れた | id の集合を比べる | 同上。メッセージに、片方にだけある id を並べる | 同上 | `npm run ndf-contract:sync` を打ち直す |
 | `buildContractUse` | 手で書く `files` の id が生成の `files` に無い | 同上か、使うインタフェースの `files` に無い id を手で書いた | id で引けない | 同上 | 同上 | データを直すか、生成し直す |
 | `buildContractUse` | `env` の `entrypoint` が使うインタフェースに無い | 手での書き誤り | id で引けない | 同上 | 同上 | データを直す |
@@ -122,21 +126,25 @@ docs/operations/pipeline-approval.md
 
 | 名前 | 種類 | 保存先 | 中身 |
 | --- | --- | --- | --- |
-| `ndfContractUseData` | zod の形（`z.strictObject`） | `packages/contracts/src/ndf-contract-use.ts` | 手で書くデータの形。キーは `entrypoints`（id の文字列の配列）・`skillPrefix`（文字列）・`env`（`entrypoint`・`site`（`hosted` か `local`）・`names` の配列）・`envSetBy`（名前から `set_by` の値への対応）・`files`（`id`・`fields` の配列）・`reportItems`（文字列の配列） |
+| `ndfContractUseData` | zod の形（`z.strictObject`） | `packages/contracts/src/ndf-contract-use-schema.ts` | 手で書くデータの形。キーは `entrypoints`（id の文字列の配列）・`skillPrefix`（文字列）・`env`（`entrypoint`・`site`（`hosted` か `local`）・`names` の配列）・`envSetBy`（名前から `set_by` の値への対応）・`files`（`id`・`fields` の配列） |
+| `REPORT_ITEMS` | 定数（`as const` の文字列の配列） | 同上 | ランナーが区間の報告から読む項目の名前（`結果`・`課題`・`区分`・`承認ゲート`・`質問`・`Pull Request`・`材料`・`人に頼むこと`・`理由`）。`NdfContractUse.reportItems` はこの定数を指す。読み取りの戻り値の `items` の型をこの定数から作るため、JSON ではなくコードに置く |
 | `ndfContractUseGenerated` | zod の形（`z.strictObject`） | 同上 | 生成のファイルの形。キーは `commit`（40 桁の 16 進）・`entrypoints`（`id`・`kind`・`target`・`lead`（任意）・`args`（任意）・`env`・`files`（任意）の配列）・`files`（`id`・`path` の配列）・`report`（`values`・`required`・`material`）。`tools` の生成のコマンドも、書く前にこの形で確かめる |
-| `NdfContractUse` | 型 | 同上 | 照合とランナーが使う形。設計書の決定 5 の代償にあるとおり、`entrypoints` と `files` は行のオブジェクトの配列になり、`pinnedCommit`（生成の `commit`）と `skillPrefix` が加わる。`readReport` の `errors` は `ReportError` の配列になる |
+| `NdfContractUse` | 型 | 同上 | 照合とランナーが使う形。設計書の決定 5 の代償にあるとおり、`entrypoints` と `files` は行のオブジェクトの配列になり、`pinnedCommit`（生成の `commit`）と `skillPrefix` が加わる。`readReport` は `ReportReading` を返す |
+| `ReportReading` | 型 | 同上 | `{ result: string; errors: readonly ReportError[]; items: Readonly<Partial<Record<ReportItemName, string>>>; material: ReportMaterial }`。中身は設計書の決定 7 の「読み取りが返すもの」の表 |
+| `ReportItemName` | 型 | 同上 | `Exclude<(typeof REPORT_ITEMS)[number], "結果">` |
+| `ReportMaterial` | 型 | 同上 | `{ kind: "none" } \| { kind: "body"; section: string } \| { kind: "urls"; urls: readonly string[] }` |
 | `NdfEntrypointRow` | 型 | 同上 | 生成の行 1 つ（`id`・`kind`・`target`・`lead?`・`args?`・`env`・`files?`） |
 | `ReportRequiredRule` | 型 | 同上 | 照合の側のコピーをここへ移す。形は今の照合のものと同じ |
 | `ReportError` | 型 | 同上 | `{ code: ReportErrorCode; item: string }`。読み取った値を持たない（決定 7） |
 | `ReportErrorCode` | 型（文字列の合併） | 同上 | 決定 7 の表の 5 つのコード |
-| `packages/contracts/data/ndf-contract-use.json` | 手で書くデータ | 同左 | `entrypoints` は決定 4 の 11 の id。`skillPrefix` は `ndf:`。`env` は `skill-workflow` と `block-next` のそれぞれに、ホステッドと手元のマシンの 2 組を書く。名前は execution.md の「渡す環境変数」の表のとおりで、手元のマシンには `NDF_PROGRESS_DB` を入れない。`envSetBy` は `GH_TOKEN`・`NDF_STATE_HOME` の `user`。`files` は `plan-progress`（`step`・`attention`）・`ask-journal`（項目なし）・`gate-rejections`（項目なし）・`issue-request`（`repo`・`title`・`body`・`labels`）。`reportItems` は、ランナーが区間の報告から読む項目（`結果`・`課題`・`区分`・`承認ゲート`・`質問`・`Pull Request`・`材料`・`人に頼むこと`・`理由`） |
+| `packages/contracts/data/ndf-contract-use.json` | 手で書くデータ | 同左 | `entrypoints` は決定 4 の 11 の id。`skillPrefix` は `ndf:`。`env` は `skill-workflow` と `block-next` のそれぞれに、ホステッドと手元のマシンの 2 組を書く。名前は execution.md の「渡す環境変数」の表のとおりで、手元のマシンには `NDF_PROGRESS_DB` を入れない。`envSetBy` は `GH_TOKEN`・`NDF_STATE_HOME` の `user`。`files` は `plan-progress`（`step`・`attention`）・`ask-journal`（項目なし）・`gate-rejections`（項目なし）・`issue-request`（`repo`・`title`・`body`・`labels`） |
 | `packages/contracts/data/ndf-contract-use.generated.json` | 生成のデータ | 同左 | 生成のコマンドだけが書く。手で直さない |
 
 `acceptedVersions` は `NDF_CONTRACTS.accepted` を渡し、データに書かない（決定 3）。
 
 生成のファイルのキーに `ndf_ref` を使わず、`commit` にする。参照の検査が、`ndf_ref` のキーは `ndf-pin.json` の 1 か所だけにあることを確かめているためである。
 
-`report.values` は、契約の `shape.values` のキー（結果の値の名前）だけを契約の順で写した文字列の配列にする。`shape.values` の値の側（結果ごとの説明の文）は写さない。設計書の決定 5 は `shape.values` を「そのまま写す」としているが、判定にも読み取りにも使うのは値の名前だけである。説明の文を写すと、参照の検査が探す語を持ち込むおそれがある（今のフィクスチャも説明の文の列を写していない）。照合の 5 項目目は、このキーの並びと契約の `shape.values` のキーの並びを比べる。`required` と `material` は契約の値をそのまま写す。
+`report.values` は、契約の `shape.values` のキー（結果の値の名前）だけを契約の順で写した文字列の配列にする（設計書の決定 5）。`shape.values` の値の側（結果ごとの説明の文）は写さない。判定にも読み取りにも使うのは値の名前だけである。説明の文を写すと、参照の検査が探す語を持ち込むおそれがある（今のフィクスチャも説明の文の列を写していない）。照合の 5 項目目は、このキーの並びと契約の `shape.values` のキーの並びを比べる。`required` と `material` は契約の値をそのまま写す。
 
 ### 既存の部品の再利用
 
@@ -223,12 +231,12 @@ docs/operations/pipeline-approval.md
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `readReportWith` | `packages/contracts/src/ndf-contract-use.ts` | 新設 | `(report: NdfContractUseGenerated["report"], text: string) => { result: string; errors: readonly ReportError[] }` | 決定 7 の規則 1〜6 で、応答の文から結果と誤りの一覧を取り出す |
+| `readReportWith` | `packages/contracts/src/ndf-contract-use.ts` | 新設 | `(report: NdfContractUseGenerated["report"], text: string) => ReportReading` | 決定 7 の規則 1〜6 で、応答の文から結果・誤りの一覧・採った項目の値・材料を取り出す。ランナーは検証にも承認資料の組み立てにもこの戻り値だけを使い、応答の文を読み直さない |
 
 `NdfContractUse.readReport` は、`buildContractUse` が生成の `report` を渡して作る。
 
 - `readReportWith`
-  - 事後条件: 例外を投げない。`errors` の各要素は `code` と `item` だけを持ち、入力の文の一部を持たない。結果の行が無いとき、`result` は空文字列である
+  - 事後条件: 例外を投げない。`errors` の各要素は `code` と `item` だけを持ち、入力の文の一部を持たない。結果の行が無いとき、`result` は空文字列である。`items` のキーは `REPORT_ITEMS` の名前（`結果` を除く）に限り、値は規則 4 で採った最後の行の値である。`errors` が空でないとき、`material` は `{ kind: "none" }` である
   - 副作用: 無い
 
 ### 異常系の処理
@@ -243,18 +251,19 @@ docs/operations/pipeline-approval.md
 
 | 条件 | 結果 |
 | --- | --- |
-| `- 結果:` で始まる行が無い（規則 1） | `result` は空文字列。`errors` は `result_line_missing`（`結果`）の 1 件だけで、規則 3〜6 を当てない |
-| 最後の `- 結果:` の行の値（前後の空白を除く）が `report.values` に無い（規則 2） | `result` はその値。`errors` は `result_value_unknown`（`結果`）の 1 件だけで、規則 3〜6 を当てない |
+| `- 結果:` で始まる行が無い（規則 1） | `result` は空文字列。`errors` は `result_line_missing`（`結果`）の 1 件だけで、規則 3〜6 を当てない。`items` は空、`material` は `none` |
+| 最後の `- 結果:` の行の値（前後の空白を除く）が `report.values` に無い（規則 2） | `result` はその値。`errors` は `result_value_unknown`（`結果`）の 1 件だけで、規則 3〜6 を当てない。`items` は空、`material` は `none` |
 | 値が `report.values` にある | 規則 3〜6 を当てる |
 
 規則 3〜6（設計書の決定 7 の番号）の当て方は次のとおりである。手順の番号と規則の番号は違う。
 
-1. 規則 3・4: 結果の行より後ろの行のうち、`- <項目>: <値>` の形の行を項目として読む。値の前後の空白を除く。同じ名前は後の行で上書きする
+1. 規則 3・4: 結果の行より後ろの行のうち、`- <項目>: <値>` の形の行を項目として読む。値の前後の空白を除く。同じ名前は後の行で上書きする。読んだ項目のうち `REPORT_ITEMS` にある名前を `items` に入れる
 2. 規則 5: 結果の値の `required` の `always` の項目と、`when` の条件に当たった行の `need` の項目を、要る項目として集める。`when` の条件は、`item` の項目の値が `prefix` で始まるか、`equals` と同じかである。`item` の項目が無ければ条件に当たらない
 3. 規則 5: 要る項目ごとに、無い・空・`無し` なら `item_missing`（その項目の名前）を足す。要る項目の順は、`always` の順の後に `when` の順とし、同じ項目は 1 回だけ確かめる
 4. 規則 6: `material.item`（`材料`）の値が、空でも `無し` でもないときだけ、形を確かめる
-   - 値が `material.body`（`本文`）のとき: 結果の行より前に、`material.heading`（`## 判断の材料`）と同じ行があるかを確かめる。無ければ `material_heading_missing`（`材料`）を足す
-   - `本文` でないとき: 値を空白で区切った並びのどれもが、`material.url_prefix`（`https://`）で始まり、その後ろに 1 文字以上あるかを確かめる。そうでなければ `material_form_invalid`（`材料`）を足す
+   - 値が `material.body`（`本文`）のとき: 結果の行より前の行を上から読み、フェンスのコードブロックの中か外かを追う。開く行は、行頭から 3 つまでの空白の後に `` ` `` か `~` を 3 つ以上並べた行である。閉じる行は、同じ文字を開いた行の数以上並べ、後ろに空白しか無い行である。コードブロックの外で `material.heading`（`## 判断の材料`）と同じ行を見出しとし、最後の見出しを採る。見出しが無ければ `material_heading_missing`（`材料`）を足す。あれば、見出しの次の行から、コードブロックの外にある次の `# ` か `## ` で始まる行の前まで（無ければ結果の行の前まで）を節とし、`material` を `{ kind: "body", section: 節の行を改行でつないだ文 }` にする
+   - `本文` でないとき: 値を空白で区切った並びのどれもが、`material.url_prefix`（`https://`）で始まり、その後ろに 1 文字以上あるかを確かめる。そうでなければ `material_form_invalid`（`材料`）を足す。そうなら `material` を `{ kind: "urls", urls: 並び }` にする
+5. 材料が無い・空・`無し` のとき、`material` は `{ kind: "none" }` にする。手順の最後に `errors` が空でなければ、`material` を `{ kind: "none" }` に戻す
 
 - 繰り返しの終わる条件: 行の数で終わる
 - 計算量の注意: 行の数に比例する
@@ -269,7 +278,7 @@ docs/operations/pipeline-approval.md
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `readReportWith` | 新しい固定の点の `cases` 16 件で、`result` と `errors` の有無がサンプルと同じ | 結果の行の後ろに `材料` が 2 行あるとき、後ろの値を採る。結果の行が 2 つあるとき、最後の行を採る。`完了` と `できなかった` の `材料: 無し` が誤りにならない。URL を空白で区切った並びが誤りにならない | `判断が要る` の `材料: 無し` が `item_missing`。`区分: ndf-gate:…` で `承認ゲート` が無いと `item_missing`。`材料: 本文` で見出しが無いと `material_heading_missing`。材料の欄が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url` のとき、`errors` は `material_form_invalid`・`材料` の 1 件だけで、`JSON.stringify(errors)` が `X-Amz-Signature`・`0000`・`not-a-url` を含まない |
+| `readReportWith` | 新しい固定の点の `cases` 16 件で、`result` と `errors` の有無がサンプルと同じ。有効な報告で、`items` の `区分`・`質問`・`Pull Request` と `material` が報告の値と同じ | 結果の行の後ろに `材料` が 2 行あるとき、`items` と `material` が後ろの値になる。`区分` が 2 行あるとき、`items.区分` が後ろの値になる。`## 判断の材料` の見出しが 2 つあるとき、`material.section` が 2 つ目の節で、次の `## ` の見出しの前で終わる。コードブロック（`` ``` `` と `~~~~`）の中の `## 判断の材料` の行を見出しとみなさない。結果の行が 2 つあるとき、最後の行を採る。`完了` と `できなかった` の `材料: 無し` が誤りにならない。URL を空白で区切った並びが誤りにならない | `判断が要る` の `材料: 無し` が `item_missing`。`区分: ndf-gate:…` で `承認ゲート` が無いと `item_missing`。`材料: 本文` で見出しが無いと `material_heading_missing`。見出しがコードブロックの中にしか無くても `material_heading_missing`。材料の欄が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url` のとき、`errors` は `material_form_invalid`・`材料` の 1 件だけで、`JSON.stringify(errors)` が `X-Amz-Signature`・`0000`・`not-a-url` を含まない |
 
 ## 契約の照合と生成のコマンド
 
@@ -282,7 +291,7 @@ docs/operations/pipeline-approval.md
 | `compareContract` | `tools/checks/src/ndf-contract-check.ts` | 変更 | `(files: ContractFiles, use: NdfContractUse, pinned: string) => ContractFinding[]`（今は `(files, use: NdfContractUse \| null)`） | 照合の 1〜6 項目目を実行し、食い違いを返す。使い方が無い場合の扱いは呼び出し元へ移す |
 | `checkCases` | 同上 | 変更（責務） | 今のまま | 1 項目目。先にすべてのサンプルの参照先の id が `entrypoints.json` にあるかを確かめ、その後で使うインタフェースへのサンプルだけを判定へ通す |
 | `checkFiles` | 同上 | 変更（責務） | 今のまま | 4 項目目。今の確かめに加えて、読むファイルの `path` が契約の行の `path` と同じかを比べる |
-| `checkReport` | 同上 | 変更（責務） | 今のまま | 5 項目目。`values`・`required`・`material` は契約の `shape` と同じかを比べる。手で書く `reportItems`（ランナーが読む項目の名前）は、契約の `shape.items` にあるかを確かめる。サンプルの照合は今のまま |
+| `checkReport` | 同上 | 変更（責務） | 今のまま | 5 項目目。`use.reportItems`（`REPORT_ITEMS`。ランナーが読む項目の名前）は、契約の `shape.items` にあるかを確かめる。`values` は契約の `shape.values` のキーの並びと比べ、`required` と `material` は値の全体を比べる。サンプルの照合は今のまま |
 | `checkEntrypoints` | 同上 | 変更 | `(files: ContractFiles, use: NdfContractUse, pinned: string, findings: ContractFinding[]) => void` | 6 項目目。生成の固定の点を比べた後、使うインタフェースの行が契約にあり、6 つの列が同じかを比べる |
 | `isContractUse` | 同上 | 変更（責務） | 今のまま | 書き出しが新しい `NdfContractUse` の形かを確かめる |
 | `MainOptions` | 同上 | 変更（型） | `{ repoUrl?: string; loadUse?: (root: string) => Promise<NdfContractUse \| null> }`（`required` を消す） | テストが差し替える依存 |
@@ -316,7 +325,7 @@ docs/operations/pipeline-approval.md
 | `checkEntrypoints` | 生成の行の列が契約と違う | 生成のファイルの手での書き換え（固定の点）・上流の変更（先端） | 列ごとに `JSON.stringify` で比べる | 列ごとに 1 件の食い違いを足す | `mismatch: … 6 …entrypoints.json <id>: <列> が契約と違う`。値は出さない（契約の値は公開の情報だが、行が長くなるため） | 固定の点なら生成し直す |
 | `checkCases` | サンプルの参照先が `entrypoints.json` に無い（使うインタフェースへのサンプルに限らず、すべてのサンプルで確かめる） | 上流の契約の誤り | 絞り込みの前の id の確かめ | 1 項目目の食い違いを足し、そのサンプルを判定へ通さない | `mismatch: … 1 …entrypoint-cases.json <サンプルの id>: …`（今の文のまま） | 上流の修正を待つ |
 | `checkFiles` | 読むファイルの `path` が契約と違う | 同上（生成し忘れか上流の変更） | `row.path !== wanted.path` | 4 項目目の食い違いを足す | `mismatch: … 4 …ndf-files.json <id>: path が生成の値と違う` | 固定の点なら生成し直す |
-| `checkReport` | `values`・`required`・`material` が契約の `shape` と違う | 同上 | 正規化した JSON で比べる | 5 項目目の食い違いを、キーごとに 1 件足す | `mismatch: … 5 …unattended-report.json: shape.<キー> が生成の値と違う` | 同上 |
+| `checkReport` | `values` が契約の `shape.values` のキーの並びと違う・`required`・`material` が契約の `shape` の値と違う | 同上 | 正規化した JSON で比べる（`values` は `Object.keys(shape.values)` と比べる） | 5 項目目の食い違いを、キーごとに 1 件足す | `mismatch: … 5 …unattended-report.json: shape.<キー> が生成の値と違う` | 同上 |
 | `generateContractUse` | 手で書く id が契約の `entrypoints.json` に無い | 手での書き誤り・上流でインタフェースが消えた | id で引けない | `ContractFetchError` でない専用の例外（`ContractUseSyncError`）を投げる | — | — |
 | `generateContractUse` | 契約のファイルの形が読めない | 上流の契約の誤り | `SCHEMAS` の `safeParse` | 同上 | — | — |
 | `mainNdfContractSync` | 上の 2 つ | 同上 | 例外を受ける | 止める。生成のファイルを書かない | 標準エラーに `error: 生成できない: <理由>`。契約に無い id は名前を並べる。終了コード 1 | 生成のファイルは前のまま残る。直して打ち直す |
@@ -343,7 +352,7 @@ docs/operations/pipeline-approval.md
 | 順 | 処理 | 失敗したとき |
 | --- | --- | --- |
 | 1 | 引数（`sync` の後に `--root` だけ）を読む | 終了コード 2 |
-| 2 | `ndf-pin.json` から固定の点を、`packages/contracts/data/ndf-contract-use.json` から `entrypoints` の id の一覧を読む | 終了コード 2 |
+| 2 | `ndf-pin.json` から固定の点を、`packages/contracts/data/ndf-contract-use.json` から `entrypoints` の id の一覧を読む。手で書くデータは `ndf-contract-use-schema` の `ndfContractUseData` で確かめ、`ndfContractUse`（生成のファイルと合わせて組み立てる書き出し）は読み込まない | 終了コード 2 |
 | 3 | 固定の点の契約を取得する（`fetchContract`） | 終了コード 2 |
 | 4 | `generateContractUse` で生成のデータを作り、`ndfContractUseGenerated` の形で確かめる | 終了コード 1 |
 | 5 | 生成のファイルを書き、`wrote: <パス> <固定の点>` を標準出力に出す | 終了コード 2 |
@@ -382,4 +391,4 @@ docs/operations/pipeline-approval.md
 | `compareContract` | 作り物の契約と使い方で食い違いが 0 件 | 使わないインタフェースのサンプルの `valid` を逆にしても、食い違いが出ない | `block-next` へのサンプル 1 件の `entrypoint` を `no-such-entrypoint` にすると、そのサンプルの id を含む 1 項目目の行が出る（`entrypoints.json` の行は消さない）。生成の `spec-io` の `target` だけを変えると 6 項目目の食い違い。`path` だけを変えると 4 項目目。`required` の `判断が要る` の `always` だけを変えると 5 項目目。生成の `commit` だけを変えると 6 項目目 |
 | `mainNdfContractCheck` | 食い違いが無ければ 0 と、固定の点と先端の `checked:` の行。`skip:` の行が出ない | — | 書き出しが無く、取得先の `repoUrl` が取得できない値でも、終了コードは 1 で、`fail: no-contract-use <固定の点>` を出し、`read:` の行を出さない（取得を試みない）。`ask-journal` に `fields` を足した契約では、`notice:` の行が標準出力と要約に出て、終了コードは 0 のまま |
 | `generateContractUse` | フィクスチャの契約から作ると、手で書く id の行と `path` と区間の報告の形を持ち、コミットした生成のファイルと同じ | 使わないインタフェース（`file-loop-record` など）の行が入らない | 契約に無い id を一覧に足すと `ContractUseSyncError` |
-| `mainNdfContractSync` | フィクスチャの契約を置いた作り物の上流で、生成のファイルを書いて 0 を返す | — | 契約に無い id で 1 を返し、生成のファイルを書き換えない。固定の点を取得できないと 2 |
+| `mainNdfContractSync` | フィクスチャの契約を置いた作り物の上流で、生成のファイルを書いて 0 を返す | 手で書く id の一覧に契約にある id を 1 件足し、生成のファイルと食い違わせた作業ツリーでも起動し、生成のファイルを書き直して 0 を返す | 契約に無い id で 1 を返し、生成のファイルを書き換えない。固定の点を取得できないと 2 |
