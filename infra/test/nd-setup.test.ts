@@ -205,7 +205,7 @@ function diffOpts(overrides: Partial<Omit<DiffArgs, "kind">> = {}): DiffArgs {
     profile: overrides.profile ?? "acme-test",
     settings: overrides.settings ?? FIXTURE,
     out: overrides.out ?? tempOut(),
-    stacks: overrides.stacks === undefined ? null : overrides.stacks,
+    stacks: overrides.stacks ?? null,
   };
 }
 
