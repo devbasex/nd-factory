@@ -162,6 +162,23 @@ export function isPurpose(value: unknown): value is TablePurpose {
   return typeof value === "string" && (TABLE_PURPOSES as readonly string[]).includes(value);
 }
 
+// 起動イベントの確かめ。識別子（idField の欄）が UUID v4 で purpose が表の用途なら、識別子と、識別子を文脈に持つ子のログの書き手を返す。
+// 外れれば `${heading}_invalid_event` を error で書いて null を返す（reason は識別子が外れれば idField、そうでなければ "purpose"）
+export function checkStartEvent(
+  event: { readonly purpose: TablePurpose } | null | undefined,
+  idField: string,
+  heading: string,
+  log: Logger,
+): { readonly id: string; readonly purpose: TablePurpose; readonly log: Logger } | null {
+  const id: unknown = (event as Record<string, unknown> | null | undefined)?.[idField];
+  // 識別子が UUID v4 なら event は物なので、purpose は event?.purpose で読んでも event.purpose と同じ
+  if (!isUuidV4(id) || !isPurpose(event?.purpose)) {
+    log.error(`${heading}_invalid_event`, { reason: isUuidV4(id) ? "purpose" : idField });
+    return null;
+  }
+  return { id, purpose: event.purpose, log: log.child({ [idField]: id }) };
+}
+
 function addReasons(a: RefusedByReason, b: RefusedByReason): RefusedByReason {
   const out: Record<string, number> = { ...a };
   for (const [reason, n] of Object.entries(b)) out[reason] = (out[reason] ?? 0) + (n ?? 0);
@@ -172,12 +189,9 @@ function addReasons(a: RefusedByReason, b: RefusedByReason): RefusedByReason {
 // 運用者は起こすごとに新しい UUID v4 の migrate_id で起こし、版を上げる子の手順はその migrate_id の migrate_done だけを採る
 export function createMigrateHandler(deps: MigrateHandlerDeps): (event: MigrateEvent, context: Context) => Promise<void> {
   return async (event, context) => {
-    const migrateId: unknown = event?.migrate_id;
-    if (!isUuidV4(migrateId) || !isPurpose(event.purpose)) {
-      deps.log.error("migrate_invalid_event", { reason: isUuidV4(migrateId) ? "purpose" : "migrate_id" });
-      return;
-    }
-    const log = deps.log.child({ migrate_id: migrateId });
+    const checked = checkStartEvent(event, "migrate_id", "migrate", deps.log);
+    if (checked === null) return;
+    const { id: migrateId, log } = checked;
     const out = await migrateTable({ purpose: event.purpose, cursor: event.cursor ?? null }, { ...deps, log, remainingMs: () => context.getRemainingTimeInMillis() });
     log.info("migrate_page", { purpose: event.purpose, rewritten: out.rewritten, skipped: out.skipped, refused: out.refused });
     const refused = (event.refused ?? 0) + out.refused;

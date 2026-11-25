@@ -1,7 +1,7 @@
 import type { TablePurpose, TableSpec } from "@nd-factory/contracts/tables";
 import type { RowKey, StoredRow } from "@nd-factory/core/db";
 import type { Context } from "aws-lambda";
-import { isPurpose, isUuidV4, rowKindOf, scanTable, type MigrateDeps } from "./migrate.ts";
+import { checkStartEvent, rowKindOf, scanTable, type MigrateDeps } from "./migrate.ts";
 
 // 版の数え（issues/issue-2-design-detail.md の「表の移し」の countRowVersions、版を上げる子の手順の 5）。
 // 行の種類の、ある版の読み手を外してよいかを、保存してある schema_version の値だけで確かめる。readRow も repair も narrow も通さず、
@@ -72,12 +72,9 @@ export type CensusHandlerDeps = Omit<CensusDeps, "remainingMs"> & {
 // 版を上げる子の手順の 5b は、起こした census_id で started_at が 5a の待ちの後の census_done だけを採る
 export function createCensusHandler(deps: CensusHandlerDeps): (event: CensusEvent, context: Context) => Promise<void> {
   return async (event, context) => {
-    const censusId: unknown = event?.census_id;
-    if (!isUuidV4(censusId) || !isPurpose(event.purpose)) {
-      deps.log.error("census_invalid_event", { reason: isUuidV4(censusId) ? "purpose" : "census_id" });
-      return;
-    }
-    const log = deps.log.child({ census_id: censusId });
+    const checked = checkStartEvent(event, "census_id", "census", deps.log);
+    if (checked === null) return;
+    const { id: censusId, log } = checked;
     let startedAt = event.started_at;
     if (startedAt === null || startedAt === undefined) {
       startedAt = deps.clock.iso();
