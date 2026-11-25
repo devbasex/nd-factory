@@ -1,6 +1,6 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { randomInt } from "node:crypto";
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -421,6 +421,18 @@ describe("履歴の探し", () => {
     ]);
   }, TIMEOUT);
 
+  it("途中のコミットで足して後で消した token が、分岐点からの git の探しで既定の規則に当たる", () => {
+    const { root, head: base } = makeRepo({ "docs/a.md": "はじめ\n" }, "base");
+    write(root, "docs/a.md", `はじめ\ntoken ${fakeToken()}\n`);
+    const added = commitAll(root, "add");
+    write(root, "docs/a.md", "はじめ\n");
+    commitAll(root, "remove");
+    expect(scan(root, ["dir", DEFAULT_CONFIG]).findings).toEqual([]);
+    const result = scan(root, ["git", DEFAULT_CONFIG, "--range", `${base}..HEAD`]);
+    expect(result.status).toBe(1);
+    expect(result.findings.map((f) => [f.RuleID, f.File, f.Commit])).toEqual([["github-pat", "docs/a.md", added]]);
+  }, TIMEOUT);
+
   it("git で読めない範囲を渡すと、当たり無しで通さずに失敗する", () => {
     const { root } = makeRepo({ "docs/a.md": `アカウント ${fakeAccount()}\n` }, "base");
     const result = scan(root, ["git", ND_CONFIG, "--range", `${"0".repeat(40)}..HEAD`]);
@@ -550,4 +562,356 @@ describe("除外の拒み", () => {
     expect(result.output).toContain(".gitleaksignore");
     expect(result.reportText).toBeNull();
   }, TIMEOUT);
+});
+
+const EXPORT_SCRIPT = join(ROOT, "tools", "checks", "export-tree.sh");
+
+type RunResult = { status: number | null; output: string };
+
+/**
+ * `export-tree.sh` を子のプロセスで打ち、標準出力と標準エラーを合わせて返す。
+ * 引数は木の取り出し・履歴の取り出し・照らすだけの 2 つ（`--verify`・`--verify-history`）のどれか。
+ * `tmp` を渡せば、スクリプトの作業のディレクトリをそこに作らせる（残らないことを確かめるため）
+ */
+function exportTree(cwd: string, args: string[], { tmp }: { tmp?: string } = {}): RunResult {
+  const result = spawnSync("bash", [EXPORT_SCRIPT, ...args], {
+    cwd,
+    encoding: "utf8",
+    env: tmp === undefined ? process.env : { ...process.env, TMPDIR: tmp },
+  });
+  return { status: result.status, output: `${result.stdout}${result.stderr}` };
+}
+
+/** blob のバイト列（属性による加工なし） */
+function blobOf(root: string, object: string): Buffer {
+  const result = spawnSync("git", ["cat-file", "blob", object], { cwd: root });
+  if (result.status !== 0) throw new Error(`git cat-file blob ${object} が失敗した`);
+  return result.stdout;
+}
+
+/** 木のファイルの項目（モード 100644・100755・120000）のパスと blob */
+function fileEntries(root: string, commit: string): { path: string; sha: string }[] {
+  return git(root, "ls-tree", "-r", "-z", "--full-tree", commit)
+    .split("\0")
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [meta = "", path = ""] = line.split("\t");
+      const [mode = "", , sha = ""] = meta.split(" ");
+      return { mode, path, sha };
+    })
+    .filter((entry) => ["100644", "100755", "120000"].includes(entry.mode))
+    .map(({ path, sha }) => ({ path, sha }));
+}
+
+/** 出力先の普通のファイルの相対パス（並べたもの）と、普通のファイルでもディレクトリでもない物の数 */
+function listOutput(dir: string): { files: string[]; others: number } {
+  const files: string[] = [];
+  let others = 0;
+  for (const name of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
+    const stat = lstatSync(join(dir, name));
+    if (stat.isFile()) files.push(name);
+    else if (!stat.isDirectory()) others += 1;
+  }
+  return { files: files.sort(), others };
+}
+
+/** 木を作って git の倉庫にし、空のコミットを分岐点にしてから、渡したファイルを置いたコミットを足す */
+function forkRepo(): { root: string; base: string } {
+  const root = makeTree({});
+  initRepo(root);
+  return { root, base: commitAll(root, "base") };
+}
+
+/** `git mktree` で 1 つの項目を持つ木を作り、`dir` の下に置いたコミットを作る（git の作業ツリーでは作れないパスのため） */
+function commitCraftedTree(root: string, dir: string, name: string, parent?: string): string {
+  const blob = git(root, "hash-object", "-w", "--stdin");
+  const inner = spawnSync("git", ["mktree"], { cwd: root, input: `100644 blob ${blob}\t${name}\n`, encoding: "utf8" });
+  if (inner.status !== 0) throw new Error("git mktree が失敗した");
+  const outer = spawnSync("git", ["mktree"], { cwd: root, input: `040000 tree ${inner.stdout.trim()}\t${dir}\n`, encoding: "utf8" });
+  if (outer.status !== 0) throw new Error("git mktree が失敗した");
+  return git(root, "commit-tree", outer.stdout.trim(), ...(parent === undefined ? [] : ["-p", parent]), "-m", "crafted");
+}
+
+describe("木の取り出し（export-tree.sh）", () => {
+  it("属性で中身を変える .gitattributes を持つコミットを、ファイルの数と blob のバイト列のまま取り出す", () => {
+    const { root, head } = makeRepo(
+      {
+        ".gitattributes": "* export-ignore\nsubst.txt export-subst\ncrlf.txt text eol=crlf\nident.txt ident\n",
+        "subst.txt": "版 $Format:%H$\n",
+        "crlf.txt": "一\n二\n",
+        "ident.txt": "$Id$\n",
+        "docs/a.md": "中身\n",
+      },
+      "attributes",
+    );
+    const out = join(tempDir("export-out-"), "tree");
+    const result = exportTree(root, [head, out]);
+    expect(result).toEqual({ status: 0, output: "" });
+    const entries = fileEntries(root, head);
+    expect(listOutput(out)).toEqual({ files: entries.map((entry) => entry.path).sort(), others: 0 });
+    for (const entry of entries) expect(readFileSync(join(out, entry.path))).toEqual(blobOf(root, entry.sha));
+  }, TIMEOUT);
+
+  it("出力先が無ければ作り、空のディレクトリを渡しても取り出す", () => {
+    const { root, head } = makeRepo({ "a.md": "中身\n" }, "first");
+    expect(exportTree(root, [head, join(tempDir("export-out-"), "new", "tree")]).status).toBe(0);
+    expect(exportTree(root, [head, tempDir("export-empty-")]).status).toBe(0);
+  }, TIMEOUT);
+
+  it("空でない出力先・ファイルの出力先・読めないコミットで 2", () => {
+    const { root, head } = makeRepo({ "a.md": "中身\n" }, "first");
+    const full = makeTree({ "x.md": "x\n" });
+    expect(exportTree(root, [head, full])).toEqual({ status: 2, output: "export-tree: 出力先が空のディレクトリでない\n" });
+    expect(exportTree(root, [head, join(full, "x.md")]).status).toBe(2);
+    expect(exportTree(root, ["0".repeat(40), join(tempDir("export-out-"), "tree")])).toEqual({
+      status: 2,
+      output: "export-tree: コミットを読めない\n",
+    });
+    expect(exportTree(root, [head]).output).toContain("使い方");
+  }, TIMEOUT);
+
+  it("export-ignore を付けたファイルにだけ置いた作り物の値が、取り出した木の探しで当たる", () => {
+    const realWord = fakeWord();
+    const { root, head } = makeRepo(
+      { ".gitattributes": "docs/hidden.md export-ignore\n", "docs/hidden.md": `名前 ${realWord}\n`, "docs/a.md": "中身\n" },
+      "hidden",
+    );
+    const out = join(tempDir("export-out-"), "tree");
+    expect(exportTree(root, [head, out]).status).toBe(0);
+    const result = scan(out, ["dir", overlayConfig(realWord)]);
+    expect(result.status).toBe(1);
+    expect(rulesByFile(result.findings)).toEqual({ "docs/hidden.md": ["nd-real-value"] });
+  }, TIMEOUT);
+
+  it("シンボリックリンクはリンク先の文字列を中身とする普通のファイルになり、サブモジュールは書かない", () => {
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+    symlinkSync("../../outside", join(root, "link"));
+    git(root, "add", "link");
+    git(root, "update-index", "--add", "--cacheinfo", `160000,${"1".repeat(40)},sub`);
+    // 作業ツリーにサブモジュールが無いので、git add -A を打たずに索引のままコミットする
+    git(root, "commit", "-q", "-m", "link and submodule");
+    const head = git(root, "rev-parse", "HEAD");
+    expect(git(root, "ls-tree", head, "sub")).toContain("160000 commit");
+    const out = join(tempDir("export-out-"), "tree");
+    expect(exportTree(root, [head, out]).status).toBe(0);
+    expect(listOutput(out)).toEqual({ files: ["a.md", "link"], others: 0 });
+    expect(readFileSync(join(out, "link"), "utf8")).toBe("../../outside");
+    expect(lstatSync(join(out, "link")).mode & 0o777).toBe(0o644);
+  }, TIMEOUT);
+
+  it.each([[".."], [".git"], [".GIT"]])("%s の部分を持つ項目の木で 1 になり、項目のパスを出さない", (name) => {
+    const realWord = fakeWord();
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+    const commit = commitCraftedTree(root, realWord, name);
+    const result = exportTree(root, [commit, join(tempDir("export-out-"), "tree")]);
+    expect(result).toEqual({ status: 1, output: "export-tree: 木に取り出せない項目がある（1 番目）\n" });
+  }, TIMEOUT);
+
+  // root は権限によらず書けるので、mkdir -p を失敗させられない
+  it.skipIf(process.getuid?.() === 0)("書けない出力先で 1 になり、作り物の値と診断を出さず、作業のディレクトリを残さない", () => {
+    const realWord = fakeWord();
+    const { root, head } = makeRepo({ [`${realWord}/a.md`]: "中身\n" }, "first");
+    const out = tempDir("export-ro-");
+    const tmp = tempDir("export-tmp-");
+    chmodSync(out, 0o555);
+    try {
+      const result = exportTree(root, [head, out], { tmp });
+      expect(result).toEqual({ status: 1, output: "export-tree: 木を書き出せない（1 番目）\n" });
+      expect(readdirSync(tmp)).toEqual([]);
+    } finally {
+      chmodSync(out, 0o755);
+    }
+  }, TIMEOUT);
+
+  describe("--verify", () => {
+    const exported = () => {
+      const { root, head } = makeRepo({ "a.md": "中身\n", "docs/b.md": "別の中身\n" }, "first");
+      const out = join(tempDir("export-out-"), "tree");
+      expect(exportTree(root, [head, out]).status).toBe(0);
+      return { root, head, out };
+    };
+
+    it("取り出したままの出力先で 0", () => {
+      const { root, head, out } = exported();
+      expect(exportTree(root, ["--verify", head, out])).toEqual({ status: 0, output: "" });
+    }, TIMEOUT);
+
+    it.each<[string, (out: string) => void]>([
+      ["ファイルを 1 つ消す", (out) => rmSync(join(out, "docs", "b.md"))],
+      ["中身を 1 バイト替える", (out) => writeFileSync(join(out, "a.md"), "中身!")],
+      ["ファイルを 1 つ足す", (out) => writeFileSync(join(out, "c.md"), "足した\n")],
+      ["シンボリックリンクを足す", (out) => symlinkSync("a.md", join(out, "link"))],
+    ])("%s と 1", (_label, breakOutput) => {
+      const { root, head, out } = exported();
+      breakOutput(out);
+      expect(exportTree(root, ["--verify", head, out])).toEqual({
+        status: 1,
+        output: "export-tree: 取り出した木が元の木と一致しない\n",
+      });
+    }, TIMEOUT);
+  });
+});
+
+/** NUL を含み、作り物の値を中に持つバイト列 */
+function binaryWith(word: string): Buffer {
+  return Buffer.concat([Buffer.from([0x89, 0x00, 0x01, 0x02]), Buffer.from(`name=${word}`), Buffer.from([0x00, 0xff, 0x0a])]);
+}
+
+describe("履歴の取り出し（export-tree.sh --history）", () => {
+  it("途中のコミットで足して後で消したパスの名前と、NUL を含むファイルの中身を書く", () => {
+    const realWord = fakeWord();
+    const { root, base } = forkRepo();
+    write(root, `docs/${realWord}.md`, "中身\n");
+    write(root, `${realWord}-dir/a.md`, "中身\n");
+    writeFileSync(join(root, "bin.dat"), binaryWith(realWord));
+    commitAll(root, "add");
+    rmSync(join(root, "docs"), { recursive: true });
+    rmSync(join(root, `${realWord}-dir`), { recursive: true });
+    rmSync(join(root, "bin.dat"));
+    write(root, "keep.md", "残す\n");
+    const head = commitAll(root, "remove");
+    const out = join(tempDir("history-out-"), "history");
+    const result = exportTree(root, ["--history", base, head, out]);
+    expect(result).toEqual({ status: 0, output: "" });
+    const { files, others } = listOutput(out);
+    expect(others).toBe(0);
+    const paths = files.filter((file) => file.startsWith("paths/")).map((file) => readFileSync(join(out, file), "utf8"));
+    expect(paths.sort()).toEqual(["keep.md", "bin.dat", `${realWord}-dir/a.md`, `docs/${realWord}.md`, "bin.dat", `${realWord}-dir/a.md`, `docs/${realWord}.md`].sort());
+    expect(readFileSync(join(out, "layers", "1", "bin.dat"))).toEqual(binaryWith(realWord));
+    expect(readFileSync(join(out, "binary-text", "1", "bin.dat"), "latin1")).toBe(`\x89\n\n\nname=${realWord}\n\xff\n`);
+    expect(files.filter((file) => file.startsWith("binary-text/"))).toEqual(["binary-text/1/bin.dat"]);
+  }, TIMEOUT);
+
+  it("範囲の中のマージのコミットの差も読む", () => {
+    const { root, base } = forkRepo();
+    git(root, "checkout", "-q", "-b", "side");
+    write(root, "side.md", "枝\n");
+    commitAll(root, "side");
+    git(root, "checkout", "-q", "main");
+    write(root, "main.md", "主\n");
+    commitAll(root, "main");
+    git(root, "merge", "-q", "--no-ff", "--no-commit", "side");
+    write(root, "merge-only.md", "マージでだけ足した\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-q", "-m", "merge");
+    const head = git(root, "rev-parse", "HEAD");
+    write(root, "x.md", "x\n");
+    rmSync(join(root, "merge-only.md"));
+    const tip = commitAll(root, "remove");
+    const out = join(tempDir("history-out-"), "history");
+    expect(exportTree(root, ["--history", base, tip, out]).status).toBe(0);
+    expect(readFileSync(join(out, "layers", "1", "merge-only.md"), "utf8")).toBe("マージでだけ足した\n");
+    expect(head).not.toBe(tip);
+  }, TIMEOUT);
+
+  it("範囲が空なら 3 つの空のディレクトリを書いて 0", () => {
+    const { root, base } = forkRepo();
+    const out = join(tempDir("history-out-"), "history");
+    expect(exportTree(root, ["--history", base, base, out])).toEqual({ status: 0, output: "" });
+    expect(readdirSync(out).sort()).toEqual(["binary-text", "layers", "paths"]);
+    expect(listOutput(out)).toEqual({ files: [], others: 0 });
+    expect(exportTree(root, ["--verify-history", base, base, out]).status).toBe(0);
+  }, TIMEOUT);
+
+  it("同じパスを 3 つのコミットで変えると層 1〜3 に 1 つずつ入り、同じ組は 1 回だけ書く", () => {
+    const { root, base } = forkRepo();
+    for (const body of ["一\n", "二\n", "三\n", "一\n"]) {
+      write(root, "a.md", body);
+      commitAll(root, body);
+    }
+    const head = git(root, "rev-parse", "HEAD");
+    const out = join(tempDir("history-out-"), "history");
+    expect(exportTree(root, ["--history", base, head, out]).status).toBe(0);
+    const layers = listOutput(join(out, "layers")).files;
+    expect(layers).toEqual(["1/a.md", "2/a.md", "3/a.md"]);
+    expect(layers.map((file) => readFileSync(join(out, "layers", file), "utf8")).sort()).toEqual(["一\n", "三\n", "二\n"]);
+  }, TIMEOUT);
+
+  it("途中のコミットで a をファイルからディレクトリに変えると、a と a/b が別の層に入る", () => {
+    const { root, base } = forkRepo();
+    write(root, "a", "ファイル\n");
+    commitAll(root, "file");
+    rmSync(join(root, "a"));
+    write(root, "a/b", "ディレクトリの中\n");
+    const head = commitAll(root, "dir");
+    const out = join(tempDir("history-out-"), "history");
+    expect(exportTree(root, ["--history", base, head, out]).status).toBe(0);
+    expect(listOutput(join(out, "layers")).files).toEqual(["1/a/b", "2/a"].sort());
+  }, TIMEOUT);
+
+  it("サブモジュールの項目はパスの名前だけを書く", () => {
+    const { root, base } = forkRepo();
+    git(root, "update-index", "--add", "--cacheinfo", `160000,${"1".repeat(40)},sub`);
+    git(root, "commit", "-q", "-m", "submodule");
+    const head = git(root, "rev-parse", "HEAD");
+    const out = join(tempDir("history-out-"), "history");
+    expect(exportTree(root, ["--history", base, head, out]).status).toBe(0);
+    expect(listOutput(out).files).toEqual(["paths/1"]);
+    expect(readFileSync(join(out, "paths", "1"), "utf8")).toBe("sub");
+  }, TIMEOUT);
+
+  it("読めない範囲で 2", () => {
+    const { root, base } = forkRepo();
+    const out = join(tempDir("history-out-"), "history");
+    expect(exportTree(root, ["--history", base, "0".repeat(40), out])).toEqual({
+      status: 2,
+      output: "export-tree: 履歴の範囲を読めない\n",
+    });
+  }, TIMEOUT);
+
+  it.each([[".."], [".git"]])("%s の部分を持つパスを途中のコミットで足すと 1 になり、パスを出さない", (name) => {
+    const realWord = fakeWord();
+    const { root, base } = forkRepo();
+    const crafted = commitCraftedTree(root, realWord, name, base);
+    const out = join(tempDir("history-out-"), "history");
+    expect(exportTree(root, ["--history", base, crafted, out])).toEqual({
+      status: 1,
+      output: "export-tree: 履歴の項目を書き出せない（1 番目）\n",
+    });
+  }, TIMEOUT);
+
+  describe("--verify-history", () => {
+    const written = () => {
+      const realWord = fakeWord();
+      const { root, base } = forkRepo();
+      write(root, `docs/${realWord}.md`, "中身\n");
+      writeFileSync(join(root, "bin.dat"), binaryWith(realWord));
+      commitAll(root, "add");
+      write(root, `docs/${realWord}.md`, "変えた中身\n");
+      const head = commitAll(root, "change");
+      const out = join(tempDir("history-out-"), "history");
+      expect(exportTree(root, ["--history", base, head, out]).status).toBe(0);
+      return { root, base, head, out, realWord };
+    };
+    const MISMATCH = { status: 1, output: "export-tree: 取り出した履歴が元の履歴と一致しない\n" };
+
+    it("書いたままの出力先で 0", () => {
+      const { root, base, head, out } = written();
+      expect(exportTree(root, ["--verify-history", base, head, out])).toEqual({ status: 0, output: "" });
+    }, TIMEOUT);
+
+    it.each<[string, (out: string, word: string) => void]>([
+      ["paths/ のファイルの中身を替える", (out) => writeFileSync(join(out, "paths", "1"), "別のパス")],
+      ["paths/ のファイルを 1 つ消す", (out) => rmSync(join(out, "paths", "3"))],
+      ["layers/ のファイルの中身を替える", (out, word) => writeFileSync(join(out, "layers", "1", "docs", `${word}.md`), "替えた\n")],
+      ["layers/ のファイルを 1 つ消す", (out, word) => rmSync(join(out, "layers", "2", "docs", `${word}.md`))],
+      ["binary-text/ のファイルを 1 つ消す", (out) => rmSync(join(out, "binary-text", "1", "bin.dat"))],
+      ["binary-text/ のファイルの中身を替える", (out) => writeFileSync(join(out, "binary-text", "1", "bin.dat"), "替えた\n")],
+      ["3 つのディレクトリのほかにファイルを足す", (out) => writeFileSync(join(out, "extra"), "足した\n")],
+    ])("%s と 1", (_label, breakOutput) => {
+      const { root, base, head, out, realWord } = written();
+      breakOutput(out, realWord);
+      expect(exportTree(root, ["--verify-history", base, head, out])).toEqual(MISMATCH);
+    }, TIMEOUT);
+
+    it("作り物の値を名前に含む layers/ のファイルを消すと、固定の知らせだけを出し、作業のディレクトリを残さない", () => {
+      const { root, base, head, out, realWord } = written();
+      rmSync(join(out, "layers", "1", "docs", `${realWord}.md`));
+      const tmp = tempDir("export-tmp-");
+      const result = exportTree(root, ["--verify-history", base, head, out], { tmp });
+      expect(result).toEqual(MISMATCH);
+      expect(result.output).not.toContain(realWord);
+      expect(readdirSync(tmp)).toEqual([]);
+    }, TIMEOUT);
+  });
 });
