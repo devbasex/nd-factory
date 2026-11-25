@@ -100,10 +100,12 @@ finish() {
   # 警告と誤りの段を見る。色の制御の列を外してから、段の語を 1 語として照らす（名前は出さない）。
   # gitleaks は当たりがあると WRN の段で件数の行（leaks found: <件数>）を出す。これは飛ばした対象の知らせではないので外す
   # （外さないと、当たりがあるだけで警告か誤りと見なし、当たりの有無で出力の行が変わる）。
+  # 外すのは、行の全体が「時刻（3:04PM の形） WRN leaks found: <件数>」の行だけ。行の末尾だけで照らすと、
+  # ファイルの名前などを含む本当の警告か誤りの末尾がたまたま件数の行と同じとき、それも捨ててしまう。
   # grep -q は当たった所で読むのをやめ、続きを書く sed が SIGPIPE で落ちて pipefail が当たりを打ち消すので、
   # -q を使わずに末尾まで読ませ、当たった行は捨てる
   local skipped=false
-  if [[ -s "$raw_log" ]] && sed $'s/\x1b\\[[0-9;]*m//g' "$raw_log" | grep -Ev ' WRN leaks found: [0-9]+$' | grep -E '(^| )(WRN|ERR|FTL)( |$)' >/dev/null; then
+  if [[ -s "$raw_log" ]] && sed $'s/\x1b\\[[0-9;]*m//g' "$raw_log" | grep -Ev '^[0-9]{1,2}:[0-9]{2}[AP]M WRN leaks found: [0-9]+$' | grep -E '(^| )(WRN|ERR|FTL)( |$)' >/dev/null; then
     skipped=true
   fi
   local findings
