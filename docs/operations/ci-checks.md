@@ -91,7 +91,9 @@ NDF の認証は、`<非公開リポジトリ>` に対して次の権限を持�
    3 つのどれかが欠ければ、今の木と履歴の両方で当たりと失敗が無くなるまで次へ進まず、変数 `LEAK_CHECK_REQUIRE_PATTERN` も `1` にしない。
    - 秘密が空の行が出ていれば、手順 2 の設定を直し、同じ `leak-check-push` の実行を GitHub Actions で再実行する（画面の「Re-run jobs」か `gh run rerun <実行の ID>`）。再実行の記録で、上の 3 つがすべてそろうことを確かめる。手元の探し直しは、GitHub Actions が直した後の環境から秘密を受け取れたことを確かめられないので、この確認の代わりにしない
    - 当たりや検査の失敗があれば、原因を解消する（当たりは「当たりの場所を手元で引く」で場所を引く）
-   - 当たりや検査の失敗を直した後は、直した後の main のコミットの SHA を控え、そのコミットを下の「main のコミットを手元で探し直す」で `dir` と `git` の両方で探し直す。両方が成功したときだけ、確かめられたことになる。片方だけの成功では先へ進まない
+   - 当たりや検査の失敗を直した後も、確かめるのは GitHub Actions の `leak-check-push` の記録である。手元の探し（下の「main のコミットを手元で探し直す」）は原因の特定に使い、手元で成功しても先へ進まない。手元の成功では、GitHub Actions でジョブが動き、環境 `leak-scan` から秘密を受け取れたことを確かめられないためである
+     - 直すために main へコミットを入れたときは、そのコミットの push で動いた `leak-check-push` の記録で、上の 3 つがすべてそろうことを確かめる。元の実行を再実行しても、探すのは元の SHA のままなので、直した後のコミットを確かめたことにならない（[ワークフローの再実行](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)）
+     - コミットを入れずに GitHub の設定だけを直したときは、元の `leak-check-push` の実行を再実行し、その記録で上の 3 つがすべてそろうことを確かめる
 
    確かめた後に、変数 `LEAK_CHECK_REQUIRE_PATTERN` を `1` にする
 5. `<非公開リポジトリ>` を作り、[`leak-check-caller.yml`](leak-check-caller.yml) を写し、秘密 `LEAK_CHECK_PATTERN` と変数 `LEAK_CHECK_GENERATION`（値は `1`）を登録する。NDF がマージに使う今の認証で、「NDF の認証の権限」の 3 つの API が呼べることを確かめる。続けて、開いている Pull Request の 1 本で探しを手で起動して確かめる（下の「手で起動して確かめる」）。この結果で Pull Request をマージしない
@@ -194,8 +196,20 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
 | 対象のある所 | 扱い |
 | --- | --- |
 | Pull Request の途中のコミットだけ | 上の手順のままでよい。規則単位の許可は、履歴の探し（`history` と `git --range`）にも効く |
-| main の木か履歴（規則か gitleaks の版を変えたために、前から在る内容に当たるようになった） | 規則・`tools/checks/gitleaks-default.toml`・gitleaks の版を変える Pull Request に、前から在る内容への許可を同じ Pull Request で入れる。許可を後の Pull Request に分けると、許可の Pull Request のマージコミットの木にも対象があるため、許可の Pull Request 自身が非公開の検査で落ちる。公開の `leak-check` が探すのは、マージコミットの木と、分岐点から head までのコミットだけで、main の過去のコミットにだけ残る内容は探さない。そのため、規則か gitleaks の版を変えるときは、マージの前に、その Pull Request のマージコミット（`refs/pull/<番号>/merge` の SHA）を、「当たりの場所を手元で引く」の「main のコミットを手元で探し直す」で探す。そのコミットの設定と gitleaks の版で、そのコミットから到達できる全履歴（main の過去のコミットを含む）と木を探すことになる。手元の `main` に切り替えて探すと、変更前の設定で探すことになる。探さずにマージすると、マージ後の `leak-check-push` で初めて当たりに気付く。探した後に main か Pull Request の head が進むと、マージ参照は新しいマージコミットを指し、前の結果はその履歴を確かめていない。そのため、マージの直前に `git ls-remote origin refs/pull/<番号>/merge` で今のマージ参照の SHA を読み、探したマージコミットの SHA と同じことを確かめる。違っていれば、新しいマージコミットで `dir` と `git` の両方を探し直してからマージする |
+| main の木か履歴（規則か gitleaks の版を変えたために、前から在る内容に当たるようになった） | 規則・`tools/checks/gitleaks-default.toml`・gitleaks の版を変える Pull Request に、前から在る内容への許可を同じ Pull Request で入れる。許可を後の Pull Request に分けると、許可の Pull Request のマージコミットの木にも対象があるため、許可の Pull Request 自身が非公開の検査で落ちる。公開の `leak-check` が探すのは、マージコミットの木と、分岐点から head までのコミットだけで、main の過去のコミットにだけ残る内容は探さない。そのため、規則か gitleaks の版を変えるときは、マージの前に、その Pull Request のマージコミット（`refs/pull/<番号>/merge` の SHA）を、「当たりの場所を手元で引く」の「main のコミットを手元で探し直す」で探す。そのコミットの設定と gitleaks の版で、そのコミットから到達できる全履歴（main の過去のコミットを含む）と木を探すことになる。手元の `main` に切り替えて探すと、変更前の設定で探すことになる。探さずにマージすると、マージ後の `leak-check-push` で初めて当たりに気付く。探した後に main か Pull Request の head が進むと、前の結果は新しいマージの候補を確かめていない。マージの直前に、下の「規則を変える Pull Request をマージの直前に確かめる」で、探したマージコミットが今の候補と同じことを確かめる |
 | 実際の値の規則 `nd-real-value` の当たり | 許可を足せない（規則は秘密の中にあり、`[[rules.allowlists]]` を持たない）。誤検知なら、「秘密を変える手順」で秘密の正規表現を直す。実際の値なら、マージせずに「当たりの場所を手元で引く」の手順 5 のとおりに扱う |
+
+### 規則を変える Pull Request をマージの直前に確かめる
+
+マージの参照（`refs/pull/<番号>/merge`）を読むだけでは、GitHub がマージの候補を作り直す前の古いコミットでも一致してしまう。そのため、Pull Request の取得の API で候補を作り直させ、作り直した候補が探したマージコミットと同じことを確かめる（[マージできるかの確かめ方](https://docs.github.com/en/enterprise-server%403.21/rest/guides/using-the-rest-api-to-interact-with-your-git-database#checking-mergeability-of-pull-requests)）。
+
+1. `gh api repos/devbasex/nd-factory/pulls/<番号>` を打つ。この呼び出しで、GitHub がマージの候補の作り直しを始める
+2. 応答の `mergeable` が `null` なら、少し待って手順 1 を打ち直す。`false` ならマージしない。`true` になるまで先へ進まない
+3. `mergeable` が `true` の応答で、次の 3 つを確かめる
+   - `merge_commit_sha` が、探したマージコミットの SHA と同じである
+   - 探したマージコミットの最初の親（`git rev-parse <探したマージコミット>^1`）が、今の main の先頭（`gh api repos/devbasex/nd-factory/commits/main --jq .sha`）と同じである
+   - 探したマージコミットの 2 つ目の親（`git rev-parse <探したマージコミット>^2`）が、応答の `head.sha` と同じである
+4. 1 つでも違えば、マージしない。新しいマージコミットを取り込み、「main のコミットを手元で探し直す」で `dir` と `git` の両方を探し直してから、手順 1 からやり直す
 
 ## 見本の写し直し
 
