@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gitleaks を固定の版と要約値で置く（#96 #101 の決定 4。中身は issues/issue-96-101-design-detail.md の「gitleaks を置くスクリプト」）。
+# gitleaks を固定の版と要約値で置く（#96 #101 の決定 4。仕様は docs/specifications/leak-check.md の「gitleaks を置くスクリプト（install-gitleaks.sh）」）。
 # gitleaks の版と要約値を持つのは、このリポジトリでこのスクリプトだけである。ci.yml の leak-check・leak-check-push と
 # leak-check-secret.yml は、それぞれのチェックアウトにあるこのスクリプトを 1 行で呼ぶ。gitleaks を上げるときは下の 2 つの定数だけを直す。
 #

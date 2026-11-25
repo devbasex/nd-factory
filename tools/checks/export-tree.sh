@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # コミットの木か、範囲の履歴の項目を、Git に保存された内容のまま取り出して照らす
-# （#96 #101 の決定 5・8。中身は issues/issue-96-101-design-detail.md の「木の取り出しのスクリプト」）。
+# （#96 #101 の決定 5・8。仕様は docs/specifications/leak-check.md の「木の取り出しのスクリプト（export-tree.sh）」）。
 # .gitattributes を読まず、git archive・git checkout・--filters・--textconv を使わない（export-ignore・export-subst・
 # 改行の変換・ident・フィルタで、探す対象の中身が変わるため）。取り出したファイルは読むだけで、動かさない。
 # 元のパスは実際の値を含み得るので、記録と端末には固定の知らせ（項目の通し番号を含む）と使い方の 1 行だけを出す。
