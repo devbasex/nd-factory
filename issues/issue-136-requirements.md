@@ -83,9 +83,10 @@ skip: no-contract-use 752a9cf48a6d36c00ffb3197c8668d1c898c32e2
 - `ndf-pin.json` の固定の点を、NDF 11.0.32 以降の配布のタグのコミットへ上げる
 - 受ける組と、決定 104・「NDF との契約」の表の値を、新しい固定の点に合わせて直す
 - 契約の検査が、使い方の書き出しを読んで 6 項目を実際に突き合わせる状態にする
+- 書き出しに入れる区間の報告の読み取り（NDF が作業の区切りごとに返す報告から、結果と項目を取り出す処理）の決まりを、設計で決める。あわせて、その読み取りの結果に応じて、ランナーがどの報告で作業の区切りとレーンを失敗にするかと、承認資料に載せてよいリンクの条件を設計書（execution.md）に決める。読み取りの処理はこの課題で作る。失敗の扱いとリンクの確かめは、ランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）が作る
 
 含まない:
-- 実行の契約（子へ渡す環境変数・引継ぎ文書・承認資料の材料）を NDF 11.0.32 に追い付かせること。NDF 11.0.32 との食い違いを直す課題（[#135](https://github.com/devbasex/nd-factory/issues/135)）の範囲（[overview.md の見直しの表](https://github.com/devbasex/nd-factory/blob/main/docs/design/overview.md)）
+- 実行の契約（子へ渡す環境変数・引継ぎ文書・承認資料の材料）を NDF 11.0.32 に追い付かせること。ただし、上の「含む」の最後の項目で決める、承認資料に載せてよいリンクの条件は除く。#135 は、この条件を前提にして承認資料の材料を追い付かせる。NDF 11.0.32 との食い違いを直す課題（[#135](https://github.com/devbasex/nd-factory/issues/135)）の範囲（[overview.md の見直しの表](https://github.com/devbasex/nd-factory/blob/main/docs/design/overview.md)）
 - 新しい固定の点でも残る、上流の契約の不足 3 件（[devbasex/ai-plugins#3947](https://github.com/devbasex/ai-plugins/issues/3947)。OPEN）
 - `block-next` の口の保存先が固定の点に無い置き場を指す件（[#47](https://github.com/devbasex/nd-factory/issues/47)）
 - レーンを動かすランナーを作る課題（[#6](https://github.com/devbasex/nd-factory/issues/6)）が持つ、起動のときの照合の実装
@@ -104,6 +105,8 @@ skip: no-contract-use 752a9cf48a6d36c00ffb3197c8668d1c898c32e2
 - [ ] 4. `npm run ndf-contract` の出力に `skip:` の行が無く、固定の点の契約と使い方を突き合わせた 6 項目の結果が出て、終了コードが 0 になる
 - [ ] 5. 使い方の書き出しが無い状態で `npm run ndf-contract` を打つと、`skip` でなく `fail: no-contract-use` を出して終了コード 1 で終わる（退行しない）
 - [ ] 6. `npm run check` が通る（生成物の差・単体テストを含む）
+- [ ] 7. execution.md の「区間と結果の行」に、報告の読み取りが誤りを返したときと、承認資料に載せる材料のリンクが条件に合わないときの、区間とレーンの扱いが書かれている。「承認資料」に、材料の欄と「判断の材料」節の中のリンクの両方に当てる受け入れの条件が書かれている
+- [ ] 8. 区間の報告の読み取りが、NDF の契約にある報告のサンプルと同じく有効か誤りかを判定し、誤りの一覧に報告の中の値（リンクなど）を含めない（単体テストで確かめる）
 
 ## 影響
 
@@ -128,9 +131,9 @@ skip: no-contract-use 752a9cf48a6d36c00ffb3197c8668d1c898c32e2
 
 | 項目 | 手段 |
 | --- | --- |
-| テスト | `npm run ndf-contract`（受け入れ条件 4・5）、`npm run check`（受け入れ条件 6） |
+| テスト | `npm run ndf-contract`（受け入れ条件 4・5）、`npm run check`（受け入れ条件 6・8） |
 | 静的解析・型検査 | `npm run check` |
-| 手動確認（マージ前） | `ndf-pin.json` の値を `gh api repos/devbasex/ai-plugins/git/ref/tags/ndf--v11.0.<N>` の `object.sha` と比べ、受ける組を同じコミットの `plugins/ndf/contracts/version.json` の `history` の最後の行と比べる（受け入れ条件 1・2）。設計書の値を目で見る（受け入れ条件 3） |
+| 手動確認（マージ前） | `ndf-pin.json` の値を `gh api repos/devbasex/ai-plugins/git/ref/tags/ndf--v11.0.<N>` の `object.sha` と比べ、受ける組を同じコミットの `plugins/ndf/contracts/version.json` の `history` の最後の行と比べる（受け入れ条件 1・2）。設計書の値と記述を目で見る（受け入れ条件 3・7） |
 
 ## 前提とする取り決め
 

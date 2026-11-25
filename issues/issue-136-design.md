@@ -85,7 +85,8 @@ graph LR
   PIN["ndf-pin.json<br/>8d22be7（11.0.36・バージョン 16）"]
   subgraph contracts["packages/contracts"]
     ACC["data/ndf-contracts.json<br/>受ける組: バージョン 16 の 1 組"]
-    UD["data/ndf-contract-use.json<br/>使うインタフェースの決まりのコピー・渡す環境変数<br/>読むファイル・区間の報告の項目"]
+    UD["data/ndf-contract-use.json（手で書く）<br/>使うインタフェースの id・渡す環境変数<br/>読む項目・区間の報告の項目"]
+    UG["data/ndf-contract-use.generated.json<br/>使うインタフェースの行と読むファイルの path<br/>（固定の点の契約から生成）"]
     UM["src/ndf-contract-use.ts<br/>ndfContractUse（型・判定・読み取り）"]
   end
   CHK["契約の照合<br/>書き出しが無ければ fail"]
@@ -93,6 +94,8 @@ graph LR
   RUN["ランナー（#6。後で使う）"]
   ACC --> UM
   UD --> UM
+  UG --> UM
+  NDF -. npm run ndf-contract:sync .-> UG
   UM --> CHK
   PIN --> CHK
   NDF --> CHK
@@ -100,7 +103,7 @@ graph LR
 ```
 
 - 固定の点は `ndf--v11.0.36` のコミット `8d22be7` を指す。受ける組は、バージョン 16 と sha256 `c50ef840…` の 1 組になる。execution.md の決定 104・「契約のバージョンの照合し」の行と、確定仕様の値は、実装の変更でそろえる
-- スキーマの正本が、使い方の書き出し（`@nd-factory/contracts/ndf-contract-use`）を持つ。データは JSON に置く。データの中身は、使うインタフェースの決まりのコピー・Skill の名前の前置き（`ndf:`）・実行の場（ホステッド・手元のマシン）ごとに渡す環境変数・読むファイルと項目・区間の報告の項目である。呼び出しの判定と区間の報告の読み取りは、そのデータだけを使う純粋な関数にする。判定の種類ごとの照合の規則は決定 5、読み取りの規則は決定 7 にある。受ける組は既存の `NDF_CONTRACTS` を引き、コピーしない
+- スキーマの正本が、使い方の書き出し（`@nd-factory/contracts/ndf-contract-use`）を持つ。データは JSON に置く。データは 2 つのファイルに分ける。手で書くのは、使うインタフェースの id・Skill の名前の前置き（`ndf:`）・実行の場（ホステッド・手元のマシン）ごとに渡す環境変数・読む項目・区間の報告の項目である。使うインタフェースの決まり（契約の行の列）と読むファイルの `path` は、固定の点の契約から生成する（決定 5）。呼び出しの判定と区間の報告の読み取りは、そのデータだけを使う純粋な関数にする。判定の種類ごとの照合の規則は決定 5、読み取りの規則は決定 7 にある。受ける組は既存の `NDF_CONTRACTS` を引き、コピーしない
 - 型 `NdfContractUse` はスキーマの正本の 1 か所に置き、照合はそれを読み込む
 - 照合は、書き出しが無ければ、契約を取得する前に `fail: no-contract-use` と終了コード 1 で終わる。skip の道と定数 `CONTRACT_USE_REQUIRED` は消す
 - 新しい固定の点で `npm run ndf-contract` が 6 項目を照合し、固定の点の食い違いが 0 件で成功する
@@ -110,8 +113,8 @@ graph LR
 | 項目 | 承認済みの F23 | この設計で改訂した後 | 決定 |
 | --- | --- | --- | --- |
 | 1 項目目 | `entrypoint-cases.json` の 26 件すべてのサンプルを判定へ通す | 26 件すべての参照先のインタフェースの id が `entrypoints.json` にあるかを先に確かめる（今の検査を残す）。その後、「使うインタフェース」の表の 11 のインタフェースへのサンプルだけを判定へ通す（固定の点では 21 件）。使い方のデータが 11 のインタフェースをちょうど持つことは、単体テストで縛る | 決定 4 |
-| 4 項目目 | `reader: service` の行の `fields` が、翻訳が読む項目を含むか | 加えて、読むファイルの `path` が、使い方のデータのコピーと同じか | 決定 5 |
-| 6 項目目 | F23 に記述が無い（[#1 の設計](../docs/design-process/issue-1/design-detail.md) の「使うインタフェースがインタフェースの表にある」だけ） | 使うインタフェースがインタフェースの表にあり、使い方のデータにコピーした行の `kind`・`target`・`lead`・`args`・`env`・`files` が契約の行と同じか | 決定 5 |
+| 4 項目目 | `reader: service` の行の `fields` が、翻訳が読む項目を含むか | 加えて、読むファイルの `path` が、固定の点の契約から生成した値と同じか | 決定 5 |
+| 6 項目目 | F23 に記述が無い（[#1 の設計](../docs/design-process/issue-1/design-detail.md) の「使うインタフェースがインタフェースの表にある」だけ） | 生成のファイルが持つ固定の点が `ndf-pin.json` と同じか。使うインタフェースがインタフェースの表にあり、生成した行の `kind`・`target`・`lead`・`args`・`env`・`files` が契約の行と同じか | 決定 5 |
 
 ## 決定の記録
 
@@ -179,16 +182,24 @@ graph LR
 - **代償**: 使わないインタフェースのサンプルが契約で変わっても、照合は気づかない。そのインタフェースを使い始める変更で、使うインタフェースとサンプルの比べる範囲を同時に広げる必要がある
 - 根拠: Value 13 / Value 11（MVV バージョン 3）
 
-### 決定 5: コピーしたインタフェースの決まりが契約から離れたら気づけるよう、使うインタフェースの行のコピーを持ち、照合の 4 項目目と 6 項目目で契約の行と項目ごとに比べる
+### 決定 5: 契約の行を手で写さないため、使うインタフェースの行と読むファイルの `path` を固定の点の契約から生成し、照合の 4 項目目と 6 項目目で契約の行と項目ごとに比べる
 
 - **質問**: 呼び出しの判定が使うインタフェースの決まりを、どこから得て、契約との離れをどう見つけるか。決まりとは、種類・名前・前置きの語・引数の正規表現・入れてよい環境変数・読むファイルの相対パスの形である
-- **選んだ案**: 使い方のデータに、次の 2 つをコピーする
-  - 使うインタフェースの行（`kind`・`target`・`lead`・`args`・`env`・`files`）
-  - 読むファイルの相対パスの形（`ndf-files.json` の `path`）
+- **選んだ案**: 上流の契約から機械的に取り出せる部分は、固定の点の契約から生成してコミットする。手で書くのは、ランナーに固有の設定だけにする
 
-  照合の 6 項目目は、「使うインタフェースがインタフェースの表にある」に加えて、コピーした行の各項目が契約の行と同じかを比べる。4 項目目は、読むファイルの `path` がコピーと同じかも比べる。これで、サンプルの無い変更（たとえば引数の正規表現だけが変わる）も、固定の点で食い違いになる
+  | 置き場 | 中身 | 作り方 |
+  | --- | --- | --- |
+  | `packages/contracts/data/ndf-contract-use.json` | 使うインタフェースの id の一覧（決定 4 の 11 件）・Skill の前置き（`ndf:`）・実行の場ごとに渡す環境変数・`set_by` の許容（`envSetBy`）・翻訳が読む項目・区間の報告の項目 | 手で書く |
+  | `packages/contracts/data/ndf-contract-use.generated.json` | 生成の元にした固定の点のコミット・使うインタフェースの行（`kind`・`target`・`lead`・`args`・`env`・`files`）・その行の `files` が指す読むファイルの `path`（`ndf-files.json` の行） | 生成する |
 
-  呼び出しの判定（`judgeCall`）は、コピーした行の列だけを使い、次の規則で呼び出し文字列を照合する。呼び出し文字列は、サンプルの `call` 列にあたり、種類ごとに中身が違う（`entrypoint-cases.json` の `call` の列の説明のとおり）。どの種類でも、呼び出しが入れる環境変数の名前は、すべて行の `env` に載っていなければ偽にする。使うインタフェースに無い id の呼び出しも偽にする
+  - 生成は `npm run ndf-contract:sync` で行う。照合と同じ取得の処理（`fetchContract`）で `ndf-pin.json` の固定の点の `entrypoints.json` と `ndf-files.json` を取り、手で書いた id の一覧で絞って、生成のファイルを書き直す。手で書いた id の一覧に、契約に無い id があれば、生成を失敗にする
+  - 固定の点を付け替える Pull Request では、`ndf-pin.json` を直した後にこのコマンドを打ち、生成のファイルを同じ Pull Request でコミットする
+  - 生成はネットワークから上流を取得するため、`npm run generate` と `npm run generate:check` には入れない。`npm run check` はネットワークにつながらない環境でも動く必要があるためである
+  - 生成のファイルの直し忘れは照合が見つける。照合は、生成のファイルが持つ固定の点のコミットが `ndf-pin.json` と同じかを 6 項目目の最初に比べる。違えば食い違いにする
+
+  照合の 6 項目目は、「使うインタフェースがインタフェースの表にある」に加えて、生成した行の各項目が契約の行と同じかを比べる。4 項目目は、読むファイルの `path` が生成した値と同じかも比べる。固定の点で食い違えば、生成のし忘れか手で書き換えたことを表す。先端で食い違えば、上流が使うインタフェースの決まりを変えたことを表す。これで、サンプルの無い変更（たとえば引数の正規表現だけが変わる）も、先端の要約で気づける
+
+  呼び出しの判定（`judgeCall`）は、生成した行の列だけを使い、次の規則で呼び出し文字列を照合する。呼び出し文字列は、サンプルの `call` 列にあたり、種類ごとに中身が違う（`entrypoint-cases.json` の `call` の列の説明のとおり）。どの種類でも、呼び出しが入れる環境変数の名前は、すべて行の `env` に載っていなければ偽にする。使うインタフェースに無い id の呼び出しも偽にする
 
   | `kind` | 呼び出し文字列の中身 | 照合の規則 | サンプルの例（valid） |
   | --- | --- | --- | --- |
@@ -197,13 +208,14 @@ graph LR
   | `report` | 結果の行の値 | 文字列全体が、`args` のどれか 1 つに全体で一致する | `完了`（`report-unattended`） |
   | `hook` | hook の事象の名前 | 文字列が `target` と同じ | `Stop`（`hook-unattended-stop`） |
   | `command` | サブコマンドの引数 | 文字列全体が、`args` のどれか 1 つに全体で一致する | `設計承認ゲート`（`gate-record`） |
-  | `file` | 保存先からの相対パス | 行の `files` に載るファイルのどれか 1 つの `path`（使い方のデータにコピーした `ndf-files.json` の `path`）に一致する。`path` の `<名前>` は `/` を含まない 1 文字以上の並びに一致させ、ほかの文字はそのまま比べる。`path` が `.` のときは、文字列も `.` のときだけ一致する | `s1/8-release-request-state/progress.jsonl`（`file-plan-progress` の `<sprint>/<n>-<plan>-state/progress.jsonl`） |
+  | `file` | 保存先からの相対パス | 行の `files` に載るファイルのどれか 1 つの `path`（生成のファイルにある `ndf-files.json` の `path`）に一致する。`path` の `<名前>` は `/` を含まない 1 文字以上の並びに一致させ、ほかの文字はそのまま比べる。`path` が `.` のときは、文字列も `.` のときだけ一致する | `s1/8-release-request-state/progress.jsonl`（`file-plan-progress` の `<sprint>/<n>-<plan>-state/progress.jsonl`） |
   | `spec` | プラグインの根からのファイルのパス | 文字列が `target` + `/` で始まり、その後ろに 1 文字以上ある（`target` はディレクトリで、呼び出しはその配下のファイル） | `contracts/schemas/io/check.args.schema.json`（`spec-io`） |
 
   正規表現の一致は、どの種類でも全体の一致にする（`^(?:…)$` で包む）。部分の一致にすると、`loop-bad-budget`・`unknown-flag` のような偽のサンプルが真になる
-- 採らなかった案: コピーを持たず、ランナーが実行のときにイメージの中の NDF の契約のファイルを読む（照合はスキーマの正本だけを相手にするため、判定が契約のファイルを読むと照合が判定を独立に検査できなくなる。画面と同じ決まりで組み込みを読まない形も崩れる）
-- 採らなかった案: コピーを持つが、サンプルの判定だけで離れを見つける（サンプルの無いインタフェースと引数の形の変更を見落とす。`gate-rejections` のようにサンプルの無い読むファイルもある）
-- **代償**: 使い方のデータの型（`NdfContractUse` の `entrypoints` と `files`）が、名前の文字列の配列から、契約の行の項目を持つオブジェクトの配列に変わる。照合の 4・6 項目目の比べる中身が増える
+- 採らなかった案: 生成のファイルを持たず、ランナーが実行のときにイメージの中の NDF の契約のファイルを読む（照合はスキーマの正本だけを相手にするため、判定が契約のファイルを読むと照合が判定を独立に検査できなくなる。画面と同じ決まりで組み込みを読まない形も崩れる）
+- 採らなかった案: 契約の行の列と `path` を使い方のデータへ手で写し、照合で契約と比べる（Value 13 の「定義から作れるものは手で写さない」に反する。上流の契約が変わるたびに、最大 11 のインタフェースの列と読むファイルの `path` を手で写し直すことになる）
+- 採らなかった案: 生成のファイルを持つが、サンプルの判定だけで離れを見つける（サンプルの無いインタフェースと引数の形の変更を見落とす。`gate-rejections` のようにサンプルの無い読むファイルもある）
+- **代償**: 使い方のデータの型（`NdfContractUse` の `entrypoints` と `files`）が、名前の文字列の配列から、契約の行の項目を持つオブジェクトの配列に変わる。照合の 4・6 項目目の比べる中身が増える。固定の点を付け替える Pull Request では、生成のコマンドを打つ手順が 1 つ増える（打ち忘れは照合が固定の点の食い違いとして落とす）
 - 作り方: 自前で作る
 - 比べた候補: STD2 / LIB1
 - 根拠: Value 17 / Value 11（MVV バージョン 3）。STD2
@@ -227,10 +239,21 @@ graph LR
   2. 結果が `shape.values` の 3 つ（`判断が要る`・`完了`・`できなかった`）のどれでもなければ誤りにする
   3. 結果の行より後ろの `- <項目>: <値>` の行を項目として読む。値の前後の空白は除く。結果の行より前の項目の行は読まない
   4. 同じ名前の項目が 2 つ以上あれば、最後の行の値を採る。前の行の値は捨てる
-  5. `shape.required` が結果の値ごとに要るとする項目を確かめる。`always` の項目と、`when` の条件に当たったときの `need` の項目の両方を確かめる。`when` の条件は、項目の値が `prefix` で始まる・`equals` と同じ、のどちらかである。要る項目が無い、値が空、値が `無し` のどれかなら、欠落として誤りにする
-  6. 項目「材料」の値は、`shape.material.body`（`本文`）か、`shape.material.url_prefix`（`https://`）で始まる URL を空白で区切って並べたもの、のどちらかでなければ誤りにする。`本文` のときは、区間の報告より前に `shape.material.heading`（`## 判断の材料`）の見出しが要る。無ければ誤りにする
+  5. `shape.required` が結果の値ごとに要るとする項目を確かめる。`always` の項目と、`when` の条件に当たったときの `need` の項目の両方を確かめる。`when` の条件は、項目の値が `prefix` で始まる・`equals` と同じ、のどちらかである。要る項目が無い、値が空、値が `無し` のどれかなら、欠落として誤りにする。項目「材料」もこの規則だけで扱う。材料が要る結果（`判断が要る`）で材料が無い・空・`無し` なら欠落の誤りにし、材料が要らない結果（`完了`・`できなかった`）なら誤りにしない（契約のサンプルにある `材料: 無し` の `完了` と `できなかった` は有効である）
+  6. 項目「材料」に、空でも `無し` でもない値があるときだけ、値の形を確かめる。値は、`shape.material.body`（`本文`）か、`shape.material.url_prefix`（`https://`）で始まる URL を空白で区切って並べたもの、のどちらかでなければ誤りにする。`本文` のときは、区間の報告より前に `shape.material.heading`（`## 判断の材料`）の見出しが要る。無ければ誤りにする
+
+  誤りの一覧の 1 件は、誤りのコードと項目の名前だけを持ち、読み取った値を持たない。上流の読み取り（`report.py`）の誤りの文は「`「材料」が本文でも https:// の URL でもない: <値>`」のように入力の値を含む。この値には署名付き URL や共有トークンが混ざりうる。ランナーはこの一覧を進捗の事象の理由（`report_item_invalid`）に使うため、値を一覧に入れない。伏せ字は既知の秘密の形だけを伏せ、任意の署名を取り除けないため、伏せ字には頼らない。照合の 5 項目目は `errors` の有無だけをサンプルと比べるため、誤りの文を上流と同じにする必要は無い
+
+  | 誤りのコード | 当たるとき | 項目の名前 |
+  | --- | --- | --- |
+  | `result_line_missing` | 結果の行が無い（規則 1） | `結果` |
+  | `result_value_unknown` | 結果が 3 つの値のどれでもない（規則 2） | `結果` |
+  | `item_missing` | 要る項目が無い・空・`無し`（規則 5） | 欠けた項目 |
+  | `material_form_invalid` | 材料の値が `本文` でも URL の並びでもない（規則 6） | `材料` |
+  | `material_heading_missing` | `材料: 本文` なのに「判断の材料」の見出しが無い（規則 6） | `材料` |
 - 採らなかった案: execution.md の「[区間と結果の行](../docs/design/execution.md#区間と結果の行)」へのリンクだけを置く（リンク先には、同じ項目の後勝ちと、URL を空白で区切ることが書かれていない。同じ項目を先勝ちで読むと、訂正した承認資料の参照先ではなく古い資料を承認者に見せる）
-- **代償**: 上流が `rule` を変えたら、この規則と関数を同じ変更で直す。`shape` の変化は照合の 5 項目目と、先端の差分の行で気づける
+- 採らなかった案: 上流の誤りの文をそのまま返し、進捗の事象へは伏せ字を通して載せる（伏せ字は既知の秘密の形しか伏せず、材料の欄に入った署名付き URL の署名が残る）
+- **代償**: 上流が `rule` を変えたら、この規則と関数を同じ変更で直す。`shape` の変化は照合の 5 項目目と、先端の差分の行で気づける。誤りの理由から値を落とすため、進捗の事象を見る人は、どの項目が誤りかまでは分かるが、どんな値が書かれていたかは分からない
 - 根拠: Value 11（MVV バージョン 3）。STD1
 
 ## 影響と危険
@@ -249,8 +272,19 @@ graph LR
 | 照合のテストのフィクスチャ（`tools/test/fixtures/ndf-contract-752a9cf/`） | 古い固定の点のコピーのまま残る | 新しい固定の点のコピーに置き換える |
 | #2 の設計 | K2-6 を重ねて書く | 決定 2 の代償。#2 の設計の時点でこの書き出しを読む |
 | 区間の失敗の理由のコード（`packages/contracts/src/rows/sprints.ts` の `segmentFailureReason`、確定仕様 `docs/specifications/contracts-and-core.md` の区間の行） | 読み取りが項目の誤りを返したときの理由のコード `report_item_invalid` と、材料の URL が受け入れ条件に合わないときの理由のコード `material_url_rejected`（どちらも execution.md の「区間と結果の行」）が値の集まりに無い | この変更では足さない。区間の失敗を書くのはランナーなので、ランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の実装で値の集まりと確定仕様に足し、`npm run generate` の生成物もコミットする |
-| 承認資料の材料の URL（execution.md の「[承認資料](../docs/design/execution.md#承認資料)」） | この変更で、材料に並んだ URL をすべて承認資料に載せる。署名付き URL や共有リンクが入ると、元の資料の閲覧権限が無い承認者や委任のエージェントにも中身を渡す。読み取り（決定 7）は契約に合わせて `https://` で始まるかだけを見るため、これを防がない | execution.md に材料の URL の受け入れ条件（ホストが `github.com` ちょうど・ユーザー名やパスワードを持たない・クエリを持たない）を書いた。承認の依頼を送るのはランナーなので、確かめる処理とテストはランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の実装に置く。テストは、API の呼び出しを差し替えた偽物を使い、材料が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000`・`https://github.com/acme/app/pull/1?token=0000`・`https://user:pass@github.com/acme/app/pull/1`・`https://docs.example.com/share/abcd` の報告ごとに、偽物の API が承認の依頼を 1 件も受けず、区間が `material_url_rejected` で失敗し、理由と進捗の事象とログに URL の全体（署名やトークンの値）が出ないことを確かめる。あわせて `https://github.com/acme/app/pull/1#discussion_r1` は受け入れることを確かめる |
+| 承認資料の材料の URL（execution.md の「[承認資料](../docs/design/execution.md#承認資料)」） | この変更で、材料に並んだ URL をすべて承認資料に載せる。`材料: 本文` なら「判断の材料」節も載せる。どちらにも署名付き URL や共有リンクが入りうる。入ると、元の資料の閲覧権限が無い承認者や委任のエージェントにも中身を渡す。読み取り（決定 7）は契約に合わせて材料の欄が `https://` で始まるかだけを見るため、これを防がない | execution.md に材料の URL の受け入れ条件を書いた。条件は、スキームが `https`・ホストが `github.com` ちょうど・ポートを書かない・ユーザー名やパスワードを持たない・クエリを持たない、である。材料の欄の URL と「判断の材料」節の中の URL の両方に当てる。承認の依頼を送るのはランナーなので、確かめる処理とテストはランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の実装に置く。テストの中身は下の「ランナーのテストに引き継ぐこと」にある |
 | ランナー（#6） | 判定と読み取りの関数の形を、ランナーの実装の時点で変えたくなる | ランナーは照合と同じ判定と読み取りの関数を使う（#1 の決定 7 のまま）。形を変えるときは照合のテストも同じ変更で直す |
+
+### ランナーのテストに引き継ぐこと
+
+区間の失敗と承認資料の受け入れ条件は、ランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）が実装する。ランナーのテストは、API の呼び出しを差し替えた偽物を使い、次を確かめる。例の値はどれも作り物である。
+
+| 報告 | 偽物の API が受けるもの | 理由と進捗の事象とログ |
+| --- | --- | --- |
+| 材料の欄が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000`・`https://github.com/acme/app/pull/1?token=0000`・`https://user:pass@github.com/acme/app/pull/1`・`https://docs.example.com/share/abcd` のどれか | 承認の依頼・問い・承認資料は 1 件も受けない。区間とレーンを `material_url_rejected` で失敗にする進捗の事象を 1 件受ける | 理由は、位置（材料の欄の何番目か）と拒否の理由のコード（`query_present`・`host_not_allowed`・`userinfo_present`）だけを持つ。URL の全体・ホスト名・署名やトークンの値が、理由にも進捗の事象にもログにも出ない |
+| `材料: 本文` で、「判断の材料」節に `[計画](https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000)` か `<https://docs.example.com/share/abcd>` か `http://github.com/acme/app/pull/1` を含む | 同上 | 理由は、位置（本文の何番目か）と拒否の理由のコードだけを持つ。同上の値が出ない |
+| 材料の欄が `https://github.com/acme/app/pull/1#discussion_r1`、または `材料: 本文` で節の中の URL がそれだけ | 承認の依頼を受ける | — |
+| 材料の欄が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url`（読み取りが `material_form_invalid` を返す） | 承認の依頼・問い・承認資料は受けない。区間とレーンを `report_item_invalid` で失敗にする進捗の事象を 1 件受ける | 理由は、誤りのコード `material_form_invalid` と項目の名前 `材料` だけを持つ。`X-Amz-Signature=0000` も `not-a-url` も出ない |
 
 ## テスト設計
 
@@ -259,22 +293,26 @@ graph LR
 | 受け入れ条件 1 | `ndf-pin.json` の `ndf_ref` が `ndf--v11.0.36` のタグの指すコミットと一致する（マージ前の手動の確認。`git ls-remote` か `gh api` のタグの参照と比べる） | 同じ契約（バージョン 16・`c50ef840…`）を持つ別のコミットに `ndf_ref` を差し替えると、タグの参照との一致の確認が失敗する。照合の 2 項目目は契約のバージョンと sha256 だけを比べ、タグが指すコミットかどうかは比べないため、この差し替えを見つけない。この確認はタグの参照との比較でだけ行う |
 | 受け入れ条件 2 | 受ける組がバージョン 16・`c50ef840…` の 1 組だけである。スキーマの正本の既存のデータのテストが形（空でない・重ならない）を縛る | バージョン 8 の組を残す・2 組にすると、手動の確認で `history` の最後の行と合わない。固定の点だけを上げて組を直し忘れると、照合の 2 項目目が落ちる |
 | 受け入れ条件 3 | execution.md の決定 104 と「契約のバージョンの照合し」の行に、新しいタグ・コミット・バージョン・sha256 がある。バージョン 8・`ed8b0365…` を今の値として書いていない（目で見る） | 値の書き換え忘れ |
-| 受け入れ条件 4 | 新しい固定の点で `npm run ndf-contract` が `checked: fixed 8d22be7… 1-6` を出し、`skip:` の行を出さず、終了コード 0 で終わる | 照合のテストで、使い方のデータの `spec-io` の `target` だけを別の値に変える（データの読み込みは壊さない）。固定の点の 6 項目目が `spec-io` の `target` の不一致を食い違いとして出し、終了コード 1 で終わる |
+| 受け入れ条件 4 | 新しい固定の点で `npm run ndf-contract` が `checked: fixed 8d22be7… 1-6` を出し、`skip:` の行を出さず、終了コード 0 で終わる | 照合のテストで、生成のファイルの `spec-io` の `target` だけを別の値に変える（データの読み込みは壊さない）。固定の点の 6 項目目が `spec-io` の `target` の不一致を食い違いとして出し、終了コード 1 で終わる |
 | 受け入れ条件 5 | 作業ツリーのパッケージが書き出しを持たないと `fail: no-contract-use <固定の点>` と終了コード 1。`skip:` の行は出ない。契約の取得に依存しない: 照合のテストで、書き出しを無しにし、取得先の `repoUrl` を取得できない値にしても、終了コードは 2 ではなく 1 で、取得を試みない（決定 6） | skip の分岐を戻すと落ちる。書き出しの欠落を判定する前に契約を取得する順に戻すと、取得できない取得先で終了コードが 2 になって落ちる |
 | 受け入れ条件 6 | `npm run check` が通る | 型・lint・生成物・単体テストのどれかが落ちる |
+| 受け入れ条件 7 | execution.md の「区間と結果の行」に `report_item_invalid` と `material_url_rejected` の行があり、「承認資料」に材料の URL の受け入れ条件がある（目で見る）。動作はランナー（#6）のテストで確かめる（「ランナーのテストに引き継ぐこと」） | 記述の書き忘れ |
+| 受け入れ条件 8 | 決定 7 の 2 つの行（区間の報告の読み取り・誤りの一覧に値を入れない） | 決定 7 の行のとおり |
 | 決定 4（呼び出しの判定） | 新しい固定の点のサンプルのうち、使うインタフェースの 21 件で、判定が `valid` と同じになる。使わないインタフェースの呼び出しは偽になる。照合の 1 項目目は、使わないインタフェースのサンプルを判定で比べない。参照先の検査は、使うインタフェースのサンプル 1 件（たとえば `block-next` へのサンプル）の `entrypoint` だけを `entrypoints.json` に無い id（たとえば `no-such-entrypoint`）に差し替えた契約で確かめる。`entrypoints.json` のインタフェースの行は消さずに残す。照合は、1 項目目の食い違いとして、そのサンプルの id を含む行（`mismatch: … 1 … entrypoint-cases.json <サンプルの id>: …`）を出す。終了コードが 1 であることだけでは確かめない（行を消すと 6 項目目も食い違いになり、1 項目目の退行と区別できないため） | 参照先の id の検査を絞り込みの後に移す（差し替えた id は使い方のデータの 11 の id にも契約の id にも無いため、どちらで絞ってもサンプルが外れ、1 項目目の行が出ない）。引数の正規表現の全体一致を部分一致にする（`loop-bad-budget`・`unknown-flag` が真になる）。入れてよい環境変数の外の名前を許す（`terminal-env` が真になる）。block の前置きの語を必須にする（`resume` が偽になる） |
 | 決定 4（網羅） | 使い方のデータの `entrypoints` の id の集合が、単体テストに置いた 11 の id のリストとちょうど同じになる | データから `block-next` を 1 件消すと、単体テストが落ちて CI が失敗する。リストに無い id（たとえば `file-loop-record`）を足しても落ちる |
 | 決定 4（呼び出しの判定の種類ごとの規則） | 決定 5 の表の種類ごとに、valid のサンプルが真になる。とくに `block-next` の `resume`（`/goal ` の前置きが無い）と `resume-loop`（前置きがある）がどちらも真、`spec-io` の `spec-io-args` が真で `spec-outside` が偽、`file-plan-progress` の `plan-progress` が真になる | `target` と `args` をそのまま連結して比べると `resume` が偽になる。`spec` の `target` を完全一致で比べると `spec-io-args` が偽になる |
-| 決定 7（区間の報告の読み取り） | 新しい固定の点の `cases` 16 件で、`result` と `errors` の有無がサンプルと同じになる。加えて単体テストで、結果の行の後ろに同じ項目（たとえば `材料`）が 2 行あるとき、後ろの行の値を採る | 最初の `- 結果:` の行を読む（最後のサンプルが `判断が要る` になる）。同じ名前の項目を先勝ちで読む（2 行目の `材料` の URL ではなく 1 行目の値を返す）。「無し」を値として受ける。条件つきで要る項目を見ない。`材料: 本文` で `## 判断の材料` の節を求めない。空白で区切った複数の URL を誤りにする |
+| 決定 7（区間の報告の読み取り） | 新しい固定の点の `cases` 16 件で、`result` と `errors` の有無がサンプルと同じになる。加えて単体テストで、結果の行の後ろに同じ項目（たとえば `材料`）が 2 行あるとき、後ろの行の値を採る | 最初の `- 結果:` の行を読む（最後のサンプルが `判断が要る` になる）。同じ名前の項目を先勝ちで読む（2 行目の `材料` の URL ではなく 1 行目の値を返す）。「無し」を値として受ける。条件つきで要る項目を見ない。`材料: 本文` で `## 判断の材料` の節を求めない。空白で区切った複数の URL を誤りにする。材料の要らない `完了`・`できなかった` で `材料: 無し` を誤りにする（契約の `完了` と `できなかった` の有効なサンプルが誤りになる） |
+| 決定 7（誤りの一覧に値を入れない） | 単体テストで、材料の欄が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url` の報告を読むと、誤りの一覧が `material_form_invalid` と `材料` の 1 件だけになり、一覧を文字列にしても `X-Amz-Signature`・`0000`・`not-a-url` を含まない | 上流と同じく誤りの文に値を入れると、一覧の文字列に署名が出て落ちる |
 | `ask-journal` の通知（「#47 と上流の不足 3 件は食い違いにならない」） | 照合のテストで、固定の点の `ndf-files.json` の `ask-journal` に `fields` を足した契約を渡すと、`notice: … の ask-journal が fields を持つ: …` の行が標準出力と要約のファイルの両方に出て、終了コードは 0 のまま、食い違いの件数も 0 のまま | 通知を 4 項目目の食い違いに数えると、終了コードが 1 になって落ちる。通知の処理を消すと、行が出ずに落ちる |
-| 決定 5 | コピーしたインタフェースの行の項目（`kind`・`target`・`lead`・`args`・`env`・`files`）か、読むファイルの `path` が契約の行と違うと、固定の点で 6 項目目か 4 項目目の食い違いになる | 比べる項目を 1 つ外すと、その項目だけを変えた契約で食い違いが出ない |
+| 決定 5（照合） | 生成したインタフェースの行の項目（`kind`・`target`・`lead`・`args`・`env`・`files`）か、読むファイルの `path` が契約の行と違うと、固定の点で 6 項目目か 4 項目目の食い違いになる。生成のファイルが持つ固定の点が `ndf-pin.json` と違っても、6 項目目の食い違いになる | 比べる項目を 1 つ外すと、その項目だけを変えた契約で食い違いが出ない。`ndf-pin.json` だけを別のコミットに変えて生成し直さないと、食い違いが出る |
+| 決定 5（生成） | 照合のテストで、フィクスチャの契約を取得先にして `npm run ndf-contract:sync` の処理を動かすと、手で書いた id の行と `path` だけを持つ生成のファイルができ、コミットした生成のファイルと同じになる。手で書いた id の一覧に契約に無い id を足すと、生成が失敗する | 絞り込みを外すと、使わないインタフェース（`file-loop-record` など）の行が生成のファイルに入って落ちる。契約に無い id を黙って飛ばすと、失敗にならずに落ちる |
 | 決定 3 | 照合が読む型が、スキーマの正本の `NdfContractUse` と同じである（型の検査）。書き出しの `acceptedVersions` が `NDF_CONTRACTS.accepted` と同じ値である | 型を照合の側にも書く・受ける組を使い方のデータにコピーすると、片方だけを変えたときに型の検査かテストで落ちる |
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #136 | 実装する | — | `ndf-pin.json`、`packages/contracts/data/ndf-contracts.json`、`packages/contracts/data/ndf-contract-use.json`（新設）、`packages/contracts/src/ndf-contract-use.ts`（新設）、`packages/contracts/package.json`、`packages/contracts/test/ndf-contract-use.test.ts`（新設）、`packages/contracts/test/fixtures/ndf-contract-8d22be7/entrypoint-cases.json`（新設）、`packages/contracts/test/fixtures/ndf-contract-8d22be7/unattended-report.json`（新設）、`packages/contracts/test/data.test.ts`、`tools/checks/src/ndf-contract-check.ts`、`tools/test/ndf-contract-check.test.ts`、`tools/test/fixtures/ndf-contract-752a9cf/entrypoints.json`（消す）、`tools/test/fixtures/ndf-contract-752a9cf/env.json`（消す）、`tools/test/fixtures/ndf-contract-8d22be7/entrypoints.json`（新設）、`tools/test/fixtures/ndf-contract-8d22be7/env.json`（新設）、`docs/design/execution.md`、`docs/specifications/contracts-and-core.md`、`docs/operations/pipeline-approval.md` |
+| #136 | 実装する | — | `ndf-pin.json`、`packages/contracts/data/ndf-contracts.json`、`packages/contracts/data/ndf-contract-use.json`（新設）、`packages/contracts/data/ndf-contract-use.generated.json`（新設。生成のファイル）、`package.json`（`ndf-contract:sync` を足す）、`packages/contracts/src/ndf-contract-use.ts`（新設）、`packages/contracts/package.json`、`packages/contracts/test/ndf-contract-use.test.ts`（新設）、`packages/contracts/test/fixtures/ndf-contract-8d22be7/entrypoint-cases.json`（新設）、`packages/contracts/test/fixtures/ndf-contract-8d22be7/unattended-report.json`（新設）、`packages/contracts/test/data.test.ts`、`tools/checks/src/ndf-contract-check.ts`、`tools/test/ndf-contract-check.test.ts`、`tools/test/fixtures/ndf-contract-752a9cf/entrypoints.json`（消す）、`tools/test/fixtures/ndf-contract-752a9cf/env.json`（消す）、`tools/test/fixtures/ndf-contract-8d22be7/entrypoints.json`（新設）、`tools/test/fixtures/ndf-contract-8d22be7/env.json`（新設）、`tools/test/fixtures/ndf-contract-8d22be7/ndf-files.json`（新設）、`docs/design/execution.md`、`docs/specifications/contracts-and-core.md`、`docs/operations/pipeline-approval.md` |
 
 ## 未確認のまま残ること
 
@@ -295,8 +333,8 @@ graph LR
 
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
-| STD1 | NDF の契約のファイル（`ndf--v11.0.36` のタグのコミット `8d22be7` の `plugins/ndf/contracts/`） | 照合が読む 6 つのファイル。`version.json` の最後の行はバージョン 16・`c50ef840…`。インタフェースは 15 行、サンプルは 26 件、区間の報告のサンプルは 16 件。11.0.12 からの差は「今の姿」の表のとおり | 決定 1 の値、決定 4・5 のコピーの元 | `git ls-remote https://github.com/devbasex/ai-plugins 'refs/tags/ndf--v11.0.*'` と、`git fetch --depth 1` で取った 2 つのコミットの `git diff` と `git show`（2026-11-25） |
-| STD2 | 利用者駆動の契約（Consumer-Driven Contracts） | 利用する側は、提供する側の能力のうち自分が使う部分だけを、自分の期待として契約に書く（契約は開いていて不完全でよい） | 決定 4（使うインタフェースだけを判定する）と決定 5（使う部分のコピーを持ち、提供する側の契約と比べる） | https://martinfowler.com/articles/consumerDrivenContracts.html （2026-11-25） |
+| STD1 | NDF の契約のファイル（`ndf--v11.0.36` のタグのコミット `8d22be7` の `plugins/ndf/contracts/`） | 照合が読む 6 つのファイル。`version.json` の最後の行はバージョン 16・`c50ef840…`。インタフェースは 15 行、サンプルは 26 件、区間の報告のサンプルは 16 件。11.0.12 からの差は「今の姿」の表のとおり | 決定 1 の値、決定 4 の比べる範囲、決定 5 の生成の元 | `git ls-remote https://github.com/devbasex/ai-plugins 'refs/tags/ndf--v11.0.*'` と、`git fetch --depth 1` で取った 2 つのコミットの `git diff` と `git show`（2026-11-25） |
+| STD2 | 利用者駆動の契約（Consumer-Driven Contracts） | 利用する側は、提供する側の能力のうち自分が使う部分だけを、自分の期待として契約に書く（契約は開いていて不完全でよい） | 決定 4（使うインタフェースだけを判定する）と決定 5（使う部分を提供する側の契約から生成して持ち、契約と比べる） | https://martinfowler.com/articles/consumerDrivenContracts.html （2026-11-25） |
 | STD3 | GitHub Actions のセキュリティ強化の手引き（サードパーティのアクションの使い方） | 依存は全長のコミット SHA で固定するのが基本で、タグは動かせるため信頼できる作者に限る | 決定 1（固定の点はタグの名前ではなく、タグが指すコミットの 40 桁を書く。今の形のまま） | https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#using-third-party-actions （2026-11-25） |
 
 ### ライブラリとサービス
