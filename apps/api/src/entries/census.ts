@@ -1,7 +1,7 @@
 import type { TablePurpose, TableSpec } from "@nd-factory/contracts/tables";
 import type { RowKey, StoredRow } from "@nd-factory/core/db";
 import type { Context } from "aws-lambda";
-import { isPurpose, isUuidV4, keyOfRow, MIGRATE_PAGE_SIZE, MIGRATE_RESERVE_MS, rowKindOf, type MigrateDeps } from "./migrate.ts";
+import { isPurpose, isUuidV4, rowKindOf, scanTable, type MigrateDeps } from "./migrate.ts";
 
 // 版の数え（issues/issue-2-design-detail.md の「表の移し」の countRowVersions、版を上げる子の手順の 5）。
 // 行の種類の、ある版の読み手を外してよいかを、保存してある schema_version の値だけで確かめる。readRow も repair も narrow も通さず、
@@ -49,17 +49,10 @@ function addCounts(a: VersionCounts, b: VersionCounts): VersionCounts {
 export async function countRowVersions(input: { purpose: TablePurpose; cursor: RowKey | null }, deps: CensusDeps): Promise<CensusResult> {
   const spec = deps.tables[input.purpose];
   const counts: MutableCounts = {};
-  let position = input.cursor;
-  for (;;) {
-    const page = await deps.db.scan(input.purpose, { limit: MIGRATE_PAGE_SIZE, startKey: position, consistent: true });
-    for (const raw of page.items) {
-      if (deps.remainingMs() <= MIGRATE_RESERVE_MS) return { done: false, cursor: position, counts };
-      addCount(counts, rowKindName(spec, raw), bucketOf(raw), 1);
-      position = keyOfRow(raw);
-    }
-    if (page.lastKey === null) return { done: true, cursor: null, counts };
-    position = page.lastKey;
-  }
+  const scanned = await scanTable(input, deps, (raw) => {
+    addCount(counts, rowKindName(spec, raw), bucketOf(raw), 1);
+  });
+  return { done: scanned.done, cursor: scanned.cursor, counts };
 }
 
 export type CensusEvent = {

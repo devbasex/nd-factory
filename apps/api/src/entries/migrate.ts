@@ -95,35 +95,47 @@ async function migrateRow(purpose: TablePurpose, spec: TableSpec, first: StoredR
   }
 }
 
+// 表の全走査（強整合の Scan）。行ごとに、取りかかる前に残り時間を確かめ、足りなければ止めて続きの位置を返す。
+// 続きの位置は処理を終えた行の鍵で、ページを終えたらその LastEvaluatedKey。事後条件: 返した cursor より前の行は visit を終えてあり、後の行は 1 行も飛ばしていない
+export async function scanTable(
+  input: { purpose: TablePurpose; cursor: RowKey | null },
+  deps: Pick<MigrateDeps, "db" | "remainingMs">,
+  visit: (raw: StoredRow) => Promise<void> | void,
+): Promise<{ readonly done: boolean; readonly cursor: RowKey | null }> {
+  let position = input.cursor;
+  for (;;) {
+    const page = await deps.db.scan(input.purpose, { limit: MIGRATE_PAGE_SIZE, startKey: position, consistent: true });
+    for (const raw of page.items) {
+      if (deps.remainingMs() <= MIGRATE_RESERVE_MS) return { done: false, cursor: position };
+      await visit(raw);
+      position = keyOfRow(raw);
+    }
+    if (page.lastKey === null) return { done: true, cursor: null };
+    position = page.lastKey;
+  }
+}
+
 // 事後条件: 返した cursor より前（走査の順）の行は、処理を終えた時点で読み手の見る形を書き手の版で保存しているか、消えたか、拒んだ行（refused に数えた行）。
 // refused はこの呼び出しで拒んだ行の数。返した cursor より後の行は 1 行も飛ばしていない
 export async function migrateTable(input: { purpose: TablePurpose; cursor: RowKey | null }, deps: MigrateDeps): Promise<MigrateResult> {
   const { purpose } = input;
   const spec = deps.tables[purpose];
-  let position = input.cursor;
   let rewritten = 0;
   let skipped = 0;
   let refused = 0;
   const refusedByReason: Record<string, number> = {};
-  const result = (done: boolean): MigrateResult => ({ done, cursor: done ? null : position, rewritten, skipped, refused, refusedByReason: refusedByReason as RefusedByReason });
-  for (;;) {
-    const page = await deps.db.scan(purpose, { limit: MIGRATE_PAGE_SIZE, startKey: position, consistent: true });
-    for (const raw of page.items) {
-      if (deps.remainingMs() <= MIGRATE_RESERVE_MS) return result(false);
-      const outcome = await migrateRow(purpose, spec, raw, deps);
-      if (outcome.kind === "rewritten") rewritten += 1;
-      else if (outcome.kind === "skipped") skipped += 1;
-      else if (outcome.kind === "refused") {
-        refused += 1;
-        refusedByReason[outcome.reason] = (refusedByReason[outcome.reason] ?? 0) + 1;
-        // 鍵の値と例外の文（Zod の issue.path・IdP の主体や利用者の ID を含みうる）は載せない
-        deps.log.error("migrate_refused", { purpose, row_kind: outcome.rowKind, reason: outcome.reason });
-      }
-      position = keyOfRow(raw);
+  const scanned = await scanTable(input, deps, async (raw) => {
+    const outcome = await migrateRow(purpose, spec, raw, deps);
+    if (outcome.kind === "rewritten") rewritten += 1;
+    else if (outcome.kind === "skipped") skipped += 1;
+    else if (outcome.kind === "refused") {
+      refused += 1;
+      refusedByReason[outcome.reason] = (refusedByReason[outcome.reason] ?? 0) + 1;
+      // 鍵の値と例外の文（Zod の issue.path・IdP の主体や利用者の ID を含みうる）は載せない
+      deps.log.error("migrate_refused", { purpose, row_kind: outcome.rowKind, reason: outcome.reason });
     }
-    if (page.lastKey === null) return result(true);
-    position = page.lastKey;
-  }
+  });
+  return { done: scanned.done, cursor: scanned.cursor, rewritten, skipped, refused, refusedByReason: refusedByReason as RefusedByReason };
 }
 
 export type MigrateEvent = {
