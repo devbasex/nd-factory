@@ -272,6 +272,42 @@
     "owner": "#11"
   },
   {
+    "operation": "organizers.list",
+    "owner": "#10"
+  },
+  {
+    "operation": "organizers.get",
+    "owner": "#10"
+  },
+  {
+    "operation": "organizers.create",
+    "owner": "#10"
+  },
+  {
+    "operation": "organizers.close",
+    "owner": "#10"
+  },
+  {
+    "operation": "organizers.resume",
+    "owner": "#10"
+  },
+  {
+    "operation": "organizer_messages.list",
+    "owner": "#10"
+  },
+  {
+    "operation": "organizer_messages.create",
+    "owner": "#10"
+  },
+  {
+    "operation": "organizer_messages.withdraw",
+    "owner": "#10"
+  },
+  {
+    "operation": "issue_requests.create",
+    "owner": "#10"
+  },
+  {
     "operation": "runner.exchanges.create",
     "owner": "#6"
   },
@@ -296,11 +332,31 @@
     "owner": "#6"
   },
   {
+    "operation": "runner.organizer_inputs.list",
+    "owner": "#10"
+  },
+  {
+    "operation": "runner.organizer_replies.create",
+    "owner": "#10"
+  },
+  {
+    "operation": "runner.organizer_receipts.create",
+    "owner": "#10"
+  },
+  {
+    "operation": "runner.organizer_transcripts.create",
+    "owner": "#10"
+  },
+  {
     "operation": "machine.heartbeats.create",
     "owner": "#7"
   },
   {
     "operation": "machine.lane_claims.create",
     "owner": "#7"
+  },
+  {
+    "operation": "machine.organizer_wipes.create",
+    "owner": "#10"
   }
 ]

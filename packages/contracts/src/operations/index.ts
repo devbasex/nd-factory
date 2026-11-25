@@ -5,6 +5,7 @@ import { EXECUTION_OPERATIONS } from "./execution.ts";
 import { MACHINE_ENDPOINT_OPERATIONS } from "./machine-endpoint.ts";
 import { MACHINE_OPERATIONS } from "./machines.ts";
 import { NOTICE_OPERATIONS } from "./notices.ts";
+import { ORGANIZER_MACHINE_OPERATIONS, ORGANIZER_OPERATIONS, ORGANIZER_RUNNER_OPERATIONS } from "./organizers.ts";
 import { PROJECT_OPERATIONS } from "./projects.ts";
 import { RUNNER_OPERATIONS } from "./runner.ts";
 import { SPRINT_OPERATIONS } from "./sprints.ts";
@@ -12,7 +13,7 @@ import { TEAM_OPERATIONS } from "./teams.ts";
 import { USAGE_OPERATIONS } from "./usage.ts";
 import { USER_OPERATIONS } from "./users.ts";
 
-// 操作の表。全体の設計の操作の一覧の表の順（F1〜F20 の表の上から、続けてランナー・手元のマシン）に並べる
+// 操作の表。全体の設計の操作の一覧の表の順（F1〜F20・F24・F25 の表の上から、続けてランナー・手元のマシン）に並べる
 export const OPERATIONS = [
   ...USER_OPERATIONS,
   ...TEAM_OPERATIONS,
@@ -25,8 +26,11 @@ export const OPERATIONS = [
   ...MACHINE_OPERATIONS,
   ...USAGE_OPERATIONS,
   ...AUDIT_OPERATIONS,
+  ...ORGANIZER_OPERATIONS,
   ...RUNNER_OPERATIONS,
+  ...ORGANIZER_RUNNER_OPERATIONS,
   ...MACHINE_ENDPOINT_OPERATIONS,
+  ...ORGANIZER_MACHINE_OPERATIONS,
 ] as const;
 
 export type Operation = (typeof OPERATIONS)[number];

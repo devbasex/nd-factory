@@ -155,11 +155,12 @@ ID の種類のプレフィックス:
 | --- | --- |
 | F1〜F3（`sessions.*`・`users.*`・`login_links.*`・`logins.*`・`teams.*`・`seats.*`・`invitations.*`） | #4 |
 | F4〜F6（`projects.*`・`github_installations.*`・`repositories.*`・`project_transfers.*`） | #5 |
-| F7〜F10・F17（`waiting_counts.get`・`issue_candidates.list`・`sprints.*`・`lanes.list`・`progress_events.list`・`execution_settings.*`・`model_keys.*`）とランナー向けの 5 つの HTTP のルート | #6 |
-| F18（`machines.*`）と手元のマシン向けの 2 つの HTTP のルート | #7 |
+| F7〜F10・F17（`waiting_counts.get`・`issue_candidates.list`・`sprints.*`・`lanes.list`・`progress_events.list`・`execution_settings.*`・`model_keys.*`）とランナー向けの 6 つの HTTP のルート（オーガナイザーのルートを除く） | #6 |
+| F18（`machines.*`）と手元のマシン向けの 2 つの HTTP のルート（オーガナイザーのルートを除く） | #7 |
 | F11〜F15（`approvals.*`・`questions.*`・`notices.*`・`notification_targets.*`） | #8 |
 | F16・F20（`delegations.*`・`audit_records.list`） | #11 |
 | F19（`usage.get`・`usage_records.list`・`spend_caps.update`） | #29 |
+| F24・F25（`organizers.*`・`organizer_messages.*`・`issue_requests.create`）とオーガナイザーのランナー・手元のマシン向けの 5 つの HTTP のルート（`/v1/runner/organizer_inputs/list`・`/v1/runner/organizer_replies/create`・`/v1/runner/organizer_receipts/create`・`/v1/runner/organizer_transcripts/create`・`/v1/machine/organizer_wipes/create`） | #10（[開発の計画](../design-process/issue-24/plan.md) の L2 と課題 #10 の対象範囲。画面は #28） |
 | DB セットアップ関数が呼ぶ 3 つの処理（`db_prep.is_current`・`db_prep.read_target`・`db_prep.record`）の本番の実装（終わりの記録のインタフェース）・DB セットアップ関数を非同期で呼ぶ API の側と定期ジョブ・インタフェースを DB セットアップ関数のエントリポイントへつなぐこと | #6（関数そのもの・呼び出しの値と終了結果の形・インタフェースの型は #13） |
 
 表の列の読み方:

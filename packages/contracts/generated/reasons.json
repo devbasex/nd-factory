@@ -1520,6 +1520,204 @@
         "status": 403
       }
     ],
+    "organizers.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "organizers.get": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "organizers.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "organizers.close": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "organizers.resume": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "organizer_messages.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      }
+    ],
+    "organizer_messages.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
+    "organizer_messages.withdraw": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "issue_requests.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      },
+      {
+        "code": "idempotency_key_reused",
+        "status": 422
+      },
+      {
+        "code": "in_progress",
+        "status": 409
+      }
+    ],
     "runner.exchanges.create": [
       {
         "code": "item_invalid",
@@ -1652,6 +1850,94 @@
         "status": 409
       }
     ],
+    "runner.organizer_inputs.list": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "runner.organizer_replies.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "runner.organizer_receipts.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "runner.organizer_transcripts.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
     "machine.heartbeats.create": [
       {
         "code": "item_invalid",
@@ -1675,6 +1961,28 @@
       }
     ],
     "machine.lane_claims.create": [
+      {
+        "code": "item_invalid",
+        "status": 400
+      },
+      {
+        "code": "not_found",
+        "status": 404
+      },
+      {
+        "code": "role_insufficient",
+        "status": 403
+      },
+      {
+        "code": "version_mismatch",
+        "status": 409
+      },
+      {
+        "code": "state_mismatch",
+        "status": 409
+      }
+    ],
+    "machine.organizer_wipes.create": [
       {
         "code": "item_invalid",
         "status": 400

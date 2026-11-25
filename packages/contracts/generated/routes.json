@@ -409,6 +409,60 @@
   },
   {
     "method": "POST",
+    "path": "/v1/organizers/list",
+    "operation": "organizers.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/organizers/get",
+    "operation": "organizers.get",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/organizers/create",
+    "operation": "organizers.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/organizers/close",
+    "operation": "organizers.close",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/organizers/resume",
+    "operation": "organizers.resume",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/organizer_messages/list",
+    "operation": "organizer_messages.list",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/organizer_messages/create",
+    "operation": "organizer_messages.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/organizer_messages/withdraw",
+    "operation": "organizer_messages.withdraw",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/issue_requests/create",
+    "operation": "issue_requests.create",
+    "endpoint": "user"
+  },
+  {
+    "method": "POST",
     "path": "/v1/runner/exchanges/create",
     "operation": "runner.exchanges.create",
     "endpoint": "runner"
@@ -445,6 +499,30 @@
   },
   {
     "method": "POST",
+    "path": "/v1/runner/organizer_inputs/list",
+    "operation": "runner.organizer_inputs.list",
+    "endpoint": "runner"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/runner/organizer_replies/create",
+    "operation": "runner.organizer_replies.create",
+    "endpoint": "runner"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/runner/organizer_receipts/create",
+    "operation": "runner.organizer_receipts.create",
+    "endpoint": "runner"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/runner/organizer_transcripts/create",
+    "operation": "runner.organizer_transcripts.create",
+    "endpoint": "runner"
+  },
+  {
+    "method": "POST",
     "path": "/v1/machine/heartbeats/create",
     "operation": "machine.heartbeats.create",
     "endpoint": "machine"
@@ -453,6 +531,12 @@
     "method": "POST",
     "path": "/v1/machine/lane_claims/create",
     "operation": "machine.lane_claims.create",
+    "endpoint": "machine"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/machine/organizer_wipes/create",
+    "operation": "machine.organizer_wipes.create",
     "endpoint": "machine"
   }
 ]

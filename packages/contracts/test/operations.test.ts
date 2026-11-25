@@ -67,11 +67,13 @@ const OWNER_ROWS = section("スキーマの正本へは次の子の課題が書�
     return { refs: backticks(ops ?? ""), endpoints, owner: owner ?? "" };
   });
 
+// 自分向けのルートは、表がルートの path を挙げた行（オーガナイザーのルート）を先に引き、無ければ受け口の語の行を引く
 function expectedOwner(op: OperationDef): string | undefined {
-  const row = OWNER_ROWS.find((r) =>
-    op.endpoint === "user" ? r.refs.some((ref) => ref === op.name || ref === `${op.entity}.*`) : r.endpoints.includes(op.endpoint),
-  );
-  return row?.owner;
+  const row =
+    op.endpoint === "user"
+      ? OWNER_ROWS.find((r) => r.refs.some((ref) => ref === op.name || ref === `${op.entity}.*`))
+      : (OWNER_ROWS.find((r) => r.refs.includes(op.route)) ?? OWNER_ROWS.find((r) => r.endpoints.includes(op.endpoint)));
+  return row?.owner.split("（")[0];
 }
 
 const IDEMPOTENT_NAMED = backticks(section("### 冪等キー", "### ページ送り").find((l) => l.startsWith("| どこに置くか")) ?? "").filter(
@@ -128,10 +130,11 @@ describe("OPERATIONS", () => {
     expect(new Set(OPERATIONS.map((op) => op.route)).size).toBe(OPERATIONS.length);
   });
 
-  it("F1〜F20 のどれもが操作の表の機能にある", () => {
+  // I14 の照合の対象は F1〜F20・F24・F25（docs/design/overview.md の機能一覧）。F21〜F23 は操作を持たない
+  it("F1〜F20・F24・F25 のどれもが操作の表の機能にあり、ほかの機能を持たない", () => {
     const features = new Set(OPERATIONS.flatMap((op) => op.features));
-    for (let n = 1; n <= 20; n++) expect(features.has(`F${n}`)).toBe(true);
-    expect([...features].every((f) => /^F([1-9]|1\d|20)$/.test(f))).toBe(true);
+    for (const n of [...Array.from({ length: 20 }, (_, i) => i + 1), 24, 25]) expect(features.has(`F${n}`)).toBe(true);
+    expect([...features].every((f) => /^F([1-9]|1\d|20|24|25)$/.test(f))).toBe(true);
   });
 
   it("読み出しのツールは表にある、`human_only` でない読む操作を指す", () => {

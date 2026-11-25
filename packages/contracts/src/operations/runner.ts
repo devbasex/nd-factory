@@ -1,6 +1,6 @@
 import { ownedBy } from "./marks.ts";
 
-// ランナー向けの HTTP のルート（受け持つ子 #6）
+// ランナー向けの 6 つの HTTP のルート（受け持つ子 #6。オーガナイザーのルートは #10 の organizers.ts）
 const { self } = ownedBy("#6");
 
 export const RUNNER_OPERATIONS = [

@@ -1090,5 +1090,173 @@
       "idempotentHint": false,
       "destructiveHint": false
     }
+  },
+  {
+    "name": "organizers.list",
+    "description": "list organizers",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "organizers.get",
+    "description": "get organizers",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "organizer_messages.list",
+    "description": "list organizer_messages",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "organizer_messages.create",
+    "description": "create organizer_messages",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": true,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "organizer_messages.withdraw",
+    "description": "withdraw organizer_messages",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": false,
+      "destructiveHint": false
+    }
+  },
+  {
+    "name": "issue_requests.create",
+    "description": "create issue_requests",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "not": {}
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": true,
+      "destructiveHint": false
+    }
   }
 ]

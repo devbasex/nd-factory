@@ -3137,6 +3137,420 @@
           }
         }
       }
+    },
+    "/v1/organizers/list": {
+      "post": {
+        "operationId": "organizers.list",
+        "description": "list organizers",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/organizers.list.item"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "results per item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/organizers.list.result"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "request error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizers/get": {
+      "post": {
+        "operationId": "organizers.get",
+        "description": "get organizers",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/organizers.get.item"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "results per item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/organizers.get.result"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "request error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizers/create": {
+      "post": {
+        "operationId": "organizers.create",
+        "description": "create organizers",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/organizers.create.item"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "results per item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/organizers.create.result"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "request error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizers/close": {
+      "post": {
+        "operationId": "organizers.close",
+        "description": "close organizers",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/organizers.close.item"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "results per item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/organizers.close.result"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "request error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizers/resume": {
+      "post": {
+        "operationId": "organizers.resume",
+        "description": "resume organizers",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/organizers.resume.item"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "results per item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/organizers.resume.result"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "request error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizer_messages/list": {
+      "post": {
+        "operationId": "organizer_messages.list",
+        "description": "list organizer_messages",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/organizer_messages.list.item"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "results per item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/organizer_messages.list.result"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "request error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizer_messages/create": {
+      "post": {
+        "operationId": "organizer_messages.create",
+        "description": "create organizer_messages",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/organizer_messages.create.item"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "results per item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/organizer_messages.create.result"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "request error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizer_messages/withdraw": {
+      "post": {
+        "operationId": "organizer_messages.withdraw",
+        "description": "withdraw organizer_messages",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/organizer_messages.withdraw.item"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "results per item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/organizer_messages.withdraw.result"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "request error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/issue_requests/create": {
+      "post": {
+        "operationId": "issue_requests.create",
+        "description": "create issue_requests",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/issue_requests.create.item"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "results per item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/issue_requests.create.result"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "request error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3343,6 +3757,33 @@
         "not": {}
       },
       "audit_records.list.item": {
+        "not": {}
+      },
+      "organizers.list.item": {
+        "not": {}
+      },
+      "organizers.get.item": {
+        "not": {}
+      },
+      "organizers.create.item": {
+        "not": {}
+      },
+      "organizers.close.item": {
+        "not": {}
+      },
+      "organizers.resume.item": {
+        "not": {}
+      },
+      "organizer_messages.list.item": {
+        "not": {}
+      },
+      "organizer_messages.create.item": {
+        "not": {}
+      },
+      "organizer_messages.withdraw.item": {
+        "not": {}
+      },
+      "issue_requests.create.item": {
         "not": {}
       },
       "sessions.create.result": {
@@ -3585,6 +4026,33 @@
         "not": {}
       },
       "audit_records.list.result": {
+        "not": {}
+      },
+      "organizers.list.result": {
+        "not": {}
+      },
+      "organizers.get.result": {
+        "not": {}
+      },
+      "organizers.create.result": {
+        "not": {}
+      },
+      "organizers.close.result": {
+        "not": {}
+      },
+      "organizers.resume.result": {
+        "not": {}
+      },
+      "organizer_messages.list.result": {
+        "not": {}
+      },
+      "organizer_messages.create.result": {
+        "not": {}
+      },
+      "organizer_messages.withdraw.result": {
+        "not": {}
+      },
+      "issue_requests.create.result": {
         "not": {}
       }
     },

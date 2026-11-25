@@ -409,6 +409,60 @@
     "audit_records.list.result": {
       "not": {}
     },
+    "organizers.list.item": {
+      "not": {}
+    },
+    "organizers.list.result": {
+      "not": {}
+    },
+    "organizers.get.item": {
+      "not": {}
+    },
+    "organizers.get.result": {
+      "not": {}
+    },
+    "organizers.create.item": {
+      "not": {}
+    },
+    "organizers.create.result": {
+      "not": {}
+    },
+    "organizers.close.item": {
+      "not": {}
+    },
+    "organizers.close.result": {
+      "not": {}
+    },
+    "organizers.resume.item": {
+      "not": {}
+    },
+    "organizers.resume.result": {
+      "not": {}
+    },
+    "organizer_messages.list.item": {
+      "not": {}
+    },
+    "organizer_messages.list.result": {
+      "not": {}
+    },
+    "organizer_messages.create.item": {
+      "not": {}
+    },
+    "organizer_messages.create.result": {
+      "not": {}
+    },
+    "organizer_messages.withdraw.item": {
+      "not": {}
+    },
+    "organizer_messages.withdraw.result": {
+      "not": {}
+    },
+    "issue_requests.create.item": {
+      "not": {}
+    },
+    "issue_requests.create.result": {
+      "not": {}
+    },
     "runner.exchanges.create.item": {
       "not": {}
     },
@@ -445,6 +499,30 @@
     "runner.answer_deliveries.create.result": {
       "not": {}
     },
+    "runner.organizer_inputs.list.item": {
+      "not": {}
+    },
+    "runner.organizer_inputs.list.result": {
+      "not": {}
+    },
+    "runner.organizer_replies.create.item": {
+      "not": {}
+    },
+    "runner.organizer_replies.create.result": {
+      "not": {}
+    },
+    "runner.organizer_receipts.create.item": {
+      "not": {}
+    },
+    "runner.organizer_receipts.create.result": {
+      "not": {}
+    },
+    "runner.organizer_transcripts.create.item": {
+      "not": {}
+    },
+    "runner.organizer_transcripts.create.result": {
+      "not": {}
+    },
     "machine.heartbeats.create.item": {
       "not": {}
     },
@@ -455,6 +533,12 @@
       "not": {}
     },
     "machine.lane_claims.create.result": {
+      "not": {}
+    },
+    "machine.organizer_wipes.create.item": {
+      "not": {}
+    },
+    "machine.organizer_wipes.create.result": {
       "not": {}
     }
   }
