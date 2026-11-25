@@ -133,7 +133,7 @@ export async function withFixedContract(
 // 契約のファイルの形のうち、照合が読む鍵だけ。ほかの鍵は受け流す
 const strings = z.array(z.string());
 const rowsOf = <T extends z.ZodType>(row: T) => z.object({ rows: z.array(row) });
-export const SCHEMAS = {
+const SCHEMAS = {
   "version.json": z.object({ history: z.array(z.object({ version: z.number(), sha256: z.string() })) }),
   "domains/entrypoint-cases.json": rowsOf(
     z.object({ id: z.string(), entrypoint: z.string(), call: z.string(), env: strings, valid: z.boolean() }),
