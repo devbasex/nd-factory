@@ -90,6 +90,15 @@ function keyConditionOf(keyCond: KeyCondition): { KeyConditionExpression: string
   return { KeyConditionExpression: expression, ExpressionAttributeNames: names, ExpressionAttributeValues: values };
 }
 
+// 読みの頁の指定（件数の上限・続きの鍵・逆順）。query と queryIndex で共用する
+function pageOptionsOf(opts: QueryOptions): { Limit?: number; ExclusiveStartKey?: Record<string, unknown>; ScanIndexForward?: false } {
+  return {
+    ...(opts.limit === undefined ? {} : { Limit: opts.limit }),
+    ...(opts.startKey == null ? {} : { ExclusiveStartKey: { ...opts.startKey } }),
+    ...(opts.descending === true ? { ScanIndexForward: false as const } : {}),
+  };
+}
+
 type TransactWriteItem = NonNullable<TransactWriteCommandInput["TransactItems"]>[number];
 
 // 条件が外れた件は行を返させない（行の値をログや例外に運ばない）
@@ -124,9 +133,7 @@ export function createDb(client: DynamoDBDocumentClient, names: TableNames): Db 
           TableName: names[table],
           ...keyConditionOf(keyCond),
           ConsistentRead: opts.consistent,
-          ...(opts.limit === undefined ? {} : { Limit: opts.limit }),
-          ...(opts.startKey == null ? {} : { ExclusiveStartKey: { ...opts.startKey } }),
-          ...(opts.descending === true ? { ScanIndexForward: false } : {}),
+          ...pageOptionsOf(opts),
         }),
       );
       return { items: out.Items ?? [], lastKey: out.LastEvaluatedKey ?? null };
@@ -137,9 +144,7 @@ export function createDb(client: DynamoDBDocumentClient, names: TableNames): Db 
           TableName: names[table],
           IndexName: index,
           ...keyConditionOf(keyCond),
-          ...(opts.limit === undefined ? {} : { Limit: opts.limit }),
-          ...(opts.startKey == null ? {} : { ExclusiveStartKey: { ...opts.startKey } }),
-          ...(opts.descending === true ? { ScanIndexForward: false } : {}),
+          ...pageOptionsOf(opts),
         }),
       );
       return { items: out.Items ?? [], lastKey: out.LastEvaluatedKey ?? null };
