@@ -7,8 +7,7 @@
  * 終了コード: 0 書いた、1 手で書く id が契約に無いなど生成できない、2 引数の誤り・読めない・取得できない・書けない。
  */
 
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { z } from "zod";
@@ -22,13 +21,12 @@ import {
 
 import {
   CONTRACT_DIR,
-  ContractFetchError,
   NDF_REPO_URL,
   SCHEMAS,
-  fetchContract,
   list,
   missing,
   readPinnedCommit,
+  withFixedContract,
   type ContractFiles,
   type ContractPath,
   type Parsed,
@@ -122,16 +120,7 @@ export async function mainNdfContractSync(
     return 2;
   }
 
-  const work = await mkdtemp(join(env.RUNNER_TEMP ?? tmpdir(), "ndf-contract-sync-"));
-  try {
-    let fixed: ContractFiles;
-    try {
-      fixed = await fetchContract({ kind: "fixed", commit: pinned }, options.repoUrl ?? NDF_REPO_URL, join(work, "fixed"));
-    } catch (error) {
-      if (!(error instanceof ContractFetchError)) throw error;
-      process.stderr.write(`error: 固定の点 ${pinned} の契約を読めない: ${error.message}\n`);
-      return 2;
-    }
+  return withFixedContract(env, "ndf-contract-sync-", pinned, options.repoUrl ?? NDF_REPO_URL, async (fixed) => {
     let generated: NdfContractUseGenerated;
     try {
       generated = generateContractUse(fixed, ids);
@@ -148,7 +137,5 @@ export async function mainNdfContractSync(
     }
     process.stdout.write(`wrote: ${GENERATED_PATH} ${pinned}\n`);
     return 0;
-  } finally {
-    await rm(work, { recursive: true, force: true });
-  }
+  });
 }

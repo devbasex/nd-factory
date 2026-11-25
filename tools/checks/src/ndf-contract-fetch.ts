@@ -6,7 +6,8 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -100,6 +101,33 @@ export async function fetchContract(rev: ContractRev, repoUrl: string, workDir: 
     }
   }
   return { commit, json };
+}
+
+/**
+ * 一時ディレクトリを作り、固定の点の契約を取得して `body` に渡し、終われば一時ディレクトリを片付ける。
+ * 固定の点の契約を取得できなければ stderr に書いて 2 を返す。`body` は同じ一時ディレクトリを使える
+ */
+export async function withFixedContract(
+  env: NodeJS.ProcessEnv,
+  prefix: string,
+  pinned: string,
+  repoUrl: string,
+  body: (fixed: ContractFiles, work: string) => Promise<number>,
+): Promise<number> {
+  const work = await mkdtemp(join(env.RUNNER_TEMP ?? tmpdir(), prefix));
+  try {
+    let fixed: ContractFiles;
+    try {
+      fixed = await fetchContract({ kind: "fixed", commit: pinned }, repoUrl, join(work, "fixed"));
+    } catch (error) {
+      if (!(error instanceof ContractFetchError)) throw error;
+      process.stderr.write(`error: 固定の点 ${pinned} の契約を読めない: ${error.message}\n`);
+      return 2;
+    }
+    return await body(fixed, work);
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
 }
 
 // 契約のファイルの形のうち、照合が読む鍵だけ。ほかの鍵は受け流す

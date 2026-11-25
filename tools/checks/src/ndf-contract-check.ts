@@ -16,9 +16,8 @@
  * 使い方の書き出しが無い（契約を取得せずに終える）、2 引数の誤り・固定の点の契約を読めない・使い方の書き出しの形が違う。
  */
 
-import { appendFile, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { appendFile, readFile, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -35,6 +34,7 @@ import {
   list,
   missing,
   readPinnedCommit,
+  withFixedContract,
   type ContractFiles,
   type ContractPath,
   type Parsed,
@@ -574,16 +574,7 @@ export async function mainNdfContractCheck(
     return 1;
   }
 
-  const work = await mkdtemp(join(env.RUNNER_TEMP ?? tmpdir(), "ndf-contract-"));
-  try {
-    let fixed: ContractFiles;
-    try {
-      fixed = await fetchContract({ kind: "fixed", commit: pinned }, repoUrl, join(work, "fixed"));
-    } catch (error) {
-      if (!(error instanceof ContractFetchError)) throw error;
-      process.stderr.write(`error: 固定の点 ${pinned} の契約を読めない: ${error.message}\n`);
-      return 2;
-    }
+  return withFixedContract(env, "ndf-contract-", pinned, repoUrl, async (fixed, work) => {
     let tip: ContractFiles | null = null;
     try {
       tip = await fetchContract({ kind: "tip" }, repoUrl, join(work, "tip"));
@@ -623,9 +614,7 @@ export async function mainNdfContractCheck(
       process.stderr.write(`固定の点 ${fixed.commit} の NDF の契約と形の正本が ${fixedFindings.length} 件食い違う\n`);
     }
     return code;
-  } finally {
-    await rm(work, { recursive: true, force: true });
-  }
+  });
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
