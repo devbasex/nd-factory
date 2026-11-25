@@ -223,7 +223,7 @@ graph LR
 
 | データ | 中身 |
 | --- | --- |
-| 受ける NDF の契約の組（`data/ndf-contracts.json`） | `{"accepted": [{"version": 8, "sha256": "ed8b036584bec284dfc93a2bb5b988e2385b4f8f297d659399f5d3cb91b520c4"}]}`。空でない・版は 1 以上の整数・sha256 は 64 桁の小文字の 16 進・同じ版か同じ sha256 が 2 つ無い。版の大小で選ばず、ランナーは対が集合にあるかだけを見る |
+| 受ける NDF の契約の組（`data/ndf-contracts.json`） | `{"accepted": [{"version": 16, "sha256": "c50ef840a72ab71a15023a46a37d050c36ec3aae6d1be6092b7f9dc7f3c0a726"}]}`（固定の点 `ndf--v11.0.36` の `version.json` の最後の行）。空でない・版は 1 以上の整数・sha256 は 64 桁の小文字の 16 進・同じ版か同じ sha256 が 2 つ無い。版の大小で選ばず、ランナーは対が集合にあるかだけを見る |
 | NDF の答えの語（`ndfAnswerWord`） | `approved`・`rejected`・`request_changes`・`retry`・`finish`・`cancel`（出所は NDF の固定の点の `C/facts/answers.json`） |
 | 再試行の方針（`data/retry-policies.json`） | 7 つの方針。名前ごとに種類を 1 つに固定し、取り違えを読み込みで拒む（下の表） |
 | 秘密の形（`data/secret-shapes.json`） | 鍵の名前に含む語（`authorization`・`token`・`secret`・`password`・`credentials`・`private_key`・`dsn`）と、値の形（`ndfd_`・`ndfm_` の接頭辞・JWT・`ghs_`・`ghp_`・`gho_`・`github_pat_`・秘密鍵の PEM・利用者と合言葉を含む接続の URL・AWS の一時の鍵）。`redact`・生成の見本の検査・漏れの検査が同じデータを読む |

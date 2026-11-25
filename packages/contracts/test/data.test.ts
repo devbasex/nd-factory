@@ -15,12 +15,12 @@ import {
   type TransactionRetryPolicy,
 } from "../src/data.ts";
 
-const SHA = "ed8b036584bec284dfc93a2bb5b988e2385b4f8f297d659399f5d3cb91b520c4";
+const SHA = "c50ef840a72ab71a15023a46a37d050c36ec3aae6d1be6092b7f9dc7f3c0a726";
 const OTHER_SHA = "f".repeat(64);
 
 describe("NDF_CONTRACTS", () => {
-  it("受ける組は版 8 と sha256 の対 1 つ", () => {
-    expect(NDF_CONTRACTS).toEqual({ accepted: [{ version: 8, sha256: SHA }] });
+  it("受ける組は版 16 と sha256 の対 1 つ", () => {
+    expect(NDF_CONTRACTS).toEqual({ accepted: [{ version: 16, sha256: SHA }] });
   });
 
   it.each([
