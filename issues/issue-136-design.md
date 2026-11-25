@@ -248,6 +248,7 @@ graph LR
 | 確定仕様 `docs/specifications/contracts-and-core.md` | 受ける組の値がバージョン 8 のまま残る | 同じ変更でバージョン 16 に直す |
 | 照合のテストのフィクスチャ（`tools/test/fixtures/ndf-contract-752a9cf/`） | 古い固定の点のコピーのまま残る | 新しい固定の点のコピーに置き換える |
 | #2 の設計 | K2-6 を重ねて書く | 決定 2 の代償。#2 の設計の時点でこの書き出しを読む |
+| 区間の失敗の理由のコード（`packages/contracts/src/rows/sprints.ts` の `segmentFailureReason`、確定仕様 `docs/specifications/contracts-and-core.md` の区間の行） | 読み取りが項目の誤りを返したときの理由のコード `report_item_invalid`（execution.md の「区間と結果の行」）が値の集まりに無い | この変更では足さない。区間の失敗を書くのはランナーなので、ランナー（[#6](https://github.com/devbasex/nd-factory/issues/6)）の実装で値の集まりと確定仕様に足し、`npm run generate` の生成物もコミットする |
 | ランナー（#6） | 判定と読み取りの関数の形を、ランナーの実装の時点で変えたくなる | ランナーは照合と同じ判定と読み取りの関数を使う（#1 の決定 7 のまま）。形を変えるときは照合のテストも同じ変更で直す |
 
 ## テスト設計
