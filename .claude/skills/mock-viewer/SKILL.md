@@ -46,12 +46,22 @@ flowchart LR
 
 | 症状 | 見ること |
 | --- | --- |
-| ログが `Chrome につながらない` を繰り返す | Chrome が専用プロファイル（`--user-data-dir`）と `--remote-debugging-port=9222` を付けて動いているか。`CDP_URL` が経路に合っているか（上の「仕組み」の表）。経路 B では SSH の転送が生きているか（`/ndf:chrome-cdp` の「4. つながったか確かめる」）。Chrome や転送が直れば、コンテナが自分でつなぎ直す。`CDP_URL` の誤りは、正しい値を付けて `mock:up` を打ち直す |
+| ログが `Chrome につながらない` を繰り返す | Chrome が専用プロファイル（`--user-data-dir`）と `--remote-debugging-port=9222` を付けて動いているか。`CDP_URL` が経路に合っているか（上の「仕組み」の表）。経路 B では、Docker ホストのネットワークから Chrome が応答するか（下の「経路 B の接続の確かめ方」）。Chrome や転送が直れば、コンテナが自分でつなぎ直す。`CDP_URL` の誤りは、正しい値を付けて `mock:up` を打ち直す |
 | タブが `ERR_CONNECTION_REFUSED` | コンテナが止まっているか、Chrome とつながっていない。`docker ps --filter name=nd-factory-mock-viewer` と `mock:logs` を見る |
 | 直したのに古い | `mock:up` を打ち直していない |
 | 利用者がタブを閉じた | `mock:up` を打ち直すと新しいタブを開く（経路 A では `CDP_URL` を付ける） |
 
 Chrome を使えない場面（CI・ほかの人の手元）では、`python3 -m http.server -d docs/design/mock 8000` で http://localhost:8000/viewer.html を開く。
+
+### 経路 B の接続の確かめ方
+
+`mock:up` のコンテナはホストのネットワークで動き、中継を通さずに SSH の転送先へつなぐ。そのため、同じネットワークから `127.0.0.1:9222` の `/json/version` にアクセスする。`/ndf:chrome-cdp` の「3.」の中継と「4.」の確認は、ブリッジネットワークの開発コンテナ向けなので使わない。
+
+```bash
+docker run --rm --network host nd-factory-mock-viewer wget -qO- -T 5 http://127.0.0.1:9222/json/version
+```
+
+`Browser` を含む JSON が返れば、SSH の転送と Chrome は動いている。返らなければ、SSH の接続の張り直しと Chrome の起動を利用者に確かめてもらう。
 
 ## 書き換えない約束
 
