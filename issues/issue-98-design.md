@@ -361,11 +361,13 @@ gitleaks の記録と報告は、今の木と履歴のどちらの探しでも�
 
 許可 2〜4・許可 5・ARN の許可が通す値は、今の main の許可でも通る。そのため、先の Pull Request に分けなくても非公開の検査は落ちない。許可 5 は、`ci-checks.md` の「main の木か履歴」の行のとおり、規則を変える 2 本目に入れる。
 
+ファイルと関数の粒度の設計は、詳細設計書（[issue-98-design-detail.md](./issue-98-design-detail.md)）にある。
+
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #98 | 実装する（Pull Request は 2 本。「導入の順序」） | — | `.gitleaks.toml`、`tools/checks/leak-scan.sh`、`tools/checks/leak-scan-secret.sh`、`tools/checks/install-gitleaks.sh`（既定の設定のファイルも固定の要約値で置く。決定 6）、`tools/test/leak-scan.integration.test.ts`、`docs/design/detail.md`、`docs/specifications/leak-check.md`、`docs/operations/ci-checks.md`。決定 5 で、今の木の `acme` の置き場と端点の例を書き換える `docs/specifications/ndf-contract-use.md`、`packages/contracts/test/ndf-contract-use.test.ts`、`packages/contracts/src/web-config.ts`（コメントの例だけ）、`infra/test/app-stack-login.test.ts`・`infra/test/app-stack.test.ts`・`infra/test/nd-setup.test.ts`（Cognito の端点を組み立てる形にする）。決定 5 の食い違いを直す `AGENTS.md`（「秘密とインフラの値を置かない」の例の行）。要求の受け入れ条件 6 は反映済み（起票者の承認は未確認） |
+| #98 | 実装する（Pull Request は 2 本。「導入の順序」） | — | `.gitleaks.toml`、`tools/checks/leak-scan.sh`、`tools/checks/leak_scan/`（新設。検査の本体の Python のモジュール `main.py`・`model.py`・`gitleaks.py`・`tree.py`・`history.py`・`relay.py`・`copyrepo.py`・`archive.py`）、`tools/checks/leak-scan-secret.sh`、`tools/checks/install-gitleaks.sh`（既定の設定のファイルも固定の要約値で置く。決定 6）、`tools/test/leak-scan.integration.test.ts`、`docs/design/detail.md`、`docs/specifications/leak-check.md`、`docs/operations/ci-checks.md`。決定 5 で、今の木の `acme` の置き場と端点の例を書き換える `docs/specifications/ndf-contract-use.md`、`packages/contracts/test/ndf-contract-use.test.ts`、`packages/contracts/src/web-config.ts`（コメントの例だけ）、`infra/test/app-stack-login.test.ts`・`infra/test/app-stack.test.ts`・`infra/test/nd-setup.test.ts`（Cognito の端点を組み立てる形にする）。決定 5 の食い違いを直す `AGENTS.md`（「秘密とインフラの値を置かない」の例の行）。要求の受け入れ条件 6 は反映済み（起票者の承認は未確認） |
 
 ## 未確認のまま残ること
 
