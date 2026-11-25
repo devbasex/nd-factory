@@ -5,6 +5,7 @@ import { EXIT } from "@nd-factory/contracts/exit-codes";
 import { describe, expect, it } from "vitest";
 import { assemblyDigest } from "../lib/assembly-digest.ts";
 import {
+  type DiffArgs,
   type RunOptions,
   type SetupDeps,
   STACKS_FILE,
@@ -179,11 +180,22 @@ describe("mainSetup", () => {
   });
 });
 
+// runDiff の引数。既定は作り物の設定・acme-test・新しい置き場・全部の stack
+function diffOpts(overrides: Partial<Omit<DiffArgs, "kind">> = {}): DiffArgs {
+  return {
+    kind: "diff",
+    profile: overrides.profile ?? "acme-test",
+    settings: overrides.settings ?? FIXTURE,
+    out: overrides.out ?? tempOut(),
+    stacks: overrides.stacks === undefined ? null : overrides.stacks,
+  };
+}
+
 describe("runDiff", () => {
   it("通れば 0 で、差分・資源の名前・戻り先の URL・確認の値を出し、AWS へ書かない", async () => {
     const f = fake();
     const out = tempOut();
-    const code = await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out, stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ out }), f.deps);
     expect(code).toBe(EXIT.OK);
     expect(writes(f)).toBe(0);
     const diff = f.calls.find((c) => isCdk(c, "diff"))!;
@@ -198,7 +210,7 @@ describe("runDiff", () => {
 
   it("出力の最後に足りない設定の欄を出す", async () => {
     const f = fake();
-    await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    await runDiff(diffOpts(), f.deps);
     const head = f.out.indexOf("足りない設定:");
     expect(head).toBeGreaterThan(f.out.findIndex((l) => l.startsWith("確認の値: ")));
     // 作り物の設定は Google のクライアントの ID と運用の知らせの宛先を持たない
@@ -211,7 +223,7 @@ describe("runDiff", () => {
 
   it("足りない設定があっても終了コードは 0 で、AWS へ書かない", async () => {
     const f = fake({ azs: 1 });
-    const code = await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts(), f.deps);
     expect(code).toBe(EXIT.OK);
     expect(writes(f)).toBe(0);
     expect(f.out.join("\n")).toContain("Fn::GetAZs が返す AZ が 1 つ");
@@ -223,20 +235,20 @@ describe("runDiff", () => {
       throw new Error("壊れた");
     };
     f.deps.readCostAllocationTags = async () => ({ "app-prefix": "Inactive", "app-env": "Active" });
-    const code = await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts(), f.deps);
     expect(code).toBe(EXIT.OK);
     expect(f.out.join("\n")).toContain("を確かめられない（Error: 壊れた）");
   });
 
   it("差分が失敗すれば足りない設定の欄を出さない", async () => {
     const f = fake({ diffCode: 1 });
-    await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    await runDiff(diffOpts(), f.deps);
     expect(f.out.some((l) => l.startsWith("足りない設定"))).toBe(false);
   });
 
   it("合成は作り物でない profile の主体とリージョンを合成へ渡す", async () => {
     const f = fake();
-    await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    await runDiff(diffOpts(), f.deps);
     const synth = f.calls.find((c) => isCdk(c, "synth"))!;
     expect(synth.options.env).toMatchObject({
       ND_SETTINGS: FIXTURE,
@@ -250,7 +262,7 @@ describe("runDiff", () => {
   it("--stack pipeline だけなら一覧は pipeline だけ", async () => {
     const f = fake();
     const out = tempOut();
-    const code = await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out, stacks: ["pipeline"] }, f.deps);
+    const code = await runDiff(diffOpts({ out, stacks: ["pipeline"] }), f.deps);
     expect(code).toBe(EXIT.OK);
     expect(JSON.parse(readFileSync(join(out, STACKS_FILE), "utf8"))).toMatchObject({ stacks: ["pipeline"] });
     expect(confirmFrom(f)).toMatch(/:pipeline$/);
@@ -259,14 +271,14 @@ describe("runDiff", () => {
 
   it("pipeline の無い設定で --stack pipeline なら 2", async () => {
     const f = fake();
-    const code = await runDiff({ kind: "diff", profile: "p", settings: EXAMPLE, out: tempOut(), stacks: ["pipeline"] }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p", settings: EXAMPLE, stacks: ["pipeline"] }), f.deps);
     expect(code).toBe(EXIT.USAGE);
     expect(f.calls).toHaveLength(0);
   });
 
   it("設定のファイルが無ければ 3 で、合成も profile も呼ばない", async () => {
     const f = fake({ profileError: true });
-    const code = await runDiff({ kind: "diff", profile: "p", settings: "/nd-no-such/settings.json", out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p", settings: "/nd-no-such/settings.json" }), f.deps);
     expect(code).toBe(EXIT.SETTINGS);
     expect(f.calls).toHaveLength(0);
   });
@@ -276,7 +288,7 @@ describe("runDiff", () => {
     const path = join(dir, "s.json");
     writeFileSync(path, JSON.stringify({ prefix: "Acme", login: { google: {} } }));
     const f = fake();
-    const code = await runDiff({ kind: "diff", profile: "p", settings: path, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p", settings: path }), f.deps);
     expect(code).toBe(EXIT.SETTINGS);
     expect(f.err.filter((l) => l.startsWith("prefix:") || l.startsWith("environment:"))).toHaveLength(2);
     expect(writes(f)).toBe(0);
@@ -284,7 +296,7 @@ describe("runDiff", () => {
 
   it("profile の失敗は 4 で、合成を呼ばない", async () => {
     const f = fake({ profileError: true });
-    const code = await runDiff({ kind: "diff", profile: "p", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p" }), f.deps);
     expect(code).toBe(EXIT.PROFILE);
     expect(f.calls).toHaveLength(0);
   });
@@ -295,7 +307,7 @@ describe("runDiff", () => {
     ["差分の作成", { diffCode: 1 }],
   ])("%s の失敗は 6 で、AWS へ書かない", async (_name, opts) => {
     const f = fake(opts);
-    const code = await runDiff({ kind: "diff", profile: "p", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p" }), f.deps);
     expect(code).toBe(EXIT.BUILD);
     expect(writes(f)).toBe(0);
     expect(f.out.some((l) => l.startsWith("確認の値"))).toBe(false);
@@ -303,7 +315,7 @@ describe("runDiff", () => {
 
   it("bootstrap の版が足りなければ 5 で、求める版と今の版を出し、差分を作らない", async () => {
     const f = fake({ requiredBootstrap: 30, currentBootstrap: 21 });
-    const code = await runDiff({ kind: "diff", profile: "p", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p" }), f.deps);
     expect(code).toBe(EXIT.BOOTSTRAP);
     expect(f.err.join("\n")).toMatch(/30/);
     expect(f.err.join("\n")).toMatch(/21/);
@@ -313,7 +325,7 @@ describe("runDiff", () => {
 
   it("bootstrap が無ければ 5", async () => {
     const f = fake({ currentBootstrap: null });
-    const code = await runDiff({ kind: "diff", profile: "p", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p" }), f.deps);
     expect(code).toBe(EXIT.BOOTSTRAP);
     expect(writes(f)).toBe(0);
   });
@@ -323,7 +335,7 @@ describe("runDiff", () => {
     f.deps.readBootstrapVersion = async () => {
       throw new Error("AccessDenied");
     };
-    const code = await runDiff({ kind: "diff", profile: "p", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p" }), f.deps);
     expect(code).toBe(EXIT.BOOTSTRAP);
     expect(writes(f)).toBe(0);
   });
@@ -331,7 +343,7 @@ describe("runDiff", () => {
 
 async function diffThen(f: Fake, stacks: Array<"app" | "pipeline"> | null = null): Promise<{ out: string; confirm: string }> {
   const out = tempOut();
-  const code = await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out, stacks }, f.deps);
+  const code = await runDiff(diffOpts({ out, stacks }), f.deps);
   expect(code).toBe(EXIT.OK);
   return { out, confirm: confirmFrom(f) };
 }
