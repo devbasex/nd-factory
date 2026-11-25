@@ -924,10 +924,15 @@ const countLine = (count: number) => `leak-scan-secret: nd-real-value: ${count} 
  * `leak-scan-secret.sh` を子のプロセスで打ち、標準出力と標準エラーを合わせて返す。
  * 秘密と必須の指定は引数からだけ渡し、テストを打つ人の環境の値を引き継がない
  */
-function secretScan(cwd: string, args: string[], { pattern, require }: { pattern?: string; require?: boolean } = {}): RunResult {
+function secretScan(
+  cwd: string,
+  args: string[],
+  { pattern, require, path }: { pattern?: string; require?: boolean; path?: string } = {},
+): RunResult {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([name]) => name !== "LEAK_CHECK_PATTERN" && name !== "LEAK_CHECK_REQUIRE_PATTERN"),
   );
+  if (path !== undefined) env.PATH = path;
   if (pattern !== undefined) env.LEAK_CHECK_PATTERN = pattern;
   if (require === true) env.LEAK_CHECK_REQUIRE_PATTERN = "1";
   const result = spawnSync("bash", [SECRET_SCRIPT, ...args], { cwd, encoding: "utf8", env });
@@ -1092,6 +1097,49 @@ describe("秘密を使う探し（leak-scan-secret.sh）", () => {
     expect(result.status).toBe(2);
     expect(result.output).toContain("leak-scan-secret: nd-real-value の件数を読めない");
   }, TIMEOUT);
+
+  describe("--count-only で、nd-real-value の探しの失敗を件数とは別の行で出す", () => {
+    const FAILED_LINE = "leak-scan-secret: nd-real-value の探しが失敗した";
+    /**
+     * nd-real-value だけの設定で打たれたときだけ、当たり 1 件を報告に書いて 1 で終える偽の gitleaks。
+     * warn が真なら、そのときに読めない対象を飛ばした警告も出す。ほかの設定では当たり無しで 0 で終える
+     */
+    const fakePath = (warn: boolean, realWord: string) => {
+      const bin = tempDir("secret-fake-bin-");
+      const body = [
+        "#!/usr/bin/env bash",
+        'report=""; config=""',
+        'while (($# > 0)); do case "$1" in --report-path) report="$2"; shift 2 ;; --config) config="$2"; shift 2 ;; *) shift ;; esac; done',
+        `if grep -qF 'id = "nd-real-value"' "$config" && ! grep -qF '[extend]' "$config"; then`,
+        `  ${warn ? `printf '%s\\n' '${skipLine(`docs/${realWord}.md`)}' >&2` : ":"}`,
+        `  printf '[{"RuleID":"nd-real-value","File":"docs/a.md","StartLine":1,"EndLine":1,"Commit":""}]' >"$report"`,
+        "  exit 1",
+        "fi",
+        "printf '[]' >\"$report\"",
+        "exit 0",
+      ].join("\n");
+      writeFileSync(join(bin, "gitleaks"), `${body}\n`, { mode: 0o755 });
+      return `${bin}:${process.env.PATH ?? ""}`;
+    };
+
+    it("当たりと読み飛ばしが同時に起きると、件数の行と失敗の行の両方を出し、飛ばしたファイルの名前を出さない", () => {
+      const realWord = fakeWord();
+      const root = makeTree({ "docs/a.md": "中身\n" });
+      const result = secretScan(root, ["dir", "--count-only"], { pattern: fakeWord(), path: fakePath(true, realWord) });
+      expect(result.status).toBe(1);
+      expect(result.output).toContain(countLine(1));
+      expect(result.output).toContain(FAILED_LINE);
+      expect(result.output).not.toContain(realWord);
+    }, TIMEOUT);
+
+    it("当たりだけなら、失敗の行を出さない", () => {
+      const root = makeTree({ "docs/a.md": "中身\n" });
+      const result = secretScan(root, ["dir", "--count-only"], { pattern: fakeWord(), path: fakePath(false, fakeWord()) });
+      expect(result.status).toBe(1);
+      expect(result.output).toContain(countLine(1));
+      expect(result.output).not.toContain(FAILED_LINE);
+    }, TIMEOUT);
+  });
 
   it("当たり 2 件で 2 件の行を出す", () => {
     const realWord = fakeWord();

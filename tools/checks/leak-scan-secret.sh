@@ -5,20 +5,26 @@
 # 受けた対象を、既定の規則（tools/checks/gitleaks-default.toml）と、秘密を重ねた設定（.gitleaks.toml を [extend] path で読み、
 # 規則 nd-real-value を足したもの。秘密が無く必須でなければ .gitleaks.toml）で 1 回ずつ探す。
 # --count-only では、既定の規則・.gitleaks.toml・nd-real-value だけの設定で 1 回ずつ探し、nd-real-value の探しの出力をすべて捨てる
-# （公開の記録に、秘密の正規表現に当たった場所の手がかりを出さない。出すのは件数の行と終了コードだけ）。
+# （公開の記録に、秘密の正規表現に当たった場所の手がかりを出さない。出すのは件数の行・失敗の固定の行・終了コードだけ）。
+# nd-real-value の探しが当たりのほかの理由で 0 以外を返したとき（読めずに飛ばした対象がある・gitleaks の失敗など）は、
+# 件数の行とは別に、失敗の固定の行を出す。leak-scan.sh は当たりと読み飛ばしが同時に起きても 1 を返すので、件数と終了コードだけでは見分けられないため。
 # 設定は、このスクリプトの在るチェックアウトの根から組む。探す木の中の設定は読まない。
 # 秘密の値は leak-scan.sh へ渡す前に環境から消し、gitleaks に渡さない。
 #
 # 使い方: leak-scan-secret.sh <dir|history|git> [<木>] [--range <範囲>] [--count-only] [--details]
 #   dir: <木>（省けば今のディレクトリ）を探す。history: export-tree.sh --history の出力先 <木> の paths/ と各層を、
 #   1 つずつ探す木の根として探す。git: 今のディレクトリの git のリポジトリの履歴を探す（--range を渡せばその範囲）
-#   --count-only: nd-real-value の当たりを件数だけで出す（main への push の探し）
+#   --count-only: nd-real-value の当たりを件数だけで出し、その探しが失敗したときは失敗の固定の行も出す（main への push の探し）
 #   --details: leak-scan.sh に --paths を渡し、実際のファイルの名前を出す。手元で当たりのファイルを特定するときだけ使う
 #   環境変数 LEAK_CHECK_PATTERN: 秘密の正規表現。LEAK_CHECK_REQUIRE_PATTERN: 1 なら秘密を必須にする
 # 終了コード: すべての探しのうち悪い方。0 当たり無し、1 当たりがある・探しの失敗・秘密の誤りか欠け・件数を読めない、2 引数の誤り
 set -euo pipefail
 
 RULE_ID="nd-real-value"
+FAILED_LINE="leak-scan-secret: ${RULE_ID} の探しが失敗した。読めずに飛ばした対象があり得るので、件数は探せた範囲だけのものである"
+# leak-scan.sh が、当たりのほかに失敗を知らせる固定の文言（読み飛ばし・報告を読めない）
+SKIP_TEXT="leak-scan: gitleaks が警告か誤りを出した"
+UNREADABLE_TEXT="leak-scan: gitleaks の報告を読めない"
 EMPTY_LINE="leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が空なので .gitleaks.toml だけで探す"
 
 # 秘密は読んだら環境から消す（子のプロセスに渡さない）
@@ -113,7 +119,22 @@ build_overlay() {
     "$RULE_ID" "$pattern" >>"$overlay"
 }
 
+# count の探しが、当たりだけでなく失敗も含んでいたか（0 なら失敗を含む）。
+# 当たりだけなら、leak-scan.sh は 1 を返し、報告に 1 件以上を書き、失敗の固定の文言を出さない
+nd_failed=false
+count_failed() {
+  local status="$1" report="$2" log="$3"
+  ((status != 0)) || return 1
+  ((status == 1)) || return 0
+  if grep -F -e "$SKIP_TEXT" -e "$UNREADABLE_TEXT" "$log" >/dev/null; then
+    return 0
+  fi
+  [[ -s "$report" ]] && jq -e 'type == "array" and length > 0' "$report" >/dev/null 2>&1 && return 1
+  return 0
+}
+
 # leak-scan.sh を 1 回打ち、報告を木の外に受ける。pass は出力をそのまま出し、count はすべて捨てる
+# （count では、捨てる前に失敗を含むかだけを見て nd_failed に残す）
 run_scan() {
   local root="$1" config="$2" report="$3" output="$4" status=0
   local -a args=("$config")
@@ -127,6 +148,9 @@ run_scan() {
   [[ "$details" == false ]] || args+=(--paths)
   if [[ "$output" == count ]]; then
     (cd "$root" && "$LEAK_SCAN" "${args[@]}") >"$work/count.log" 2>&1 || status=$?
+    if count_failed "$status" "$report" "$work/count.log"; then
+      nd_failed=true
+    fi
     rm -f "$work/count.log"
   else
     (cd "$root" && "$LEAK_SCAN" "${args[@]}") || status=$?
@@ -226,5 +250,9 @@ if [[ "$has_secret" == true ]]; then
   status=0
   report_counts "${reports[@]}" || status=$?
   worse "$status"
+fi
+if [[ "$nd_failed" == true ]]; then
+  echo "$FAILED_LINE"
+  worse 1
 fi
 exit "$final"
