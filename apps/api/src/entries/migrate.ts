@@ -21,6 +21,11 @@ type MigrateRefusal = "version_unsupported" | "shape_invalid" | RowCodecErrorCod
 // 拒んだ行の数を理由の符号ごとに持つ。欄の和は refused
 type RefusedByReason = Partial<Record<MigrateRefusal, number>>;
 
+// 鍵ごとの数へ n を足す（無い鍵は 0 から足す）。counts を書き換える
+export function addToCount<K extends string>(counts: Partial<Record<K, number>>, key: K, n: number): void {
+  counts[key] = (counts[key] ?? 0) + n;
+}
+
 export type MigrateDeps = {
   readonly db: Db;
   readonly clock: Clock;
@@ -130,7 +135,7 @@ export async function migrateTable(input: { purpose: TablePurpose; cursor: RowKe
     else if (outcome.kind === "skipped") skipped += 1;
     else if (outcome.kind === "refused") {
       refused += 1;
-      refusedByReason[outcome.reason] = (refusedByReason[outcome.reason] ?? 0) + 1;
+      addToCount(refusedByReason, outcome.reason, 1);
       // 鍵の値と例外の文（Zod の issue.path・IdP の主体や利用者の ID を含みうる）は載せない
       deps.log.error("migrate_refused", { purpose, row_kind: outcome.rowKind, reason: outcome.reason });
     }
@@ -181,7 +186,7 @@ export function checkStartEvent(
 
 function addReasons(a: RefusedByReason, b: RefusedByReason): RefusedByReason {
   const out: Record<string, number> = { ...a };
-  for (const [reason, n] of Object.entries(b)) out[reason] = (out[reason] ?? 0) + (n ?? 0);
+  for (const [reason, n] of Object.entries(b)) addToCount(out, reason, n ?? 0);
   return out as RefusedByReason;
 }
 

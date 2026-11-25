@@ -1,7 +1,7 @@
 import type { TablePurpose, TableSpec } from "@nd-factory/contracts/tables";
 import type { RowKey, StoredRow } from "@nd-factory/core/db";
 import type { Context } from "aws-lambda";
-import { checkStartEvent, rowKindOf, scanTable, type MigrateDeps } from "./migrate.ts";
+import { addToCount, checkStartEvent, rowKindOf, scanTable, type MigrateDeps } from "./migrate.ts";
 
 // 版の数え（issues/issue-2-design-detail.md の「表の移し」の countRowVersions、版を上げる子の手順の 5）。
 // 行の種類の、ある版の読み手を外してよいかを、保存してある schema_version の値だけで確かめる。readRow も repair も narrow も通さず、
@@ -31,7 +31,7 @@ type MutableCounts = Record<string, Partial<Record<VersionBucket, number>>>;
 
 function addCount(counts: MutableCounts, kind: string, bucket: VersionBucket, n: number): void {
   const byBucket = counts[kind] ?? {};
-  byBucket[bucket] = (byBucket[bucket] ?? 0) + n;
+  addToCount(byBucket, bucket, n);
   counts[kind] = byBucket;
 }
 
