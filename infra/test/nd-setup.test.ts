@@ -45,6 +45,11 @@ function isCdk(call: Call, sub: string): boolean {
   return call.args.includes("cdk") && call.args.includes(sub);
 }
 
+// スタックの properties。null なら bootstrap の要求を持たない
+function bootstrapProps(required: number | null): { requiresBootstrapStackVersion?: number } {
+  return required === null ? {} : { requiresBootstrapStackVersion: required };
+}
+
 // AWS と外部コマンドを差し替えた依存。合成は作り物の合成の結果を置き場へ書く
 function fake(o: FakeOptions = {}): Fake {
   const calls: Call[] = [];
@@ -61,7 +66,7 @@ function fake(o: FakeOptions = {}): Fake {
         const dir = args[args.indexOf("-o") + 1]!;
         mkdirSync(dir, { recursive: true });
         const required = o.requiredBootstrap === undefined ? 6 : o.requiredBootstrap;
-        const props = required === null ? {} : { requiresBootstrapStackVersion: required };
+        const props = bootstrapProps(required);
         const stacks = (options.env?.ND_STACKS ?? "app").split(",");
         const artifacts = Object.fromEntries(
           stacks.map((k) => [`acme-test-${k}`, { type: "aws:cloudformation:stack", properties: props }]),
@@ -460,7 +465,7 @@ describe("synthesize", () => {
 describe("checkBootstrap", () => {
   function assemblyRequiring(required: number | null): string {
     const dir = mkdtempSync(join(tmpdir(), "nd-boot-"));
-    const props = required === null ? {} : { requiresBootstrapStackVersion: required };
+    const props = bootstrapProps(required);
     writeFileSync(
       join(dir, "manifest.json"),
       JSON.stringify({ artifacts: { a: { type: "aws:cloudformation:stack", properties: props }, b: { type: "cdk:tree" } } }),
