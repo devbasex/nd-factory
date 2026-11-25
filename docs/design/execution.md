@@ -903,7 +903,7 @@ Slack アプリには、戻り先として、設置先の画面のオリジン�
 
 採らなかった案: すべての問いを `human_only` にする形は、AI エージェントへ任せた人の待ちを減らさない。
 
-根拠: Value 4 / Mission / 共通原則 C4（MVV バージョン 3）
+根拠: Value 4 / Mission（MVV バージョン 3）。共通原則 C4
 
 
 2026-11-24 の利用者の決定で改めた: 起票の依頼は `human_only` から外す。`ndf-ask:irreversible`・`cost`・`legal`・プロジェクトが足した区分・知らない区分は、プロジェクトの設定 `ask_human_only` で決め、既定は `human_only` にする（[区分の表](#区分とだれが答えられるか)）。承認ゲート・レッドライン・`ndf-ask:human-action` は設定で外せない。
