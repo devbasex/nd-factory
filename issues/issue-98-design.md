@@ -213,27 +213,33 @@ flowchart TD
 
   | # | 許可 | 置く規則 | 作り物と言える理由 |
   | --- | --- | --- | --- |
-  | 1 | S3 の置き場の名前が `amzn-s3-demo-` で始まり、置き場の名前の文字（小文字・数字・`.`・`-`）だけでできているもの | `nd-aws-arn-s3`、`nd-aws-endpoint`（S3 の端点だけ） | AWS が、この接頭辞で始まる置き場を作れないと定め、例のために使っている（STD3） |
+  | 1 | S3 の置き場の名前が `amzn-s3-demo-` で始まり、その後ろが小文字と数字だけ（`-`・`.` を含まない）のもの（`amzn-s3-demo-bucket` の形） | `nd-aws-arn-s3`、`nd-aws-endpoint`（S3 の端点だけ） | AWS が、この接頭辞で始まる置き場を作れないと定め、例のために使っている（STD3）。接頭辞の後ろに `-`・`.` を許さないのは、アクセスポイントの別名を通さないためである（下の段落） |
   | 2 | プレースホルダー（`<名前>`・`${名前}`）と区切り（`.`・`-`）だけでできている名前 | 両方 | 実際の値の文字を含まない |
   | 3 | CloudFront の端点で、名前が `EXAMPLE` と数字だけのもの（`EXAMPLE1234.cloudfront.net` の形） | `nd-aws-endpoint` | 既存の結合テスト（`tools/test/leak-scan.integration.test.ts` の「作り物の値だけの木では当たらない」）が置く端点。CloudFront の配信の名前は `d` で始まるので、この形の実在の配信は無い。ほかのサービスの端点（`EXAMPLE1234.execute-api.…` など）には当てない |
-  | 4 | Cognito の端点で、名前が `<prefix>-<environment>-login` か `acme-test-login` のもの（リージョンは `<リージョン>` か `us-west-2`） | `nd-aws-endpoint` | `<prefix>-<environment>-login` は `docs/operations/idp-and-apps.md` が Cognito のドメインの形を示す例で、置き換え記号と、設置のコマンドが付ける固定の語 `login` だけでできている。`acme-test-login` は、infra のテストが作り物の接頭辞 `acme` と環境 `test` から組み立てる 1 つの名前で、似た形の名前は許さない |
+  | 4 | Cognito の端点で、名前が `<prefix>-<environment>-login` のもの、または小文字・数字・`-` だけでできていて `cognito` を含むもの（リージョンは `<リージョン>` か `us-west-2`） | `nd-aws-endpoint` | `<prefix>-<environment>-login` は `docs/operations/idp-and-apps.md` が Cognito のドメインの形を示す例で、置き換え記号と、設置のコマンドが付ける固定の語 `login` だけでできている。`cognito` を含む名前は、AWS が Cognito の接頭辞のドメインに使うことを禁じている（STD5） |
   | 5 | 今の木から消した旧い作り物の名前の、正確な値と、その値を足したコミットの組 | 値を当てた規則 | main の履歴に残る値だけを、足したコミットに限って許す（許可に `commits` と `regexes` を並べ、`condition = "AND"` にする）。コミットを持たない今の木の探しと、新しいコミットでは当たる |
 
-  `acme` で始まる名前の許可は外す。AGENTS.md の作り物の接頭辞 `acme` は、S3 の置き場の名前や Cognito のドメインを予約しないので、`acme` で始まる実在の置き場や端点がありうる。今の木で外した許可に頼る値（2026-11-25 の時点で `acme-bucket`・`acme-assets`・`assets.example.com`・`nd-EXAMPLE-logs` の置き場と、`acme-test` の Cognito の端点）は、同じ Pull Request で 1・2・4 の形に書き換える。main の履歴に残る旧い値は 5 で許す。5 に並べるコミットは、実装のときに `git log -S'<値>' main` で求める
+  許可 1 は、S3 のアクセスポイントの別名を通さないよう、接頭辞の後ろを小文字と数字だけに絞る。AWS はアクセスポイントの名前から `<アクセスポイントの名前>-<メタデータ>-s3alias` の形の別名を作り、この別名は置き場の名前の代わりに使える（STD4）。置き場の作成の制限（STD3）はこの別名に掛からないので、`amzn-s3-demo-` で始まる別名は実在しうる。別名は必ず `-s3alias` か `-ext-s3alias` で終わり、ほかの予約された末尾（`--ol-s3`・`.mrap`・`--x-s3`・`--table-s3`）も `-` か `.` を含む。接頭辞の後ろに `-`・`.` が無い名前は、これらのどれにも当たらない
+
+  `acme` で始まる名前の許可は外す。AGENTS.md の作り物の接頭辞 `acme` は、S3 の置き場の名前や Cognito のドメインを予約しないので、`acme` で始まる実在の置き場や端点がありうる。特に `acme-test-login` は、設置のときに接頭辞を `acme`、環境を `test` にすると `infra/lib/naming.ts` が作る名前そのもので、テストの値と実際の端点を文字列で区別できない。
+
+  今の木で外した許可に頼る値は、同じ Pull Request で 1・2・4 の形に書き換える。2026-11-25 の時点では、`acme-bucket`・`acme-assets`・`assets.example.com`・`nd-EXAMPLE-logs` の置き場と、`acme-test-login` の Cognito の端点（`infra/test/app-stack-login.test.ts`）が当たる。Cognito の端点は、そのテストの設定の環境の名前を `cognito` にして、`acme-cognito-login` の端点にする（`packages/contracts/src/settings.ts` は環境の名前を小文字の英数字 2〜10 字と決めているので、`cognito` を使える）。
+
+  main の履歴に残る旧い値は 5 で許す。5 の値とコミットの組は、実装担当者が次の手順で求める。候補の設定で main の全履歴を検査し、旧い作り物の値が当たったコミットを特定する。そのコミットで当たった追加の行を確かめ、規則ごとに、当たった値とコミットの組を登録する。`git log -S` は使わない。`-S` はファイルの中の出現の回数が変わるコミットだけを返すので、旧い値を含む行を書き換えたコミットを拾えず、値を消したコミットも候補に入れる（STD6）
 
   `nd-aws-resource-id` の許可は、すべて外す。この規則が取り出すのは `vpc-` などの頭と 16 進なので、アカウント ID の例（`123456789012`）を部分一致で許すと、16 進の中にその並びを持つ実在の ID を通す。ほかの許可（`^acme`・`example\.com`・プレースホルダー・`EXAMPLE`）は、この形の値に当たり得ない。今の木と main の全履歴に、この規則の形の値は無い。正当な作り物の ID が要るようになったら、その ID だけを許す許可を理由とともに足す
 
   ほかの規則（アカウント ID の 2 規則・`nd-aws-arn`）の許可は変えない（「同じ形の箇所」の表）
-- **例外の許可（3・4）を外すとき**: 例外の元になった表記（3 は結合テストの値、4 は `docs/operations/idp-and-apps.md` の Cognito のドメインの形と infra のテストの値）を変える Pull Request の作者が、例外を外せるかを確かめる。main への push の探し（`leak-check-push`）は main の全履歴を探すので、旧い表記が main の履歴に残る間は、その値と足したコミットの組を 5 に移す。どの例外も、ほかの規則には置かない（4 は端点だけの例で、S3 の置き場の ARN には現れない）
+- **例外の許可（3・4）を外すとき**: 例外の元になった表記（3 は結合テストの値、4 の `<prefix>-<environment>-login` は `docs/operations/idp-and-apps.md` の Cognito のドメインの形）を変える Pull Request の作者が、例外を外せるかを確かめる。main への push の探し（`leak-check-push`）は main の全履歴を探すので、旧い表記が main の履歴に残る間は、その値と足したコミットの組を 5 に移す。どの例外も、ほかの規則には置かない（4 は端点だけの例で、S3 の置き場の ARN には現れない）
 - 採らなかった案: プレースホルダーを含めば許す（`real-<env>` のように、実在の名前の一部を残した端点を通す）
 - 採らなかった案: 予約済みのドメイン `example.com`・`example.net`・`example.org` か、その下の名前を許す（STD2）。予約で作り物と言えるのは、そのホスト名自体を調べるときだけである。S3 の置き場の名前は誰でも付けられるので（STD3）、`logs.example.com` という名前の置き場や、その端点 `logs.example.com.s3.amazonaws.com` は実在しうる
 - 採らなかった案: 大文字の `EXAMPLE` を含む名前を許す。S3 の置き場の名前は小文字だけだが（STD3）、DNS の名前は大文字と小文字を区別しないので、実在の名前に大文字の印を混ぜて書いた端点が通る
 - 採らなかった案: アカウント ID の 2 規則と `nd-aws-arn` の許可も全体の形にそろえる。アカウント ID の規則が取り出すのは 12 桁の数だけで、部分一致と全体一致の結果が同じである。`nd-aws-arn` のアカウントの欄は、アカウント ID の規則が別に当てる
 - 採らなかった案: `acme` で始まる名前を許す（AGENTS.md が作り物の接頭辞を `acme` と決めていても、S3 の置き場の名前と Cognito のドメインは誰でも付けられるので、`acme` で始まる実在の名前を通す）
-- **代償**: S3 の置き場と端点の例に、AGENTS.md の `acme` を使えなくなる。新しい作り物の名前を文書やテストに足すときは、1・2 の形にするか、例外の許可を理由とともに足すことになる。この約束は `docs/specifications/leak-check.md` に書く。4 の `acme-test-login` は、実在する Cognito のドメインと同じ名前でありうるが、許すのはこの 1 つの名前だけで、このプロジェクトの実際の接頭辞が `acme` でない限り、このプロジェクトの値の漏れにはならない。2026-11-25 に、この設計の前の版の許可（`acme` で始まる名前と `assets.example.com` を許していた）を写した試しの設定で、`data-example.com-logs` の置き場の ARN と端点・`real-<env>` の端点・`logs.example.com` の置き場の端点・`real-EXAMPLE-x` の CloudFront の端点・`EXAMPLE1234.execute-api.us-west-2.amazonaws.com` が当たることを確かめた。この表の許可で今の木と履歴を探した結果は、テスト設計の「マージの前の確認」で確かめる
+- **代償**: S3 の置き場と端点の例に、AGENTS.md の `acme` を使えなくなる。新しい作り物の名前を文書やテストに足すときは、1・2 の形にするか、例外の許可を理由とともに足すことになる。この約束は `docs/specifications/leak-check.md` に書く。infra のテストの Cognito の端点は、環境の名前を `cognito` にした値で書く。旧い `acme-test-login` は、main の履歴に残る分だけを 5 で許す。2026-11-25 に、この設計の前の版の許可（`acme` で始まる名前と `assets.example.com` を許していた）を写した試しの設定で、`data-example.com-logs` の置き場の ARN と端点・`real-<env>` の端点・`logs.example.com` の置き場の端点・`real-EXAMPLE-x` の CloudFront の端点・`EXAMPLE1234.execute-api.us-west-2.amazonaws.com` が当たることを確かめた。この表の許可で今の木と履歴を探した結果は、テスト設計の「マージの前の確認」で確かめる
 - 作り方: 標準に倣う
-- 比べた候補: STD2 / STD3
-- 根拠: Value 7（MVV バージョン 3）。STD2・STD3
+- 比べた候補: STD2 / STD3 / STD4 / STD5 / STD6
+- 根拠: Value 7（MVV バージョン 3）。STD2・STD3・STD4・STD5・STD6
 
 ### 決定 6: 既定の規則の誤検知の扱いを保つため、gitleaks の既定の全体の許可は外さない
 
@@ -287,8 +293,8 @@ flowchart TD
 | 4 | 偽の gitleaks で、2 回目が 0 と 1 のほかの終了コードで終えるとき・報告を書かないとき・JSON の配列でない報告を書くとき・探し直す対象に無いパスの当たりを書くときは、どれも 1 で終え、新しい固定の行を出す。2 回目が当たり 0 件の報告を書いて 0 で終えるときは、1 回目に当たりが無ければ 0 で終える | 2 回目の終了コードか報告を見ないように壊すと落ちる |
 | 4 | 1 回目の記録に、「処理の流れ」の表に無い `skipping` の DBG の行（偽の gitleaks）があると、当たりが 0 件でも 1 で終える。表の対象外の行（全体の許可・設定のファイル・規則の許可・空のファイル・シンボリックリンク・`skipping finding`）だけなら 0 で終える | 知らない飛ばしの行を対象外にすると落ちる |
 | 4 | 段を上げても、`--paths` を渡したときの出力に当たった値と DBG・TRC の行が出ない | 記録をそのまま出すように壊すと落ちる |
-| 5 | `data-example.com-logs` の形の S3 の端点と置き場の ARN、`real-<名前>` の形の端点、`<乱数>.example.com` の置き場の端点、`<乱数>-EXAMPLE-<乱数>` の CloudFront の端点、`EXAMPLE<数字>` の API Gateway の端点、`acme-<乱数>` の置き場の ARN と S3 の端点、`acme-<乱数>-login` の Cognito の端点を置いた木で、`nd-aws-endpoint`・`nd-aws-arn-s3` が当たる。許可 5 の値を、許可に並べていないコミットで足した履歴を `git --range` で探すと当たる。16 進の中に `123456789012` を含む資源の ID が `nd-aws-resource-id` で当たる | 許可を部分一致に戻すと落ちる。予約済みのドメインか `EXAMPLE` か `acme` を含む名前の許可を戻すと落ちる。許可 5 からコミットの条件を外すと落ちる。資源の ID の規則に `123456789012` の許可を戻すと落ちる |
-| 6 | 今の「作り物の値だけの木では当たらない」の 2 つのテストの置き場と端点の値を、決定 5 の許可の形（`amzn-s3-demo-<名前>`・プレースホルダー・`EXAMPLE1234.cloudfront.net`・`acme-test-login` の Cognito の端点）に替えて、当たり無しで通る。`<prefix>-<environment>-login` の端点を足しても通る | 決定 5 の許可 1〜4 のどれかを消すと落ちる |
+| 5 | `data-example.com-logs` の形の S3 の端点と置き場の ARN、`real-<名前>` の形の端点、`<乱数>.example.com` の置き場の端点、`<乱数>-EXAMPLE-<乱数>` の CloudFront の端点、`EXAMPLE<数字>` の API Gateway の端点、`acme-<乱数>` の置き場の ARN と S3 の端点、`acme-<乱数>-login` と `acme-test-login` の Cognito の端点、接頭辞 `amzn-s3-demo-` を持つアクセスポイントの別名（`amzn-s3-demo-<乱数>-<乱数>-s3alias`）を置き場の名前の位置に含む S3 の端点と置き場の ARN を置いた木で、`nd-aws-endpoint`・`nd-aws-arn-s3` が当たる。許可 5 の値を、許可に並べていないコミットで足した履歴を `git --range` で探すと当たる。16 進の中に `123456789012` を含む資源の ID が `nd-aws-resource-id` で当たる | 許可を部分一致に戻すと落ちる。予約済みのドメインか `EXAMPLE` か `acme` を含む名前の許可を戻すと落ちる。許可 1 で接頭辞の後ろに `-` を許すと落ちる。許可 5 からコミットの条件を外すと落ちる。資源の ID の規則に `123456789012` の許可を戻すと落ちる |
+| 6 | 今の「作り物の値だけの木では当たらない」の 2 つのテストの置き場と端点の値を、決定 5 の許可の形に替えて、当たり無しで通る。許可 1 のテストには `amzn-s3-demo-bucket` を使う。許可 2 のテストには `<bucket>` を文字どおり使う。許可 3 のテストには `EXAMPLE1234.cloudfront.net` を、許可 4 のテストには `acme-cognito-login` と `<prefix>-<environment>-login` の Cognito の端点を使う | 決定 5 の許可 1〜4 のどれかを消すと落ちる |
 | 7 | この課題の Pull Request の `leak-check` が成功する | 新しい規則か許可が今の木か範囲に当たると落ちる（CI で見る） |
 | 7（マージの前の確認） | 規則と gitleaks の動かし方を変える Pull Request なので、`docs/operations/ci-checks.md` の「正当な当たりを規則単位で外す」の表の「main の木か履歴」の行と、「規則を変える Pull Request をマージの直前に確かめる」に従い、マージの前に、最終のマージの候補（`refs/pull/<番号>/merge` の SHA）の木と、そこから到達できる全履歴を、その候補の設定とスクリプトで探す。新しい当たりも、飛ばしたファイルを探せない行も、内部の Git が止まった行も出ないことを確かめてからマージする。探した後に main か head が進んだら、探し直す | Pull Request の必須のチェックは分岐点からの範囲しか探さないので、main の過去のコミットだけにある内容は、この確認でしか分からない |
 | 8 | 詳細設計の「秘密の形のデータ」の行が、実行時の `redact` と生成時のダミーデータの検査の 2 つを書き、gitleaks の設定がこのデータを読まず生成もしないことを残す | 文書なのでテストを持たない。設計 Pull Request と実装の Pull Request のレビューで見る |
@@ -298,7 +304,7 @@ flowchart TD
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #98 | 実装する | — | `.gitleaks.toml`、`tools/checks/leak-scan.sh`、`tools/checks/leak-scan-secret.sh`、`tools/test/leak-scan.integration.test.ts`、`docs/design/detail.md`、`docs/specifications/leak-check.md`、`docs/operations/ci-checks.md`。決定 5 で、今の木の `acme` の置き場と端点の例を書き換える `docs/specifications/ndf-contract-use.md`、`packages/contracts/test/ndf-contract-use.test.ts`、`packages/contracts/src/web-config.ts`（コメントの例だけ） |
+| #98 | 実装する | — | `.gitleaks.toml`、`tools/checks/leak-scan.sh`、`tools/checks/leak-scan-secret.sh`、`tools/test/leak-scan.integration.test.ts`、`docs/design/detail.md`、`docs/specifications/leak-check.md`、`docs/operations/ci-checks.md`。決定 5 で、今の木の `acme` の置き場と端点の例を書き換える `docs/specifications/ndf-contract-use.md`、`packages/contracts/test/ndf-contract-use.test.ts`、`packages/contracts/src/web-config.ts`（コメントの例だけ）、`infra/test/app-stack-login.test.ts`（Cognito の端点） |
 
 ## 未確認のまま残ること
 
@@ -322,7 +328,10 @@ flowchart TD
 | --- | --- | --- | --- | --- |
 | STD1 | Git の `git diff` の選択肢 | `--text` は「すべてのファイルをテキストとして扱う」。`--no-textconv` は外部のテキストへの変換を使わない | 決定 2 で `--log-opts` に足す | https://git-scm.com/docs/git-diff （2026-11-25） |
 | STD2 | RFC 2606（予約済みのドメイン名） | `example.com`・`example.net`・`example.org` を例のために予約する | 決定 5 の許可 3 | https://www.rfc-editor.org/rfc/rfc2606.txt （2026-11-25） |
-| STD3 | Amazon S3 の汎用の置き場の名前の規則 | 置き場の名前は小文字・数字・`.`・`-` だけでできる。`amzn-s3-demo-` で始まる名前の置き場は作れず、AWS は例の説明だけにこの接頭辞を使う | 決定 5 の許可 1。大文字の `EXAMPLE` を含む名前を許さない理由（決定 5 の採らなかった案） | https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html （2026-11-25） |
+| STD3 | Amazon S3 の汎用の置き場の名前の規則 | 置き場の名前は小文字・数字・`.`・`-` だけでできる。`amzn-s3-demo-` で始まる名前の置き場は作れず、AWS は例の説明だけにこの接頭辞を使う。名前の末尾の `-s3alias`・`--ol-s3`・`.mrap`・`--x-s3`・`--table-s3` は、別名やほかの種類の置き場のために予約されている | 決定 5 の許可 1。大文字の `EXAMPLE` を含む名前を許さない理由（決定 5 の採らなかった案） | https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html （2026-11-25） |
+| STD4 | Amazon S3 のアクセスポイントの名前と別名 | AWS はアクセスポイントの名前から `<名前>-<メタデータ>-s3alias`（S3 以外のデータを指すときは `-ext-s3alias`）の別名を作る。別名は、データの操作で置き場の名前の代わりに使える | 決定 5 の許可 1 で、接頭辞の後ろに `-`・`.` を許さない理由 | https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-points-naming.html 、https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-points-restrictions-limitations-naming-rules.html （2026-11-25） |
+| STD5 | Amazon Cognito の利用者プールのドメイン | 接頭辞のドメインの名前に `aws`・`amazon`・`cognito` の文字を使えない | 決定 5 の許可 4 | https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-assign-domain.html （2026-11-25） |
+| STD6 | Git の `git log` の `-S` と `-G` | `-S` は、指定した文字列の出現の回数が変わる変更だけを返す。`-G` は、追加か削除の行が正規表現に合う変更を返す | 決定 5 の許可 5 の組を `git log -S` で求めない理由 | https://git-scm.com/docs/git-log （2026-11-25） |
 
 ### 主要な製品
 
