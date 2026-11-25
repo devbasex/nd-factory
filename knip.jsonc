@@ -11,8 +11,9 @@
     ".": {},
     "packages/*": {},
     "apps/api": {
-      // Lambda の起点。infra がパスの文字列で渡すので import では辿れない
-      "entry": ["src/users-handler.ts"]
+      // Lambda の起点。infra がパスの文字列で渡すので import では辿れない。
+      // entries/api-fn.ts は HTTP の振り分けの Lambda の起点（書き出し handler。#2 の詳細設計）で、スタックへつなぐのは #4
+      "entry": ["src/users-handler.ts", "src/entries/api-fn.ts"]
     },
     // 画面の起点（index.html の script）は knip が vite の設定から拾う。生成した画面の呼び出しは
     // apps/web/src/generated/ に置く（K2-2）。入口（package.json の exports など）にされても使われない書き出しを

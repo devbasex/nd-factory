@@ -1,0 +1,39 @@
+{
+  "name": "@nd-factory/core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./clock": "./src/clock.ts",
+    "./ids": "./src/ids.ts",
+    "./redact": "./src/redact.ts",
+    "./log": "./src/log.ts",
+    "./retry": "./src/retry.ts",
+    "./outbound": "./src/outbound.ts",
+    "./idempotency": "./src/idempotency.ts",
+    "./db": "./src/db.ts",
+    "./conditional-write": "./src/conditional-write.ts",
+    "./auth": "./src/auth/authenticate.ts",
+    "./audit": "./src/audit.ts",
+    "./authorize": "./src/authorize.ts",
+    "./usage-limit": "./src/usage-limit.ts",
+    "./dispatch": "./src/dispatch/dispatch.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1170.0",
+    "@aws-sdk/lib-dynamodb": "3.1170.0",
+    "@nd-factory/contracts": "*",
+    "@noble/hashes": "2.4.0",
+    "@smithy/node-http-handler": "4.14.2",
+    "aws-jwt-verify": "5.2.1",
+    "ky": "2.2.0",
+    "p-retry": "9.0.0",
+    "pino": "10.4.0",
+    "uuid": "14.0.3"
+  },
+  "devDependencies": {
+    "zod": "4.6.7"
+  }
+}

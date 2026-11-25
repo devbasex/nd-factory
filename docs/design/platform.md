@@ -144,6 +144,7 @@ graph TD
 | 通知の送信側 | 通知のテーブルに足された行を通知先（Web Push・Slack）へ送り、通知先ごとの送達の状態を書く | Lambda（通知のテーブルのストリームで起動） |
 | テーブルの移行 | サービスのテーブルにある古いスキーマバージョンの項目を新しいバージョンへ書き換える（[スキーマのバージョンと移行方法](data.md#スキーマのバージョンと移行方法)） | Lambda（反映の後に 1 回） |
 | スキーマの正本 | 設定のファイル・操作の表・事象・値の形・終了コードを zod で持ち、型・JSON Schema・OpenAPI・MCP のツール・ダミーデータ・文書の表を作る | ビルド時（`packages/contracts/`） |
+| 横断の部品 | 時計・ID・伏せ字・ログなど、各アイテムが共に使う部品（[保存先の基準](#横断の部品の保存先の基準)、粒度は [詳細設計](detail.md)） | 使うアイテム（API・画面など）に組み込まれて動く（`packages/core/`） |
 | 設置のコマンド | 確認・合成・差分・確認の値・反映（`npm run nd-setup`） | 設置する人の端末 |
 | 反映のパイプライン | ソースブランチへの push → 準備 → 人の承認 → 反映 | CodePipeline と CodeBuild |
 | 検査 | 漏れ・参照・形の往復・境界・依存の向き・I8・I14・CI の資格情報・使っていないコード・ワークフローの点検・NDF の契約の照合 | GitHub の workflow |
@@ -219,12 +220,12 @@ graph TD
 | タスクの SG | 受け入れを空にする。行きは 443（任意の送信先）と 5432（Aurora の SG だけ） | 公開のサブネットに置くため、外から入る道筋を持たない |
 | Aurora Serverless v2 | PostgreSQL（自動の一時停止を持つバージョン、LIB80）。出口の無いサブネット。ライター 1 台・リーダーなし。最小 0 ACU。最大 ACU は設定のファイルで受ける。Data API を有効にする（CDK の `enableDataApi: true`。使うのは DB セットアップ関数だけ。決定 83） | Value 6（使わない間は計算の費用が 0） |
 | Aurora の SG | タスクの SG からの 5432 だけを受ける | DB へ接続するのはタスクだけ。DB セットアップ関数は Data API で触れ、SG を通らない |
-| Cognito | 利用者プール。自分の登録を止め、Google（と GitHub）の IdP からだけ入る | Value 9（だれが入れるかをサーバーの側で決める） |
-| CloudFront と画面の S3 | 保存先は公開せず、配信は OAC で読む（LIB83）。料金は従量の課金（定額のプランに入らない）で、価格の区分は 100。画面の HTTP のルートを直に開いても画面が出るよう、既定の振る舞いに viewer request の CloudFront Function を結び、path の最後の区切りに `.` を含まないリクエストを `/index.html` に書き換える（`/`・`/signin`・`/me`・`/p/*`・`/t/*`。画面マップに無いルートも画面が受けて `/` へ移す）。`.` を含むリクエスト（`/config.json`・`/sw.js`・束のファイル）は書き換えず、S3 に無ければ 403 をそのまま返す。束のファイルは `/assets/*` の振る舞いに分け、関数を結ばない。403・404 を `index.html` に差し替えるエラーレスポンスの設定は置かない（決定 141・LIB94） | Value 3（HTTPS の配信で Service Worker が動く）・Value 6・Value 1（通知から画面を直に開く） |
+| Cognito | 利用者プール。自分の登録を止め、Google（と GitHub）の IdP からだけ入る。画面のアプリのクライアントは秘密を持たず（PKCE）、token の取り消しを有効にし、refresh token の回し（rotation）を使わない（寿命 30 日をサインインから数える）。managed login を使える状態にするため、次の 2 つをそれぞれ定義する（どちらか一方では managed login にならない。[Cognito の managed login](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-managed-login.html)）。(a) 利用者プールのドメイン（`AWS::Cognito::UserPoolDomain`）のブランディングのバージョンを managed login にする（`ManagedLoginVersion` を 2。CDK の `managedLoginVersion: ManagedLoginVersion.NEWER_MANAGED_LOGIN`。1 は古い hosted UI）。(b) スタックで作る画面のアプリのクライアントに managed login のスタイルを割り当てる（`AWS::Cognito::ManagedLoginBranding` を、その利用者プールの ID とアプリのクライアントの ID に結んで 1 件作る。見た目は Cognito の既定の値 `UseCognitoProvidedValues: true`）。スタックのテストは、(a) のドメインのバージョンが 2 であることと、(b) のスタイルが同じスタックのアプリのクライアントの ID を参照して 1 件あることを、それぞれ照合する（`prompt`（連携の `select_account`・`login`、サインアウトの確認の `none`）は managed login でだけ効く。連携の `prompt` は IdP ごとの設定の値で、Google は `select_account`、GitHub は `login`。[詳細設計の `verifyLoginToLink`](detail.md#関数の仕様)）。アプリのクライアントは認可コードの付与・PKCE・scope `openid` を許し、許可済みのコールバック（`CallbackURLs`）に `<画面のオリジン>/`（通常のサインインの戻り）・`<画面のオリジン>/me/logins/return`（サインインの手段をつなぐ戻り。[詳細設計の `verifyLoginToLink`](detail.md#関数の仕様)）・`<画面のオリジン>/signed-out`（サインアウトの確認の戻りだけ）の 3 つを登録する。サインアウトの戻り先（`LogoutURLs`）には専用の `/signed-out` だけを登録し、サインインの戻り先（`/`）と分ける（[画面の文書のサインアウトで消す](screens.md#サインアウトで消す)）。IdP の属性の対応づけで、IdP の `email` を利用者プールの属性 `email` へ写す（連携の確認に出す表示の名前）| Value 9（だれが入れるかをサーバーの側で決める） |
+| CloudFront と画面の S3 | 保存先は公開せず、配信は OAC で読む（LIB83）。料金は従量の課金（定額のプランに入らない）で、価格の区分は 100。画面の HTTP のルートを直に開いても画面が出るよう、既定の振る舞いに viewer request の CloudFront Function を結び、path の最後の区切りに `.` を含まないリクエストを `/index.html` に書き換える（`/`・`/signin`・`/me`・`/p/*`・`/t/*`。サインインの手段をつなぐ戻り先 `/me/logins/return` と、サインアウトの専用の戻り先 `/signed-out` も含む。画面マップに無いルートも画面が受けて `/` へ移す）。検索の値（`code`・`state`）は書き換えず画面へ渡す。`.` を含むリクエスト（`/config.json`・`/sw.js`・束のファイル）は書き換えず、S3 に無ければ 403 をそのまま返す。束のファイルは `/assets/*` の振る舞いに分け、関数を結ばない。403・404 を `index.html` に差し替えるエラーレスポンスの設定は置かない（決定 141・LIB94）。検証は、`/me/logins/return?code=…&state=…`・`/signed-out?error=login_required&state=…`・画面マップのルートの 1 つを直に開いて `index.html` が返ることを配信の試しに入れる | Value 3（HTTPS の配信で Service Worker が動く）・Value 6・Value 1（通知から画面を直に開く） |
 | 状態用 S3 バケット | 公開を止め、暗号化し、TLS だけ。NDF のファイルは 14 日で消す規則 | Value 7・Value 6 |
 | ECR | nd-factory 専用のリポジトリ（イメージごとに 1 つ）。ランナーのイメージは、設置のコマンドと反映のパイプラインが作ってここへ push する。ライフサイクルルールで、push した新しいバージョンを戻せる数より多めに残し、古いバージョンを消す（決定 87・LIB85） | Value 6（保管の費用を抑える）・Value 8（ダイジェストで引き、確認の値で縛る） |
 | Secrets Manager | シークレットは CDK が作り、値は人か API が入れる。名前は `<prefix>/<environment>/<用途>`（決定 90） | Value 7 |
-| HTTP API | 利用者の JWT（利用者プール）と、委任・レーン・マシンの token を受ける。token は API の関数の中の 1 か所で確認、HTTP API の JWT の前段を利用者向けの HTTP のルートに置かない（[API と MCP](api.md#認証と主体)）。CORS は配信の元だけ | Value 4・Value 9 |
+| HTTP API | 利用者の JWT（利用者プール）と、委任・レーン・マシンの token を受ける。token は API の関数の中の 1 か所で確認、HTTP API の JWT の前段を利用者向けの HTTP のルートに置かない（[API と MCP](api.md#認証と主体)）。CORS は配信の元だけ。画面が API の時刻を読めるよう、`Access-Control-Expose-Headers` に `Date` を入れる（[画面の今のログインを外した後](screens.md#サインアウトで消す)） | Value 4・Value 9 |
 | 予算 | AWS Budgets の月の予算と通知（[費用](#費用)） | Value 6 |
 
 ### ECS.2 と公開 IP
@@ -417,7 +418,7 @@ Value 6 のとおり、運用の費用が増える構成や依存を足す PR �
 | 使っていないコード | どこからも読まれないファイル・使われない書き出し・使われない依存（knip）。検査の CI は #1 が足す | Value 13 |
 | ワークフローの点検 | ワークフローの広すぎる権限・資格情報の持ち出し・固定していない動作の参照など（zizmor）。検査の CI は #1 が足す | Value 8 |
 | 依存の向き | `packages/contracts` → `packages/core` → `apps/*` の一方向に反する import・`apps/*` どうしの import・`infra` から `apps/*` への import（[詳細設計の依存の表](detail.md#クラスと関数の構造)）。検査の CI は #1 が足す | Value 1・Value 7 |
-| スタックのテストに足す行 | NAT が 1 件以上・タスクの SG に受け入れの規則・Lambda が VPC の中・`AWS::ECS::Service` か `TaskSet` が 1 件以上・タスクの役割に許可の文・Aurora の最小が 0 でない・テーブルとバケットが消せる設定・PITR が無い・画面配信の既定の振る舞いに経路を書き換える関数が無い・`/assets/*` の振る舞いに関数がある・403 か 404 を差し替えるエラーレスポンスの設定がある | Value 6・I11・Value 1 |
+| スタックのテストに足す行 | NAT が 1 件以上・タスクの SG に受け入れの規則・Lambda が VPC の中・`AWS::ECS::Service` か `TaskSet` が 1 件以上・タスクの役割に許可の文・Aurora の最小が 0 でない・テーブルとバケットが消せる設定・PITR が無い・画面配信の既定の振る舞いに経路を書き換える関数が無い・`/assets/*` の振る舞いに関数がある・403 か 404 を差し替えるエラーレスポンスの設定がある・利用者プールのドメインの `ManagedLoginVersion` が 2 でない・画面のアプリのクライアントの ID を参照する `AWS::Cognito::ManagedLoginBranding` が無い | Value 6・I11・Value 1 |
 | 画面ルートの書き換えの単体テスト | 書き換え関数のコードが、`/p/prj_x/approvals/apr_y`・`/t/team_x/usage`・`/me`・`/signin`・`/`・画面マップに無い `/foo` を `/index.html` に変えない、または `/config.json`・`/sw.js`・`/assets/app.js` を書き換える（関数のコードを vitest で直に呼ぶ。決定 141） | Value 1・Value 3 |
 
 NDF のバージョンの数字の比べ（参照の検査）と CI の資格情報（CI の定義のテスト）は基本の検査が受け持つ。設計の決まりを縛る検査は CI の必須のチェック（`.ndf/project.json` の `required_checks`）に載せ、CI の定義のテストが食い違いを落とす。
