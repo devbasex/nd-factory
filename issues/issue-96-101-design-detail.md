@@ -18,7 +18,7 @@
   leak-check-secret.yml *     非公開リポジトリから呼ばれる、秘密を使う探し（workflow_call）
 tools/checks/
   export-tree.sh *            コミットの木か、範囲の履歴の項目を、Git に保存された内容のまま取り出す
-  leak-scan-secret.sh *       秘密の正規表現を重ねた設定を組み、leak-scan.sh を 2 回打つ
+  leak-scan-secret.sh *       秘密の正規表現を重ねた設定を組み、規則ごとに leak-scan.sh を打つ
   install-gitleaks.sh *       gitleaks の版と要約値を持ち、固定の版を確かめて置く（3 つのジョブが呼ぶ）
   leak-scan.sh                変えない（呼ばれる側）
 tools/test/
@@ -36,7 +36,7 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 | --- | --- | --- | --- | --- | --- |
 | `.github/workflows/leak-check-secret.yml` | 新設 | 渡された Pull Request のマージコミットの木と、分岐点から head までのパッチと履歴の項目を、秘密を重ねた設定で探す | `actions/checkout`・`install-gitleaks.sh`・`export-tree.sh`・`leak-scan-secret.sh` | ジョブ `leak-check-secret` | 手順: 入力の形を確かめる・チェックアウト・gitleaks を置く・Pull Request の参照を取り込んで確かめる・マージコミットの木と履歴の項目を取り出す・探す（新設） |
 | `.github/workflows/ci.yml` | 変更 | Pull Request の探しから秘密を外し、main への push の探しを環境 `leak-scan` のジョブへ分ける。gitleaks を置く手順を `install-gitleaks.sh` の呼び出しに替え、版と要約値をジョブから消す | `install-gitleaks.sh`・`leak-scan.sh`・`leak-scan-secret.sh` | ジョブ `leak-check`（変更）・`leak-check-push`（新設） | `leak-check` の手順「今の木と履歴のコミットを探す」（変更）。`leak-check-push` の手順（新設） |
-| `tools/checks/leak-scan-secret.sh` | 新設 | 秘密の正規表現から重ねた設定を組み、既定の規則と重ねた設定で 1 回ずつ探し、`nd-real-value` の件数を出す | `leak-scan.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml` | シェルのモジュール | `usage`・`parse_args`・`build_overlay`・`run_scan`・`report_counts`（新設） |
+| `tools/checks/leak-scan-secret.sh` | 新設 | 秘密の正規表現から重ねた設定を組み、既定の規則と重ねた設定で 1 回ずつ探し（件数だけを出す指定では、既定の規則・`.gitleaks.toml`・`nd-real-value` だけの設定で 1 回ずつ）、`nd-real-value` の件数を出す | `leak-scan.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml` | シェルのモジュール | `usage`・`parse_args`・`build_overlay`・`run_scan`・`report_counts`（新設） |
 | `tools/checks/install-gitleaks.sh` | 新設 | gitleaks の版と要約値を 1 か所に持ち、固定の版の配布の資産を要約値で確かめて置く | `curl`・`sha256sum`・`tar` | シェルのモジュール | スクリプト全体（関数を持たない） |
 | `tools/checks/export-tree.sh` | 新設 | コミットの木のすべてのファイルか、範囲のコミットの差の項目のパスの名前と blob を、属性による加工なしで空のディレクトリへ書き、数と内容の値を確かめる | `git` | シェルのモジュール | `usage`・`check_path`・`write_entries`・`verify_tree`・`write_history`・`verify_history`（新設） |
 | `tools/test/ci-definition.test.ts` | 変更 | 起動の許可・`leak-check-secret.yml` と見本の形・漏れの検査のジョブの分け方を、定義から読んで落とす | `yaml`・`.ndf/project.json` | テストのモジュール | `loadWorkflowFile`・`triggerNames`・`triggerViolations`・`runCommandWords`・`secretWorkflowViolations`・`callerViolations`・`leakJobViolations`・`actorConditions`・`patternSecretReaders`（新設）。`pullRequestChecks`・`triggersPullRequest`・`loadWorkflows`（変更） |
@@ -53,25 +53,27 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| スクリプト全体 | `tools/checks/leak-scan-secret.sh` | 新設 | `leak-scan-secret.sh <dir\|git> [<木>] [--range <範囲>] [--count-only] [--details]`。環境変数 `LEAK_CHECK_PATTERN`・`LEAK_CHECK_REQUIRE_PATTERN` を読む。終了コード 0・1・2 | 受けた対象を、既定の規則と、秘密を重ねた設定（秘密が無く必須でなければ `.gitleaks.toml`）で 1 回ずつ探す |
+| スクリプト全体 | `tools/checks/leak-scan-secret.sh` | 新設 | `leak-scan-secret.sh <dir\|history\|git> [<木>] [--range <範囲>] [--count-only] [--details]`。環境変数 `LEAK_CHECK_PATTERN`・`LEAK_CHECK_REQUIRE_PATTERN` を読む。終了コード 0・1・2 | 受けた対象を、既定の規則と、秘密を重ねた設定（秘密が無く必須でなければ `.gitleaks.toml`）で 1 回ずつ探す。`--count-only` では、既定の規則・`.gitleaks.toml`・`nd-real-value` だけの設定で 1 回ずつ探す。`history` では、`<木>` の `paths/` と、`layers/` と `binary-text/` の各層を、1 つずつ探す木の根として、それぞれ同じ回数だけ探す |
 | `usage` | 同上 | 新設 | `usage() -> 終了コード 2` | 使い方の 1 行を標準エラーに出して 2 で終える |
 | `parse_args` | 同上 | 新設 | `parse_args "$@"` → 大域の `mode`・`tree`・`range`・`count_only`・`details` を決める | 引数を読み、組み合わせの誤りを 2 で落とす |
-| `build_overlay` | 同上 | 新設 | `build_overlay <作業のディレクトリ> -> 標準出力に設定のファイルの絶対パス` | 秘密と必須の指定から、2 回目の探しに使う設定のファイルを決める。秘密があれば重ねた設定を作業のディレクトリに書く |
-| `run_scan` | 同上 | 新設 | `run_scan <設定> <報告のファイル> <出力の扱い: pass\|filter> -> leak-scan.sh の終了コード` | `leak-scan.sh` を 1 回打ち、報告を木の外に受け、出力をそのまま出すか `nd-real-value` を除いて出す |
-| `report_counts` | 同上 | 新設 | `report_counts <報告のファイル> -> 終了コード 0 か 1` | 重ねた設定の報告から `nd-real-value` の件数を数え、件数の行を出す |
+| `build_overlay` | 同上 | 新設 | `build_overlay <作業のディレクトリ> <形: extend\|alone> -> 標準出力に設定のファイルの絶対パス` | 秘密と必須の指定から、`nd-real-value` を探す設定のファイルを決める。秘密があれば、`extend` では `.gitleaks.toml` を読んで `nd-real-value` を足した設定を、`alone` では `nd-real-value` だけの設定を、作業のディレクトリに書く |
+| `run_scan` | 同上 | 新設 | `run_scan <木の根> <設定> <報告のファイル> <出力の扱い: pass\|count> -> leak-scan.sh の終了コード` | `leak-scan.sh` を 1 回打ち、報告を木の外に受け、出力をそのまま出すか、すべて捨てる |
+| `report_counts` | 同上 | 新設 | `report_counts <報告のファイル>... -> 終了コード 0 か 1` | `nd-real-value` を探した報告（`history` では木の根ごとの報告）から `nd-real-value` の件数を合わせて数え、件数の行を 1 つ出す |
 
 - スクリプト全体
-  - 事前条件: `dir` では、`<木>`（省けば今のディレクトリ）が在るディレクトリである。`git` では、今のディレクトリが git のリポジトリで、`--range` の両端のコミットを持つ。gitleaks が `PATH` にある
-  - 事後条件: 終了コードは 2 回の探しのうち悪い方である（どちらかが 2 なら 2、どちらかが 1 なら 1、両方 0 なら 0）。秘密があり、2 回目の探しが報告を書けたときは、当たりの有無によらず `leak-scan-secret: nd-real-value: <件数> 件` の行が 1 つ出ている。秘密が空で必須でないときは、`leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が空なので .gitleaks.toml だけで探す` の行が 1 つ出ている。作業のディレクトリは消えている
-  - 副作用: `mktemp -d` の作業のディレクトリに、重ねた設定と 2 つの報告を書く。`leak-scan.sh` を子のプロセスで 2 回打つ。`leak-scan.sh` へ渡す前に `LEAK_CHECK_PATTERN` を `unset` し、gitleaks の環境に秘密を残さない
+  - 事前条件: `dir` では、`<木>`（省けば今のディレクトリ）が在るディレクトリである。`history` では、`<木>` が `export-tree.sh --history` の出力先である。`git` では、今のディレクトリが git のリポジトリで、`--range` の両端のコミットを持つ。gitleaks が `PATH` にある
+  - 事後条件: 終了コードは、すべての探しのうち悪い方である（どれかが 2 なら 2、どれかが 1 なら 1、すべて 0 なら 0）。秘密があり、`nd-real-value` を探したすべての探しが報告を書けたときは、当たりの有無によらず `leak-scan-secret: nd-real-value: <件数> 件` の行が 1 つ出ている。秘密が空で必須でないときは、`leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が空なので .gitleaks.toml だけで探す` の行が 1 つ出ている。作業のディレクトリは消えている
+  - 副作用: `mktemp -d` の作業のディレクトリに、重ねた設定と探しごとの報告を書く。`leak-scan.sh` を子のプロセスで探しの回数だけ打つ。`leak-scan.sh` へ渡す前に `LEAK_CHECK_PATTERN` を `unset` し、gitleaks の環境に秘密を残さない
 - `parse_args`
   - `--details` は `leak-scan.sh` に `--paths` を渡す指定で、手元で当たりのファイルを特定するときだけ使う。`--count-only` と同時には受けない（場所を出す指定と件数だけを出す指定が食い違うため）
-  - `<木>` は `dir` でだけ受ける。`--range` は `git` でだけ受ける
+  - `<木>` は `dir` と `history` でだけ受け、`history` では省けない。`--range` は `git` でだけ受ける
 - `build_overlay`
-  - 重ねた設定の形は今の `ci.yml` の手順と同じである（`[extend] path` で `.gitleaks.toml` を読み、規則 `nd-real-value` を `'''` の文字列の正規表現で足す）。`[extend] path` と 1 回目の既定の規則の設定は、このスクリプトの在るチェックアウトの根（`$(dirname "$0")/../..` を `cd` と `pwd -P` で絶対パスにしたもの）から組む。探す木の中の設定は読まない
+  - `extend` の形は今の `ci.yml` の手順と同じである（`[extend] path` で `.gitleaks.toml` を読み、規則 `nd-real-value` を `'''` の文字列の正規表現で足す）。`alone` の形は `[extend]` を持たず、規則 `nd-real-value` だけを持つ。`.gitleaks.toml` は最上位の許可を持たない（その頭の注）ので、`nd-real-value` の当たりは 2 つの形で同じになる。`[extend] path` と 1 回目の既定の規則の設定は、このスクリプトの在るチェックアウトの根（`$(dirname "$0")/../..` を `cd` と `pwd -P` で絶対パスにしたもの）から組む。探す木の中の設定は読まない
 - `run_scan`
-  - `dir` では、`<木>` へ `cd` してから `leak-scan.sh dir` を打つ。`leak-scan.sh` は今のディレクトリを探す木の根とし、根の `.gitleaksignore` を 2 で落とす
-  - `filter` は `--count-only` のときの 2 回目だけに使う。`leak-scan.sh` の標準出力は捨て、報告の JSON から `RuleID` が `nd-real-value` でない当たりを、`leak-scan.sh` と同じ `leak-scan: 当たり <規則> <ファイル>:<行> [<コミット>]` の形で出す。標準エラーはそのまま通す（`leak-scan.sh` はファイルの名前を `--paths` なしでは出さない）
+  - `dir` と `history` では、`<木の根>` へ `cd` してから `leak-scan.sh dir` を打つ。`leak-scan.sh` は今のディレクトリを探す木の根とし、根の `.gitleaksignore` を 2 で落とす
+  - `history` では、木の根を `paths`・`layers/1`・`layers/2`…・`binary-text/1`・`binary-text/2`… の順に回し、根ごとに `pass` の行の前に `leak-scan-secret: 履歴 <木の根> を探す` の行を出す（層の番号と `paths` だけで、元のパスを含まない）。層が無ければ `paths` だけを探す
+  - `count` は `--count-only` のときの `nd-real-value` だけの探しにだけ使う。`leak-scan.sh` の標準出力と標準エラーを作業のディレクトリの一時のファイルに受け、読まずに消す。`leak-scan.sh` の標準エラーの「当たり <件数> 件」の行と `file-<番号>` の振り方は `nd-real-value` の当たりによって変わるので、どちらも記録に出さない
+  - **`--count-only` で記録に出る行のうち、秘密の値によって変わるのは、`report_counts` の件数の行か件数を読めない行だけである。** 既定の規則と `.gitleaks.toml` の探しは秘密を使わないので、その `pass` の出力は秘密の値によらず同じになる。終了コードも、当たりのときに 1 になるだけで、場所の手がかりを持たない
 
 ### 異常系の処理
 
@@ -82,21 +84,22 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 | `build_overlay` | 秘密の形の誤り | 秘密に `'''` か改行を含む（TOML の文字列を閉じるか、複数行の正規表現になるため） | `build_overlay` | 止める | `leak-scan-secret: 秘密 LEAK_CHECK_PATTERN に ''' と改行を含めない`（値を出さない）、1 | `trap` で作業のディレクトリを消す。秘密を直して打ち直せる |
 | `build_overlay` | 必須なのに秘密が空 | `LEAK_CHECK_REQUIRE_PATTERN` が `1` で `LEAK_CHECK_PATTERN` が空 | `build_overlay` | 止める | `leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が無い（必須にしている）`、1 | 同上 |
 | `build_overlay` | チェックアウトの根を設定に書けない | 根の絶対パスが `"` か `\` か改行を含む | `build_overlay` | 止める | `leak-scan-secret: チェックアウトのパスを設定に書けない`、2 | 同上。別の場所へチェックアウトして打ち直す |
-| `run_scan` | 探しの失敗か当たり | `leak-scan.sh` が 1 か 2 を返した | `run_scan` の戻り値 | 2 回目まで打ってから、悪い方の終了コードで終える | `leak-scan.sh` の出力（`filter` のときは `nd-real-value` を除いた当たり）と、`leak-scan.sh` の終了コード | 同上 |
-| `report_counts` | 件数を読めない | 2 回目の `leak-scan.sh` が報告を書かずに終えた（範囲を読めない・gitleaks の報告を読めない・`.gitleaksignore` がある） | `report_counts` | 呼び出し元へ返す | `leak-scan-secret: nd-real-value の件数を読めない`、1（`run_scan` が 2 なら 2 のまま） | 同上。決定 10 の手順 4 の確かめは、この行が出た実行を「確かめられない」とする |
+| `run_scan` | 探しの失敗か当たり | `leak-scan.sh` が 1 か 2 を返した | `run_scan` の戻り値 | 最後の探しまで打ってから、悪い方の終了コードで終える | `pass` では `leak-scan.sh` の出力と終了コード。`count` では `leak-scan.sh` の出力を出さず、終了コードと `report_counts` の行だけ | 同上 |
+| `report_counts` | 件数を読めない | `nd-real-value` を探した `leak-scan.sh` のどれかが報告を書かずに終えた（範囲を読めない・gitleaks の報告を読めない・`.gitleaksignore` がある） | `report_counts` | 呼び出し元へ返す | `leak-scan-secret: nd-real-value の件数を読めない`（理由を出さない固定の行）、1（`run_scan` が 2 なら 2 のまま） | 同上。決定 10 の手順 4 の確かめは、この行が出た実行を「確かめられない」とする |
 
 ### 処理の手順
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `build_overlay` | 秘密あり（形が正しい） | 重ねた設定のパスを返す。2 回目は重ねた設定で探し、件数の行を出す |
+| `build_overlay` | 秘密あり（形が正しい） | `--count-only` なしでは `extend`、ありでは `alone` の設定のパスを返す。その設定で探した後に件数の行を出す |
 | `build_overlay` | 秘密が空・必須（`LEAK_CHECK_REQUIRE_PATTERN` が `1`） | 1 で止める（探さない） |
 | `build_overlay` | 秘密が空・必須でない | 空のときの行を出し、`.gitleaks.toml` の絶対パスを返す。件数の行は出さない |
-| スクリプト全体 | `--count-only` なし | 2 回とも `pass`。非公開リポジトリの実行と手元の確かめで使う |
-| スクリプト全体 | `--count-only` あり | 1 回目は `pass`、2 回目は `filter`。main への push の `leak-check-push` で使う |
+| スクリプト全体 | `--count-only` なし | 既定の規則と `extend` の設定の 2 回を、どちらも `pass` で打つ。非公開リポジトリの実行と手元の確かめで使う |
+| スクリプト全体 | `--count-only` あり | 既定の規則と `.gitleaks.toml` を `pass` で、`alone` の設定を `count` で、この順に 3 回打つ。秘密が空で必須でなければ、前の 2 回だけを打つ。main への push の `leak-check-push` で使う |
 | スクリプト全体 | `--details` あり | 2 回とも `leak-scan.sh` に `--paths` を渡し、`pass` で出す。手元でだけ使う |
+| スクリプト全体 | `history` | 上の回数の探しを、`paths/` と各層の木の根ごとに打つ。件数の行は、すべての根の `nd-real-value` の当たりを合わせて 1 つだけ出す |
 
-- 計算量の注意: gitleaks を 2 回打つ。非公開リポジトリの実行は、このスクリプトを、取り出した木の `dir`・取り出した履歴の `dir`・`git` で 1 回ずつ呼ぶので、gitleaks を合わせて 6 回打つ（設計文書の決定 5 の代償）
+- 計算量の注意: 木の根 1 つにつき、gitleaks を 2 回打つ（`--count-only` では 3 回）。非公開リポジトリの実行は、このスクリプトを、取り出した木の `dir`・取り出した履歴の `history`・`git` で 1 回ずつ呼ぶ。`history` は `paths/` と層の数だけ木の根を持つので、gitleaks を打つ回数は、`layers/` の層の数を n、`binary-text/` の層の数を m として 2 ×（3 + n + m）回になる（設計文書の決定 5 の代償）
 
 ### 内部のデータと定数
 
@@ -110,8 +113,9 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `report_counts` | `nd-real-value` の件数の行 | 標準出力（CI の記録） | 正規表現・当たった値・当たりのファイルと行とコミット |
-| `run_scan` | 既定の規則と nd-factory の規則の当たり（規則・`file-<番号>`・行・コミット） | 標準出力 | `--details` なしでは実際のファイルの名前と gitleaks の生の出力 |
+| `report_counts` | `nd-real-value` の件数の行か、件数を読めない固定の行 | 標準出力（CI の記録） | 正規表現・当たった値・当たりのファイルと行とコミット |
+| `run_scan`（`pass`） | 探した規則の当たり（規則・`file-<番号>`・行・コミット）と `leak-scan.sh` の標準エラーの行 | 標準出力・標準エラー | `--details` なしでは実際のファイルの名前と gitleaks の生の出力 |
+| `run_scan`（`count`） | 何も出さない | — | `leak-scan.sh` の標準出力と標準エラーのすべて（当たりの行・当たりの合計の件数・`file-<番号>`） |
 | `build_overlay` | 秘密が空のときの行・誤りの行 | 標準出力・標準エラー | 秘密の値と重ねた設定の中身 |
 
 ### 既存の部品の再利用
@@ -132,7 +136,8 @@ AGENTS.md                     秘密とインフラの値を置かない、の�
 | スクリプト全体 | 途中のコミットで足して後で消した値を、`git --range <分岐点>..<head>` が 1 で当てる。分岐点より前から在るファイルの、範囲で変えていない行の値を、`dir <木>` が 1 で当てる | 当たりが 0 件のとき、0 で終え、`nd-real-value: 0 件` の行が出る。既定の規則だけに当たる値で、1 回目が 1 を返しても 2 回目も打たれ、件数の行が出る | 範囲を読めないと 0 以外で終える。出力と報告に、作り物の正規表現と当たった値が現れない |
 | `parse_args` | `dir` に木を渡すと、そのディレクトリを探す | 木を省くと今のディレクトリを探す | 誤りの組み合わせ（異常系の表の 1 行目）がそれぞれ 2 で終える。無い木は、パスを出さずに 2 で終える |
 | `build_overlay` | 秘密ありで、`nd-real-value` の当たりが規則の名前つきで報告に入る | 秘密が空・必須でないとき、空のときの行が出て、件数の行が出ない | 秘密が空・必須で 1。`'''` か改行を含む秘密で 1。どちらの出力にも秘密の値が現れない |
-| `run_scan` | `--count-only` で、`nd-real-value` の当たりは件数だけが出て、ファイル・行・コミットが出ない。既定の規則の当たりは今の形で出る | — | 木の根に `.gitleaksignore` があると 2 |
+| `run_scan` | `--count-only` で、`nd-real-value` の当たりは件数だけが出て、ファイル・行・コミットが出ない。既定の規則の当たりは今の形で出る。`history` で、`paths/` と各層の木の根ごとに探し、層の中の当たりが元のパスに置いたときと同じ規則と許可で決まる | — | 木の根に `.gitleaksignore` があると 2 |
+| `--count-only` の出力 | 既定の規則に当たる行を 1 つ置いたリポジトリを、その行に当たる作り物の正規表現 A と、別のファイルの行に当たる作り物の正規表現 B で探すと、`dir` でも `git` でも、標準出力と標準エラーを合わせた出力が A と B で同じになる | 当たらない作り物の正規表現 C で探した出力とは、件数の行だけが違う。`nd-real-value` が 2 件のときも、同じ行に 2 件と別のファイルに 2 件で出力が同じになる | 3 回目の `leak-scan.sh` の標準エラーを通すか、`nd-real-value` を `extend` の設定で探して当たりだけを除くように壊すと、A と B の出力が違って落ちる |
 | `report_counts` | 当たり 2 件で `nd-real-value: 2 件` | 0 件で `nd-real-value: 0 件` | 2 回目の報告が無いと、件数を読めない行を出して 0 以外 |
 | `--details` | 実際のファイルの名前が出る | — | `--details` なしでは、作り物の値を名前に含むファイルが `file-<番号>` で出て、名前が出力に現れない |
 
@@ -162,54 +167,64 @@ gitleaks の版と要約値を持つのは、このスクリプトだけであ�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| スクリプト全体 | `tools/checks/export-tree.sh` | 新設 | `export-tree.sh <コミット> <出力先>` か `export-tree.sh --history <分岐点> <head> <出力先>`。今のディレクトリの git のリポジトリを読む。終了コード 0・1・2 | 前者は、コミットの木のすべてのファイルを、Git に保存された内容のまま出力先へ書き、書いたものが木と一致することを確かめる。後者は、分岐点から head までの各コミットの差の項目のパスの名前と blob の中身を書く（設計文書の決定 5 の 3 種類のファイル） |
+| スクリプト全体 | `tools/checks/export-tree.sh` | 新設 | `export-tree.sh <コミット> <出力先>`・`export-tree.sh --history <分岐点> <head> <出力先>`・`export-tree.sh --verify <コミット> <出力先>`・`export-tree.sh --verify-history <分岐点> <head> <出力先>`。今のディレクトリの git のリポジトリを読む。終了コード 0・1・2 | 1 つ目は、コミットの木のすべてのファイルを、Git に保存された内容のまま出力先へ書き、`verify_tree` で照らす。2 つ目は、分岐点から head までの各コミットの差の項目のパスの名前と blob の中身を書き（設計文書の決定 5 の 3 種類のファイル）、`verify_history` で照らす。後の 2 つは、書いてある出力先を照らすだけで、何も書かない |
 | `usage` | 同上 | 新設 | `usage() -> 終了コード 2` | 使い方の 1 行を標準エラーに出して 2 で終える |
 | `check_path` | 同上 | 新設 | `check_path <通し番号> <パス> -> 終了コード 0 か 1` | 項目のパスが、出力先の外や `.git` を指さないことを確かめる |
-| `write_entries` | 同上 | 新設 | `write_entries <コミット> <出力先> -> 標準出力に書いたファイルの数` | `git ls-tree -r -z --full-tree` の項目ごとに、ファイルの項目の blob を `git cat-file blob` で書く |
-| `verify_tree` | 同上 | 新設 | `verify_tree <コミット> <出力先> <書いた数> -> 終了コード 0 か 1` | 出力先のファイルの数と各ファイルの `git hash-object --no-filters` の値が、木の項目と一致することを確かめる |
-| `write_history` | 同上 | 新設 | `write_history <分岐点> <head> <出力先> -> 標準出力に書いたパスの数と blob の数` | `git rev-list <分岐点>..<head>` の各コミットについて `git diff-tree -r -z --raw --no-renames --root -m --no-commit-id` の項目を読み、`paths/<通し番号>`・`blobs/<blob の SHA>`・`binary-text/<blob の SHA>` を書く |
-| `verify_history` | 同上 | 新設 | `verify_history <出力先> <書いたパスの数> <書いた blob の数> -> 終了コード 0 か 1` | `paths/` のファイルの数と `blobs/` のファイルの数が書いた数と同じで、`blobs/` の各ファイルの `git hash-object --no-filters` の値がファイルの名前と同じことを確かめる |
+| `write_entries` | 同上 | 新設 | `write_entries <コミット> <出力先>` | `git ls-tree -r -z --full-tree` の項目ごとに、ファイルの項目の blob を `git cat-file blob` で書く |
+| `verify_tree` | 同上 | 新設 | `verify_tree <コミット> <出力先> -> 終了コード 0 か 1` | `git ls-tree` を打ち直して期待するファイルの項目を求め、出力先のファイルの数と各ファイルの `git hash-object --no-filters` の値が、その項目と一致することを確かめる。`write_entries` の結果（書いた数など）は使わない |
+| `expected_history` | 同上 | 新設 | `expected_history <分岐点> <head> <作業のディレクトリ>` | `git rev-list <分岐点>..<head>` の各コミットについて `git diff-tree -r -z --raw --no-renames --root -m --no-commit-id` の項目を読み、差の項目のパスの並びと、元のパスと blob の組の一覧（重なりを除いたもの）を、作業のディレクトリに書く。`write_history` と `verify_history` が、それぞれ打ち直して使う |
+| `write_history` | 同上 | 新設 | `write_history <分岐点> <head> <出力先>` | `expected_history` の結果から、`paths/<通し番号>`・`layers/<層の番号>/<元のパス>`・`binary-text/<層の番号>/<元のパス>` を書く |
+| `verify_history` | 同上 | 新設 | `verify_history <分岐点> <head> <出力先> -> 終了コード 0 か 1` | `expected_history` を打ち直した結果と、出力先の 3 つのディレクトリを照らす（下の箇条）。`write_history` の結果（書いた数・層の割り当て）は使わない |
 
 - スクリプト全体
-  - 事前条件: 今のディレクトリが git のリポジトリで、`<コミット>` を持つ。`<出力先>` は無いか、空のディレクトリである（無ければこのスクリプトが作る。ワークフローの `run:` で `mkdir` を打たずに済ませるため）
-  - 事後条件: 0 で終えたとき、出力先には、木のファイルの項目（モード `100644`・`100755`・`120000`）と同じ数の普通のファイルと、それを入れるディレクトリだけがある。各ファイルの中身は、項目の blob のバイト列と同じである。シンボリックリンク・サブモジュール・ほかの種類のファイルは無い。書いたファイルは実行の権限を持たない（モード `0644`）
-  - 副作用: 出力先にディレクトリとファイルを書く。`git ls-tree`・`git cat-file`・`git hash-object` を子のプロセスで打つ。`.gitattributes` を読まず、`git archive`・`git checkout`・`--filters`・`--textconv` を使わない
+  - 事前条件: 今のディレクトリが git のリポジトリで、`<コミット>` を持つ。書く 2 つの使い方では、`<出力先>` は無いか、空のディレクトリである（無ければこのスクリプトが作る。ワークフローの `run:` で `mkdir` を打たずに済ませるため）。照らす 2 つの使い方では、`<出力先>` は在るディレクトリである
+  - 事後条件: 木を書く使い方で 0 で終えたとき、出力先には、木のファイルの項目（モード `100644`・`100755`・`120000`）と同じ数の普通のファイルと、それを入れるディレクトリだけがある。各ファイルの中身は、項目の blob のバイト列と同じである。シンボリックリンク・サブモジュール・ほかの種類のファイルは無い。書いたファイルは実行の権限を持たない（モード `0644`）
+  - 副作用: 出力先にディレクトリとファイルを書く（照らす使い方では書かない）。`git ls-tree`・`git cat-file`・`git hash-object` を子のプロセスで打つ。`.gitattributes` を読まず、`git archive`・`git checkout`・`--filters`・`--textconv` を使わない
 - `check_path`
   - 失敗とするのは、パスが空、`/` で始まる、`/` で区切った部分に空・`.`・`..` がある、部分のどれかが大文字と小文字を区別せずに `.git` と同じ、のどれかである
-  - 知らせにはパスを出さず、`ls-tree` の何番目の項目かだけを出す
+  - 知らせにはパスを出さず、何番目の項目かだけを出す
 - `write_entries`
   - モード `100644`・`100755` の項目は、そのまま中身を書く。`120000`（シンボリックリンク）は、リンク先の文字列（blob の中身）を中身とする普通のファイルとして書く。`160000`（サブモジュール）は中身を持たないので書かず、数えない。ほかのモードは失敗とする
   - 書く先が既に在れば失敗とする（壊れた木が同じパスを 2 回持つ場合）。親のディレクトリの部分が既にファイルとして在るときも、`mkdir -p` の失敗で止まる
 - `verify_tree`
-  - 出力先の `find -type f` の数が書いた数と同じで、`find ! -type f ! -type d` が 0 件で、項目ごとの `git hash-object --no-filters -- <ファイル>` が項目の値と同じことを確かめる
+  - 出力先の `find -type f` の数が期待するファイルの項目の数と同じで、`find ! -type f ! -type d` が 0 件で、項目ごとの `git hash-object --no-filters -- <ファイル>` が項目の値と同じことを確かめる
+- `expected_history`
+  - 差の項目は、足した・変えた・消した・種類を変えたのどれも、パスの並びに読んだ順で入れる。同じパスが複数のコミットに出ても、項目ごとに入れる
+  - 差の後の側のモードが `100644`・`100755`・`120000` で、blob の SHA が 0 でない項目は、元のパスと blob の組の一覧に入れる。同じ組は 1 回だけ入れる。`160000` と、消した項目（後の側の SHA が 0）は、パスの並びにだけ入れる。ほかのモードは失敗とする
+  - どの項目のパスも `check_path` を通す。`layers/` と `binary-text/` に元のパスで書くためである
 - `write_history`
   - 事前条件: `<分岐点>` と `<head>` がどちらもコミットで、`<出力先>` は無いか空のディレクトリである
-  - 事後条件: 0 で終えたとき、出力先には `paths/`・`blobs/`・`binary-text/` の 3 つのディレクトリと、その中の普通のファイルだけがある。ファイルの名前は通し番号か blob の SHA だけで、元のパスを含まない。範囲が空（分岐点と head が同じ）なら、3 つのディレクトリは空で、0 で終える
-  - `paths/<通し番号>` には、差の項目のパスのバイト列を、改行を足さずにそのまま書く。足した・変えた・消した・種類を変えた項目のどれも書く。同じパスが複数のコミットに出ても、項目ごとに書く（通し番号は読んだ順）
-  - 差の後の側のモードが `100644`・`100755`・`120000` で、blob の SHA が 0 でない項目は、`blobs/<blob の SHA>` に `git cat-file blob` の中身をそのまま書く。既に在れば書かない。`160000` と、消した項目（後の側の SHA が 0）は、パスの名前だけを書く。ほかのモードは失敗とする
-  - 書いた blob が NUL を含めば、`binary-text/<blob の SHA>` に、`LC_ALL=C tr -c '\11\40-\176\200-\377' '\n'` で、タブと印字できるバイトの外を改行に替えた中身を書く
+  - 事後条件: 0 で終えたとき、出力先には `paths/`・`layers/`・`binary-text/` の 3 つのディレクトリと、その中のディレクトリと普通のファイルだけがある。範囲が空（分岐点と head が同じ）なら、3 つのディレクトリは空で、0 で終える
+  - `paths/<通し番号>` には、パスの並びの各パスのバイト列を、改行を足さずにそのまま書く（通し番号は 1 から読んだ順）
+  - 組の一覧の各組を、読んだ順に、置ける最も小さい番号の層に置く。置けるのは、その層が同じパスを持たず、そのパスの親のディレクトリに当たるパスも、そのパスを親のディレクトリに持つパスも持たないときである。`layers/<層の番号>/<元のパス>` に `git cat-file blob` の中身をそのまま書く。層の番号は 1 から振る
+  - 書いた blob が NUL を含めば、`binary-text/<同じ層の番号>/<同じ元のパス>` に、`LC_ALL=C tr -c '\11\40-\176\200-\377' '\n'` で、タブと印字できるバイトの外を改行に替えた中身を書く
   - `.gitattributes` を読まず、`git log -p`・`--textconv`・`--filters` を使わない
+  - 書き終えたら `verify_history` を打つ
 - `verify_history`
-  - 出力先の `find ! -type f ! -type d` が 0 件で、3 つのディレクトリのほかに項目が無いことも確かめる
+  - `expected_history` を打ち直し、次のすべてを確かめる。1 つでも外れれば 1 で終える
+  - `paths/` のファイルの名前が 1 からパスの並びの数までの通し番号だけで、各ファイルの中身が、同じ番号のパスのバイト列と `cmp` で同じである
+  - 組の一覧の各組について、`layers/<n>/<元のパス>` が普通のファイルとして在り、その `git hash-object --no-filters` の値が組の blob と同じになる層 n が、ちょうど 1 つある。`layers/` の普通のファイルの数の合計が組の数と同じである
+  - `layers/` の NUL を含むファイルごとに、`binary-text/` の同じ層・同じパスに普通のファイルがあり、その中身が、組の blob から `tr` で作り直した中身と `cmp` で同じである。`binary-text/` の普通のファイルの数が、NUL を含む `layers/` のファイルの数と同じである
+  - 出力先の `find ! -type f ! -type d` が 0 件で、3 つのディレクトリのほかに項目が無い
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| スクリプト全体 | 引数の誤り | 引数が 2 つでない、出力先が空でないディレクトリかファイル | 頭の確かめ | 止める | 使い方の 1 行か `export-tree: 出力先が空のディレクトリでない`、2 | 書く前なので後始末は無い。打ち直せる |
+| スクリプト全体 | 引数の誤り | 引数の数が使い方と合わない、書く使い方で出力先が空でないディレクトリかファイル、照らす使い方で出力先がディレクトリでない | 頭の確かめ | 止める | 使い方の 1 行か `export-tree: 出力先が空のディレクトリでない`、2 | 書く前なので後始末は無い。打ち直せる |
 | スクリプト全体 | コミットを読めない | `git rev-parse --verify "<コミット>^{commit}"` が失敗した | 頭の確かめ | 止める | `export-tree: コミットを読めない`、2 | 同上 |
 | `check_path` | 取り出せないパス | 絶対パス・`.`・`..`・`.git` の部分を持つ項目 | `check_path` | 止める | `export-tree: 木に取り出せない項目がある（<通し番号> 番目）`、1 | 出力先は途中まで書かれたまま残る。呼ぶ側（ワークフロー）はジョブごと失敗させ、手元では出力先を消して打ち直す |
 | `write_entries` | 扱えない種類の項目 | 既知でないモード、同じパスの重なり | `write_entries` | 止める | `export-tree: 木に取り出せない項目がある（<通し番号> 番目）`、1 | 同上 |
 | `write_entries` | 書けない | `git cat-file` の失敗・ディスクの不足・`mkdir -p` の失敗 | 各コマンドの終了コード（`set -euo pipefail`） | 止める | `export-tree: 木を書き出せない（<通し番号> 番目）`、1。git の標準エラーはパスを含み得るので一時のファイルに受けて捨てる | 同上 |
-| `verify_tree` | 木と食い違う | 書いた数か内容の値が項目と違う、ファイルでもディレクトリでもない物がある | `verify_tree` | 止める | `export-tree: 取り出した木が元の木と一致しない`、1 | 同上 |
-| `write_history` | 範囲を読めない | `<分岐点>` か `<head>` がコミットでない、`git rev-list`・`git diff-tree` の失敗 | 頭の確かめと各コマンドの終了コード | 止める | `export-tree: 履歴の範囲を読めない`、2。git の標準エラーは捨てる | 同上 |
-| `write_history` | 扱えない種類の項目か書けない | 既知でないモード、`git cat-file` の失敗・ディスクの不足 | `write_history` | 止める | `export-tree: 履歴の項目を書き出せない（<通し番号> 番目）`、1 | 同上 |
-| `verify_history` | 書いたものと食い違う | 数か blob の値が違う、ほかの種類の物がある | `verify_history` | 止める | `export-tree: 取り出した履歴が元の履歴と一致しない`、1 | 同上 |
+| `verify_tree` | 木と食い違う | ファイルの数か内容の値が、`git ls-tree` で求め直した項目と違う、ファイルでもディレクトリでもない物がある | `verify_tree` | 止める | `export-tree: 取り出した木が元の木と一致しない`、1 | 同上 |
+| `expected_history` | 範囲を読めない | `<分岐点>` か `<head>` がコミットでない、`git rev-list`・`git diff-tree` の失敗 | 頭の確かめと各コマンドの終了コード | 止める | `export-tree: 履歴の範囲を読めない`、2。git の標準エラーは捨てる | 同上 |
+| `expected_history`・`write_history` | 扱えない項目か書けない | 既知でないモード、`check_path` を通らないパス、`git cat-file` の失敗・ディスクの不足 | `expected_history`・`write_history` | 止める | `export-tree: 履歴の項目を書き出せない（<通し番号> 番目）`、1 | 同上 |
+| `verify_history` | 元の履歴と食い違う | `paths/` の中身か数、`layers/` の組の中身か数、`binary-text/` の中身か数が、`expected_history` で求め直した値と違う。ほかの種類の物か、3 つのディレクトリのほかの項目がある | `verify_history` | 止める | `export-tree: 取り出した履歴が元の履歴と一致しない`、1 | 同上 |
 
 ### 処理の手順
 
-- ループの終了条件: `ls-tree -z` の出力を `read -r -d ''` で読み、読み終えたら終える。1 項目ずつ `check_path` を先に通してから書く。`write_history` も、`diff-tree -z` の出力を同じく `read -r -d ''` で読む。出力先のファイルの名前に元のパスを使わないので、`check_path` は通さない
-- 計算量の注意（`write_history`）: 範囲のコミットが足したか変えた blob ごとに `git cat-file` と `git hash-object` を 1 回ずつ打つ。同じ blob は 1 回だけ書く
+- ループの終了条件: `ls-tree -z` の出力を `read -r -d ''` で読み、読み終えたら終える。1 項目ずつ `check_path` を先に通してから書く。`expected_history` も、`diff-tree -z` の出力を同じく `read -r -d ''` で読み、1 項目ずつ `check_path` を通す
+- 計算量の注意（`write_history`・`verify_history`）: 元のパスと blob の組ごとに `git cat-file` と `git hash-object` を 1 回ずつ打つ。同じ組は 1 回だけ書く。層の割り当ては、層ごとにパスとその親のディレクトリの集合を連想配列で持ち、組ごとに層を若い順に確かめる
 - 計算量の注意: ファイルの項目ごとに `git cat-file` と `git hash-object` を 1 回ずつ打つ。2026-11-24 の main の追跡するファイルは 284 本なので、子のプロセスは 600 前後で済む。数が 1 万を超えたら `git cat-file --batch` に替える
 
 ### 既存の部品の再利用
@@ -217,7 +232,7 @@ gitleaks の版と要約値を持つのは、このスクリプトだけであ�
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `write_entries` | `git archive`・`git checkout-index`・`git worktree add` | [Git の属性の仕様](https://git-scm.com/docs/gitattributes.html) を読んだ | 使えない。どれも対象のコミットの `.gitattributes`（`export-ignore`・`export-subst`・改行の変換・`ident`・フィルタ）に従って中身を変えうる（設計文書の決定 5） |
-| `verify_tree` | `git hash-object --no-filters` | `git hash-object -h` | 使う。属性を読まずに blob の値を求める |
+| `verify_tree`・`verify_history` | `git hash-object --no-filters` | `git hash-object -h` | 使う。属性を読まずに blob の値を求める |
 | `check_path` | このリポジトリの既存のパスの確かめ | `grep -rn "\.\." tools/checks` | 無い。新しく書く |
 
 ### 単体テストの観点
@@ -229,9 +244,9 @@ gitleaks の版と要約値を持つのは、このスクリプトだけであ�
 | スクリプト全体 | `.gitattributes` に `* export-ignore`・`export-subst`・`text eol=crlf`・`ident` を書いたコミットを取り出すと、ファイルの数が `git ls-tree` のファイルの項目の数と同じで、各ファイルの中身が blob と同じバイト列になる | 出力先が無いときは作る。空のディレクトリを渡しても通る | 空でない出力先・ファイルの出力先・読めないコミットで 2 |
 | `write_entries` | `export-ignore` を付けたファイルにだけ作り物の値を置き、取り出した木を `leak-scan-secret.sh dir` で探すと 1 | シンボリックリンク（`../../outside` を指す）が、リンク先の文字列を中身とする普通のファイルになり、出力先の外を指すリンクが無い。サブモジュールの項目は書かれない | — |
 | `check_path` | — | — | `git mktree` で作った、`..` か `.git` か `.GIT` の部分を持つ項目の木で 1。出力に項目のパスが現れない |
-| `verify_tree` | — | — | 数か値の確かめを外すと上の「正常」の行が落ちる（壊し方の確かめは設計文書のテスト設計の決定 5 の行） |
-| `write_history` | 途中のコミットで足して後で消した、作り物の値を名前に含むファイルとディレクトリのパスが `paths/` に入り、`leak-scan-secret.sh dir` で 1。途中のコミットで足して後で消した、NUL を含み作り物の値を中に持つファイルが `binary-text/` に入り、同じく 1。範囲の中のマージのコミットの差も読む | 範囲が空なら 3 つの空のディレクトリで 0。同じ blob を 2 つのコミットが持っても `blobs/` には 1 つ。サブモジュールの項目はパスの名前だけ | 読めない範囲で 2。出力先のファイルの名前と標準出力・標準エラーに、作り物の値を含むパスが現れない |
-| `verify_history` | — | — | 数か値の確かめを外すと上の「正常」の行が落ちる |
+| `verify_tree` | 取り出したままの出力先に `--verify` を打つと 0 | — | 取り出した木から、ファイルを 1 つ消す・中身を 1 バイト替える・ファイルを 1 つ足す・シンボリックリンクを足すのどれか 1 つだけをしてから `--verify` を打つと、どれも 1 |
+| `write_history` | 途中のコミットで足して後で消した、作り物の値を名前に含むファイルとディレクトリのパスが `paths/` に入り、`leak-scan-secret.sh history` で 1。途中のコミットで足して後で消した、NUL を含み作り物の値を中に持つファイルが `binary-text/` に入り、同じく 1。範囲の中のマージのコミットの差も読む。既定の規則がファイルの名前だけで当てるファイル（例えば拡張子 `.p12`）を途中で足して消すと、`history` で 1。既定の全体の許可がパスで外すファイル（例えば拡張子 `.png`）に既定の規則に当たる作り物の値を置いて足して消すと、`history` の既定の規則の探しで 0 | 範囲が空なら 3 つの空のディレクトリで 0。同じパスを 3 つのコミットで変えると `layers/1`〜`layers/3` に 1 つずつ入る。途中のコミットで `a` をファイルからディレクトリ `a/` に変えると、`a` と `a/b` が別の層に入る。同じ元のパスと blob の組を 2 つのコミットが持っても 1 つだけ書く。同じ blob を、全体の許可で外すパスと外さないパスに置くと、2 つの層の別々のパスに書かれ、外さない側だけが当たる。サブモジュールの項目はパスの名前だけ | 読めない範囲で 2。`..` か `.git` の部分を持つパスを途中のコミットで足すと 1。標準出力・標準エラーに、作り物の値を含むパスが現れない |
+| `verify_history` | 書いたままの出力先に `--verify-history` を打つと 0 | 範囲が空の出力先で 0 | 書いた出力先を、次のどれか 1 つだけ壊してから `--verify-history` を打つと、どれも 1。`paths/` のファイルの中身を替える・`paths/` のファイルを 1 つ消す・`layers/` のファイルの中身を替える・`layers/` のファイルを 1 つ消す・`binary-text/` のファイルを 1 つ消す・`binary-text/` のファイルの中身を替える・3 つのディレクトリのほかにファイルを足す |
 
 ## 再利用できる漏れの検査のワークフロー（`.github/workflows/leak-check-secret.yml`）
 
@@ -250,7 +265,7 @@ gitleaks の版と要約値を持つのは、このスクリプトだけであ�
 | 手順「gitleaks を固定の版と要約値で置く」 | 同上 | 新設 | `run: tools/checks/install-gitleaks.sh "$RUNNER_TEMP/gitleaks"` の 1 行だけ。版と要約値を持たない | 検査のコードのコミットのチェックアウトにある `install-gitleaks.sh` で gitleaks を置き、`GITHUB_PATH` に足す |
 | 手順「Pull Request の参照を取り込んで確かめる」 | 同上 | 新設 | 環境変数 `PR_NUMBER`・`HEAD_SHA`・`BASE_SHA`・`MERGE_SHA` | `git fetch --no-tags --no-recurse-submodules origin +refs/pull/<番号>/head:refs/ndf-scan/head +refs/pull/<番号>/merge:refs/ndf-scan/merge` で取り込み、2 つの参照が入力の SHA と同じこと、マージコミットの親がちょうど 2 つで順に base と head であること、`git merge-base` で分岐点を求められることを確かめる |
 | 手順「マージコミットの木と履歴の項目を取り出す」 | 同上 | 新設 | 環境変数 `MERGE_SHA`・`BASE_SHA`・`HEAD_SHA` | `tools/checks/export-tree.sh "$MERGE_SHA" "$RUNNER_TEMP/merge-tree"` を打つ。分岐点を `git merge-base "$BASE_SHA" "$HEAD_SHA"` で求め、`tools/checks/export-tree.sh --history "<分岐点>" "$HEAD_SHA" "$RUNNER_TEMP/history"` を打つ |
-| 手順「秘密の規則を重ねて探す」 | 同上 | 新設 | 環境変数 `LEAK_CHECK_PATTERN: ${{ secrets.LEAK_CHECK_PATTERN }}`・`LEAK_CHECK_REQUIRE_PATTERN: "1"`・`BASE_SHA`・`HEAD_SHA` | 分岐点を求め直し、`leak-scan-secret.sh dir "$RUNNER_TEMP/merge-tree"`・`leak-scan-secret.sh dir "$RUNNER_TEMP/history"`・`leak-scan-secret.sh git --range "<分岐点>..$HEAD_SHA"` を打ち、どれかが 0 以外なら 1 で終える |
+| 手順「秘密の規則を重ねて探す」 | 同上 | 新設 | 環境変数 `LEAK_CHECK_PATTERN: ${{ secrets.LEAK_CHECK_PATTERN }}`・`LEAK_CHECK_REQUIRE_PATTERN: "1"`・`BASE_SHA`・`HEAD_SHA` | 分岐点を求め直し、`leak-scan-secret.sh dir "$RUNNER_TEMP/merge-tree"`・`leak-scan-secret.sh history "$RUNNER_TEMP/history"`・`leak-scan-secret.sh git --range "<分岐点>..$HEAD_SHA"` を打ち、どれかが 0 以外なら 1 で終える |
 
 - ワークフローの最上位: `permissions: contents: read`。`defaults.run.shell: bash`（GitHub は `bash --noprofile --norc -eo pipefail` で打つ）。`concurrency` は置かない。NDF は自分が起動した実行だけを読むので、同じ Pull Request の実行を打ち消し合わせる理由が無い
 - 手順「秘密の規則を重ねて探す」
@@ -271,7 +286,7 @@ gitleaks の版と要約値を持つのは、このスクリプトだけであ�
 | 同上 | 親の食い違い | 親が 2 つでない、順が違う、入力の base と違う | `git rev-list --parents -n 1` の比べ | 止める | `::error::マージコミットの親が入力の base と head でない`、1 | 同上 |
 | 同上 | 分岐点を求められない | base と head が共通の祖先を持たない | `git merge-base` の終了コード | 止める | `::error::base と head の分岐点を求められない`、1 | 同上 |
 | 手順「マージコミットの木と履歴の項目を取り出す」 | 取り出しの失敗 | `export-tree.sh` の異常系の表のどれか | `export-tree.sh` の終了コード | 止める | `export-tree.sh` の行（パスを出さない）、1 か 2 | 同上 |
-| 手順「秘密の規則を重ねて探す」 | 当たりか探しの失敗 | `leak-scan-secret.sh` の異常系の表のどれか | 2 回の終了コード | 2 回とも打ってから止める | `leak-scan-secret.sh` と `leak-scan.sh` の行、1 | 同上 |
+| 手順「秘密の規則を重ねて探す」 | 当たりか探しの失敗 | `leak-scan-secret.sh` の異常系の表のどれか | 3 回の呼び出しの終了コード | 3 回とも打ってから止める | `leak-scan-secret.sh` と `leak-scan.sh` の行、1 | 同上 |
 
 ### 内部のデータと定数
 
@@ -325,7 +340,7 @@ gitleaks の版と要約値を持つのは、このスクリプトだけであ�
 | ジョブ `leak-check` | `.github/workflows/ci.yml` | 変更 | `if: github.event_name == 'pull_request'` を足す。`environment` と秘密を持たない | 既定の規則と `.gitleaks.toml` だけで、今の木と分岐点から head までを探す |
 | 手順「今の木と履歴のコミットを探す」（`leak-check`） | 同上 | 変更 | 環境変数は `BASE_SHA`・`HEAD_SHA` だけ（`LEAK_CHECK_PATTERN`・`LEAK_CHECK_REQUIRE_PATTERN`・`EVENT_NAME` を消す） | `leak-scan.sh` を `dir` と `git --range <分岐点>..<head>` で、それぞれ `tools/checks/gitleaks-default.toml` と `.gitleaks.toml` の 2 回、合わせて 4 回打つ |
 | ジョブ `leak-check-push` | 同上 | 新設 | `if: github.event_name == 'push'`・`environment: leak-scan`・`timeout-minutes: 15`。チェックアウト（`fetch-depth: 0`・`persist-credentials: false`）と、gitleaks を置く手順（`tools/checks/install-gitleaks.sh "$RUNNER_TEMP/gitleaks"` の 1 行）は `leak-check` と同じ。gitleaks の版と要約値をジョブの `env` に持たない | main への push で、今の木と到達できるすべてのコミットを、既定の規則と秘密を重ねた設定で探す |
-| 手順「今の木と履歴のコミットを探す」（`leak-check-push`） | 同上 | 新設 | 環境変数 `LEAK_CHECK_PATTERN: ${{ secrets.LEAK_CHECK_PATTERN }}`・`LEAK_CHECK_REQUIRE_PATTERN: ${{ vars.LEAK_CHECK_REQUIRE_PATTERN == '1' && '1' \|\| '' }}` | `leak-scan-secret.sh dir --count-only` と `leak-scan-secret.sh git --count-only` を打ち、どちらかが 0 以外なら 1 で終える |
+| 手順「今の木と履歴のコミットを探す」（`leak-check-push`） | 同上 | 新設 | 環境変数 `LEAK_CHECK_PATTERN: ${{ secrets.LEAK_CHECK_PATTERN }}`・`LEAK_CHECK_REQUIRE_PATTERN: ${{ vars.LEAK_CHECK_REQUIRE_PATTERN == '1' && '1' \|\| '' }}` | `leak-scan-secret.sh dir --count-only` と `leak-scan-secret.sh git --count-only` を打ち、どちらかが 0 以外なら 1 で終える。それぞれ、既定の規則・`.gitleaks.toml`・`nd-real-value` だけの設定の 3 回で探し、`nd-real-value` は件数の行だけを出す（上の `leak-scan-secret.sh` の節の `run_scan`） |
 
 - `leak-check` の手順「gitleaks を固定の版と要約値で置く」は、`tools/checks/install-gitleaks.sh "$RUNNER_TEMP/gitleaks"` の 1 行に替え、ジョブの `env` の `GITLEAKS_VERSION`・`GITLEAKS_SHA256` を消す
 - `leak-check` の手順「gitleaks の設定の結合のテスト」（`setup-node`・`npm ci`・`npm run test:integration -- leak-scan`）は `leak-check` に残す。新しい結合のテストも、ファイルの名前で同じ呼び出しに入る
@@ -377,7 +392,7 @@ gitleaks の版と要約値を持つのは、このスクリプトだけであ�
   - `secrets.LEAK_CHECK_PATTERN` を `env` に持つ手順が「秘密の規則を重ねて探す」のほかにある
   - ジョブの `name` に、6 つの入力の式（`${{ inputs.pr_number }}` など）のどれかが無い
   - 分岐点を求める `git merge-base` に、`$BASE_SHA` と `$HEAD_SHA` 以外を渡す。マージコミットの親を確かめる `git rev-list --parents` が無い
-  - `export-tree.sh` の木の取り出しか `--history` の呼び出しが無い。`leak-scan-secret.sh` の、取り出した木の `dir`・取り出した履歴の `dir`・`git --range` の呼び出しのどれかが無い
+  - `export-tree.sh` の木の取り出しか `--history` の呼び出しが無い。`leak-scan-secret.sh` の、取り出した木の `dir`・取り出した履歴の `history`・`git --range` の呼び出しのどれかが無い
 - `callerViolations` が返す所: `on` が `workflow_dispatch` だけでない。`uses:` が `devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main` でない。`secrets: inherit` を使う。`scan` が `needs: generation` を持たない。`generation` の手順が `vars.LEAK_CHECK_GENERATION` と `inputs.generation` を読まない。最上位の `permissions` が `{ contents: read }` だけでない
 - `leakJobViolations` が返す所
   - 両方のジョブ: gitleaks を置く手順の `run:` が `tools/checks/install-gitleaks.sh "$RUNNER_TEMP/gitleaks"` の 1 行でない。ジョブか手順の `env` に `GITLEAKS_` で始まる名前がある
@@ -418,7 +433,7 @@ gitleaks の版と要約値を持つのは、このスクリプトだけであ�
 | `triggerViolations` | 実際のワークフローで空 | — | `leak-check-secret.yml` に `pull_request_target` か `workflow_run` を足す・`ci.yml` に `pull_request_target` を足すと当たる |
 | `pullRequestChecks` | 実際の `ci.yml` で、必須のチェックの宣言の 7 つと等しい | — | 必須の宣言に無い Pull Request のジョブを足すと当たる |
 | `runCommandWords` | `a && b \| c`・`x="$(git rev-parse y)"` で `a`・`b`・`c`・`git` | `if [[ ... ]]; then` で `[[` | — |
-| `secretWorkflowViolations` | 実際の `leak-check-secret.yml` で空 | — | 決定 4 の箇条ごとに 1 つずつ壊した作り物で、その印が 1 つだけ出る（`ref` を head にする・`npm ci` を足す・`actions/setup-node` を足す・`run:` に `${{ inputs.head_sha }}` を書く・`continue-on-error: true` を足す・表示名から head の SHA を外す・親の確かめを外す・`export-tree.sh --history` の呼び出しか履歴の `dir` の探しを外す・`git archive` を使う・`--details` を足す・`pull-requests: write` を足す・ジョブの `env` に `GITLEAKS_VERSION` を足す・gitleaks を置く手順に `curl` を直に書く） |
+| `secretWorkflowViolations` | 実際の `leak-check-secret.yml` で空 | — | 決定 4 の箇条ごとに 1 つずつ壊した作り物で、その印が 1 つだけ出る（`ref` を head にする・`npm ci` を足す・`actions/setup-node` を足す・`run:` に `${{ inputs.head_sha }}` を書く・`continue-on-error: true` を足す・表示名から head の SHA を外す・親の確かめを外す・`export-tree.sh --history` の呼び出しか履歴の `history` の探しを外す・`git archive` を使う・`--details` を足す・`pull-requests: write` を足す・ジョブの `env` に `GITLEAKS_VERSION` を足す・gitleaks を置く手順に `curl` を直に書く） |
 | `callerViolations` | 実際の見本で空 | — | `secrets: inherit`・`@` の後を SHA にする・世代の確かめを外すと当たる |
 | `leakJobViolations` | 実際の `ci.yml` で空 | — | `leak-check` か `leak-check-push` に `GITLEAKS_SHA256` を戻す・`leak-check` に秘密か `environment` を戻す・`leak-check-push` から `environment` か `dir` の呼び出しを外す・`--range` を渡すと当たる |
 | `actorConditions` | 実際のワークフローで空 | — | `if: github.actor != 'dependabot[bot]'` を足すと当たる |
@@ -433,7 +448,7 @@ gitleaks の版と要約値を持つのは、このスクリプトだけであ�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `secretScan` | `tools/test/leak-scan.integration.test.ts` | 新設 | `secretScan(cwd: string, args: string[], env: { pattern?: string; require?: boolean }): { status: number \| null; output: string }` | `leak-scan-secret.sh` を子のプロセスで打ち、標準出力と標準エラーを合わせて返す。`LEAK_CHECK_PATTERN` と `LEAK_CHECK_REQUIRE_PATTERN` は引数からだけ渡し、テストを打つ人の環境の値を引き継がない |
-| `exportTree` | 同上 | 新設 | `exportTree(cwd: string, args: string[]): { status: number \| null; output: string }` | `export-tree.sh` を、木の取り出し（`[<コミット>, <出力先>]`）か履歴の取り出し（`["--history", <分岐点>, <head>, <出力先>]`）の引数で子のプロセスで打つ |
+| `exportTree` | 同上 | 新設 | `exportTree(cwd: string, args: string[]): { status: number \| null; output: string }` | `export-tree.sh` を、木の取り出し（`[<コミット>, <出力先>]`）・履歴の取り出し（`["--history", <分岐点>, <head>, <出力先>]`）・照らすだけの 2 つ（`--verify`・`--verify-history`）のどれかの引数で子のプロセスで打つ |
 | `mergeRepo` | 同上 | 新設 | `mergeRepo(base: Record<string, string>, head: Record<string, string>): { root: string; baseSha: string; headSha: string; mergeSha: string }` | 共通のコミットから base と head を分け、`git merge --no-ff` で 2 つの親のマージコミットを作る |
 
 - 新しい `describe` は 2 つにする。「秘密を使う探し（leak-scan-secret.sh）」と「木の取り出し（export-tree.sh）」である。中身の観点は、上の 2 つのスクリプトの「単体テストの観点」の表にある
@@ -472,8 +487,8 @@ gitleaks の版と要約値を持つのは、このスクリプトだけであ�
 | 同上 | 秘密と変数の登録 | 非公開リポジトリの作成と見本の写し・秘密 `LEAK_CHECK_PATTERN`・変数 `LEAK_CHECK_GENERATION`。環境 `leak-scan`（使えるブランチは main だけ）とその秘密・変数 `LEAK_CHECK_REQUIRE_PATTERN`。`REF_CHECK_TERMS` の 2 か所。Dependabot の Pull Request では操作が要らず、Dependabot の秘密に `LEAK_CHECK_PATTERN` を登録しないこと |
 | 同上 | NDF の認証の権限 | 非公開リポジトリの変数の読み取り・ワークフローの起動・実行とジョブの読み取りの権限と、読み取りの権限を持つ人を最小にすること。その権限は、1 つの記録の置き場所を共有する NDF の認証にだけ与え、与えた認証と記録の置き場所を控えること（設計文書の決定 7 の手順 6） |
 | 同上 | 秘密を変える手順 | 設計文書の決定 7 の切り替えの手順 1〜4。今の世代の値を控え、非公開リポジトリの変数 `LEAK_CHECK_GENERATION`（世代）を `0` にする → NDF の時間の上限 T を待つ → 控えた記録の置き場所で、NDF の未解決の記録の一覧に、このリポジトリの結果不明と未検証の状態の記録が残っていないことを確かめる → 秘密を変える → 世代を、控えた値に 1 を足した値にする |
-| 同上 | 導入の順序 | 設計文書の決定 10 の手順 2〜6。その手順 3 の中の、1 本目を手元で探してマージの後に確かめる 7 つの手順（マージ先が main であることと、マージの後のマージ先と最初の親の確かめを含む）。1 本目のマージから、NDF の非公開の検査を利用者の設定で有効にする（決定 10 の手順 6）まで、NDF にほかの Pull Request をマージさせず、手で起動した探しの結果でもマージしないこと。手で起動するときの 3 つの手順（決定 7 の手順 1〜3 と同じ方法で 6 つの入力を取る `gh api` の呼び出し → 既定のブランチで起動する → 実行と探しのジョブの結論が成功で、ジョブの表示名の 6 つの値が入力と一致することを確かめる）。2 本目へ進む条件 |
-| 同上 | 当たりの場所を手元で引く | 非公開の記録の表示名の SHA で対象を取り、`export-tree.sh`（木と `--history`）と `leak-scan-secret.sh --details` を打ち、履歴の当たりのコミットを `git log --find-object` で引く手順（決定 8 の手順 1〜4）。main への push の当たりも同じく引くこと。当たりの理由を公開の Pull Request に書かないこと |
+| 同上 | 導入の順序 | 設計文書の決定 10 の手順 2〜6。その手順 3 の中の、1 本目を手元で探してマージの後に確かめる 7 つの手順（マージ先が main であることと、マージの後のマージ先と最初の親の確かめを含む）。1 本目のマージから、NDF の非公開の検査を利用者の設定で有効にする（決定 10 の手順 6）まで、NDF にほかの Pull Request をマージさせず、手で起動した探しの結果でもマージしないこと。手で起動するときの 3 つの手順（決定 7 の手順 1〜3 と同じ方法で 6 つの入力を取る `gh api` の呼び出し → 既定のブランチで、ワークフローの起動の API で起動して `workflow_run_id` を控える → 試行 1 の結論が成功で、試行 1 の `referenced_workflows` に `leak-check-secret.yml@main` の項目がちょうど 1 つあってその SHA が検査のコードのコミットと同じで、試行 1 のすべてのジョブの結論が成功で、ジョブの表示名の 6 つの値が入力と一致することを確かめる）。2 本目へ進む条件 |
+| 同上 | 当たりの場所を手元で引く | 非公開の記録の表示名の SHA で対象を取り、`export-tree.sh <マージコミットの SHA> <木の出力先>` と `export-tree.sh --history <分岐点> <head の SHA> <履歴の出力先>` を別々の空ディレクトリへ打ち、`leak-scan-secret.sh dir <木の出力先> --details` と `leak-scan-secret.sh history <履歴の出力先> --details` を打ち、履歴の当たりのコミットを `git log --find-object` で引く手順（決定 8 の手順 1〜4）。main への push の当たりも同じく引くこと。当たりの理由を公開の Pull Request に書かないこと |
 | 同上 | 見本の写し直し | `docs/operations/leak-check-caller.yml` を変えたら、世代を切り替えて非公開リポジトリへ写し直すこと |
 | 同上 | 振る舞いの変化 | main への push で結合のテストを打たなくなったこと（上の `ci.yml` の節） |
 | `AGENTS.md` | 秘密とインフラの値を置かない | 47 行目の「`leak-check` のジョブが `.gitleaks.toml` に重ねて探す」を、「Pull Request は NDF のマージの直前に検査用の非公開リポジトリで、main への push は環境 `leak-scan` を持つ `leak-check-push` で、`.gitleaks.toml` に重ねて探す」に直し、`docs/operations/ci-checks.md` へリンクする。gitleaks の当たりの外し方の文は変えない |
