@@ -5,6 +5,8 @@ import { EXIT } from "@nd-factory/contracts/exit-codes";
 import { describe, expect, it } from "vitest";
 import { assemblyDigest } from "../lib/assembly-digest.ts";
 import {
+  type DeployArgs,
+  type DiffArgs,
   type RunOptions,
   type SetupDeps,
   STACKS_FILE,
@@ -44,6 +46,28 @@ function isCdk(call: Call, sub: string): boolean {
   return call.args.includes("cdk") && call.args.includes(sub);
 }
 
+// 呼び出しのうち cdk の sub のもの
+function cdkCalls(f: Fake, sub: string): Call[] {
+  return f.calls.filter((c) => isCdk(c, sub));
+}
+
+// スタックの properties。null なら bootstrap の要求を持たない
+function bootstrapProps(required: number | null): { requiresBootstrapStackVersion?: number } {
+  return required === null ? {} : { requiresBootstrapStackVersion: required };
+}
+
+// 作り物の合成の結果（manifest と app の template）を置き場 dir へ書く
+function writeFakeAssembly(dir: string, env: RunOptions["env"], required: number | null): void {
+  mkdirSync(dir, { recursive: true });
+  const props = bootstrapProps(required);
+  const stacks = (env?.ND_STACKS ?? "app").split(",");
+  const artifacts = Object.fromEntries(
+    stacks.map((k) => [`acme-test-${k}`, { type: "aws:cloudformation:stack", properties: props }]),
+  );
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify({ version: "1", artifacts }));
+  writeFileSync(join(dir, "acme-test-app.template.json"), JSON.stringify({ env: env?.CDK_DEFAULT_ACCOUNT }));
+}
+
 // AWS と外部コマンドを差し替えた依存。合成は作り物の合成の結果を置き場へ書く
 function fake(o: FakeOptions = {}): Fake {
   const calls: Call[] = [];
@@ -58,15 +82,8 @@ function fake(o: FakeOptions = {}): Fake {
       if (command === "npm" && args.includes("build")) return o.buildCode ?? 0;
       if (isCdk(call, "synth")) {
         const dir = args[args.indexOf("-o") + 1]!;
-        mkdirSync(dir, { recursive: true });
         const required = o.requiredBootstrap === undefined ? 6 : o.requiredBootstrap;
-        const props = required === null ? {} : { requiresBootstrapStackVersion: required };
-        const stacks = (options.env?.ND_STACKS ?? "app").split(",");
-        const artifacts = Object.fromEntries(
-          stacks.map((k) => [`acme-test-${k}`, { type: "aws:cloudformation:stack", properties: props }]),
-        );
-        writeFileSync(join(dir, "manifest.json"), JSON.stringify({ version: "1", artifacts }));
-        writeFileSync(join(dir, "acme-test-app.template.json"), JSON.stringify({ env: options.env?.CDK_DEFAULT_ACCOUNT }));
+        writeFakeAssembly(dir, options.env, required);
         return o.synthCode ?? 0;
       }
       if (isCdk(call, "diff")) return o.diffCode ?? 0;
@@ -105,10 +122,12 @@ function tempOut(): string {
   return join(mkdtempSync(join(tmpdir(), "nd-setup-")), "assembly");
 }
 
+const CONFIRM_PREFIX = "確認の値: ";
+
 function confirmFrom(f: Fake): string {
-  const line = f.out.find((l) => l.startsWith("確認の値: "));
+  const line = f.out.find((l) => l.startsWith(CONFIRM_PREFIX));
   if (!line) throw new Error("確認の値が出ていない");
-  return line.slice("確認の値: ".length);
+  return line.slice(CONFIRM_PREFIX.length);
 }
 
 describe("parseArgs", () => {
@@ -151,7 +170,7 @@ describe("mainSetup", () => {
     const f = fake();
     const code = await mainSetup(["diff", "--profile", "acme-test", "--settings", FIXTURE, "--out", tempOut()], f.deps);
     expect(code).toBe(EXIT.OK);
-    expect(f.calls.some((c) => isCdk(c, "diff"))).toBe(true);
+    expect(cdkCalls(f, "diff").length > 0).toBe(true);
   });
 
   it("deploy を振り分ける", async () => {
@@ -179,14 +198,25 @@ describe("mainSetup", () => {
   });
 });
 
+// runDiff の引数。既定は作り物の設定・acme-test・新しい置き場・全部の stack
+function diffOpts(overrides: Partial<Omit<DiffArgs, "kind">> = {}): DiffArgs {
+  return {
+    kind: "diff",
+    profile: overrides.profile ?? "acme-test",
+    settings: overrides.settings ?? FIXTURE,
+    out: overrides.out ?? tempOut(),
+    stacks: overrides.stacks ?? null,
+  };
+}
+
 describe("runDiff", () => {
   it("通れば 0 で、差分・資源の名前・戻り先の URL・確認の値を出し、AWS へ書かない", async () => {
     const f = fake();
     const out = tempOut();
-    const code = await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out, stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ out }), f.deps);
     expect(code).toBe(EXIT.OK);
     expect(writes(f)).toBe(0);
-    const diff = f.calls.find((c) => isCdk(c, "diff"))!;
+    const diff = cdkCalls(f, "diff")[0]!;
     expect(diff.args).toEqual(expect.arrayContaining(["--app", out, "--method=template", "acme-test-app", "acme-test-pipeline"]));
     const text = f.out.join("\n");
     expect(text).toContain("acme-test-accounts");
@@ -198,9 +228,9 @@ describe("runDiff", () => {
 
   it("出力の最後に足りない設定の欄を出す", async () => {
     const f = fake();
-    await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    await runDiff(diffOpts(), f.deps);
     const head = f.out.indexOf("足りない設定:");
-    expect(head).toBeGreaterThan(f.out.findIndex((l) => l.startsWith("確認の値: ")));
+    expect(head).toBeGreaterThan(f.out.findIndex((l) => l.startsWith(CONFIRM_PREFIX)));
     // 作り物の設定は Google のクライアントの ID と運用の知らせの宛先を持たない
     const rows = f.out.slice(head + 1);
     expect(rows).toHaveLength(2);
@@ -211,7 +241,7 @@ describe("runDiff", () => {
 
   it("足りない設定があっても終了コードは 0 で、AWS へ書かない", async () => {
     const f = fake({ azs: 1 });
-    const code = await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts(), f.deps);
     expect(code).toBe(EXIT.OK);
     expect(writes(f)).toBe(0);
     expect(f.out.join("\n")).toContain("Fn::GetAZs が返す AZ が 1 つ");
@@ -223,21 +253,21 @@ describe("runDiff", () => {
       throw new Error("壊れた");
     };
     f.deps.readCostAllocationTags = async () => ({ "app-prefix": "Inactive", "app-env": "Active" });
-    const code = await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts(), f.deps);
     expect(code).toBe(EXIT.OK);
     expect(f.out.join("\n")).toContain("を確かめられない（Error: 壊れた）");
   });
 
   it("差分が失敗すれば足りない設定の欄を出さない", async () => {
     const f = fake({ diffCode: 1 });
-    await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    await runDiff(diffOpts(), f.deps);
     expect(f.out.some((l) => l.startsWith("足りない設定"))).toBe(false);
   });
 
   it("合成は作り物でない profile の主体とリージョンを合成へ渡す", async () => {
     const f = fake();
-    await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
-    const synth = f.calls.find((c) => isCdk(c, "synth"))!;
+    await runDiff(diffOpts(), f.deps);
+    const synth = cdkCalls(f, "synth")[0]!;
     expect(synth.options.env).toMatchObject({
       ND_SETTINGS: FIXTURE,
       ND_STACKS: "app,pipeline",
@@ -250,7 +280,7 @@ describe("runDiff", () => {
   it("--stack pipeline だけなら一覧は pipeline だけ", async () => {
     const f = fake();
     const out = tempOut();
-    const code = await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out, stacks: ["pipeline"] }, f.deps);
+    const code = await runDiff(diffOpts({ out, stacks: ["pipeline"] }), f.deps);
     expect(code).toBe(EXIT.OK);
     expect(JSON.parse(readFileSync(join(out, STACKS_FILE), "utf8"))).toMatchObject({ stacks: ["pipeline"] });
     expect(confirmFrom(f)).toMatch(/:pipeline$/);
@@ -259,14 +289,14 @@ describe("runDiff", () => {
 
   it("pipeline の無い設定で --stack pipeline なら 2", async () => {
     const f = fake();
-    const code = await runDiff({ kind: "diff", profile: "p", settings: EXAMPLE, out: tempOut(), stacks: ["pipeline"] }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p", settings: EXAMPLE, stacks: ["pipeline"] }), f.deps);
     expect(code).toBe(EXIT.USAGE);
     expect(f.calls).toHaveLength(0);
   });
 
   it("設定のファイルが無ければ 3 で、合成も profile も呼ばない", async () => {
     const f = fake({ profileError: true });
-    const code = await runDiff({ kind: "diff", profile: "p", settings: "/nd-no-such/settings.json", out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p", settings: "/nd-no-such/settings.json" }), f.deps);
     expect(code).toBe(EXIT.SETTINGS);
     expect(f.calls).toHaveLength(0);
   });
@@ -276,7 +306,7 @@ describe("runDiff", () => {
     const path = join(dir, "s.json");
     writeFileSync(path, JSON.stringify({ prefix: "Acme", login: { google: {} } }));
     const f = fake();
-    const code = await runDiff({ kind: "diff", profile: "p", settings: path, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p", settings: path }), f.deps);
     expect(code).toBe(EXIT.SETTINGS);
     expect(f.err.filter((l) => l.startsWith("prefix:") || l.startsWith("environment:"))).toHaveLength(2);
     expect(writes(f)).toBe(0);
@@ -284,7 +314,7 @@ describe("runDiff", () => {
 
   it("profile の失敗は 4 で、合成を呼ばない", async () => {
     const f = fake({ profileError: true });
-    const code = await runDiff({ kind: "diff", profile: "p", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p" }), f.deps);
     expect(code).toBe(EXIT.PROFILE);
     expect(f.calls).toHaveLength(0);
   });
@@ -295,7 +325,7 @@ describe("runDiff", () => {
     ["差分の作成", { diffCode: 1 }],
   ])("%s の失敗は 6 で、AWS へ書かない", async (_name, opts) => {
     const f = fake(opts);
-    const code = await runDiff({ kind: "diff", profile: "p", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p" }), f.deps);
     expect(code).toBe(EXIT.BUILD);
     expect(writes(f)).toBe(0);
     expect(f.out.some((l) => l.startsWith("確認の値"))).toBe(false);
@@ -303,17 +333,17 @@ describe("runDiff", () => {
 
   it("bootstrap の版が足りなければ 5 で、求める版と今の版を出し、差分を作らない", async () => {
     const f = fake({ requiredBootstrap: 30, currentBootstrap: 21 });
-    const code = await runDiff({ kind: "diff", profile: "p", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p" }), f.deps);
     expect(code).toBe(EXIT.BOOTSTRAP);
     expect(f.err.join("\n")).toMatch(/30/);
     expect(f.err.join("\n")).toMatch(/21/);
-    expect(f.calls.some((c) => isCdk(c, "diff"))).toBe(false);
+    expect(cdkCalls(f, "diff").length > 0).toBe(false);
     expect(writes(f)).toBe(0);
   });
 
   it("bootstrap が無ければ 5", async () => {
     const f = fake({ currentBootstrap: null });
-    const code = await runDiff({ kind: "diff", profile: "p", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p" }), f.deps);
     expect(code).toBe(EXIT.BOOTSTRAP);
     expect(writes(f)).toBe(0);
   });
@@ -323,17 +353,21 @@ describe("runDiff", () => {
     f.deps.readBootstrapVersion = async () => {
       throw new Error("AccessDenied");
     };
-    const code = await runDiff({ kind: "diff", profile: "p", settings: FIXTURE, out: tempOut(), stacks: null }, f.deps);
+    const code = await runDiff(diffOpts({ profile: "p" }), f.deps);
     expect(code).toBe(EXIT.BOOTSTRAP);
     expect(writes(f)).toBe(0);
   });
 });
 
-async function diffThen(f: Fake, stacks: Array<"app" | "pipeline"> | null = null): Promise<{ out: string; confirm: string }> {
+async function diffThen(f: Fake): Promise<{ out: string; confirm: string }> {
   const out = tempOut();
-  const code = await runDiff({ kind: "diff", profile: "acme-test", settings: FIXTURE, out, stacks }, f.deps);
+  const code = await runDiff(diffOpts({ out }), f.deps);
   expect(code).toBe(EXIT.OK);
   return { out, confirm: confirmFrom(f) };
+}
+
+function deployOpts(out: string, confirm: string, overrides: Partial<Pick<DeployArgs, "profile">> = {}): DeployArgs {
+  return { kind: "deploy", profile: overrides.profile ?? "acme-test", assembly: out, confirm };
 }
 
 describe("runDeploy", () => {
@@ -341,9 +375,9 @@ describe("runDeploy", () => {
     const first = fake();
     const { out, confirm } = await diffThen(first);
     const f = fake();
-    const code = await runDeploy({ kind: "deploy", profile: "acme-test", assembly: out, confirm }, f.deps);
+    const code = await runDeploy(deployOpts(out, confirm), f.deps);
     expect(code).toBe(EXIT.OK);
-    const deploys = f.calls.filter((c) => isCdk(c, "deploy"));
+    const deploys = cdkCalls(f, "deploy");
     expect(deploys).toHaveLength(1);
     expect(deploys[0]!.args).toEqual(
       expect.arrayContaining(["--app", out, "--profile", "acme-test", "acme-test-app", "acme-test-pipeline"]),
@@ -355,20 +389,30 @@ describe("runDeploy", () => {
     const { out, confirm } = await diffThen(fake());
     writeFileSync(join(out, "acme-test-app.template.json"), "{}");
     const f = fake();
-    expect(await runDeploy({ kind: "deploy", profile: "acme-test", assembly: out, confirm }, f.deps)).toBe(EXIT.CONFIRM_MISMATCH);
+    expect(await runDeploy(deployOpts(out, confirm), f.deps)).toBe(EXIT.CONFIRM_MISMATCH);
     expect(writes(f)).toBe(0);
   });
 
   it("別のアカウントの profile なら 7 で、AWS へ書かない", async () => {
     const { out, confirm } = await diffThen(fake());
     const f = fake({ target: { profile: "other", account: "210987654321", region: "us-west-2" } });
-    expect(await runDeploy({ kind: "deploy", profile: "other", assembly: out, confirm }, f.deps)).toBe(EXIT.CONFIRM_MISMATCH);
+    expect(await runDeploy(deployOpts(out, confirm, { profile: "other" }), f.deps)).toBe(EXIT.CONFIRM_MISMATCH);
+    expect(writes(f)).toBe(0);
+  });
+
+  it("置き場とアカウントが同じでも、確認の値だけが違えば 7 で、AWS へ書かない", async () => {
+    const { out, confirm } = await diffThen(fake());
+    const [digest, ...rest] = confirm.split(":");
+    const other = [digest === "0".repeat(12) ? "f".repeat(12) : "0".repeat(12), ...rest].join(":");
+    expect(other).not.toBe(confirm);
+    const f = fake();
+    expect(await runDeploy(deployOpts(out, other), f.deps)).toBe(EXIT.CONFIRM_MISMATCH);
     expect(writes(f)).toBe(0);
   });
 
   it("置き場が無ければ 3", async () => {
     const f = fake();
-    expect(await runDeploy({ kind: "deploy", profile: "p", assembly: tempOut(), confirm: "x" }, f.deps)).toBe(EXIT.SETTINGS);
+    expect(await runDeploy(deployOpts(tempOut(), "x", { profile: "p" }), f.deps)).toBe(EXIT.SETTINGS);
     expect(f.calls).toHaveLength(0);
   });
 
@@ -377,29 +421,29 @@ describe("runDeploy", () => {
     mkdirSync(out, { recursive: true });
     writeFileSync(join(out, "manifest.json"), "{}");
     const f = fake();
-    expect(await runDeploy({ kind: "deploy", profile: "p", assembly: out, confirm: "x" }, f.deps)).toBe(EXIT.SETTINGS);
+    expect(await runDeploy(deployOpts(out, "x", { profile: "p" }), f.deps)).toBe(EXIT.SETTINGS);
     expect(writes(f)).toBe(0);
   });
 
   it("profile の失敗は 4", async () => {
     const { out, confirm } = await diffThen(fake());
     const f = fake({ profileError: true });
-    expect(await runDeploy({ kind: "deploy", profile: "p", assembly: out, confirm }, f.deps)).toBe(EXIT.PROFILE);
+    expect(await runDeploy(deployOpts(out, confirm, { profile: "p" }), f.deps)).toBe(EXIT.PROFILE);
     expect(writes(f)).toBe(0);
   });
 
   it("bootstrap の失敗は 5", async () => {
     const { out, confirm } = await diffThen(fake());
     const f = fake({ currentBootstrap: 1 });
-    expect(await runDeploy({ kind: "deploy", profile: "acme-test", assembly: out, confirm }, f.deps)).toBe(EXIT.BOOTSTRAP);
+    expect(await runDeploy(deployOpts(out, confirm), f.deps)).toBe(EXIT.BOOTSTRAP);
     expect(writes(f)).toBe(0);
   });
 
   it("cdk deploy の失敗は 8", async () => {
     const { out, confirm } = await diffThen(fake());
     const f = fake({ deployCode: 1 });
-    expect(await runDeploy({ kind: "deploy", profile: "acme-test", assembly: out, confirm }, f.deps)).toBe(EXIT.DEPLOY_FAILED);
-    expect(f.calls.filter((c) => isCdk(c, "deploy"))).toHaveLength(1);
+    expect(await runDeploy(deployOpts(out, confirm), f.deps)).toBe(EXIT.DEPLOY_FAILED);
+    expect(cdkCalls(f, "deploy")).toHaveLength(1);
   });
 });
 
@@ -436,7 +480,7 @@ describe("synthesize", () => {
 describe("checkBootstrap", () => {
   function assemblyRequiring(required: number | null): string {
     const dir = mkdtempSync(join(tmpdir(), "nd-boot-"));
-    const props = required === null ? {} : { requiresBootstrapStackVersion: required };
+    const props = bootstrapProps(required);
     writeFileSync(
       join(dir, "manifest.json"),
       JSON.stringify({ artifacts: { a: { type: "aws:cloudformation:stack", properties: props }, b: { type: "cdk:tree" } } }),
