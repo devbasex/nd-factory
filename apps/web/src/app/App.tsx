@@ -13,6 +13,7 @@ import { ErrorNotice } from "../ui/error-notice.tsx";
 import { Loading } from "../ui/loading.tsx";
 import { OfflineBanner } from "../ui/offline-banner.tsx";
 import type { BootState } from "./boot.ts";
+import type { DEVICE_PARTS } from "./device.ts";
 
 const PlaceholderScreen = lazy(async () => ({ default: (await import("../screens/placeholder.tsx")).PlaceholderScreen }));
 
@@ -35,6 +36,8 @@ export type AppDeps = {
   reload: () => void;
   // 共通の部品の一覧。機能の画面（#28）がまだ使わない部品も、起動の組み立てから届くようにする
   components: typeof CATALOG;
+  // 端末のデータの部品。ログインの切り替えと、#4 のサインインとサインアウトが呼ぶ
+  device: typeof DEVICE_PARTS;
 };
 
 type ReadyState = Extract<BootState, { kind: "ready" }>;

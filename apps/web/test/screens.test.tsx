@@ -9,6 +9,7 @@ import { createAppRouter } from "../src/routes/router.tsx";
 import { MeScreen } from "../src/screens/me.tsx";
 import { type PlaceholderData, PlaceholderScreen } from "../src/screens/placeholder.tsx";
 import { SigninScreen } from "../src/screens/signin.tsx";
+import { DEVICE_PARTS } from "../src/app/device.ts";
 import { CATALOG } from "../src/ui/catalog.ts";
 import { buttonNamed, click, render, unmountAll } from "./support/render.tsx";
 
@@ -27,6 +28,7 @@ function deps(over: Partial<AppDeps> = {}): AppDeps {
     placeholder: async () => ({ kind: "empty" }),
     reload: vi.fn(),
     components: CATALOG,
+    device: DEVICE_PARTS,
     ...over,
   };
 }

@@ -7,6 +7,7 @@ import { createConnectivity } from "../offline/connectivity.ts";
 import { CATALOG } from "../ui/catalog.ts";
 import type { AppDeps } from "./App.tsx";
 import type { BootDeps } from "./boot.ts";
+import { DEVICE_PARTS } from "./device.ts";
 
 // 本物かダミーを選び、各要素を 1 度だけ組む
 
@@ -22,6 +23,7 @@ export async function composeApp({ window: win }: BrowserEnv): Promise<AppDeps &
   const base = {
     i18n,
     components: CATALOG,
+    device: DEVICE_PARTS,
     location: win.location,
     history: win.history,
     sessionStorage: win.sessionStorage,
