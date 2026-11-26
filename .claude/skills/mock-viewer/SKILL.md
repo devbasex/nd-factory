@@ -40,6 +40,8 @@ open -na "Google Chrome" --args --remote-debugging-port=9223 --user-data-dir="$H
 | B（リモートのホスト）で、SSH の転送先がホストの `127.0.0.1:9223` | `npm run mock:up` |
 | ほかの場所に CDP が届いている | `CDP_URL=http://<ホスト>:<ポート> npm run mock:up` |
 
+`mock:up` はコンテナを常に `--network host` で起動する。経路 A で Docker Desktop を使う場合は、4.34 以降で[ホストネットワーク](https://docs.docker.com/engine/network/drivers/host/)の設定を有効にしてから、表のコマンドを実行する。設定を変更できない場合は、「開かないとき」の HTTP サーバーの手順を使う。
+
 下の「使い方」などの `npm run mock:up` も、経路に合わせて `CDP_URL` を付けて打つ。
 
 ## 使い方
