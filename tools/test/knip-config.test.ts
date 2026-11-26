@@ -83,6 +83,11 @@ function write(root: string, path: string, content: string): void {
   writeFileSync(join(root, path), content);
 }
 
+/** 設定の入口から木に置くファイルのパスを求める。末尾の ! は knip の production の印で、パスの一部ではない */
+function entryPath(entry: string): string {
+  return entry.replace(/!$/, "");
+}
+
 /** 設定の入口と除外に合わせた木を組む。入口のファイルを置き、除外する依存と、除外する実行ファイルを打つスクリプトを package.json に載せる */
 function buildTree({ config, manifest = (_d, m) => m, files = {} }: Tree): string {
   const root = mkdtempSync(join(tmpdir(), "knip-config-"));
@@ -99,13 +104,14 @@ function buildTree({ config, manifest = (_d, m) => m, files = {} }: Tree): strin
       ...(Object.keys(binaries).length > 0 ? { scripts: { ...(base.scripts as object | undefined), ...binaries } } : {}),
     };
     write(root, join(ws.dir, "package.json"), JSON.stringify(manifest(ws.dir, withIgnored)));
+    const usesContracts = "@nd-factory/contracts" in ((ws.manifest.dependencies as Record<string, string> | undefined) ?? {});
     // 生成した画面の呼び出しの入口は、木の生成したファイルが当たる
     for (const entry of (wsConfig.entry ?? []).filter((e) => !(ws.dir === "apps/web" && e === GENERATED_ENTRY))) {
-      // 末尾の ! は knip の production の印で、パスの一部ではない
-      const path = entry.replace(/!$/, "");
+      const path = entryPath(entry);
       if (/[*?{}[\]!]/.test(path)) throw new Error(`入口の glob はこのテストの木に置けない: ${ws.dir} の ${entry}`);
-      // 入口は起点で、書き出しを持たない（includeEntryExports で入口の書き出しも照らすため、書き出すと当たる）
-      write(root, join(ws.dir, path), 'import { schema } from "@nd-factory/contracts/schema";\nconsole.log(schema);\n');
+      // 入口は起点で、書き出しを持たない（includeEntryExports で入口の書き出しも照らすため、書き出すと当たる）。
+      // 宣言した依存だけを読む（宣言の無い依存を読むと knip が未宣言の依存として当て、宣言して読まないと使われない依存として当てる）
+      write(root, join(ws.dir, path), usesContracts ? 'import { schema } from "@nd-factory/contracts/schema";\nconsole.log(schema);\n' : 'console.log("entry");\n');
     }
   }
   for (const [path, content] of Object.entries({ ...BASE_FILES, ...files })) write(root, path, content);
@@ -307,11 +313,11 @@ describe("受け入れ条件 1・5・12: knip.jsonc の使っていないもの�
       expect(withEntry.length).toBeGreaterThan(0);
       for (const [dir, ws] of withEntry) {
         const { entry: _entry, ...rest } = ws;
-        const tree = buildTree({ config, files: Object.fromEntries((ws.entry ?? []).map((e) => [join(dir, e), "export const entry = 1;\n"])) });
+        const tree = buildTree({ config, files: Object.fromEntries((ws.entry ?? []).map((e) => [join(dir, entryPath(e)), "export const entry = 1;\n"])) });
         write(tree, "knip.jsonc", JSON.stringify({ ...config, workspaces: { ...config.workspaces, [dir]: rest } }));
         const run = runKnip(tree);
         expect(run.status, dir).toBe(1);
-        expect([...run.files].sort(), dir).toEqual((ws.entry ?? []).map((e) => join(dir, e.replace(/!$/, ""))).sort());
+        expect([...run.files].sort(), dir).toEqual((ws.entry ?? []).map((e) => join(dir, entryPath(e))).sort());
       }
     },
     KNIP_TIMEOUT,
