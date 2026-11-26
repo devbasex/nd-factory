@@ -119,7 +119,7 @@ NDF の認証は、`<非公開リポジトリ>` に対して次の権限を持�
 秘密を渡す前に、秘密を受けて動くスクリプトと設定の一式を読んで確かめ、そのコミットに固定する。探す対象のコミットは、データとして取り込むだけで、そのチェックアウトのコードは動かさない。
 
 1. 1 本目の Pull Request の head の SHA を控える（以後「確かめたコミット」）
-2. 確かめたコミットの `tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`tools/checks/install-gitleaks.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml` の 6 つを、差分だけでなく全体を読む。秘密を外へ送る処理や、ほかのファイルを動かす処理が無いこと、`install-gitleaks.sh` の版と要約値が main の `ci.yml` の `leak-check` の値と同じことを確かめる
+2. 確かめたコミットの `tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`tools/checks/install-gitleaks.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml` の 6 つと、`tools/checks/leak_scan/`（`leak-scan.sh` が起こす検査の本体）のすべてのファイルを、差分だけでなく全体を読む。秘密を外へ送る処理や、ほかのファイルを動かす処理が無いこと、`install-gitleaks.sh` の版と要約値が main の `ci.yml` の `leak-check` の値と同じことを確かめる
 3. 確かめたコミットを、探す対象とは別のディレクトリにチェックアウトする。秘密を渡して動かすのは、このディレクトリのスクリプトと設定だけである。gitleaks は、このディレクトリの `install-gitleaks.sh` で置く（`GITHUB_PATH` を空にして打ち、置いた先を `PATH` に足す）
 4. 探す対象は、`refs/pull/<番号>/head` と `refs/pull/<番号>/merge` を取り込んだ別のリポジトリにする。Pull Request の取得の API の `base.ref` で、マージ先のブランチが main であることを確かめる。取り込んだ head が確かめたコミットと同じで、マージコミットの最初の親が今の main の先頭、2 つ目の親が確かめたコミットであることを確かめる。このときの main の先頭の SHA を「探した base」として控える。どれかが違えば手順 1 からやり直す
 5. 探す対象のリポジトリで、手順 3 のスクリプトを絶対パスで打つ。マージコミットの木を `export-tree.sh <マージコミット> <空のディレクトリ>` で、分岐点（`git merge-base <探した base> <確かめたコミット>`）から head までの履歴の項目を `export-tree.sh --history <分岐点> <確かめたコミット> <別の空のディレクトリ>` で、作業ツリーの外に取り出す。秘密を `LEAK_CHECK_PATTERN` に、`LEAK_CHECK_REQUIRE_PATTERN=1` を渡し、`leak-scan-secret.sh dir <木>`・`leak-scan-secret.sh history <履歴>`・`leak-scan-secret.sh git --range <分岐点>..<確かめたコミット>` を打つ。設定は、スクリプトが手順 3 のチェックアウトから絶対パスで読む
@@ -189,7 +189,7 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
 1. 探すコミットの SHA を控える（以後「対象のコミット」）
 2. 新しい空のディレクトリに公開のリポジトリを複製し（`git clone https://github.com/devbasex/nd-factory.git <空のディレクトリ>`）、そこへ移る。対象のコミットが main に無いとき（Pull Request のマージコミット）は、`git fetch origin refs/pull/<番号>/merge` で取り込む
 3. `git checkout --detach <対象のコミット>` でチェックアウトし、`git rev-parse HEAD` が対象のコミットと同じこと、`git status --porcelain` が何も出さないことを確かめる
-4. 対象のコミットがまだ main に無いときは、秘密を渡す前に、「1 本目を手元で探す」の手順 2 に挙げた 6 つのファイルを、差分だけでなく全体を読み、秘密を外へ送る処理や、ほかのファイルを動かす処理が無いことを確かめる。秘密を受けて動くのは、このチェックアウトのスクリプトだからである。gitleaks の版か要約値を変えるコミットでは、対象のコミットの `install-gitleaks.sh` が取る配布物が gitleaks の公式の配布（`github.com/gitleaks/gitleaks` の Releases）で、要約値がその配布物を自分で取って `sha256sum` で求めた値と同じことも確かめてから打つ。main の `ci.yml` の値とは照らし合わせない（1 本目のマージの後の `ci.yml` は `install-gitleaks.sh` を呼ぶだけで、版と要約値を持たない）
+4. 対象のコミットがまだ main に無いときは、秘密を渡す前に、「1 本目を手元で探す」の手順 2 に挙げた 6 つのファイルと `tools/checks/leak_scan/` を、差分だけでなく全体を読み、秘密を外へ送る処理や、ほかのファイルを動かす処理が無いことを確かめる。秘密を受けて動くのは、このチェックアウトのスクリプトだからである。gitleaks の版か要約値を変えるコミットでは、対象のコミットの `install-gitleaks.sh` が取る配布物が gitleaks の公式の配布（`github.com/gitleaks/gitleaks` の Releases）で、要約値がその配布物を自分で取って `sha256sum` で求めた値と同じことも確かめてから打つ。main の `ci.yml` の値とは照らし合わせない（1 本目のマージの後の `ci.yml` は `install-gitleaks.sh` を呼ぶだけで、版と要約値を持たない）
 5. このチェックアウトの `install-gitleaks.sh` で gitleaks を置き、置いた先を `PATH` の先頭に足す。`install-gitleaks.sh` が失敗したら（取得・要約値の確かめ・取り出しの失敗。終了コードが `0` でない）、先へ進まない。続けて、`command -v gitleaks` が今回置いた先の `gitleaks` を指すことと、`gitleaks version` が `install-gitleaks.sh` の `GITLEAKS_VERSION` と同じことを確かめる。版の番号だけでは、前から入っていた同じ版の gitleaks と見分けられないためである
 
    ```bash
@@ -386,7 +386,7 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
      - 手順 6 で実際の head を決められたときは、`git fetch origin refs/pull/<番号>/head` を打ち、`git cat-file -e '<実際の head>^{commit}'` で実際の head が手元にあることを確かめる。無ければ `git fetch origin '<実際の head>'` で取り込む
      - 実際の head を決められなかったか、取り込めなかったとき、またはできたコミットの親が 1 つでないときは、その旨を作業の記録に残す。7-3・7-4 は打ち、7-5 は打たずに 7-6 に進む
    - **7-3.** 実際にマージされたコミットの規則（`.gitleaks.toml`・`tools/checks/gitleaks-default.toml`）か gitleaks の版（`tools/checks/install-gitleaks.sh`）が、探したマージコミットと違えば、7-1 の検査のコードではそのコミットの規則と版で探せない。この場合は、7-4 の代わりに、実際にマージされたコミットを「main のコミットを手元で探し直す」で探す。7-5 の変更後の設定にも、このチェックアウトを使う
-     - そのコミットが main に入っていても、その手順 4 の 6 つのファイルの読み込みを省かない。その手順 4 は main のコミットを読み込みの対象から外すが、マージの後の探し直しで探すコミットは、この手順のどこでも読んで確かめていないためである。gitleaks を置く（その手順 5）前に、6 つのファイルを全体を読んで確かめ、版か要約値が違えば配布物と要約値も確かめる。秘密を渡すのは、そのあとである
+     - そのコミットが main に入っていても、その手順 4 の 6 つのファイルの読み込みを省かない。その手順 4 は main のコミットを読み込みの対象から外すが、マージの後の探し直しで探すコミットは、この手順のどこでも読んで確かめていないためである。gitleaks を置く（その手順 5）前に、6 つのファイルと `tools/checks/leak_scan/` を全体を読んで確かめ、版か要約値が違えば配布物と要約値も確かめる。秘密を渡すのは、そのあとである
    - **7-4.** 規則と版が同じなら、7-2 のチェックアウトの中で、7-1 のディレクトリのスクリプトを絶対パスで打つ。打つ前に、7-1 のチェックアウトで gitleaks を置いたディレクトリ（「main のコミットを手元で探し直す」の手順 5 で `install-gitleaks.sh` に渡した `$dest`。実行ファイルではなく、それを入れたディレクトリ）を `PATH` の先頭に足し、`command -v gitleaks` がそのディレクトリの中の `gitleaks` を指すことを確かめる。指さなければ、前から入っていた別の版の gitleaks で探すことになるので、打たない。秘密は `LEAK_CHECK_PATTERN` に、`LEAK_CHECK_REQUIRE_PATTERN=1` を渡す。`dir` の探しは、木の書き出しが成功したときだけ打つ。M2 と同じく、`export-tree.sh` は途中まで書き出してから失敗することがあり、`dir` の検査は書き出しがそろっているかを確かめないためである。書き出しが失敗したら、残りを使わず、新しい空のディレクトリに書き出し直す
 
      ```bash
@@ -403,7 +403,7 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
      ```
    - **7-5.** 実際に取り込んだ base と head の組み合わせで、Pull Request の途中のコミットを、変更前と変更後の両方の設定で探す。探すのは、パスの名前と中身を探す `history` と、途中のコミットの差分を探す `git --range` の 2 つで、非公開の検査が探すものと同じである。squash でできたコミットからは途中のコミットをたどれないので、7-4 の `git` の探しでは途中のコミットにだけ現れた秘密を見落とす。実際の base はできたコミットの親（`git rev-parse <コミット>^1`）、実際の head は手順 6 で決めた head である
      - 変更後の設定: 7-3 で規則か版が違ったなら実際にマージされたコミットのチェックアウト、同じなら 7-1 のディレクトリを使う
-     - 変更前の設定: 実際の base を、さらに別の新しい空のディレクトリで「main のコミットを手元で探し直す」の手順 2〜5 のとおりに用意したチェックアウトを使う。実際の base が探した base（探したマージコミットの最初の親）と同じなら、マージの前の main の先頭なので、その手順 4 の読み込みは省いてよい。違うとき（別のブランチにマージされたときなど）は、そのコミットの検査のコードを信頼できるかが分からない。main に入っているかどうかによらず、gitleaks を置く前に、その手順 4 のとおりに 6 つのファイルを全体を読んで確かめる。版か要約値が探した base と違えば、配布物と要約値も確かめる。秘密を渡すのは、そのあとである
+     - 変更前の設定: 実際の base を、さらに別の新しい空のディレクトリで「main のコミットを手元で探し直す」の手順 2〜5 のとおりに用意したチェックアウトを使う。実際の base が探した base（探したマージコミットの最初の親）と同じなら、マージの前の main の先頭なので、その手順 4 の読み込みは省いてよい。違うとき（別のブランチにマージされたときなど）は、そのコミットの検査のコードを信頼できるかが分からない。main に入っているかどうかによらず、gitleaks を置く前に、その手順 4 のとおりに 6 つのファイルと `tools/checks/leak_scan/` を全体を読んで確かめる。版か要約値が探した base と違えば、配布物と要約値も確かめる。秘密を渡すのは、そのあとである
      - 変更前の設定のチェックアウトの検査のコードが、`nd-real-value` の探しの失敗を報告しないことがある。そのような版の `--count-only` は、当たりと読み飛ばしが同時に起きても、件数の行と終了コード `1` しか出さない。そこで、実際の base の `tools/checks/leak-scan-secret.sh` を読み、`--count-only` で読み飛ばしを見つけて、件数とは別に失敗を報告する処理があるかを確かめる。固定の文字列では検索しない。現行の版では、規則の名前を `${RULE_ID}` で埋めて失敗の行（`FAILED_LINE`）を組み立てるので、出力に出る `nd-real-value の探しが失敗した` という文字列はソースに無いためである。現行の版の処理は次のとおりで、これと同じ働きがあれば、失敗を報告できる版とする
        - `count_failed` が、`nd-real-value` の探しの終了コードと出力から、当たりのほかの失敗を含むかを見分け、含めば `nd_failed` を立てる
        - 最後に、`nd_failed` が立っていれば `FAILED_LINE` を出力する
@@ -429,7 +429,7 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
        ```
 
        **変更前の設定を確認済みの検査のコードで探し直す**。変更前の設定の規則・対象・gitleaks の版は変えずに、失敗を報告できる確認済みの検査のコード（7-1 のディレクトリのスクリプト）で探す。`leak-scan-secret.sh` は、スクリプトを置いたチェックアウトの根から規則を読むので、確認済みのスクリプトと実際の base の規則を 1 つのディレクトリに集めて打つ
-       1. 新しい空のディレクトリ（以後「集めたディレクトリ」）に `tools/checks` を作り、7-1 のディレクトリの `tools/checks/leak-scan-secret.sh` と `tools/checks/leak-scan.sh` を写す。写した `leak-scan-secret.sh` に、上の段落で確かめた、失敗を報告する処理があることを、同じ見方で確かめる
+       1. 新しい空のディレクトリ（以後「集めたディレクトリ」）に `tools/checks` を作り、7-1 のディレクトリの `tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`tools/checks/leak_scan/`（ディレクトリごと。`leak-scan.sh` が本体を起こすのに要る）を写す。写した `leak-scan-secret.sh` に、上の段落で確かめた、失敗を報告する処理があることを、同じ見方で確かめる
        2. 集めたディレクトリに、実際の base のチェックアウトの `.gitleaks.toml` を根に、`tools/checks/gitleaks-default.toml` を `tools/checks` に写す。7-1 の規則は写さない
        3. `PATH` の先頭には、上と同じく、実際の base のチェックアウトで gitleaks を置いたディレクトリを足し、`command -v gitleaks` がその中の `gitleaks` を指すことを確かめる
        4. 作業ディレクトリを 7-2 のチェックアウトにし、次のコマンドを打つ。上のコマンドと違い、履歴の書き出し（`export-tree.sh`）は元の `history` の探しと同じ、実際の base のチェックアウトの確認済みのスクリプトを絶対パスで打つ。集めたディレクトリには `export-tree.sh` を写していないためである。2 つのスキャンのスクリプトは、集めたディレクトリのものを絶対パスで打つ。範囲は元の探しと同じ実際の base と実際の head にし、書き出しの先は新しい空のディレクトリにする
@@ -470,6 +470,8 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
        | --- | --- |
        | `leak-scan: gitleaks が警告か誤りを出した` | 既定の規則か `.gitleaks.toml` の探し（読めずに飛ばした対象がある） |
        | `leak-scan: gitleaks の報告を読めない` | 既定の規則か `.gitleaks.toml` の探し |
+      | `leak-scan: gitleaks が中身を読まずに飛ばしたファイルを探せなかった` | 既定の規則か `.gitleaks.toml` の `dir` の探し（飛ばしたファイル・名前で外したファイル・アーカイブの中を探せない） |
+      | `leak-scan: 履歴を最後まで探し終えたことを確かめられなかった` | 既定の規則か `.gitleaks.toml` の `git` の探し（読み終えたことを確かめられないファイルがある） |
        | `leak-scan-secret: nd-real-value の探しが失敗した` | `nd-real-value` の探し（読めずに飛ばした対象があるか、gitleaks が失敗した） |
        | `leak-scan-secret: nd-real-value の件数を読めない` | `nd-real-value` の探し（報告を書けなかった） |
 
