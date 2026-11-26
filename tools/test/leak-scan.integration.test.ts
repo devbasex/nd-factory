@@ -1899,6 +1899,36 @@ describe("今の木の探し直し（#98 の 3・4）", () => {
   }, TIMEOUT);
 });
 
+describe("道具の版の確かめ", () => {
+  /** name の代わりに body を打つ起動スクリプトを PATH の先頭に置いた環境 */
+  const shadowed = (name: string, body: string) => {
+    const bin = tempDir("leak-oldtool-");
+    writeFileSync(join(bin, name), `#!/usr/bin/env bash\n${body}\n`);
+    chmodSync(join(bin, name), 0o755);
+    return { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` };
+  };
+
+  it("python3 が 3.11 より古ければ、探しの固定の行で 1", () => {
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+    const env = shadowed("python3", "exit 1");
+    for (const [mode, message] of [["dir", UNSEARCHED_MESSAGE], ["git", HISTORY_MESSAGE]] as const) {
+      const result = spawnSync("bash", [SCRIPT, mode, ND_CONFIG], { cwd: root, encoding: "utf8", env });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(message);
+      expect(result.stderr).toContain("python3 が 3.11 より古い");
+    }
+  }, TIMEOUT);
+
+  it("git が 2.40 より古ければ、履歴の探しは固定の行で 1", () => {
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+    const env = shadowed("git", `[[ "$1" == --version ]] && { echo "git version 2.39.5"; exit 0; }\nexec '${which("git")}' "$@"`);
+    const result = spawnSync("bash", [SCRIPT, "git", ND_CONFIG], { cwd: root, encoding: "utf8", env });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(HISTORY_MESSAGE);
+    expect(result.stderr).toContain("git が 2.40 より古い");
+  }, TIMEOUT);
+});
+
 describe("名前で外すファイル（#98 の決定 6）", () => {
   it("追跡していない依存のディレクトリは当てず、追跡したもの・vendor・img は木と履歴で当たる", () => {
     const untracked = makeRepo({ "a.md": "中身\n" }, "first").root;
@@ -2339,6 +2369,21 @@ describe("絞った許可（#98 の 5・決定 5）", () => {
     const { root, base } = forkRepo();
     step(root, { "e.md": `https://acme-bucket.s3.${"us-west-2.amazonaws.com"}/p\n${s3Arn}acme-assets\n` });
     expect(rulesByFile(gitScan(root, ND_CONFIG, base).findings)).toEqual({ "e.md": ["nd-aws-arn-s3", "nd-aws-endpoint"] });
+  }, TIMEOUT);
+
+  it("サービス名と DNS の接尾辞に大文字を混ぜた端点も当たる", () => {
+    const endpoints = [
+      `${word()}.${"Execute-API.us-west-2.AmazonAWS.com"}`,
+      `${word()}.${"Lambda-URL.us-west-2.On.AWS"}`,
+      `d${lower(13)}.${"CloudFront.NET"}`,
+      `${word()}.${"Auth.us-west-2.AmazonCognito.COM"}`,
+      `${word()}.${lower(12)}.us-west-2.${"RDS.AmazonAWS.com"}`,
+      `${word()}.${"S3.US-West-2.AMAZONAWS.COM"}`,
+    ];
+    const root = makeTree({ "e.md": endpoints.map((host) => `https://${host}/p\n`).join("") });
+    const result = scan(root, ["dir", ND_CONFIG]);
+    expect(result.findings.filter((f) => f.RuleID === "nd-aws-endpoint").map((f) => f.StartLine).sort((a, b) => a - b)).toEqual(endpoints.map((_, i) => i + 1));
+    expect(result.status).toBe(1);
   }, TIMEOUT);
 
   it("実際の名前になり得る端点・置き場・ARN・資源の ID は当たる", () => {

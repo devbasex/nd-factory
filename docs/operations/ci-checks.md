@@ -59,6 +59,17 @@ NDF の認証は、`<非公開リポジトリ>` に対して次の権限を持�
 - `<非公開リポジトリ>` に読み取りの権限を持つ人を最小にする（実行の記録に当たりの規則・行・コミットが出る）
 - この権限は、1 つの記録の置き場所を共有する NDF の認証にだけ与える。マージの要求の排他は置き場所をまたいで効かないためである。**権限を与えた NDF の認証と、その記録の置き場所を控える**（「秘密を変える手順」の手順 2 で使う）
 
+## 手元の検査に要る道具
+
+この文書の手元の検査は、始める前に端末の道具の版を確かめる。
+
+| 道具 | 最低の版 | 版の確かめ方 |
+| --- | --- | --- |
+| Python（`python3` の名前で起動するもの） | 3.11 | `python3 --version` |
+| Git | 2.40 | `git --version` |
+
+版が足りないと、`leak-scan.sh` は起動時に `leak-scan: python3 が 3.11 より古い` か `leak-scan: git が 2.40 より古い` を出して終了コード `1` で終える（Git の版は履歴の探しでだけ確かめる）。この終了は当たりの有無を判定していないので、道具を新しくしてから打ち直す。gitleaks は、各手順の `install-gitleaks.sh` が固定の版を置く。
+
 ## 秘密を変える手順
 
 `<非公開リポジトリ>` の秘密 `LEAK_CHECK_PATTERN` の値か、呼び出しのワークフローを変えるときは、進行中のマージを終わらせるか止めてから変え、新しいマージは世代 `0` で締め出す。
@@ -89,7 +100,7 @@ NDF の認証は、`<非公開リポジトリ>` に対して次の権限を持�
    - `.gitleaksignore` を足した Pull Request と、`.gitattributes` の `export-ignore` で作り物の値のファイルを省こうとした Pull Request が落ちる
    - squash のマージでできたコミットの木が、同じ base の先頭と head のマージコミットの木と同じである
    - 呼び出しのワークフローが、世代が `0` か入力と違うときに探す前に失敗する。環境 `leak-scan` の秘密を Pull Request の側の実行が受けられない
-   - NDF の受け入れの条件（[漏れの検査の仕様](../specifications/leak-check.md) の「NDF が非公開の検査の結果を受け入れる条件」）で、ジョブを作る前の失敗・探しの失敗・版の食い違い・未完了・成功を区別し、起動の後の push・base の先頭の前進と書き換え・世代の切り替え・検査のコードの変更・マージ先の変更・再実行の結果を退けられる
+   - NDF の受け入れの条件（[漏れの検査の仕様](../specifications/leak-check.md) の「NDF が非公開の検査の結果を受け入れる条件」）で、ジョブを作る前の失敗・探しの失敗・版の食い違い・未完了・成功を区別し、起動の後の push・base の先頭の前進と書き換え・世代の切り替え・検査のコードの変更（`tools/checks/leak_scan/` のモジュールの追加・変更・削除・改名を含む。対象は仕様の「秘密を受けて動くコードと設定の一覧」）・マージ先の変更・再実行の結果を退けられる
 2. 1 本目をマージする前に、公開のリポジトリの環境 `leak-scan`（使えるブランチは main だけ）とその秘密 `LEAK_CHECK_PATTERN` を設定する。変数 `LEAK_CHECK_REQUIRE_PATTERN` は、この時点では `1` にしない
 3. 1 本目の Pull Request を、マージの前に持ち主が手元で探す（下の「1 本目を手元で探す」）。**1 本目のマージから、NDF に非公開の検査の機能が入り、手順 6 で NDF の利用者の設定から非公開の検査を有効にするまで、NDF にほかの Pull Request をマージさせない。** 手で起動した探しの結果でもマージしない（今の NDF は、探した Pull Request の番号・head・マージ先・base の先頭の組を確かめずにマージするため）
 4. 1 本目のマージで起きた main への push の `leak-check-push` で、秘密の規則を使って当たりなく探し終えたことを確かめる。次の 3 つがすべてそろえば、確かめられたことになる
@@ -119,7 +130,7 @@ NDF の認証は、`<非公開リポジトリ>` に対して次の権限を持�
 秘密を渡す前に、秘密を受けて動くスクリプトと設定の一式を読んで確かめ、そのコミットに固定する。探す対象のコミットは、データとして取り込むだけで、そのチェックアウトのコードは動かさない。
 
 1. 1 本目の Pull Request の head の SHA を控える（以後「確かめたコミット」）
-2. 確かめたコミットの `tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`tools/checks/install-gitleaks.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml` の 6 つと、`tools/checks/leak_scan/`（`leak-scan.sh` が起こす検査の本体）のすべてのファイルを、差分だけでなく全体を読む。秘密を外へ送る処理や、ほかのファイルを動かす処理が無いこと、`install-gitleaks.sh` の版と要約値が main の `ci.yml` の `leak-check` の値と同じことを確かめる
+2. 確かめたコミットの `tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`tools/checks/install-gitleaks.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml` の 6 つと、`tools/checks/leak_scan/`（`leak-scan.sh` が起こす検査の本体）のすべてのファイルを、差分だけでなく全体を読む（[漏れの検査の仕様](../specifications/leak-check.md) の「秘密を受けて動くコードと設定の一覧」から、手元では動かさない `leak-check-secret.yml` を除いたもの）。秘密を外へ送る処理や、ほかのファイルを動かす処理が無いこと、`install-gitleaks.sh` の版と要約値が main の `ci.yml` の `leak-check` の値と同じことを確かめる
 3. 確かめたコミットを、探す対象とは別のディレクトリにチェックアウトする。秘密を渡して動かすのは、このディレクトリのスクリプトと設定だけである。gitleaks は、このディレクトリの `install-gitleaks.sh` で置く（`GITHUB_PATH` を空にして打ち、置いた先を `PATH` に足す）
 4. 探す対象は、`refs/pull/<番号>/head` と `refs/pull/<番号>/merge` を取り込んだ別のリポジトリにする。Pull Request の取得の API の `base.ref` で、マージ先のブランチが main であることを確かめる。取り込んだ head が確かめたコミットと同じで、マージコミットの最初の親が今の main の先頭、2 つ目の親が確かめたコミットであることを確かめる。このときの main の先頭の SHA を「探した base」として控える。どれかが違えば手順 1 からやり直す
 5. 探す対象のリポジトリで、手順 3 のスクリプトを絶対パスで打つ。マージコミットの木を `export-tree.sh <マージコミット> <空のディレクトリ>` で、分岐点（`git merge-base <探した base> <確かめたコミット>`）から head までの履歴の項目を `export-tree.sh --history <分岐点> <確かめたコミット> <別の空のディレクトリ>` で、作業ツリーの外に取り出す。秘密を `LEAK_CHECK_PATTERN` に、`LEAK_CHECK_REQUIRE_PATTERN=1` を渡し、`leak-scan-secret.sh dir <木>`・`leak-scan-secret.sh history <履歴>`・`leak-scan-secret.sh git --range <分岐点>..<確かめたコミット>` を打つ。設定は、スクリプトが手順 3 のチェックアウトから絶対パスで読む

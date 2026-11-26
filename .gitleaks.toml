@@ -118,11 +118,12 @@ secretGroup = 1
 # 資源ごとに名前の付く AWS の端点。秘密は資源の部分（サービスとリージョンより前のラベル）。
 # ラベルは置き場所の記号（<名前>・${名前}）の全体か英数字と _- の並び。<実際の名前.cloudfront.net> の < は記号の一部にならず、秘密に含めない。
 # S3 はリージョンなし（<bucket>.s3.amazonaws.com）・リージョンつき（<bucket>.s3.<region>.amazonaws.com・<bucket>.s3-<region>.amazonaws.com）・
-# dualstack と website の形（<bucket>.s3.dualstack.<region>.amazonaws.com・<bucket>.s3-website-<region>.amazonaws.com）を当てる
+# dualstack と website の形（<bucket>.s3.dualstack.<region>.amazonaws.com・<bucket>.s3-website-<region>.amazonaws.com）を当てる。
+# DNS の名前は大文字と小文字を区別しないので、サービス名と接尾辞は (?i:…) で当てる。許可は書かれたとおりの表記に当てる
 [[rules]]
 id = "nd-aws-endpoint"
 description = "AWS の資源ごとの端点"
-regex = '''((?:(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[A-Za-z0-9_-])+\.)*(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[A-Za-z0-9_-])+)\.(?:execute-api\.[^.\s"'`/]+\.amazonaws\.com|lambda-url\.[^.\s"'`/]+\.on\.aws|cloudfront\.net|auth\.[^.\s"'`/]+\.amazoncognito\.com|rds\.amazonaws\.com|s3(?:[.-][^.\s"'`/]+)*\.amazonaws\.com)'''
+regex = '''((?:(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[A-Za-z0-9_-])+\.)*(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[A-Za-z0-9_-])+)\.(?i:execute-api\.[^.\s"'`/]+\.amazonaws\.com|lambda-url\.[^.\s"'`/]+\.on\.aws|cloudfront\.net|auth\.[^.\s"'`/]+\.amazoncognito\.com|rds\.amazonaws\.com|s3(?:[.-][^.\s"'`/]+)*\.amazonaws\.com)'''
 secretGroup = 1
 
 [[rules.allowlists]]

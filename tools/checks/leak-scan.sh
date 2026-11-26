@@ -14,7 +14,7 @@
 #   設定: 必ず渡す。省くと gitleaks は探す木の根の .gitleaks.toml を読み、既定の規則が抜けるため
 #   --report: 当たりを JSON で書く先（探す木の外に置く）。項目は RuleID・File・StartLine・EndLine・Commit だけ
 #   --paths: File に実際のファイルの名前を出し、gitleaks の生の出力も標準エラーへ出す。手元で当たりの場所を引くときだけ渡す（CI のジョブは渡さない）
-# 終了コード: 0 当たり無し、1 当たりがある・gitleaks が失敗した・読めずに飛ばした対象か探し終えたことを確かめられない対象がある、2 引数の誤り・除外のファイルがある
+# 終了コード: 0 当たり無し、1 当たりがある・gitleaks が失敗した・読めずに飛ばした対象か探し終えたことを確かめられない対象がある・python3 か git が無いか版が古い、2 引数の誤り・除外のファイルがある
 set -euo pipefail
 
 usage() {
@@ -60,15 +60,26 @@ if [[ -e .gitleaksignore ]] || git ls-files --error-unmatch .gitleaksignore >/de
   exit 2
 fi
 
-# 本体を起こせなければ、gitleaks を打たずに、探しの種類の固定の行で失敗にする
-if ! command -v python3 >/dev/null 2>&1; then
+# 本体を起こせないか道具の版が足りなければ、gitleaks を打たずに、探しの種類の固定の行で失敗にする
+cannot_scan() {
   if [[ "$mode" == dir ]]; then
     echo "leak-scan: gitleaks が中身を読まずに飛ばしたファイルを探せなかった" >&2
   else
     echo "leak-scan: 履歴を最後まで探し終えたことを確かめられなかった" >&2
   fi
-  echo "leak-scan: python3 が無い" >&2
+  echo "leak-scan: $1" >&2
   exit 1
+}
+
+command -v python3 >/dev/null 2>&1 || cannot_scan "python3 が無い"
+# 本体は tomllib（Python 3.11 以降）を読み込む
+python3 -I -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1 || cannot_scan "python3 が 3.11 より古い"
+# 履歴の探しは git check-attr --source（Git 2.40 以降）を使う
+if [[ "$mode" == git ]]; then
+  if [[ ! "$(git --version 2>/dev/null)" =~ ^git\ version\ ([0-9]+)\.([0-9]+) ]] ||
+    ((BASH_REMATCH[1] < 2 || (BASH_REMATCH[1] == 2 && BASH_REMATCH[2] < 40))); then
+    cannot_scan "git が 2.40 より古い"
+  fi
 fi
 
 # gitleaks は git log の失敗（無い範囲など）を当たり無しの 0 で終えるので、範囲を先に git で確かめる
