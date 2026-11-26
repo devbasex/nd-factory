@@ -569,7 +569,7 @@ type OperationClass =
 | `quarantinePending` | `quarantine.ts` | 新設 | `(db: DeviceDb, o: { drop: ReadonlySet<string> }) => Promise<void>` | `switching` を書き、`drop` に無い件とキーを隔離へ移す |
 | `restoreQuarantined` | 同上 | 新設 | `(db: DeviceDb, userId: string) => Promise<void>` | 持ち主の件を今のキーで戻す（戻し先は設計文書の「戻した件の戻し先」） |
 | `rollbackQuarantine` | 同上 | 新設 | `(db: DeviceDb) => Promise<void>` | 中断した隔離の複製を消して `switching` を外す |
-| `unreadableQuarantine` | 同上 | 新設 | `(db: DeviceDb, userId: string) => Promise<{ items: ReadonlyArray<{ answerTag: string; kind: Exclude<OperationClass["class"], "online"> }>; discard: (answerTag: string) => Promise<"deleted" \| "kept" \| "stale"> }>` | 持ち主の復号できない件の一覧と破棄 |
+| `unreadableQuarantine` | 同上 | 新設 | `(db: DeviceDb, userId: string, readFingerprint: () => string \| null) => Promise<"no-token" \| "stale" \| { items: ReadonlyArray<{ answerTag: string; kind: Exclude<OperationClass["class"], "online"> }>; discard: (answerTag: string) => Promise<"deleted" \| "kept" \| "stale"> }>` | 持ち主の復号できない件の一覧と破棄 |
 
 - `quarantinePending`
   - 事前条件: サインインの錠を持つ
@@ -579,12 +579,14 @@ type OperationClass =
   - 事後条件: 今のデータベースへ書き終えた件だけを隔離から消す
   - 副作用: 同上
 - `unreadableQuarantine`
-  - 事後条件: `items` は、持ち主が `userId` の利用者である復号できない件を、1 件ずつ返す。持ち主の行は、設計文書の「隔離」と同じ HMAC の照合で選ぶ。件数は `items` の数である
+  - 引数: `readFingerprint` は、このタブのメモリにある access token のセッションの指紋を、呼ぶたびに読んで返す。access token が無ければ `null` を返す
+  - 照合: 件を読む前に、設計文書の「隔離」の表のとおりタブの指紋をログインキャッシュ行と照合する。指紋が `null` なら `no-token`、行と合わないか行が無ければ `stale` を返し、どちらも件を読まない
+  - 事後条件: 照合に合えば、`items` は、持ち主が `userId` の利用者である復号できない件を、1 件ずつ返す。持ち主の行は、設計文書の「隔離」と同じ HMAC の照合で選ぶ。件数は `items` の数である
   - `answerTag` は隔離の件の主キーで、HMAC の値のため元の ID は読めない。呼び出し元は破棄する件の指定にだけ使う。`kind` は一覧に出す区分である
 - `unreadableQuarantine` の `discard`
   - 事前条件: 利用者が確認のダイアログで確定した
   - 排他: `discard` がサインインの錠を自分で取り、セッションの照合から削除のトランザクションの完了まで持ち続ける
-  - 照合: 手順と条件は設計文書の「隔離」の破棄の手順にある。`unreadableQuarantine` は一覧を読む前にログインキャッシュ行の `fingerprintTag` を覚え、`discard` は削除の直前に現在のセッションが同じことを確かめる。持ち主の行は、選んだ件の `ownerTag` で引き、その行の `tagKey` で `userId` を照合する
+  - 照合: 手順と条件は設計文書の「隔離」の破棄の手順にある。`unreadableQuarantine` は一覧を読む前にログインキャッシュ行の `fingerprintTag` を覚え、`discard` は削除の直前に `readFingerprint` を呼び直し、現在のセッションが同じことを確かめる。持ち主の行は、選んだ件の `ownerTag` で引き、その行の `tagKey` で `userId` を照合する
   - 事後条件: 消したら `deleted`。現在のセッションが一覧を読んだセッションと違えば、何も消さず `stale`。件が無いか、件の持ち主が `userId` の利用者でなければ、何も消さず `kept`
   - 副作用: 件の削除と、件が無くなった持ち主の行の削除を、1 つの `readwrite` のトランザクションで行う
 
@@ -593,6 +595,8 @@ type OperationClass =
 | --- | --- | --- | --- | --- | --- | --- |
 | `quarantinePending` | 隔離の書き込みの失敗 | 容量 | トランザクションの abort | 呼び出し元へ返す | 持ち主の交代は「この端末の保存の領域が足りないため、サインインを終えられませんでした」 | 元を消さない。再実行は同じ主キーの上書き |
 | `restoreQuarantined` | 復号できない件 | 壊れ | `unseal` | 隔離に残す | 件数と「内容を読めません」と区分 | 次のサインインの確定で再試行 |
+| `unreadableQuarantine` | `stale` | 別タブの利用者の切り替え・入り直し・サインアウト | 件を読む前のタブの指紋の照合 | 件を読まない | 隔離の件を出さない | 起動の照合からやり直す |
+| `unreadableQuarantine` | `no-token` | access token をまだ取り直していない | `readFingerprint` が `null` | 件を読まない | 隔離の件を件数と一覧に入れない | 取り直した後に呼び直す |
 | `unreadableQuarantine` の `discard` | `stale` | 別タブの利用者の切り替え・入り直し・サインアウト | 錠の中のセッションの照合 | 何も消さない | ダイアログを閉じる | 起動の照合からやり直す |
 | `rollbackQuarantine` | 削除の失敗 | 容量・ブラウザー | トランザクションの abort | `switching` を残す | 保留の件数は出す | 完了まで送らず破棄も受けない |
 
@@ -606,7 +610,7 @@ type OperationClass =
 | `quarantinePending` | 暗号文のまま移る | 件が 0 | 書き込みの失敗で元が残る |
 | `restoreQuarantined` | キャッシュして送るは送る列へ、確定待ちは保留へ | 版の古い隔離 | 壊れた 1 件が残る・2 回打って増えない |
 | `rollbackQuarantine` | 複製が消える | 元に無い件は残る | 削除の失敗 |
-| `unreadableQuarantine` | 持ち主だけに件が出る・指定した 1 件だけを破棄する | 0 件で持ち主の行が消える・同じ利用者の 2 つ目の持ち主の行の件も破棄できる | 別の利用者は 0 件・別の利用者の `answerTag` を渡しても消えない・一覧の後に利用者かセッションが替わると `stale` で消えない |
+| `unreadableQuarantine` | 持ち主だけに件が出る・指定した 1 件だけを破棄する | 0 件で持ち主の行が消える・同じ利用者の 2 つ目の持ち主の行の件も破棄できる | 別の利用者は 0 件・別の利用者の `answerTag` を渡しても消えない・一覧の後に利用者かセッションが替わると `stale` で消えない・同じ利用者が入り直した後に古いタブが一覧を呼ぶと `stale` で件を読まない・指紋が `null` なら `no-token` |
 
 ## 保留の一覧
 満たす決定: 決定 12、受け入れ条件 14
@@ -615,13 +619,13 @@ type OperationClass =
 | --- | --- | --- | --- | --- |
 | `createHeldStore` | `held-store.ts` | 新設 | `(d: { db: DeviceDb }) => HeldStore`（`count()`・`list()`・`discard(answerTag)`） | 保留の件の読み出しと、確認の後の破棄 |
 | `visibleFieldsOf` | 同上 | 新設 | `(item: HeldItem, record: AuthzRecord \| null) => HeldView` | 設計文書の「件の表示で出すもの」の条件で項目を落とす |
-| `HeldListDialog` | `screens/held-list.tsx` | 新設 | `(props: { store: HeldStore; quarantined: Awaited<ReturnType<typeof unreadableQuarantine>>; open: boolean }) => ReactElement` | 一覧と「破棄すると元に戻せません」の確認 |
+| `HeldListDialog` | `screens/held-list.tsx` | 新設 | `(props: { store: HeldStore; quarantined: Extract<Awaited<ReturnType<typeof unreadableQuarantine>>, object> \| null; open: boolean }) => ReactElement` | 一覧と「破棄すると元に戻せません」の確認 |
 
 - `createHeldStore` の `discard`
   - 事前条件: 利用者が確認のダイアログで確定した
   - 副作用: IndexedDB の削除
 
-`HeldListDialog` は、`store` の件の後に `quarantined.items` を「内容を読めません」と区分で並べる。隔離の件の破棄は `quarantined.discard` に `answerTag` を渡す。`deleted` か `kept` が返ったら `unreadableQuarantine` を呼び直し、`stale` が返ったらダイアログを閉じて起動の照合からやり直す。画面に出す件数は、`store.count()` と `quarantined.items` の数の合計である。
+`HeldListDialog` は、`store` の件の後に `quarantined.items` を「内容を読めません」と区分で並べる。隔離の件の破棄は `quarantined.discard` に `answerTag` を渡す。`deleted` か `kept` が返ったら `unreadableQuarantine` を呼び直し、`stale` が返ったらダイアログを閉じて起動の照合からやり直す。画面に出す件数は、`store.count()` と `quarantined.items` の数の合計である。`unreadableQuarantine` が `no-token` を返した間は `quarantined` を `null` にして `store` の件だけを出し、access token を取り直した後に呼び直す。`stale` を返したら、起動の照合からやり直す。
 
 「結果未確認」と食い違いの表示も `visibleFieldsOf` を通す（出し分けを 1 か所にする）。
 
