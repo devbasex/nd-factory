@@ -100,6 +100,27 @@ describe("アセットのバケットと管理ポリシーの ARN", () => {
   });
 });
 
+// 資源とリクエストのタグを渡し、タグの条件まで当てて、許可されるかを返す
+function allows(doc: Doc, action: string, resource: string, tags: Record<string, string>): boolean {
+  const holds = (condition: Statement["Condition"] = {}) =>
+    Object.entries(condition).every(([operator, entries]) =>
+      Object.entries(entries).every(([key, expected]) => {
+        if (operator === "Null") return String(tags[key] === undefined) === expected;
+        if (operator === "StringEquals") return tags[key] === expected;
+        if (operator === "StringNotEquals") return tags[key] !== expected;
+        return false;
+      }),
+    );
+  const applies = (effect: "Allow" | "Deny") => statements(doc, effect, action, resource).some((s) => holds(s.Condition));
+  return applies("Allow") && !applies("Deny");
+}
+
+const tagsOf = (context: "ResourceTag" | "RequestTag", prefix: string, environment: string) => ({
+  [`aws:${context}/app-prefix`]: prefix,
+  [`aws:${context}/app-env`]: environment,
+});
+const DISTRIBUTION = `arn:aws:cloudfront::${FAKE_ACCOUNT}:distribution/EXAMPLE`;
+
 describe("appExecutionPolicy", () => {
   const doc = appExecutionPolicy(INPUT) as Doc;
 
@@ -197,26 +218,8 @@ describe("appExecutionPolicy", () => {
     expect(statements(doc, "Allow", "sns:DeleteTopic", `arn:aws:sns:us-west-2:${FAKE_ACCOUNT}:acme-test-ops`)).not.toEqual([]);
   });
 
-  // 資源とリクエストのタグを渡し、タグの条件まで当てて、許可されるかを返す
-  const allowedWithTags = (action: string, resource: string, tags: Record<string, string>) => {
-    const holds = (condition: Statement["Condition"] = {}) =>
-      Object.entries(condition).every(([operator, entries]) =>
-        Object.entries(entries).every(([key, expected]) => {
-          if (operator === "Null") return String(tags[key] === undefined) === expected;
-          if (operator === "StringEquals") return tags[key] === expected;
-          if (operator === "StringNotEquals") return tags[key] !== expected;
-          return false;
-        }),
-      );
-    const applies = (effect: "Allow" | "Deny") => statements(doc, effect, action, resource).some((s) => holds(s.Condition));
-    return applies("Allow") && !applies("Deny");
-  };
-  const tagsOf = (context: "ResourceTag" | "RequestTag", prefix: string, environment: string) => ({
-    [`aws:${context}/app-prefix`]: prefix,
-    [`aws:${context}/app-env`]: environment,
-  });
+  const allowedWithTags = (action: string, resource: string, tags: Record<string, string>) => allows(doc, action, resource, tags);
   const USER_POOL = `arn:aws:cognito-idp:us-west-2:${FAKE_ACCOUNT}:userpool/us-west-2_EXAMPLE`;
-  const DISTRIBUTION = `arn:aws:cloudfront::${FAKE_ACCOUNT}:distribution/EXAMPLE`;
   const VPC = `arn:aws:ec2:us-west-2:${FAKE_ACCOUNT}:vpc/vpc-EXAMPLE`;
   const API = "arn:aws:apigateway:us-west-2::/apis/example";
 
@@ -303,6 +306,16 @@ describe("appPermissionsBoundary", () => {
     }
     expect(statements(doc, "Allow", action)).toEqual([]);
   });
+
+  it.each(["cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"])(
+    "%s は、この設置のタグのディストリビューションだけに許す",
+    (action) => {
+      expect(allows(doc, action, DISTRIBUTION, tagsOf("ResourceTag", "acme", "test"))).toBe(true);
+      expect(allows(doc, action, DISTRIBUTION, tagsOf("ResourceTag", "other", "test"))).toBe(false);
+      expect(allows(doc, action, DISTRIBUTION, tagsOf("ResourceTag", "acme", "prod"))).toBe(false);
+      expect(allows(doc, action, DISTRIBUTION, {})).toBe(false);
+    },
+  );
 
   it("prefix と environment が最長でも 6144 文字に収まる", () => {
     expect(JSON.stringify(appPermissionsBoundary(LONGEST)).length).toBeLessThanOrEqual(6144);

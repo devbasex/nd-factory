@@ -336,9 +336,10 @@ export function appPermissionsBoundary(input: BootstrapInput): PolicyDocument {
   return {
     Version: "2012-10-17",
     Statement: [
-      ...allowStatements(APP_BOUNDARY, shapes),
+      // ディストリビューションは名前で限れないので、この設置のタグが付いたものの無効化だけを許す
+      ...allowStatements(APP_BOUNDARY, shapes, { distribution: ownTags(input.settings, "aws:ResourceTag") }),
       { Effect: "Deny", Action: ["ssm:PutParameter", "ssm:DeleteParameter", "ssm:DeleteParameters"], Resource: shapes.parameters },
-      // SG の規則と CloudFront の無効化は名前で限れないので、別の設置の分をタグで拒む
+      // SG の規則は名前で限れないので、別の設置の分をタグで拒む
       ...otherInstallationDenies(input.settings),
     ],
   };
