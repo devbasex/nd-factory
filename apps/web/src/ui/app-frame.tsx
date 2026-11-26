@@ -1,7 +1,7 @@
 import { type ReactNode, useId, useState } from "react";
 import { Link } from "react-router";
 import { useI18n } from "../i18n/context.ts";
-import type { NavId } from "../routes/route-table.ts";
+import { type NavId, routePath } from "../routes/route-table.ts";
 
 export type Place = { to: string; name: string };
 
@@ -20,10 +20,10 @@ export type AppFrameProps = {
 
 // 行き先の並びはどの幅でも同じ。下の帯・細い帯・横の帯の形は CSS だけが変える
 const ITEMS: { id: NavId; path: string | null; mark: string }[] = [
-  { id: "organizers", path: "/", mark: "◎" },
-  { id: "approvals", path: "/approvals", mark: "✓" },
+  { id: "organizers", path: routePath("R2"), mark: "◎" },
+  { id: "approvals", path: routePath("R16"), mark: "✓" },
   { id: "sprints", path: null, mark: "▶" },
-  { id: "settings", path: "/me", mark: "⚙" },
+  { id: "settings", path: routePath("R14"), mark: "⚙" },
 ];
 
 export function AppFrame({ current, places, waiting, stopped, sprintsPath, banner, children }: AppFrameProps) {

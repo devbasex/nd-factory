@@ -49,6 +49,13 @@ export const ROUTES: readonly RouteDef[] = ROWS.map(([id, path, group, name, off
   nav,
 }));
 
+// ルート ID からパスを引く。パスを別の場所に書かず、この表だけを正にする
+export function routePath(id: RouteId): string {
+  const route = ROUTES.find((r) => r.id === id);
+  if (route === undefined) throw new Error(`unknown route: ${id}`);
+  return route.path;
+}
+
 const PATTERNS = ROUTES.map((r) => new RegExp(`^${r.path.replace(/:\w+/g, "[^/]+")}/?$`));
 
 export function isMapPath(pathname: string): boolean {
