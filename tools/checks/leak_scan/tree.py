@@ -9,8 +9,8 @@ from pathlib import Path
 
 import archive
 import gitleaks
-from copyrepo import CopyRepo
-from model import ArchiveError, Budget, Context, CopyError, Mark, Run, SkipKind, Target
+from copyrepo import CopyRepo, add_leaves, add_or_fail
+from model import Budget, Context, CopyError, Mark, Run, SkipKind, Target
 
 DEPENDENCY_DIRS = ("node_modules", "bower_components")
 
@@ -86,10 +86,7 @@ class _Collector:
                 self.fail()
 
     def add(self, target: Target, data: bytes) -> None:
-        try:
-            self.repo.add(target, data)
-        except CopyError:
-            self.fail()
+        add_or_fail(self.repo, target, data, self.fail)
 
     def add_file(self, path: str) -> None:
         if path in self.added:
@@ -111,11 +108,7 @@ class _Collector:
             kind = archive.detect(head, full.name, lambda: full.open("rb"))
             if kind is None:
                 return
-            for leaf in archive.expand(path, full.read_bytes(), self.budget):
-                if isinstance(leaf, ArchiveError):
-                    self.fail()
-                else:
-                    self.add(Target("", "none", path, leaf.eval_path, leaf.report_path), leaf.data)
+            add_leaves(self.repo, archive.expand(path, full.read_bytes(), self.budget), "", "none", path, self.fail)
         except OSError:
             self.fail()
 

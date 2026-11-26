@@ -19,7 +19,7 @@ import archive  # noqa: E402
 import gitleaks  # noqa: E402
 import history  # noqa: E402
 import tree  # noqa: E402
-from copyrepo import CopyRepo, install_relay  # noqa: E402
+from copyrepo import CopyRepo, add_leaves, add_or_fail, install_relay  # noqa: E402
 from model import (  # noqa: E402
     HIDDEN_NOTE,
     HISTORY_LINE,
@@ -28,7 +28,6 @@ from model import (  # noqa: E402
     SKIPPED_LINE,
     UNREADABLE_LINE,
     WARNING_LINE,
-    ArchiveError,
     ConfigError,
     Context,
     CopyError,
@@ -135,12 +134,7 @@ def _add_history_targets(ctx: Context, entries: list[Entry], allowlisted: list[E
         outcome.marks.add(Mark.HISTORY)
 
     def add(target: Target, data: bytes) -> bool:
-        try:
-            repo.add(target, data)
-            return True
-        except CopyError:
-            fail()
-            return False
+        return add_or_fail(repo, target, data, fail)
 
     try:
         numstat: set[Key] = set()
@@ -184,11 +178,7 @@ def _add_history_targets(ctx: Context, entries: list[Entry], allowlisted: list[E
             if once in expanded:
                 continue
             expanded.add(once)
-            for leaf in archive.expand(entry.path, blob, budget):
-                if isinstance(leaf, ArchiveError):
-                    fail()
-                else:
-                    add(Target(entry.commit, entry.parent, entry.path, leaf.eval_path, leaf.report_path), leaf.data)
+            add_leaves(repo, archive.expand(entry.path, blob, budget), entry.commit, entry.parent, entry.path, fail)
     finally:
         blobs.close()
     return contents

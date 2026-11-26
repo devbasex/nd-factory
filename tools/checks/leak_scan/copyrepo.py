@@ -11,10 +11,10 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Iterable, Mapping
 
 import gitleaks
-from model import MARKER_RULE, Context, CopyError, Finding, Mark, SkipKind, Target
+from model import MARKER_RULE, ArchiveError, Context, CopyError, Finding, Leaf, Mark, SkipKind, Target
 
 AUTHOR_NAME = "leak-scan"
 AUTHOR_DATE = "2000-01-01T00:00:00Z"
@@ -146,3 +146,24 @@ class CopyRepo:
         if marked != set(self.targets):
             ok = False
         return found, set() if ok else {mark}
+
+
+def add_or_fail(repo: CopyRepo, target: Target, data: bytes, fail: Callable[[], None]) -> bool:
+    """写しに足す。足せなければ失敗の印を立てる。"""
+    try:
+        repo.add(target, data)
+        return True
+    except CopyError:
+        fail()
+        return False
+
+
+def add_leaves(
+    repo: CopyRepo, leaves: Iterable[Leaf | ArchiveError], commit: str, parent: str, path: str, fail: Callable[[], None]
+) -> None:
+    """アーカイブの葉を写しに足す。展開か追加の失敗には印を立て、残りを続ける。"""
+    for leaf in leaves:
+        if isinstance(leaf, ArchiveError):
+            fail()
+        else:
+            add_or_fail(repo, Target(commit, parent, path, leaf.eval_path, leaf.report_path), leaf.data, fail)
