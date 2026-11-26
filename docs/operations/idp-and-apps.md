@@ -81,4 +81,4 @@ aws cloudformation describe-stack-events --profile <profile> \
 
 1. 組織の持ち主が、AWS のコンソールの「CodePipeline > 設定 > 接続」で接続 `<prefix>-<environment>-github` を開き、「保留中の接続を更新」から AWS の接続の App を組織へ入れ、対象のリポジトリを選ぶ
 2. 接続の状態が `AVAILABLE` になったことを確かめる
-3. 承認を拒む方針を AI が使う主体へ付けるまで（[pipeline-approval.md](pipeline-approval.md)）、起点のブランチへ push しない
+3. 起点のブランチの保護と反映を始められる主体の確認を終えるまで（[pipeline-approval.md](pipeline-approval.md)）、起点のブランチへ push しない

@@ -10,6 +10,8 @@ export const PREFIX_SHAPE = /^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$/;
 const PREFIX_NOT_AWS = /^(?!aws)/;
 const ENVIRONMENT_SHAPE = /^[a-z0-9]{2,10}$/;
 const REPOSITORY_SHAPE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+// 起点のブランチは push のトリガーの glob へそのまま渡すため、glob の特殊文字を持てない形に限る
+const BRANCH_SHAPE = /^[A-Za-z0-9._/-]+$/;
 // VPC の CIDR。IPv4 の 4 つの数（先頭の 0 を許さない）と接頭辞の長さ 16〜20。
 // 20 より長いと 2 つの AZ の公開と隔離のサブネットが VPC に収まらず、16 より短い VPC は AWS が作らない。
 // ホストの部分が 0 でない CIDR（10.80.1.0/16 など）は、書いた人の意図した範囲と作られる範囲がずれるため止める。
@@ -42,7 +44,7 @@ export const settingsSchema = z.strictObject({
   pipeline: z
     .strictObject({
       repository: z.string().regex(REPOSITORY_SHAPE, "<組織>/<名前> の形にする"),
-      branch: z.string().min(1, "空にできない"),
+      branch: z.string().regex(BRANCH_SHAPE, "英数字と . _ - / だけにする"),
       notify_emails: z.array(email).optional(),
     })
     .optional(),

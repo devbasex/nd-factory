@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Settings } from "@nd-factory/contracts/settings";
 import { Tags } from "aws-cdk-lib";
 import type { IConstruct } from "constructs";
@@ -34,6 +35,11 @@ export function secretName(s: Naming, use: string): string {
 // 運用する環境の設定のファイルの正本を置く SSM のパラメーター
 export function settingsParameterName(s: Naming): string {
   return `/${secretName(s, "settings")}`;
+}
+
+// 商用利用の開始を宣言した記録を置く SSM のパラメーター。反映の直前の検査が有無を読む
+export function launchDeclaredParameterName(s: Naming): string {
+  return `/${secretName(s, "launch-declared")}`;
 }
 
 export function stackName(s: Naming, key: StackKey): string {
@@ -86,9 +92,48 @@ export function pipelineResourceNames(s: Naming) {
     deployProject: resourceName(s, "deploy"),
     notifyTopic: resourceName(s, "notify"),
     failedRule: resourceName(s, "pipeline-failed"),
-    denyApprovalPolicy: resourceName(s, "deny-approval"),
     settingsParameter: settingsParameterName(s),
   };
+}
+
+// 反映のパイプラインがアプリのスタックを反映する bootstrap の qualifier。設置ごとに分け、
+// 同じアカウントとリージョンの別の設置のスタックを書き換えられないようにする。CDK の上限の 10 文字に収める
+export function appQualifier(s: Naming): string {
+  return `nd${createHash("sha256").update(`${s.prefix}/${s.environment}`).digest("hex").slice(0, 8)}`;
+}
+
+// アプリ専用の bootstrap のスタックと、そのテンプレートが作る管理ポリシーの名前
+export function appBootstrapNames(s: Naming) {
+  return {
+    stack: resourceName(s, "bootstrap"),
+    executionPolicy: resourceName(s, "app-cfn-exec"),
+    boundaryPolicy: resourceName(s, "app-boundary"),
+  };
+}
+
+// アプリ専用の管理ポリシーと、アセットのバケットの ARN
+export function appBootstrapArns(t: { partition: string; account: string; region: string }, s: Naming) {
+  const names = appBootstrapNames(s);
+  const policy = (name: string) => `arn:${t.partition}:iam::${t.account}:policy/${name}`;
+  return {
+    assetsBucket: `arn:${t.partition}:s3:::cdk-${appQualifier(s)}-assets-${t.account}-${t.region}`,
+    executionPolicy: policy(names.executionPolicy),
+    boundaryPolicy: policy(names.boundaryPolicy),
+  };
+}
+
+// 反映のプロジェクトのロールの固定の名前。bootstrap の信頼ポリシーが、パイプラインより先に名前を書けるようにする
+export function deployRoleName(s: Naming, region: string): string {
+  return `${resourceName(s, "deploy")}-${region}`;
+}
+
+// CDK の bootstrap のロールの ARN
+export function cdkRoleArn(
+  t: { partition: string; account: string; region: string },
+  qualifier: string,
+  kind: string,
+): string {
+  return `arn:${t.partition}:iam::${t.account}:role/cdk-${qualifier}-${kind}-role-${t.account}-${t.region}`;
 }
 
 // 利用者プールのドメインの URL。画面の設定の値の authority と、Google に登録する戻り先の元になる

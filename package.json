@@ -25,6 +25,7 @@
     "synth": "npm run synth -w infra",
     "e2e": "npm run e2e -w apps/web",
     "nd-setup": "node infra/setup/nd-setup.ts",
+    "app-bootstrap": "node infra/bin/app-bootstrap.ts",
     "ref-check": "node tools/ref-check/src/ref-check.ts",
     "ndf-contract": "node tools/checks/src/ndf-contract-check.ts",
     "ndf-contract:sync": "node tools/checks/src/ndf-contract-check.ts sync",

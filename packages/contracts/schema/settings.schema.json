@@ -45,7 +45,7 @@
         },
         "branch": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[A-Za-z0-9._/-]+$"
         },
         "notify_emails": {
           "type": "array",
