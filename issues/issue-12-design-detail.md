@@ -415,7 +415,7 @@ infra/lib/app-stack.ts
 | メソッド | 返り | 中身 |
 | --- | --- | --- |
 | `read(kind, targetId)` | `{ value, receivedAt, fetchSeq } \| null` | 14 日を過ぎた行・削除の印は `null`。復号できなければ全写しを消して `null` |
-| `readGuarded(guard, kind, targetId)` | `{ found, unchanged }` | `found` は `read` と同じ条件で値か `null`。`unchanged` は書き込みの中で、行が読んだときのまま（無ければ無いまま）かを確かめる |
+| `readGuarded(guard, kind, targetId)` | `{ found, unchanged }` | 14 日以内の値を復号できたときは、`found` に `{ value, fetchSeq }` を返す。行が無い・14 日を過ぎた・削除の印がある・復号できないときは、`found` を `null` にする。`read` と違い、復号できない行も写しも消さずに残す。`unchanged` は、書き込みのトランザクションの中で、読んだ行の `iv` が変わっていないこと（行が無かったときは、今も無いこと）を確かめる |
 | `prepareReplace(guard, kind, targetId, value, fetchSeq)` | 書き込みの 1 件か `null` | 表に無い種類・番号の古いレスポンス・印と一覧の記録に合わないものは `null` |
 | `applyOptimistic(guard, kind, targetId, change)` | `void` | 先映し（`fetchSeq` を変えない） |
 | `markGone(guard, kind, targetId, goneSeq)` | `void` | 削除の印 |
