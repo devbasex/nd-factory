@@ -6,6 +6,7 @@ import { deleteDeviceData, forgetDeviceMemory, recordDiscardConfirmation, settle
 import { createOwner, deleteDeviceDb, nextSeq, openDeviceDb, readOwner } from "../offline/db.ts";
 import { commitGuarded, prepareGuard } from "../offline/guarded-commit.ts";
 import { runMigrations } from "../offline/migrate.ts";
+import { createDeviceView } from "./device-view.ts";
 import { operationClassOf } from "../offline/operation-classes.ts";
 import { createLoginStore, sessionFingerprint } from "../offline/login-store.ts";
 import { createOutbox } from "../offline/outbox.ts";
@@ -30,6 +31,7 @@ const PENDING_READERS: SyncReaders = {
 };
 
 export const DEVICE_PARTS = {
+  createDeviceView,
   createApiSender,
   createSendWait,
   createSender,

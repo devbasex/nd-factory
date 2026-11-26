@@ -74,6 +74,8 @@ export type SyncDeps = {
   notify: () => void;
   onAuth: (owner: SessionOwner) => void;
   onEvent: (event: SendEvent) => void;
+  // 回を通し終えた。画面は端末のデータを読み直す
+  onRound?: () => void;
 };
 
 export type Sync = {
@@ -283,7 +285,11 @@ export function createSync(d: SyncDeps): Sync {
       if (owner.flagged()) return { kind: "flagged" };
       if (!d.connectivity.online()) return { kind: "offline" };
       if ((await prepareGuard(d.db, owner)) === null) return { kind: "no-owner" };
-      return run(owner);
+      try {
+        return await run(owner);
+      } finally {
+        d.onRound?.();
+      }
     });
 
   let running: Promise<void> = Promise.resolve();

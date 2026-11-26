@@ -1,7 +1,8 @@
-import type { FrameData } from "../app/App.tsx";
+import type { AppDeps, FrameData } from "../app/App.tsx";
 import type { AuthClient } from "../app/boot.ts";
-import type { Connectivity } from "../offline/connectivity.ts";
+import { type Connectivity, createConnectivity } from "../offline/connectivity.ts";
 import type { PlaceholderData } from "../screens/placeholder.tsx";
+import { DUMMY_ACTIONS, openDummyDevice } from "./device.ts";
 
 // ダミーの mode だけが読むモジュール。クエリパラメータ scenario と connection を読むのはここだけで、値は作り物だけを使う
 
@@ -30,6 +31,7 @@ export type DummyApp = {
   placeholder: () => Promise<PlaceholderData>;
   connectivity: Connectivity;
   seedPending: boolean;
+  offlineData: NonNullable<AppDeps["offlineData"]>;
   frame: FrameData;
   fetch: typeof fetch;
   createAuth: () => AuthClient;
@@ -50,16 +52,20 @@ export function createDummyApp(url: URL): DummyApp {
   const connection = url.searchParams.get("connection");
   const seedPending = connection === "pending";
   const user = { access_token: "dummy", expired: false };
+  // connection=offline のほかは、ブラウザーのつながりに従う
+  const connectivity: Connectivity =
+    connection === "offline" ? { online: () => false, subscribe: () => () => {} } : createConnectivity(window);
   return {
     placeholder: (Object.hasOwn(SCENARIOS, scenario) ? SCENARIOS[scenario] : SCENARIOS["normal"])!,
-    connectivity: { online: () => connection !== "offline", subscribe: () => () => {} },
+    connectivity,
     seedPending,
+    offlineData: { open: () => openDummyDevice(connectivity, seedPending), actions: DUMMY_ACTIONS },
     frame: {
       places: [{ to: "/t/team_00000000-0000-7000-8000-000000000001", name: "acme" }],
       waiting: 2,
       stopped: 0,
       sprintsPath: "/p/prj_00000000-0000-7000-8000-000000000001",
-      pending: seedPending ? 1 : 0,
+      pending: 0,
       held: 0,
     },
     // 設定の値と利用者の読み出しだけに答え、外へは何も送らない

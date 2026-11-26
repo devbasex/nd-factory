@@ -43,6 +43,7 @@ export async function composeApp({ window: win }: BrowserEnv): Promise<AppDeps &
       connectivity: dummy.connectivity,
       placeholder: dummy.placeholder,
       frame: dummy.frame,
+      offlineData: dummy.offlineData,
     };
   }
 

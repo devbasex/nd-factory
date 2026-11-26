@@ -33,6 +33,12 @@ export function reasonKey(code: string): MessageKey {
   return (Object.hasOwn(ja.errors.reason, code) ? `errors.reason.${code}` : "errors.reason.unknown") as MessageKey;
 }
 
+// 送る列に入る操作の名前の文のキー。表に無い操作は汎用の文にし、操作の名前をそのまま出さない
+export function operationKey(operation: string): MessageKey {
+  const name = operation.replaceAll(".", "_");
+  return `operations.${Object.hasOwn(ja.operations, name) ? name : "unknown"}` as MessageKey;
+}
+
 export function createTranslator(locale: Locale): Translator {
   const messages = MESSAGES[locale];
   const plurals = new Intl.PluralRules(locale);

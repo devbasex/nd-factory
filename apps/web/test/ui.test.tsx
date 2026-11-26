@@ -137,7 +137,7 @@ describe("状態を出す部品", () => {
     expect(banner?.textContent).toContain("つながっていません");
     expect(banner?.textContent).toContain("2026/01/02");
     expect(banner?.textContent).toContain("確定待ち 2 件");
-    expect(banner?.textContent).toContain("保留 1 件");
+    expect(banner?.textContent).toContain("送れなかった操作が 1 件あります");
     const failed = render(<OfflineBanner online pending={0} held={0} reloadFailedAt="2026-01-02T03:04:00.000Z" />);
     expect(failed.host.textContent).toContain("読み直せませんでした");
   });

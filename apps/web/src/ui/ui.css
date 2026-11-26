@@ -360,3 +360,18 @@ textarea {
     padding: var(--space-8);
   }
 }
+
+/* 保留の一覧と、仮の画面の操作 */
+.nd-held {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  padding: var(--space-3);
+}
+.nd-held-item,
+.nd-actions > li {
+  margin-block-end: var(--space-3);
+}
+.nd-actions {
+  list-style: none;
+  padding: 0;
+}

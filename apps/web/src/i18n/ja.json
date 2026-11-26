@@ -1,5 +1,8 @@
 {
-  "app": { "name": "nd-factory", "skipToMain": "本文へ移る" },
+  "app": {
+    "name": "nd-factory",
+    "skipToMain": "本文へ移る"
+  },
   "common": {
     "retry": "もう一度",
     "cancel": "やめる",
@@ -36,22 +39,54 @@
     "since": "利用を始めた日時"
   },
   "routes": {
-    "signin": { "title": "サインイン" },
-    "organizers": { "title": "オーガナイザー" },
-    "sprints": { "title": "スプリントの一覧" },
-    "sprintStart": { "title": "スプリントを始める" },
-    "sprintDetail": { "title": "スプリントの詳細" },
-    "approvalDetail": { "title": "承認の詳細" },
-    "question": { "title": "問い" },
-    "projectSettings": { "title": "プロジェクトの設定" },
-    "team": { "title": "チーム" },
-    "projectNew": { "title": "プロジェクトを作る" },
-    "execution": { "title": "実行の場所" },
-    "usage": { "title": "使える量と費用" },
-    "audit": { "title": "操作の記録" },
-    "me": { "title": "自分の設定" },
-    "organizerChat": { "title": "オーガナイザーの会話" },
-    "approvals": { "title": "承認待ちの一覧" }
+    "signin": {
+      "title": "サインイン"
+    },
+    "organizers": {
+      "title": "オーガナイザー"
+    },
+    "sprints": {
+      "title": "スプリントの一覧"
+    },
+    "sprintStart": {
+      "title": "スプリントを始める"
+    },
+    "sprintDetail": {
+      "title": "スプリントの詳細"
+    },
+    "approvalDetail": {
+      "title": "承認の詳細"
+    },
+    "question": {
+      "title": "問い"
+    },
+    "projectSettings": {
+      "title": "プロジェクトの設定"
+    },
+    "team": {
+      "title": "チーム"
+    },
+    "projectNew": {
+      "title": "プロジェクトを作る"
+    },
+    "execution": {
+      "title": "実行の場所"
+    },
+    "usage": {
+      "title": "使える量と費用"
+    },
+    "audit": {
+      "title": "操作の記録"
+    },
+    "me": {
+      "title": "自分の設定"
+    },
+    "organizerChat": {
+      "title": "オーガナイザーの会話"
+    },
+    "approvals": {
+      "title": "承認待ちの一覧"
+    }
   },
   "state": {
     "empty": "まだ何もありません",
@@ -66,9 +101,10 @@
     "lastReceived": "最後に受け取った時刻 {{time}}",
     "pending_one": "確定待ち {{count}} 件",
     "pending_other": "確定待ち {{count}} 件",
-    "held_one": "保留 {{count}} 件",
-    "held_other": "保留 {{count}} 件",
-    "reloadFailed": "読み直せませんでした（{{time}}）"
+    "held_one": "送れなかった操作が {{count}} 件あります",
+    "held_other": "送れなかった操作が {{count}} 件あります",
+    "reloadFailed": "読み直せませんでした（{{time}}）",
+    "showHeld": "内容を確認する"
   },
   "pending": {
     "waiting": "つながってから確定",
@@ -76,7 +112,9 @@
     "deadline": "期限 {{time}}",
     "withdraw": "取り下げる"
   },
-  "money": { "noCurrency": "通貨の無い金額は表示できません" },
+  "money": {
+    "noCurrency": "通貨の無い金額は表示できません"
+  },
   "errors": {
     "reason": {
       "unknown": "処理できませんでした",
@@ -94,5 +132,49 @@
       "version_mismatch": "ほかで先に変わりました",
       "state_mismatch": "状態が変わりました"
     }
+  },
+  "held": {
+    "title": "送れなかった操作",
+    "discard": "破棄する",
+    "discardTitle": "この操作を破棄しますか",
+    "discardBody": "破棄すると元に戻せません",
+    "unreadable": "内容を読めません",
+    "hidden": "対象を見る権限を確認できないため、内容は表示しません",
+    "discardFailed": "破棄できませんでした",
+    "kind": {
+      "queued": "キャッシュして送る",
+      "confirm": "確定待ち"
+    },
+    "reason": {
+      "unmigrated": "画面の更新で送れなくなりました。内容を確かめて、必要ならもう一度操作してください",
+      "unreadable": "内容を読めないため送れません",
+      "revoked": "見る権限が無くなったため送りませんでした",
+      "transfer-unavailable": "受け入れできなくなったため送りませんでした",
+      "expired": "期限が過ぎたか、期限内と確かめられないため送りませんでした。もう一度操作してください",
+      "restored": "サインアウトやアカウントの切り替えの前に押した操作は、送っていません。対象を開いて今の状態を確かめてから、必要ならもう一度操作してください",
+      "unknown-result": "結果を確認できませんでした。対象を開いて今の状態を確かめてから、必要ならもう一度操作してください",
+      "rejected": "サーバーが受け付けませんでした。内容を確かめて、必要ならもう一度操作してください"
+    }
+  },
+  "operations": {
+    "users_update": "自分の設定を変える",
+    "notices_mark_read": "通知を既読にする",
+    "organizer_messages_create": "オーガナイザーの会話へ送る",
+    "organizer_messages_withdraw": "会話の項目を取り下げる",
+    "approvals_answer": "承認の依頼に答える",
+    "questions_answer": "問いに答える",
+    "sprints_cancel": "スプリントを取り消す",
+    "project_transfers_create": "割り当てを移す",
+    "project_transfers_accept": "割り当てを受け入れる",
+    "project_transfers_delete": "割り当ての移行を取り下げる",
+    "projects_close": "プロジェクトを閉じる",
+    "unknown": "操作"
+  },
+  "result": {
+    "confirmed": "確定しました",
+    "rejected": "食い違いがあり、確定していません",
+    "unknown": "結果を確認できませんでした",
+    "expired": "期限が過ぎたため送りませんでした",
+    "saveFailed": "保存できませんでした"
   }
 }

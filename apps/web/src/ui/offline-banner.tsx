@@ -1,5 +1,6 @@
 import { useI18n } from "../i18n/context.ts";
 import { formatDateTime } from "../i18n/format.ts";
+import { Button } from "./button.tsx";
 
 export type OfflineBannerProps = {
   online: boolean;
@@ -7,10 +8,12 @@ export type OfflineBannerProps = {
   held: number;
   lastReceivedAt?: string;
   reloadFailedAt?: string;
+  // 保留の一覧を開く
+  onShowHeld?: () => void;
 };
 
 // 枠の上端の 1 本の帯。出すものが無ければ描かない
-export function OfflineBanner({ online, pending, held, lastReceivedAt, reloadFailedAt }: OfflineBannerProps) {
+export function OfflineBanner({ online, pending, held, lastReceivedAt, reloadFailedAt, onShowHeld }: OfflineBannerProps) {
   const { t, locale, timeZone } = useI18n();
   const time = (iso: string) => formatDateTime(iso, { locale, timeZone });
   const lines: string[] = [];
@@ -28,6 +31,7 @@ export function OfflineBanner({ online, pending, held, lastReceivedAt, reloadFai
       {lines.map((line) => (
         <span key={line}>{line}</span>
       ))}
+      {held > 0 && onShowHeld !== undefined ? <Button onClick={onShowHeld}>{t("offline.showHeld")}</Button> : null}
     </div>
   );
 }

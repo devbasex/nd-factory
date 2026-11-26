@@ -1,5 +1,8 @@
 {
-  "app": { "name": "nd-factory", "skipToMain": "Skip to content" },
+  "app": {
+    "name": "nd-factory",
+    "skipToMain": "Skip to content"
+  },
   "common": {
     "retry": "Try again",
     "cancel": "Cancel",
@@ -36,22 +39,54 @@
     "since": "Member since"
   },
   "routes": {
-    "signin": { "title": "Sign in" },
-    "organizers": { "title": "Organizers" },
-    "sprints": { "title": "Sprints" },
-    "sprintStart": { "title": "Start a sprint" },
-    "sprintDetail": { "title": "Sprint" },
-    "approvalDetail": { "title": "Approval" },
-    "question": { "title": "Question" },
-    "projectSettings": { "title": "Project settings" },
-    "team": { "title": "Team" },
-    "projectNew": { "title": "Create a project" },
-    "execution": { "title": "Execution" },
-    "usage": { "title": "Usage and cost" },
-    "audit": { "title": "Audit log" },
-    "me": { "title": "My settings" },
-    "organizerChat": { "title": "Organizer conversation" },
-    "approvals": { "title": "Waiting for approval" }
+    "signin": {
+      "title": "Sign in"
+    },
+    "organizers": {
+      "title": "Organizers"
+    },
+    "sprints": {
+      "title": "Sprints"
+    },
+    "sprintStart": {
+      "title": "Start a sprint"
+    },
+    "sprintDetail": {
+      "title": "Sprint"
+    },
+    "approvalDetail": {
+      "title": "Approval"
+    },
+    "question": {
+      "title": "Question"
+    },
+    "projectSettings": {
+      "title": "Project settings"
+    },
+    "team": {
+      "title": "Team"
+    },
+    "projectNew": {
+      "title": "Create a project"
+    },
+    "execution": {
+      "title": "Execution"
+    },
+    "usage": {
+      "title": "Usage and cost"
+    },
+    "audit": {
+      "title": "Audit log"
+    },
+    "me": {
+      "title": "My settings"
+    },
+    "organizerChat": {
+      "title": "Organizer conversation"
+    },
+    "approvals": {
+      "title": "Waiting for approval"
+    }
   },
   "state": {
     "empty": "Nothing here yet",
@@ -66,9 +101,10 @@
     "lastReceived": "Last received {{time}}",
     "pending_one": "{{count}} operation waiting to be confirmed",
     "pending_other": "{{count}} operations waiting to be confirmed",
-    "held_one": "{{count}} item on hold",
-    "held_other": "{{count}} items on hold",
-    "reloadFailed": "Could not refresh ({{time}})"
+    "held_one": "{{count}} operation could not be sent",
+    "held_other": "{{count}} operations could not be sent",
+    "reloadFailed": "Could not refresh ({{time}})",
+    "showHeld": "Review"
   },
   "pending": {
     "waiting": "Confirms when online",
@@ -76,7 +112,9 @@
     "deadline": "Due {{time}}",
     "withdraw": "Withdraw"
   },
-  "money": { "noCurrency": "Cannot show an amount without a currency" },
+  "money": {
+    "noCurrency": "Cannot show an amount without a currency"
+  },
   "errors": {
     "reason": {
       "unknown": "Something went wrong",
@@ -94,5 +132,49 @@
       "version_mismatch": "This was changed elsewhere",
       "state_mismatch": "The state has changed"
     }
+  },
+  "held": {
+    "title": "Operations that were not sent",
+    "discard": "Discard",
+    "discardTitle": "Discard this operation?",
+    "discardBody": "Discarding cannot be undone",
+    "unreadable": "The content cannot be read",
+    "hidden": "The content is hidden because your access to the target cannot be confirmed",
+    "discardFailed": "Could not discard",
+    "kind": {
+      "queued": "Saved to send",
+      "confirm": "Waiting for confirmation"
+    },
+    "reason": {
+      "unmigrated": "The app was updated and this can no longer be sent. Check the content and try again if needed",
+      "unreadable": "The content cannot be read, so it cannot be sent",
+      "revoked": "Not sent because you no longer have access",
+      "transfer-unavailable": "Not sent because it can no longer be accepted",
+      "expired": "Not sent because it expired or could not be confirmed to be within the time limit. Please try again",
+      "restored": "Operations made before signing out or switching accounts were not sent. Check the current state and try again if needed",
+      "unknown-result": "The result could not be confirmed. Check the current state and try again if needed",
+      "rejected": "The server did not accept it. Check the content and try again if needed"
+    }
+  },
+  "operations": {
+    "users_update": "Change your settings",
+    "notices_mark_read": "Mark a notice as read",
+    "organizer_messages_create": "Send to the organizer chat",
+    "organizer_messages_withdraw": "Withdraw a chat item",
+    "approvals_answer": "Answer an approval request",
+    "questions_answer": "Answer a question",
+    "sprints_cancel": "Cancel a sprint",
+    "project_transfers_create": "Move an assignment",
+    "project_transfers_accept": "Accept an assignment",
+    "project_transfers_delete": "Withdraw a move",
+    "projects_close": "Close a project",
+    "unknown": "Operation"
+  },
+  "result": {
+    "confirmed": "Confirmed",
+    "rejected": "Not confirmed because the state differs",
+    "unknown": "The result could not be confirmed",
+    "expired": "Not sent because it expired",
+    "saveFailed": "Could not save"
   }
 }
