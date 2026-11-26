@@ -415,7 +415,8 @@ infra/lib/app-stack.ts
 | メソッド | 返り | 中身 |
 | --- | --- | --- |
 | `read(kind, targetId)` | `{ value, receivedAt, fetchSeq } \| null` | 14 日を過ぎた行・削除の印は `null`。復号できなければ全写しを消して `null` |
-| `readGuarded(guard, kind, targetId)` | `{ found, unchanged }` | 14 日以内の値を復号できたときは、`found` に `{ value, fetchSeq }` を返す。行が無い・14 日を過ぎた・削除の印がある・復号できないときは、`found` を `null` にする。`read` と違い、復号できない行も写しも消さずに残す。`unchanged` は、書き込みのトランザクションの中で、読んだ行の `iv` が変わっていないこと（行が無かったときは、今も無いこと）を確かめる |
+| `readGuarded(guard, kind, targetId)` | `{ found, unreadable, unchanged }` | 14 日以内の値を復号できたときは、`found` に `{ value, fetchSeq }` を返す。行が無い・14 日を過ぎた・削除の印があるときは、`found` を `null`、`unreadable` を偽にする（キャッシュミス）。復号できないときは、`found` を `null`、`unreadable` を真にし、行も写しも消さずに返す。`unreadable` が真なら、呼び出し元は `dropAll` で写しをすべて消してから読み直す。`unchanged` は、書き込みのトランザクションの中で、読んだ行の `iv` が変わっていないこと（行が無かったときは、今も無いこと）を確かめる |
+| `dropAll(guard)` | `"committed" \| "stale"` | `commitGuarded` の中で写しをすべて消す。セッションが替わっていれば `stale` で何も消さない。`readGuarded` が復号できない行を見つけたときに呼び出し元が呼ぶ |
 | `prepareReplace(guard, kind, targetId, value, fetchSeq)` | 書き込みの 1 件か `null` | 表に無い種類・番号の古いレスポンス・印と一覧の記録に合わないものは `null` |
 | `applyOptimistic(guard, kind, targetId, change)` | `void` | 先映し（`fetchSeq` を変えない） |
 | `markGone(guard, kind, targetId, goneSeq)` | `void` | 削除の印 |
@@ -435,6 +436,7 @@ infra/lib/app-stack.ts
 | `commitGuarded` | `iv` の違い | 別タブの書き換え | 手順 3 の確認 | `stale` を返す | 出さない | 次の回で読み直す |
 | `commitGuarded` | `QuotaExceededError` | 容量の不足 | トランザクションの abort | 写しは捨てて表示を続ける。送る列の移動は呼び出し元へ返す | 写しは出さない | 次の読み出しで書き直す |
 | `createCacheStore` の `read` | 復号できない | 壊れ・キーの欠け | `unseal` | 全写しを消す | 読み直して描く。オフラインは空の状態 | 読み直し |
+| `createCacheStore` の `readGuarded` | 復号できない | 壊れ・キーの欠け | `unseal` | `unreadable` を真で返す。呼び出し元が `dropAll`（セッションを照合する）で全写しを消し、消した後の行を読み直す。`dropAll` が `stale` なら写しに触れずに捨てる | `read` と同じ（画面は写しが無いので読み直す。オフラインは空の状態） | 読み直し |
 
 ### 内部のデータと定数
 | 名前 | 種類 | 保存先 | 既定値 |
@@ -456,7 +458,7 @@ infra/lib/app-stack.ts
 ### ログと記録の出力
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `commitGuarded`・`read` | 中止と復号の失敗の種類、写しの `kind` | `createLogger` の `warn` | レスポンスの中身・対象とプロジェクトと利用者の ID・タグ |
+| `commitGuarded`・`read`・`dropAll` | 中止と復号の失敗の種類、写しの `kind` | `createLogger` の `warn` | レスポンスの中身・対象とプロジェクトと利用者の ID・タグ |
 
 ### 既存の部品の再利用
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |

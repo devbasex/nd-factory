@@ -205,7 +205,14 @@ export function createSender(d: SendDeps): QueueSender {
   async function sentIdWrite(owner: Owner, item: OutboxItem, itemId: string) {
     const guard = await prepareGuard(d.db, owner);
     if (guard === null) return null;
-    const { found, unchanged } = await d.cache.readGuarded(guard, "organizer-messages", item.targetId);
+    let { found, unreadable, unchanged } = await d.cache.readGuarded(guard, "organizer-messages", item.targetId);
+    if (unreadable) {
+      // 復号できない写しは、設計文書の「暗号化」のとおり写しをすべて消す。画面は写しが無いので読み直す。
+      // 消した後の行（無いこと）を読み直し、その照合を書き込みに使う
+      if ((await d.cache.dropAll(guard)) !== "committed") return null;
+      ({ found, unreadable, unchanged } = await d.cache.readGuarded(guard, "organizer-messages", item.targetId));
+      if (unreadable) return null;
+    }
     const value = found?.value as Conversing | undefined;
     if (found === null || !value?.items?.some((i) => i.answer_tag === item.answerTag)) return unchanged;
     const items = value.items.map((i) => (i.answer_tag === item.answerTag ? { ...i, id: itemId } : i));

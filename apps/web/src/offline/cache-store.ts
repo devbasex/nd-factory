@@ -23,12 +23,16 @@ type Write = (tx: GuardedTx) => Promise<boolean>;
 
 export type CacheStore = {
   read(kind: SnapshotKind, targetId: string): Promise<{ value: unknown; receivedAt: number; fetchSeq: number } | null>;
-  // 写しを読み、読んだときから行が変わっていないことを書き込みの中で確かめる関数も返す。写しが無いか読めなければ found は null
+  // 写しを読み、読んだときから行が変わっていないことを書き込みの中で確かめる関数も返す。写しが無い・14 日を過ぎた・
+  // 削除の印なら found は null。復号できなければ unreadable を真にし、行も写しも消さない。呼び出し元は dropAll で
+  // 写しをすべて消し（セッションを照合する）、読み直しへ回す
   readGuarded(
     guard: Guard,
     kind: SnapshotKind,
     targetId: string,
-  ): Promise<{ found: { value: unknown; fetchSeq: number } | null; unchanged: Write }>;
+  ): Promise<{ found: { value: unknown; fetchSeq: number } | null; unreadable: boolean; unchanged: Write }>;
+  // 復号できない写しが見つかったときに、セッションを照合したうえで写しをすべて消す
+  dropAll(guard: Guard): Promise<"committed" | "stale">;
   prepareReplace(guard: Guard, kind: SnapshotKind, targetId: string, value: unknown, fetchSeq: number): Promise<Write | null>;
   applyOptimistic(guard: Guard, kind: SnapshotKind, targetId: string, change: (value: unknown) => unknown): Promise<void>;
   markGone(guard: Guard, kind: SnapshotKind, targetId: string, goneSeq: number): Promise<void>;
@@ -120,9 +124,25 @@ export function createCacheStore({ db, wallNow, log, notify }: CacheDeps): Cache
       const current = await db.get("snapshots", id);
       const iv = current?.iv ?? null;
       const same: Write = (tx) => unchanged(tx, id, iv);
-      const body = current === undefined ? null : await unseal<Body>(guard.keys.key, current).catch(() => null);
+      let unreadable = false;
+      const body =
+        current === undefined
+          ? null
+          : await unseal<Body>(guard.keys.key, current).catch(() => {
+              unreadable = true;
+              return null;
+            });
       const fresh = body?.type === "value" && current !== undefined && wallNow() - current.receivedAt <= SNAPSHOT_TTL_MS;
-      return { found: fresh ? { value: body.value, fetchSeq: body.fetchSeq } : null, unchanged: same };
+      return { found: fresh ? { value: body.value, fetchSeq: body.fetchSeq } : null, unreadable, unchanged: same };
+    },
+
+    async dropAll(guard) {
+      const result = await commitGuarded(guard, async (tx) => {
+        await tx.objectStore("snapshots").clear();
+        return true;
+      });
+      if (result === "committed") log.warn("写しを復号できないため、写しをすべて消した", {});
+      return result;
     },
 
     async prepareReplace(guard, kind, targetId, value, fetchSeq) {
