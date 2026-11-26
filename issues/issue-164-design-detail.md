@@ -421,7 +421,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 実行の管理ポリシーは、`--cloudformation-execution-policies` で渡す前に存在しなければならない。テンプレートに入れて `DependsOn` で順序を付けるので、bootstrap の外で方針を作る操作は増えない。
 
 - `appExecutionPolicy`
-  - 事後条件: 許可は、定数 `EXECUTION_ALLOW`（CloudFormation の資源の型 → 操作と資源の ARN の形）から作る。資源の ARN は、サービスが許すかぎり `<prefix>-<environment>-app-*`・`<prefix>-<environment>-*`・`<prefix>/<environment>/*` に限る。拒否は、パイプラインのスタックの書き込み、反映のプロジェクトのロールとパイプラインのスタックのロール・ポリシーの変更、このパイプラインの定義の変更と削除、反映のプロジェクトの変更、2 つのパラメーターの書き込みと削除である
+  - 事後条件: 許可は、定数 `EXECUTION_ALLOW`（CloudFormation の資源の型 → 操作と資源の ARN の形）から作る。資源の ARN は、サービスが許すかぎり `<prefix>-<environment>-app-*`・`<prefix>-<environment>-*`・`<prefix>/<environment>/*` に限る。名前で限れない資源は、設置のタグで限る（設計文書の決定 6 の「別の設置の資源をタグで限る」）。別の設置のタグが付いた資源への操作は拒否する。ほかの拒否は、パイプラインのスタックの書き込み、反映のプロジェクトのロールとパイプラインのスタックのロール・ポリシーの変更、このパイプラインの定義の変更と削除、反映のプロジェクトの変更、2 つのパラメーターの書き込みと削除である
   - 操作の一覧そのものは、実装で今の権限と照らして作り、リリース承認ゲートで差分を示す（決定 6）
 - `restrictBootstrapTemplate`
   - 事後条件: `DeploymentActionRole` の文が、知っている `Sid` と形だけであることを確かめてから変える

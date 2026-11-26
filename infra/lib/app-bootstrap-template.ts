@@ -11,6 +11,7 @@ import {
   resourceName,
   settingsParameterName,
   stackName,
+  TAG_KEYS,
 } from "./naming.ts";
 
 // アプリ専用の bootstrap のテンプレート。打つ版の CDK の標準のテンプレートに、設置ごとの制約と値を当てる。
@@ -61,10 +62,13 @@ function arnShapes(input: BootstrapInput) {
     assetsBucket: [`arn:${partition}:s3:::cdk-${qualifier}-assets-${account}-${region}`],
     assets: [`arn:${partition}:s3:::cdk-${qualifier}-assets-${account}-${region}/*`],
     apiGateway: ["apis", "apis/*", "tags/*"].map((path) => `arn:${partition}:apigateway:${region}::/${path}`),
-    userPool: [arn("cognito-idp", "userpool/*")],
-    cloudFront: [arn("cloudfront", "distribution/*", ""), arn("cloudfront", "origin-access-control/*", "")],
+    // 名前で限れず、タグで限る資源（Cognito のユーザープールと CloudFront のディストリビューション）
+    tagged: [arn("cognito-idp", "userpool/*"), arn("cloudfront", "distribution/*", "")],
+    // タグを持てないので、この設置に限れない
+    originAccessControl: [arn("cloudfront", "origin-access-control/*", "")],
     ec2: [arn("ec2", "*")],
-    rds: ["cluster", "db", "cluster-pg", "subgrp"].map((kind) => arn("rds", `${kind}:${prefix}-*`)),
+    // 種類（cluster・db・cluster-pg・subgrp など）を分けて並べると、管理ポリシーの上限に収まらない
+    rds: [arn("rds", `*:${prefix}-*`)],
     secret: [arn("secretsmanager", `secret:${secretPrefix}/*`)],
     ecsCluster: [arn("ecs", `cluster/${prefix}-*`)],
     // パイプラインの失敗の知らせのトピックも同じ接頭辞を持つので、アプリのトピックは名前で指す
@@ -87,7 +91,27 @@ function arnShapes(input: BootstrapInput) {
     parameters: [settingsParameterName(s), launchDeclaredParameterName(s)].map((name) => arn("ssm", `parameter${name}`)),
     // 資源を指定できない操作だけに使う
     any: ["*"],
+    // 作る要求に、この設置のタグを求める操作
+    requestTagged: ["*"],
   };
+}
+
+// この設置のタグの条件
+function ownTags(s: BootstrapInput["settings"], context: "aws:RequestTag" | "aws:ResourceTag"): Record<string, unknown> {
+  const [prefixKey, envKey] = TAG_KEYS;
+  return { StringEquals: { [`${context}/${prefixKey}`]: s.prefix, [`${context}/${envKey}`]: s.environment } };
+}
+
+// 別の設置のタグが付いた資源への操作を、サービスによらず拒む。タグの無い資源には当たらない
+function otherInstallationDenies(s: BootstrapInput["settings"]): Statement[] {
+  const [prefixKey, envKey] = TAG_KEYS;
+  return [
+    [prefixKey, s.prefix],
+    [envKey, s.environment],
+  ].map(([key, value]) => {
+    const tag = `aws:ResourceTag/${key}`;
+    return { Effect: "Deny", Action: "*", Resource: "*", Condition: { Null: { [tag]: "false" }, StringNotEquals: { [tag]: value } } };
+  });
 }
 
 type Shapes = ReturnType<typeof arnShapes>;
@@ -100,15 +124,15 @@ const grant = (on: ListShape, service: string, actions: string): Grant => ({
 });
 
 // この設置の名前で始まる資源は、そのサービスの操作をまとめて許す。操作を 1 つずつ並べると、
-// 管理ポリシーの上限の 6,144 文字に収まらない。名前で限れない資源（EC2・Cognito・CloudFront）は操作の形で限る
+// 管理ポリシーの上限の 6,144 文字に収まらない。名前で限れない資源（EC2・Cognito・CloudFront）は操作の形で限り、
+// タグでも限る（Cognito と CloudFront は許可の条件、EC2 は otherInstallationDenies の拒否）
 const own = (on: ListShape, service: string): Grant => grant(on, service, "*");
 
 const ASSET_READ = grant("assets", "s3", "GetObject*");
 const API_GATEWAY = [own("apiGateway", "apigateway")];
 const ec2 = (actions: string): Grant[] => [grant("any", "ec2", "Describe*"), grant("ec2", "ec2", `${actions} *Tags`)];
 const RDS = [grant("any", "rds", "Describe*"), own("rds", "rds")];
-const userPool = [grant("any", "cognito-idp", "CreateUserPool DescribeUserPoolDomain"), grant("userPool", "cognito-idp", "*UserPool* *IdentityProvider *Resource")];
-const cloudFront = (actions: string): Grant => grant("cloudFront", "cloudfront", `${actions} *Resource*`);
+const userPool = [grant("any", "cognito-idp", "CreateUserPool DescribeUserPoolDomain"), grant("tagged", "cognito-idp", "*UserPool* *IdentityProvider *Resource")];
 const CUSTOM_RESOURCE = [own("function", "lambda")];
 const SECRET = [grant("any", "secretsmanager", "GetRandomPassword"), own("secret", "secretsmanager")];
 
@@ -122,10 +146,14 @@ export const EXECUTION_ALLOW: Readonly<Record<string, readonly Grant[]>> = {
   "AWS::ApiGatewayV2::Stage": API_GATEWAY,
   "AWS::Budgets::Budget": [own("budget", "budgets")],
   "AWS::CDK::Metadata": [],
-  "AWS::CloudFront::Distribution": [cloudFront("*Distribution*")],
+  // CreateDistribution は資源の ARN を指定できない。作る時点のタグ付けは、資源にまだタグが無いので要求のタグで許す
+  "AWS::CloudFront::Distribution": [
+    grant("requestTagged", "cloudfront", "CreateDistribution TagResource"),
+    grant("tagged", "cloudfront", "*Distribution* *Resource*"),
+  ],
   "AWS::CloudFront::OriginAccessControl": [
     grant("any", "cloudfront", "CreateOriginAccessControl"),
-    cloudFront("*OriginAccessControl*"),
+    grant("originAccessControl", "cloudfront", "*OriginAccessControl*"),
   ],
   "AWS::Cognito::UserPool": userPool,
   "AWS::Cognito::UserPoolClient": userPool,
@@ -162,7 +190,7 @@ export const EXECUTION_ALLOW: Readonly<Record<string, readonly Grant[]>> = {
   "AWS::RDS::DBSubnetGroup": RDS,
   "AWS::S3::Bucket": [own("bucket", "s3")],
   "AWS::S3::BucketPolicy": [own("bucket", "s3")],
-  "AWS::SNS::Subscription": [own("topic", "sns"), grant("any", "sns", "Unsubscribe *SubscriptionAttributes")],
+  "AWS::SNS::Subscription": [own("topic", "sns")],
   "AWS::SNS::Topic": [own("topic", "sns")],
   "AWS::SNS::TopicPolicy": [own("topic", "sns")],
   "AWS::SecretsManager::Secret": SECRET,
@@ -239,14 +267,23 @@ function denyStatements(shapes: Shapes): Statement[] {
 }
 
 // 同じ資源の形の操作を 1 つの文にまとめる。管理ポリシーの上限（6,144 文字）に収める
-function allowStatements(grants: readonly Grant[], shapes: Shapes): Statement[] {
+function allowStatements(
+  grants: readonly Grant[],
+  shapes: Shapes,
+  conditions: Partial<Record<ListShape, Record<string, unknown>>> = {},
+): Statement[] {
   const byShape = new Map<ListShape, Set<string>>();
   for (const g of grants) {
     const actions = byShape.get(g.on) ?? new Set<string>();
     for (const a of g.actions) actions.add(a);
     byShape.set(g.on, actions);
   }
-  return [...byShape].map(([on, actions]) => ({ Effect: "Allow", Action: [...actions].sort(), Resource: shapes[on] }));
+  return [...byShape].map(([on, actions]) => ({
+    Effect: "Allow",
+    Action: [...actions].sort(),
+    Resource: shapes[on],
+    ...(conditions[on] ? { Condition: conditions[on] } : {}),
+  }));
 }
 
 export function appExecutionPolicy(input: BootstrapInput): PolicyDocument {
@@ -256,9 +293,13 @@ export function appExecutionPolicy(input: BootstrapInput): PolicyDocument {
   return {
     Version: "2012-10-17",
     Statement: [
-      ...allowStatements([base, ...Object.values(EXECUTION_ALLOW).flat()], shapes),
+      ...allowStatements([base, ...Object.values(EXECUTION_ALLOW).flat()], shapes, {
+        tagged: ownTags(input.settings, "aws:ResourceTag"),
+        requestTagged: ownTags(input.settings, "aws:RequestTag"),
+      }),
       ...iamStatements(shapes),
       ...denyStatements(shapes),
+      ...otherInstallationDenies(input.settings),
     ],
   };
 }
@@ -297,6 +338,8 @@ export function appPermissionsBoundary(input: BootstrapInput): PolicyDocument {
     Statement: [
       ...allowStatements(APP_BOUNDARY, shapes),
       { Effect: "Deny", Action: ["ssm:PutParameter", "ssm:DeleteParameter", "ssm:DeleteParameters"], Resource: shapes.parameters },
+      // SG の規則と CloudFront の無効化は名前で限れないので、別の設置の分をタグで拒む
+      ...otherInstallationDenies(input.settings),
     ],
   };
 }

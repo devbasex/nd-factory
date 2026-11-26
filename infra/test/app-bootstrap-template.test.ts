@@ -181,6 +181,67 @@ describe("appExecutionPolicy", () => {
     expect(statements(doc, "Allow", "sns:DeleteTopic", `arn:aws:sns:us-west-2:${FAKE_ACCOUNT}:acme-test-ops`)).not.toEqual([]);
   });
 
+  // 資源とリクエストのタグを渡し、タグの条件まで当てて、許可されるかを返す
+  const allowedWithTags = (action: string, resource: string, tags: Record<string, string>) => {
+    const holds = (condition: Statement["Condition"] = {}) =>
+      Object.entries(condition).every(([operator, entries]) =>
+        Object.entries(entries).every(([key, expected]) => {
+          if (operator === "Null") return String(tags[key] === undefined) === expected;
+          if (operator === "StringEquals") return tags[key] === expected;
+          if (operator === "StringNotEquals") return tags[key] !== expected;
+          return false;
+        }),
+      );
+    const applies = (effect: "Allow" | "Deny") => statements(doc, effect, action, resource).some((s) => holds(s.Condition));
+    return applies("Allow") && !applies("Deny");
+  };
+  const tagsOf = (context: "ResourceTag" | "RequestTag", prefix: string, environment: string) => ({
+    [`aws:${context}/app-prefix`]: prefix,
+    [`aws:${context}/app-env`]: environment,
+  });
+  const USER_POOL = `arn:aws:cognito-idp:us-west-2:${FAKE_ACCOUNT}:userpool/us-west-2_EXAMPLE`;
+  const DISTRIBUTION = `arn:aws:cloudfront::${FAKE_ACCOUNT}:distribution/EXAMPLE`;
+  const VPC = `arn:aws:ec2:us-west-2:${FAKE_ACCOUNT}:vpc/vpc-EXAMPLE`;
+  const API = "arn:aws:apigateway:us-west-2::/apis/example";
+
+  it.each([
+    ["cognito-idp:DeleteUserPool", USER_POOL],
+    ["cognito-idp:UpdateUserPoolClient", USER_POOL],
+    ["cloudfront:UpdateDistribution", DISTRIBUTION],
+    ["cloudfront:DeleteDistribution", DISTRIBUTION],
+    ["ec2:DeleteVpc", VPC],
+    ["ec2:CreateTags", VPC],
+    ["apigateway:DELETE", API],
+  ])("%s は、この設置のタグの資源に許し、別の設置のタグの資源を拒む", (action, resource) => {
+    expect(allowedWithTags(action, resource, tagsOf("ResourceTag", "acme", "test"))).toBe(true);
+    expect(allowedWithTags(action, resource, tagsOf("ResourceTag", "other", "test"))).toBe(false);
+    expect(allowedWithTags(action, resource, tagsOf("ResourceTag", "acme", "prod"))).toBe(false);
+  });
+
+  it.each([
+    ["cognito-idp:DeleteUserPool", USER_POOL],
+    ["cloudfront:DeleteDistribution", DISTRIBUTION],
+  ])("%s は、タグの無い資源に許さない", (action, resource) => {
+    expect(allowedWithTags(action, resource, {})).toBe(false);
+  });
+
+  it("ディストリビューションの作成は、この設置のタグを付ける要求だけに許す", () => {
+    expect(statements(doc, "Allow", "cloudfront:CreateDistribution", "*")).not.toEqual([]);
+    // 資源の ARN を指定できないので、資源は * で渡る
+    expect(allowedWithTags("cloudfront:CreateDistribution", "*", tagsOf("RequestTag", "acme", "test"))).toBe(true);
+    expect(allowedWithTags("cloudfront:CreateDistribution", "*", tagsOf("RequestTag", "other", "test"))).toBe(false);
+    expect(allowedWithTags("cloudfront:CreateDistribution", "*", {})).toBe(false);
+  });
+
+  it.each(["sns:Unsubscribe", "sns:GetSubscriptionAttributes", "sns:SetSubscriptionAttributes"])(
+    "%s は、この設置の運用トピックだけ",
+    (action) => {
+      expect(statements(doc, "Allow", action).flatMap((s) => list(s.Resource))).toEqual([
+        `arn:aws:sns:us-west-2:${FAKE_ACCOUNT}:acme-test-ops`,
+      ]);
+    },
+  );
+
   it.each(["iam:CreateUser", "iam:CreateAccessKey", "iam:CreateGroup", "iam:CreatePolicy", "sts:AssumeRole"])("%s を許さない", (action) => {
     expect(statements(doc, "Allow", action)).toEqual([]);
   });
