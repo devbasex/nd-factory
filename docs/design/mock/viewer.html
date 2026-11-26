@@ -172,7 +172,7 @@ fetch(BASE + 'canvas.json').then(r => {
 }).catch(e => {
   const el = document.getElementById('err');
   el.style.display = 'block';
-  el.textContent = e.message + '。ファイルを直に開くとブラウザが読み込みを止めるので、python3 -m http.server --bind 127.0.0.1 -d docs/design/mock を打って http://localhost:8000/viewer.html を開く。';
+  el.textContent = e.message + '。ファイルを直に開くとブラウザが読み込みを止めるので、python3 -m http.server --bind 127.0.0.1 -d docs/design/mock を打って http://127.0.0.1:8000/viewer.html を開く。';
 });
 </script>
 </body>
