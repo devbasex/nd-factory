@@ -212,30 +212,31 @@ export function createSender(d: SendDeps): QueueSender {
 
   // 件を消すのと会話の写しと待機の解除を 1 度に書く。取り下げた後の成功なら、返った項目の取り下げを足す
   async function created(round: Round, item: OutboxItem, itemId: string, waitSeen: Uint8Array | null): Promise<boolean> {
-    // 読んだ後に取り下げが保留へ移すことがあるので、所属は書き込みの中で確かめ、変わっていれば読み直す
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    // 読んだ後に取り下げが保留へ移すことや、別のタブの読み直しで会話の写しが変わることがあるので、
+    // 所属と写しは書き込みの中で確かめ、変わっていれば件と写しを読み直す
+    const attempts = 3;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       const found = await d.outbox.find(item.answerTag);
       if (found === null) return d.wait.clear(round.owner, waitSeen);
-      const conversation = await sentIdWrite(round.owner, item, itemId);
+      // 最後の回は写しへの ID の書き込みを諦め、件の反映（取り下げの登録）を優先する。写しは次の読み直しで直る
+      const conversation = attempt < attempts - 1 ? await sentIdWrite(round.owner, item, itemId) : null;
       const writeConversation = async (tx: GuardedTx) => conversation === null || (await conversation(tx));
       if (found.held) {
         // 保留から先へは移らないので、取り下げを足すのと同じトランザクションで保留の件を消す
         const draft = { operation: WITHDRAW, targetId: itemId, projectId: item.projectId, input: {} };
-        let refused = false;
+        // 写しの照合が外れたら、enqueue の中で同じ写しのまま試し直さないよう、投げて抜ける
+        const stale = new Error("会話の写しが読んだ後に変わった");
         try {
           await d.outbox.enqueue(round.owner, draft, async (tx) => {
-            if (!(await writeConversation(tx))) {
-              refused = true;
-              return false;
-            }
+            if (!(await writeConversation(tx))) throw stale;
             await tx.objectStore("held").delete(item.answerTag);
             await d.wait.clearIn(tx, waitSeen);
             return true;
           });
         } catch (error) {
-          // セッションが替わったか、会話の写しが読んだ後に変わったときは、何も変えずに回を止める。
-          // それ以外（保存の失敗）はそのまま投げる
-          if (error instanceof SessionChangedError || refused) return false;
+          if (error === stale) continue;
+          // セッションが替わったときは、何も変えずに回を止める。それ以外（保存の失敗）はそのまま投げる
+          if (error instanceof SessionChangedError) return false;
           throw error;
         }
         return true;
@@ -243,15 +244,20 @@ export function createSender(d: SendDeps): QueueSender {
       const guard = await prepareGuard(d.db, round.owner);
       if (guard === null) return false;
       let moved = false;
+      let stale = false;
       const result = await commitGuarded(guard, async (tx) => {
         moved = (await tx.objectStore("outbox").get(item.answerTag)) === undefined;
-        if (moved || !(await writeConversation(tx))) return false;
+        if (moved) return false;
+        if (!(await writeConversation(tx))) {
+          stale = true;
+          return false;
+        }
         await tx.objectStore("outbox").delete(item.answerTag);
         await d.wait.clearIn(tx, waitSeen);
         return true;
       });
       if (result === "committed") return true;
-      if (!moved) return false;
+      if (!moved && !stale) return false;
     }
     return false;
   }
