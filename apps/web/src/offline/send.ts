@@ -9,7 +9,7 @@ import { missingChecks, type OperationClass, operationClassOf } from "./operatio
 import { type Outbox, type OutboxItem, SessionChangedError } from "./outbox.ts";
 import { holdDenied } from "./revocation.ts";
 import { retryUntilFrom, type SendWait } from "./send-wait.ts";
-import { SIGNIN_LOCK } from "./quarantine.ts";
+import { withSigninLock } from "./quarantine.ts";
 
 // そろえ方の段 2（送る列を送る）と取り下げ（#12 の設計書の「段 2 の結果ごとの扱い」「確定待ちの取り下げ」）
 
@@ -494,7 +494,7 @@ export function createSender(d: SendDeps): QueueSender {
 
     // 送信の開始と同じ錠で、1 つずつ行う
     withdraw: (owner, answerTag, conversation) =>
-      navigator.locks.request(SIGNIN_LOCK, async () => {
+      withSigninLock(async () => {
         for (let attempt = 0; attempt < 3; attempt += 1) {
           const found = await d.outbox.find(answerTag);
           if (found === null) break;

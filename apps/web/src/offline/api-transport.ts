@@ -2,7 +2,7 @@ import { type CallResult, createOperationClient, httpTransport } from "@nd-facto
 import type { OperationDef } from "@nd-factory/contracts/operation";
 import { tagOf } from "./crypto.ts";
 import { type DeviceDb, readOwner } from "./db.ts";
-import { SIGNIN_LOCK } from "./quarantine.ts";
+import { withSigninLock } from "./quarantine.ts";
 
 // API への 1 つの送り方。照合した token をそのまま送り、照合と送信の開始の間にサインアウトや
 // アカウントの切り替えが入らないようにする（#12 の設計書の「送信の直前の照合と token の固定」）
@@ -106,7 +106,7 @@ export function createApiSender(d: SenderDeps): ApiSender {
     const seen: { status: number; retryAfter: string | null; date: string | null } = { status: 0, retryAfter: null, date: null };
     const guarded: typeof fetch = async (input, init) => {
       let pending: Promise<Response> | undefined;
-      await navigator.locks.request(SIGNIN_LOCK, async () => {
+      await withSigninLock(async () => {
         const reason = await check(call, owner, tags);
         if (reason !== null) throw new Aborted(reason);
         // 照合から送信の開始まで await を挟まない。応答は錠を放してから待つ

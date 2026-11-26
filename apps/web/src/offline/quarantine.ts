@@ -10,6 +10,11 @@ const QUARANTINE_DB_NAME = "nd-quarantine";
 /** サインインとサインアウトが使う、アプリに 1 つの錠（画面の文書の「実行の排他と照合」。#4 と共有する） */
 export const SIGNIN_LOCK = "nd-factory";
 
+/** サインインの錠を取って fn を行う */
+export function withSigninLock<T>(fn: () => Promise<T>): Promise<T> {
+  return navigator.locks.request(SIGNIN_LOCK, fn);
+}
+
 type OwnerRow = { ownerTag: string; key: CryptoKey; tagKey: CryptoKey; version: number };
 type Item = HeldRow & { ownerTag: string; store: "outbox" | "held" };
 // 保留の理由は保留の件だけが持つ
@@ -171,7 +176,7 @@ export async function unreadableQuarantine(
   });
 
   const discard = (answerTag: string) =>
-    navigator.locks.request(SIGNIN_LOCK, async () => {
+    withSigninLock(async () => {
       if ((await session()) !== seen) return "stale" as const;
       return withQuarantine(async (q) => {
         const item = await q.get("items", answerTag);
