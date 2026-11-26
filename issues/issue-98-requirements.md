@@ -48,7 +48,7 @@
    leak-scan: 当たり 1 件
    ```
 
-3. 資源の名前に `example.com` を含む S3 の端点が当たらない。`data-example.com-logs.s3.amazonaws.com` を置いた `docs/e.md` と、置き場の名前 `datalogs` に `.s3.amazonaws.com` を続けた端点を置いた `docs/e2.md` の木で、`.gitleaks.toml` の当たりは `docs/e2.md` だけだった
+3. 資源の名前に `example.com` を含む S3 の端点が当たらない。`data-example.com-logs` に `.s3.amazonaws.com` を続けた端点を置いた `docs/e.md` と、置き場の名前 `datalogs` に `.s3.amazonaws.com` を続けた端点を置いた `docs/e2.md` の木で、`.gitleaks.toml` の当たりは `docs/e2.md` だけだった
 
    ```text
    $ leak-scan.sh dir .gitleaks.toml --paths
@@ -119,7 +119,7 @@
 - [ ] 2. 途中のコミットで、NUL を含みバイナリと判定されるファイルに架空の秘密を入れ、後のコミットで消した履歴を `leak-scan.sh git --range` でスキャンすると、当たりを報告して終了コード 1 で終える。スキャンの対象は `git log -p` のパッチの表示に頼らずに決める（結合テストがある）
 - [ ] 3. NUL を含みバイナリと判定されるファイルに架空の秘密を入れた今の木を `leak-scan.sh dir` でスキャンすると、当たりを報告して終了コード 1 で終える（結合テストがある）
 - [ ] 4. 今の木と履歴のスキャンで、対象のファイルのうち 1 つでも中身をスキャンできなかったときは、当たりが 0 件でも終了コード 0 で終えない。`--paths` を渡さなければ、出力にファイルの名前を出さない（結合テストがある）
-- [ ] 5. 資源の名前の一部に `example.com` を含む架空の S3 の端点（`data-example.com-logs.s3.amazonaws.com` の形）を置いた木で、`leak-scan.sh dir .gitleaks.toml` が `nd-aws-endpoint` の当たりを報告する。端点を例外として許すのは、端点の名前の全体が次の「許す形」のどれかのときだけで、実際の資源の名前の一部を含む端点は検出する（結合テストがある。理由は[設計書の端点と S3 の置き場の許可の決定](./issue-98-design-decisions.md)）
+- [ ] 5. 資源の名前の一部に `example.com` を含む架空の S3 の端点（`data-example.com-logs` に `.s3.amazonaws.com` を続けた形）を置いた木で、`leak-scan.sh dir .gitleaks.toml` が `nd-aws-endpoint` の当たりを報告する。端点を例外として許すのは、端点の名前の全体が次の「許す形」のどれかのときだけで、実際の資源の名前の一部を含む端点は検出する（結合テストがある。理由は[設計書の端点と S3 の置き場の許可の決定](./issue-98-design-decisions.md)）
   - プレースホルダー（`<名前>`・`${名前}`）と区切り（`.`・`-`）だけでできた名前
   - S3: `amzn-s3-demo-` で始まり、後ろが小文字と数字だけの名前
   - CloudFront: `EXAMPLE` と数字だけの名前
@@ -188,7 +188,7 @@
 >
 > 1. 委任の token（`ndfd_<利用者の ID>.<委任の ID>.<秘密の部分>`）と手元のマシンの登録の token（`ndfm_<チームの ID>.<マシンの ID>.<秘密の部分>`。`docs/design/api.md` の「認証と主体」）。gitleaks の既定の規則にも `.gitleaks.toml` の `nd-*` の規則（AWS の値だけ）にも当たらない
 > 2. 途中のコミットにだけ含まれ、Git がバイナリと見たファイルの中の秘密。`tools/checks/leak-scan.sh` の履歴の探しは `git log -p` のパッチに頼り、gitleaks はバイナリ扱いのファイルを警告なしで飛ばすので、今の木と履歴のどちらでも見逃しうる（今の WRN・ERR・FTL の照らしにも掛からない）
-> 3. 資源の名前に `example.com` などの許可の文字列を含む S3 の端点。`.gitleaks.toml` の `nd-aws-endpoint` の許可は部分一致で、バケットの名前の一部に `example.com` がある架空の S3 の端点（`data-example.com-logs.s3.amazonaws.com` の形）が当たらない。実在のバケットの名前にも同じ文字列を含められる
+> 3. 資源の名前に `example.com` などの許可の文字列を含む S3 の端点。`.gitleaks.toml` の `nd-aws-endpoint` の許可は部分一致で、バケットの名前の一部に `example.com` がある架空の S3 の端点（`data-example.com-logs` に `.s3.amazonaws.com` を続けた形）が当たらない。実在のバケットの名前にも同じ文字列を含められる
 >
 > 設計文書の食い違い:
 >

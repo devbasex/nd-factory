@@ -53,15 +53,33 @@ description = "作り物の値と印（AGENTS.md の「秘密とインフラの�
 regexes = ['''123456789012''', '''^210987654321$''']
 
 # アカウントの欄が 12 桁の ARN。秘密は ARN の全体（アカウントの欄の 12 桁は nd-aws-account-id も当てる）。
-# 資源の欄は置き場所の記号（<名前>・${名前}）の全体か、空白・引用符・<>{} の外の文字。値に接した文書の区切り（<…> の閉じ・} ）を含めない
+# 資源の欄は置き換え記号の全体か、空白・引用符・<>{} の外の文字。値に接した文書の区切り（<…> の閉じ・} ）を含めない。
+# <…> は中に空白や日本語を持つ置き換え記号も含める（許可が ARN の全体を見分けられるようにする。#98）
 [[rules]]
 id = "nd-aws-arn"
 description = "AWS の ARN（アカウントの欄つき）"
-regex = '''arn:(?:aws|aws-cn|aws-us-gov):[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[^\s"'`<>{}])*'''
+regex = '''arn:(?:aws|aws-cn|aws-us-gov):[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:(?:<[^<>"'`/\r\n]+>|\$\{[^{}\s]+\}|[^\s"'`<>{}])*'''
 
 [[rules.allowlists]]
-description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<名前>・${名前} の全体。記号の 1 文字だけでは許さない）"
-regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''<[A-Za-z0-9_-]+>''', '''\$\{[^{}\s]+\}''', '''EXAMPLE''']
+description = "置き換え記号の例（#98 の決定 5）。アカウントの欄が作り物で、資源の欄が置き換え記号と区切りだけ（前に role/ か policy/ を付けてよい）"
+regexTarget = "match"
+regexes = ['''^arn:(?:aws|aws-cn|aws-us-gov):[a-z0-9-]+:[a-z0-9-]*:123456789012:(?:role/|policy/)?(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[.-])+$''']
+
+# 資源の欄に名前を書く ARN の例を足すときは、この一覧に ARN の全体を 1 つ足す。
+# このファイル自身が nd-aws-arn に当たらないよう、アカウントの欄の後ろの : は [:] と書く
+[[rules.allowlists]]
+description = "文書とテストの ARN の例（#98 の決定 5）。アカウントの欄が作り物で、資源の欄の名前は例のためのもの"
+regexTarget = "match"
+regexes = [
+  '''^arn:aws:iam::123456789012[:]role/acme-deploy$''',
+  '''^arn:aws:iam::123456789012[:]role/example$''',
+  '''^arn:aws:iam::123456789012[:]role/<AI のロール>$''',
+  '''^arn:aws:iam::123456789012[:]policy/acme-test-deny-approval$''',
+  '''^arn:aws:ecs:ap-northeast-1:123456789012[:]task-definition/example:1$''',
+  '''^arn:aws:rds:us-west-2:123456789012[:]cluster:acme-test-progress$''',
+  '''^arn:aws:secretsmanager:us-west-2:123456789012[:]secret:acme/test/progress-db-admin-AbCdEf$''',
+  '''^arn:aws:codepipeline:us-west-2:123456789012[:]acme-test-pipeline/Approve/Approve$''',
+]
 
 # アカウントとリージョンの欄の無い S3 の ARN。秘密は置き場の名前（置き場所の記号の全体か、名前に使える文字の並び）
 [[rules]]
@@ -71,8 +89,24 @@ regex = '''arn:(?:aws|aws-cn|aws-us-gov):s3:::((?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\
 secretGroup = 1
 
 [[rules.allowlists]]
-description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<名前>・${名前} の全体。記号の 1 文字だけでは許さない）"
-regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''<[A-Za-z0-9_-]+>''', '''\$\{[^{}\s]+\}''', '''EXAMPLE''']
+description = "置き換え記号（<名前>・${名前}）と区切り（.・-）だけでできた名前（#98 の決定 5 の許可 2）。実際の値の文字を含まない"
+regexes = ['''^(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[.-])+$''']
+
+[[rules.allowlists]]
+description = "S3 の例の置き場（#98 の決定 5 の許可 1）。AWS は amzn-s3-demo- で始まる置き場を作らせない。アクセスポイントの別名を通さないため、接頭辞の後ろは小文字と数字だけ"
+regexes = ['''^amzn-s3-demo-[a-z0-9]+$''']
+
+[[rules.allowlists]]
+description = "main の履歴に残る旧い作り物の値と、それを足したコミットの組（#98 の決定 5 の許可 5）。今の木と新しいコミットでは当たる"
+condition = "AND"
+commits = ["28057e3f0ee9ce072dc8b2e3c1023c6b682468c8"]
+regexes = ['''^acme-assets$''', '''^assets\.example\.com$''', '''^nd-EXAMPLE-logs$''']
+
+[[rules.allowlists]]
+description = "main の履歴に残る旧い作り物の値と、それを足したコミットの組（#98 の決定 5 の許可 5）。今の木と新しいコミットでは当たる"
+condition = "AND"
+commits = ["0cf8dcd571ce6b63825eb134ebb26def8118c1db"]
+regexes = ['''^data-example\.com-logs$''']
 
 # AWS の資源の ID（頭と 8 か 17 桁の 16 進）
 [[rules]]
@@ -81,20 +115,79 @@ description = "AWS の資源の ID"
 regex = '''\b((?:vpc|subnet|sg|i|vol|snap|ami|igw|rtb|eni|nat|eipalloc|lt)-(?:[0-9a-f]{17}|[0-9a-f]{8}))\b'''
 secretGroup = 1
 
-[[rules.allowlists]]
-description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<名前>・${名前} の全体。記号の 1 文字だけでは許さない）"
-regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''<[A-Za-z0-9_-]+>''', '''\$\{[^{}\s]+\}''', '''EXAMPLE''']
-
 # 資源ごとに名前の付く AWS の端点。秘密は資源の部分（サービスとリージョンより前のラベル）。
 # ラベルは置き場所の記号（<名前>・${名前}）の全体か英数字と _- の並び。<実際の名前.cloudfront.net> の < は記号の一部にならず、秘密に含めない。
 # S3 はリージョンなし（<bucket>.s3.amazonaws.com）・リージョンつき（<bucket>.s3.<region>.amazonaws.com・<bucket>.s3-<region>.amazonaws.com）・
-# dualstack と website の形（<bucket>.s3.dualstack.<region>.amazonaws.com・<bucket>.s3-website-<region>.amazonaws.com）を当てる
+# dualstack と website の形（<bucket>.s3.dualstack.<region>.amazonaws.com・<bucket>.s3-website-<region>.amazonaws.com）を当てる。
+# DNS の名前は大文字と小文字を区別しないので、サービス名と接尾辞は (?i:…) で当てる。許可は書かれたとおりの表記に当てる
 [[rules]]
 id = "nd-aws-endpoint"
 description = "AWS の資源ごとの端点"
-regex = '''((?:(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[A-Za-z0-9_-])+\.)*(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[A-Za-z0-9_-])+)\.(?:execute-api\.[^.\s"'`/]+\.amazonaws\.com|lambda-url\.[^.\s"'`/]+\.on\.aws|cloudfront\.net|auth\.[^.\s"'`/]+\.amazoncognito\.com|rds\.amazonaws\.com|s3(?:[.-][^.\s"'`/]+)*\.amazonaws\.com)'''
+regex = '''((?:(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[A-Za-z0-9_-])+\.)*(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[A-Za-z0-9_-])+)\.(?i:execute-api\.[^.\s"'`/]+\.amazonaws\.com|lambda-url\.[^.\s"'`/]+\.on\.aws|cloudfront\.net|auth\.[^.\s"'`/]+\.amazoncognito\.com|rds\.amazonaws\.com|s3(?:[.-][^.\s"'`/]+)*\.amazonaws\.com)'''
 secretGroup = 1
 
 [[rules.allowlists]]
-description = "作り物の値と印（AGENTS.md の「秘密とインフラの値を置かない」）と、置き場所の記号（<名前>・${名前} の全体。記号の 1 文字だけでは許さない）"
-regexes = ['''123456789012''', '''^acme''', '''example\.com''', '''<[A-Za-z0-9_-]+>''', '''\$\{[^{}\s]+\}''', '''EXAMPLE''']
+description = "置き換え記号（<名前>・${名前}）と区切り（.・-）だけでできた名前（#98 の決定 5 の許可 2）。実際の値の文字を含まない"
+regexes = ['''^(?:<[A-Za-z0-9_-]+>|\$\{[^{}\s]+\}|[.-])+$''']
+
+[[rules.allowlists]]
+description = "CloudFront の例（#98 の決定 5 の許可 3）。実在の配信の名前は d で始まるので、EXAMPLE と数字だけの名前の配信は無い"
+regexTarget = "match"
+regexes = ['''^EXAMPLE[0-9]+\.cloudfront\.net$''']
+
+[[rules.allowlists]]
+description = "Cognito のドメインの例（#98 の決定 5 の許可 4）。<prefix>-<environment>-login は docs/operations/idp-and-apps.md の形の例で、置き換え記号と固定の語 login だけ。cognito を含む名前は AWS が接頭辞のドメインに使わせない"
+regexTarget = "match"
+regexes = ['''^(?:<prefix>-<environment>-login|[a-z0-9-]*cognito[a-z0-9-]*)\.auth\.(?:<[^<>\s"'`/.]+>|us-west-2)\.amazoncognito\.com$''']
+
+[[rules.allowlists]]
+description = "S3 の例の置き場の端点（#98 の決定 5 の許可 1）。AWS は amzn-s3-demo- で始まる置き場を作らせない。アクセスポイントの別名を通さないため、接頭辞の後ろは小文字と数字だけ"
+regexTarget = "match"
+regexes = ['''^amzn-s3-demo-[a-z0-9]+\.s3(?:[.-][^.\s"'`/]+)*\.amazonaws\.com$''']
+
+[[rules.allowlists]]
+description = "main の履歴に残る旧い作り物の値と、それを足したコミットの組（#98 の決定 5 の許可 5）。今の木と新しいコミットでは当たる"
+condition = "AND"
+regexTarget = "match"
+commits = ["0cf8dcd571ce6b63825eb134ebb26def8118c1db", "551abec8ed02bbd3a635878e6e5d9c694c5822ce"]
+regexes = ['''^EXAMPLE1234\.execute-api\.us-west-2\.amazonaws\.com$''']
+
+[[rules.allowlists]]
+description = "main の履歴に残る旧い作り物の値と、それを足したコミットの組（#98 の決定 5 の許可 5）。今の木と新しいコミットでは当たる"
+condition = "AND"
+regexTarget = "match"
+commits = ["0cf8dcd571ce6b63825eb134ebb26def8118c1db"]
+regexes = ['''^data-example\.com-logs\.s3\.amazonaws\.com$''', '''^logs\.example\.com\.s3\.amazonaws\.com$''']
+
+[[rules.allowlists]]
+description = "main の履歴に残る旧い作り物の値と、それを足したコミットの組（#98 の決定 5 の許可 5）。今の木と新しいコミットでは当たる"
+condition = "AND"
+regexTarget = "match"
+commits = ["424cc11d4ccdeeb91da5dec217b97d1ed4f6265e", "69fd0b96383396fbf6f0091fa3b473d965918178", "a17398098db7265989071f0cfdfdd5aed2e8b3db", "ee58e0364b06253346a7e002773877bc303a366d"]
+regexes = ['''^acme-bucket\.s3\.us-west-2\.amazonaws\.com$''']
+
+[[rules.allowlists]]
+description = "main の履歴に残る旧い作り物の値と、それを足したコミットの組（#98 の決定 5 の許可 5）。今の木と新しいコミットでは当たる"
+condition = "AND"
+regexTarget = "match"
+commits = ["28057e3f0ee9ce072dc8b2e3c1023c6b682468c8", "e49b177c4516475fdf7d8c1ce7a0dab989d9cd3c"]
+regexes = ['''^acme-test-login\.auth\.us-west-2\.amazoncognito\.com$''']
+
+[[rules.allowlists]]
+description = "main の履歴に残る旧い作り物の値と、それを足したコミットの組（#98 の決定 5 の許可 5）。今の木と新しいコミットでは当たる"
+condition = "AND"
+regexTarget = "match"
+commits = ["e49b177c4516475fdf7d8c1ce7a0dab989d9cd3c"]
+regexes = ['''^acme-test\.auth\.us-west-2\.amazoncognito\.com$''']
+
+# nd-factory のサービスが発行する token（形は docs/design/api.md の「認証と主体」。#98 の決定 1）。
+# ID の部分の形は問わず、秘密の部分の長さ（base64url の 32 字以上）で当てる。許可は持たない
+[[rules]]
+id = "nd-delegation-token"
+description = "nd-factory の委任の token"
+regex = '''\bndfd_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{32,}'''
+
+[[rules]]
+id = "nd-machine-token"
+description = "nd-factory の手元のマシンの登録の token"
+regex = '''\bndfm_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{32,}'''

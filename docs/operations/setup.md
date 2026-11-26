@@ -58,7 +58,7 @@ npm run nd-setup -- diff --profile <profile> --settings <設定のファイル> 
 | --- | --- |
 | 差分 | スタックごとの資源の足し・変え・消し |
 | 作る資源の名前 | スタックの名前と、利用者プール・利用者の表・秘密の器・接続・承認を拒む方針などの名前。名前はすべて `<prefix>-<environment>-<用途>`（秘密の器とパラメーターは `<prefix>/<environment>/<用途>`）になる |
-| 戻り先の URL | `app` を選んだときだけ。Google のクライアントに登録する URL（例 `https://acme-test-login.auth.us-west-2.amazoncognito.com/oauth2/idpresponse`）。使い方は [idp-and-apps.md](idp-and-apps.md) にある |
+| 戻り先の URL | `app` を選んだときだけ。Google のクライアントに登録する URL（例 `https://<prefix>-<environment>-login.auth.<リージョン>.amazoncognito.com/oauth2/idpresponse`）。使い方は [idp-and-apps.md](idp-and-apps.md) にある |
 | 確認の値 | 下の「確認の値」の形。`deploy` に渡す |
 | 次に打つコマンド | 確認の値を入れた `deploy` のコマンド |
 | 足りない設定 | 出力の最後の欄。反映の前に直すとよい設定を 1 件 1 行で示し、無ければ「足りない設定: 無し」を出す。下の「足りない設定」にある |

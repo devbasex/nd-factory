@@ -43,6 +43,7 @@
 | 木の取り出しのスクリプト | `export-tree.sh` | `tools/checks/` |
 | gitleaks を置くスクリプト | `install-gitleaks.sh` | `tools/checks/` |
 | 今の木と履歴の探しのスクリプト | `leak-scan.sh` | `tools/checks/` |
+| 検査の本体 | `main`・`gitleaks`・`tree`・`history`・`relay`・`copyrepo`・`archive`・`model` の Python のモジュール | `tools/checks/leak_scan/` |
 | CI の定義のテスト | `triggerViolations`・`secretWorkflowViolations`・`callerViolations`・`leakJobViolations`・`actorConditions`・`patternSecretReaders` ほか | `tools/test/ci-definition.test.ts` |
 | 漏れの検査の結合のテスト | `secretScan`・`exportTree`・`mergeRepo` ほか | `tools/test/leak-scan.integration.test.ts` |
 
@@ -80,11 +81,12 @@ flowchart TB
 | `leak-scan-secret.sh` | 秘密の正規表現から重ねた設定を組み、規則ごとに `leak-scan.sh` を打ち、`nd-real-value` の件数の行を出す。重ねた規則の名前と設定を組む処理を持つのは、このスクリプトだけである |
 | `export-tree.sh` | コミットの木か、範囲の各コミットの差の項目を、属性による加工なしで空のディレクトリへ書き、元の木か元の履歴と照らす |
 | `install-gitleaks.sh` | gitleaks の版と要約値（SHA-256）を持つ、このリポジトリで唯一の場所。3 つのジョブ（`leak-check`・`leak-check-push`・`leak-check-secret`）は、どれもこのスクリプトを 1 行で呼ぶ |
-| `leak-scan.sh` | gitleaks の 1 回の探しを打ち、当たりを規則・ファイル・行・コミットだけで出す。`--paths` を渡さなければ、ファイルを名前の順の通し番号 `file-<番号>` で出す。探す木の根に `.gitleaksignore` があれば終了コード 2 で落ちる |
+| `leak-scan.sh` | 引数と前提を確かめて `leak_scan/main.py` を起こす。探す木の根に `.gitleaksignore` があれば終了コード 2 で落ちる |
+| `leak_scan/` | 1 回の探しの本体（Python の標準ライブラリだけ）。gitleaks を打ち、読まれなかった対象を探し直し、当たりを規則・ファイル・行・コミットだけで出す。`--paths` を渡さなければ、ファイルを名前の順の通し番号 `file-<番号>` で出す。流れは下の「1 回の探し」 |
 | CI の定義のテスト | ワークフローごとの起動の許可、`leak-check-secret.yml` と見本の形、`leak-check` と `leak-check-push` の分け方を、定義から読んで落とす |
 | NDF のマージの前の非公開の検査 | このリポジトリの外（devbasex/ai-plugins）の機能。「外部連携」に受け入れの条件を書く |
 
-依存の向きは、ワークフロー → `leak-scan-secret.sh` → `leak-scan.sh` → gitleaks と設定のファイル、の一方向である。`export-tree.sh` を呼ぶのは `leak-check-secret.yml` だけで、`leak-scan-secret.sh` は渡された木を探すだけである。
+依存の向きは、ワークフロー → `leak-scan-secret.sh` → `leak-scan.sh` → `leak_scan/` → gitleaks と設定のファイル、の一方向である。`export-tree.sh` を呼ぶのは `leak-check-secret.yml` だけで、`leak-scan-secret.sh` は渡された木を探すだけである。
 
 ## 背景
 
@@ -112,7 +114,7 @@ flowchart TB
 
 含む:
 
-- 公開のリポジトリの `leak-check`・`leak-check-push`・`leak-check-secret.yml` と、4 本のスクリプト
+- 公開のリポジトリの `leak-check`・`leak-check-push`・`leak-check-secret.yml` と、4 本のスクリプトと検査の本体 `leak_scan/`
 - 呼び出しのワークフローの見本と、その形を縛る CI の定義のテスト
 - NDF が非公開の検査の結果を受け入れる条件（外部連携の契約）
 
@@ -174,6 +176,84 @@ sequenceDiagram
 
 呼び出しのワークフローの見本は、ジョブ `generation` で変数 `LEAK_CHECK_GENERATION` が `^[1-9][0-9]*$` に合い入力の世代と同じかを確かめ、外れれば `::error::設定の世代が入力と違うか、切り替え中` で落ちる。ジョブ `scan` は `needs: generation` を持ち、秘密を `secrets: inherit` ではなく名前で渡す。
 
+### 1 回の探し（`leak-scan.sh` と `leak_scan/`）
+
+使い方は `leak-scan.sh <dir|git> <設定> [--range <範囲>] [--report <ファイル>] [--paths]` である。終了コードは、0 が当たり無し、1 が当たりか探しの失敗、2 が引数の誤りである。gitleaks の終了コードと件数の行は使わず、当たりと失敗の印だけから決める。
+
+`leak-scan.sh` は起動時に道具の版を確かめ、足りなければ gitleaks を打たずに終了コード 1 で終える。
+
+| 道具 | 最低の版 | 確かめる探し | 要る理由 |
+| --- | --- | --- | --- |
+| `python3` | 3.11 | `dir` と `git` | 検査の本体が `tomllib` を読み込む |
+| `git` | 2.40 | `git` | 履歴の探しが `git check-attr --source` を使う |
+
+#### 今の木の探し（`dir`）
+
+1. 渡された設定で木を探す（記録の段は trace）
+2. 次を、一時の Git のリポジトリに「対象 1 つだけを持つ親の無いコミット」として写す
+   - gitleaks が中身を読まずに飛ばしたファイル（先頭のバイトの種類、名前でアーカイブと見なしたもの）
+   - 全体の許可が名前で外したファイルと、外れたディレクトリの下のファイル
+   - アーカイブと圧縮ファイルの中のファイル
+3. 元のパスを保った写しを `gitleaks git` で検査する。Git の `--text` は、`gitleaks git` の `--log-opts` に含めて渡す。使う設定は、渡された設定に目印の規則（写しを読み終えたことを確かめる規則）を追加したもので、全体の許可の扱いは次のとおりである
+
+| 渡された設定 | 全体の許可の扱い |
+| --- | --- |
+| `useDefault = true` が直接書かれている | gitleaks の既定の設定から、全体の許可のパス条件だけを外して読み込む |
+| 直接書かれておらず、全体の許可も無い（`.gitleaks.toml`） | 目印の規則を追加するだけである |
+| 直接書かれておらず、全体の許可のパス条件がある（設定自身に書くか、読み込んだ先にある） | パス条件は外せない。写しがその条件で外されると、探し直しは失敗になる |
+
+#### 履歴の探し（`git`）
+
+1. 探す対象を、パッチの表示に頼らず、コミットと親ごとの `git diff-tree --raw` で決める
+2. `--text --no-textconv --no-ext-diff --no-renames` を足して探す。`git` の中継（`relay.py`）が各ファイルの差分の末尾に目印の行を足し、対象のすべてで目印が当たることを確かめる
+3. バイナリ（Git が行を数えられない・`-diff` 属性・NUL を含む）と全体の許可が外したファイルは、変更後の blob の全体も写して探す。出すのは、そのコミットで足した行に重なる当たりと、変更前の blob に無い当たりだけである
+4. アーカイブと圧縮ファイルは展開して、中のファイルを探す。中の当たりはすべて出す
+5. 写しの探しでは `commit` の行を元のコミットに書き換えるので、コミットを条件にする許可が効く
+
+#### 対象外のパス
+
+渡された設定のファイル、`node_modules`・`bower_components` の下の Git が追跡していないファイル（木の根が Git の作業ツリーの最上位のときだけ）、`.git` は探し直さない。
+
+#### アーカイブと圧縮ファイル
+
+名前ではなく中身で見分ける。展開するのは zip・tar・gzip・bzip2・xz である。当たりのファイルは `<アーカイブのパス>!<中のパス>` で出し、規則と許可は `<アーカイブのパス>/<中のパス>`（圧縮ファイルは同じディレクトリの、拡張子を除いた名前）に当てる。次は失敗にする。
+
+- 壊れている・途中で切れている・暗号化されている
+- 7z・rar・zstd・lz4・compress と、`zipfile` が読めない圧縮の方式
+- 末尾のディレクトリ情報を失った ZIP、NUL の無い UTF-8 のテキストでない `.br`
+- 絶対パスか `..` を含むメンバー名
+- 入れ子が 5 段を超える、展開の合計が 1 GiB を超える（環境変数 `LEAK_SCAN_EXPAND_LIMIT` で小さくできる）
+
+#### 失敗の行
+
+当たりが無くても、次の行を出したら終了コード 1 で終える。行はファイルの名前を含まない。
+
+| 行 | 出るとき |
+| --- | --- |
+| `leak-scan: gitleaks の報告を読めない（終了コード <n>）` | 1 回目の報告が無いか、JSON の配列でない |
+| `leak-scan: gitleaks が警告か誤りを出した…` | 記録に WRN・ERR・FTL の行（件数の行を除く）がある |
+| `leak-scan: gitleaks が中身を読まずに飛ばしたファイルを探せなかった` | 今の木の探し直しができない。分けられない飛ばしの行、読めないファイル、展開の失敗、写しの探しの失敗 |
+| `leak-scan: 履歴を最後まで探し終えたことを確かめられなかった` | 目印の欠け、内部の `git log` の失敗、履歴の写しの探しか展開の失敗 |
+
+`--paths` を渡すと、gitleaks の記録のうち INF・WRN・ERR・FTL の段の行（件数の行を除く）を標準エラーへ出す。当たった値を含む DBG・TRC の行は出さない。
+
+### 作り物の値の許可と token の規則（`.gitleaks.toml`）
+
+- `nd-delegation-token`・`nd-machine-token` は、`ndfd_`・`ndfm_` の後に 3 つの部分を `.` でつないだ形で、3 つ目が base64url の 32 字以上のものに当てる。許可を持たない
+- `nd-aws-endpoint` は、サービス名と DNS の接尾辞（`amazonaws.com` など）を、大文字と小文字を区別せずに当てる。DNS の名前は大文字と小文字を区別しないためである。許可は書かれたとおりの表記に当てるので、大文字を混ぜた端点は、許す形に合わなければ当たる
+- S3 の置き場と端点の許可は、名前の全体に当てる。実在し得る名前を通さないためで、`acme`・`example.com`・`EXAMPLE` を含むだけの名前は許さない
+
+| 許す形 | 対象 |
+| --- | --- |
+| `amzn-s3-demo-` の後が小文字と数字だけの名前 | S3 の置き場の ARN と端点 |
+| 置き換え記号（`<名前>`・`${名前}`）と区切り（`.`・`-`）だけの名前 | 置き場の ARN と端点 |
+| `EXAMPLE` と数字だけの名前 | CloudFront の端点 |
+| `<prefix>-<environment>-login` か、`cognito` を含む名前（リージョンは置き換え記号か `us-west-2`） | Cognito の端点 |
+| アカウントの欄が `123456789012` で、資源の欄が置き換え記号の例か、`.gitleaks.toml` の一覧にある ARN | ARN |
+| main の履歴に残る旧い作り物の値と、それを足したコミットの組 | 当てた規則 |
+
+AWS の資源の ID の規則は許可を持たない。新しい作り物の名前は上の形にするか、許可を理由とともに足す。
+
 ### 秘密を使う探しのスクリプト（`leak-scan-secret.sh`）
 
 使い方は `leak-scan-secret.sh <dir|history|git> [<木>] [--range <範囲>] [--count-only] [--details]` である。秘密を環境変数 `LEAK_CHECK_PATTERN` で、必須の指定を `LEAK_CHECK_REQUIRE_PATTERN`（`1` で必須）で受ける。秘密は読んだらすぐ環境から消し、`leak-scan.sh` と gitleaks に渡さない。
@@ -194,7 +274,7 @@ sequenceDiagram
 
 - 秘密があれば、当たりが 0 件でも `leak-scan-secret: nd-real-value: <件数> 件` の行を必ず 1 つ出す。`history` では、すべての根の件数を合わせて 1 行にする
 - 秘密が空で必須でなければ、`leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が空なので .gitleaks.toml だけで探す` の行を出し、実際の値の規則を使わずに進む。件数の行は出さない
-- `--count-only` の 3 回目が、当たりのほかの理由（読み飛ばし・報告を読めないなど）で 0 以外を返したときは、`leak-scan-secret: nd-real-value の探しが失敗した。…` の固定の行を出す。`leak-scan.sh` は当たりと読み飛ばしが同時に起きても 1 を返すので、件数と終了コードだけでは見分けられないためである
+- `--count-only` の 3 回目が、当たりのほかの理由（読み飛ばし・報告を読めない・探し終えたことを確かめられないなど）で 0 以外を返したときは、`leak-scan-secret: nd-real-value の探しが失敗した。…` の固定の行を出す。`leak-scan.sh` は当たりと読み飛ばしが同時に起きても 1 を返すので、件数と終了コードだけでは見分けられないためである
 - 終了コードは、すべての探しのうち悪い方である（どれかが 2 なら 2、どれかが 1 なら 1、すべて 0 なら 0）
 
 ### 木の取り出しのスクリプト（`export-tree.sh`）
@@ -233,7 +313,7 @@ sequenceDiagram
 
 ### gitleaks を置くスクリプト（`install-gitleaks.sh`）
 
-`install-gitleaks.sh <置く先>` は、固定の版の `linux_x64` の配布の資産を取り、要約値を `sha256sum --check --strict` で確かめてから `gitleaks` だけを取り出す。環境変数 `GITHUB_PATH` が空でなければ、置く先の絶対パスをそのファイルに足す。手元では `GITHUB_PATH` を空にして打つ。gitleaks を上げるときは、このスクリプトの定数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256` だけを直す。
+`install-gitleaks.sh <置く先>` は、固定の版の `linux_x64` の配布の資産を取り、要約値を `sha256sum --check --strict` で確かめてから `gitleaks` だけを取り出す。続けて、同じ版の既定の設定のファイル（`config/gitleaks.toml`）を取り、要約値を確かめて `<置く先>/gitleaks.default.toml` に置く。環境変数 `GITHUB_PATH` が空でなければ、置く先の絶対パスをそのファイルに足す。手元では `GITHUB_PATH` を空にして打つ。gitleaks を上げるときは、このスクリプトの定数 `GITLEAKS_VERSION`・`GITLEAKS_SHA256`・`GITLEAKS_CONFIG_SHA256` だけを直す。
 
 ## データ・設定
 
@@ -251,6 +331,8 @@ sequenceDiagram
 | 定数 | 値 | 置き場 |
 | --- | --- | --- |
 | 重ねた規則の名前 | `nd-real-value` | `tools/checks/leak-scan-secret.sh` |
+| 目印の規則の名前 | `leak-scan-marker` | `tools/checks/leak_scan/model.py` |
+| 展開の合計の上限・入れ子の上限 | 1 GiB・5 段 | `tools/checks/leak_scan/archive.py` |
 | gitleaks の版 | `8.30.1` | `tools/checks/install-gitleaks.sh` |
 | 取り出した木と履歴の置き場所 | `$RUNNER_TEMP/merge-tree`・`$RUNNER_TEMP/history` | `.github/workflows/leak-check-secret.yml` |
 | 取り込む参照の名前 | `refs/ndf-scan/head`・`refs/ndf-scan/merge` | 同上 |
@@ -270,11 +352,33 @@ NDF の側の機能はこのリポジトリの外にあり、まだ入ってい�
 2. Pull Request の番号・head の SHA・base のブランチと先頭の SHA・マージコミットの SHA（`merge_commit_sha`）と、公開のリポジトリの main の先頭の SHA を読む。`mergeable` が `null` の間は読み直して待ち、真にならなければマージしない
 3. 呼び出しのワークフローを、非公開リポジトリの既定のブランチで、6 つの入力を渡して起動し、応答の `workflow_run_id` を控える。実行の ID が返らなければマージしない。前の実行の成功は、同じ head に対するものでも使わない
 4. 控えた実行の試行 1 だけを読む（`GET .../actions/runs/{run_id}/attempts/1` と `.../attempts/1/jobs`）。試行 1 の `conclusion` が `success` で、`referenced_workflows` に `devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main` の項目がちょうど 1 つあってその `sha` が検査のコードのコミットと同じで、表示名が 6 つの入力から組んだ名前で終わるジョブがちょうど 1 つあり、すべてのジョブの `conclusion` が `success` のときだけ受け入れる
-5. マージの直前に読み直し、世代・head の SHA・base のブランチと先頭の SHA が手順 1・2 と同じで、検査のコードのコミットから今の main の先頭までに次の 7 つのファイルが変わっていない（比較の API の `filename` と `previous_filename` のどちらにも無く、`files` が 300 件に届いていない）ことを確かめる。`.github/workflows/leak-check-secret.yml`・`tools/checks/export-tree.sh`・`tools/checks/leak-scan-secret.sh`・`tools/checks/leak-scan.sh`・`tools/checks/install-gitleaks.sh`・`.gitleaks.toml`・`tools/checks/gitleaks-default.toml`
+5. マージの直前に読み直し、次の 3 つを確かめる（3 つ目はマージ先が main の場合だけ）。どれかが外れるか、確かめられなければ、マージせずに人へ戻す
+   - 世代・head の SHA・base のブランチと先頭の SHA が、手順 1・2 と同じである
+   - 非公開の検査が、今の main と同じ検査のコードで動いたといえる。公開のリポジトリの main の先頭の SHA を読み直し、比較の API（`GET /repos/{owner}/{repo}/compare/{検査のコードのコミット}...{読み直した main の先頭の SHA}`）で次のすべてを満たすときだけ、そうみなす
+     - API の呼び出しが成功し、応答に `status` と `files` がある
+     - `status` が `identical` か `ahead` である。つまり、検査のコードのコミットが今の main の先頭と同じか、その祖先である。`diverged` と `behind` では、`files` に当たりが無くてもマージしない。比較の API の `files` は、2 つのコミットの共通の祖先から今の main の先頭までの差分なので、検査のコードのコミットの側だけにある変更が現れないためである
+     - `files` が 300 件に届いていない
+     - `files` のすべての項目で、`filename` と `previous_filename` のどちらも、下の「秘密を受けて動くコードと設定の一覧」に当たらない。これで、一覧のファイルの追加・変更・削除と、一覧の内外へ向かう改名のどれも見つかる
+   - マージ先が main の場合は、比較の API に渡した main の先頭の SHA が、手順 2 で読んで検査に渡した base の SHA と同じである。base の先頭と main の先頭は別々に読むので、2 回の読み取りの間に main が進むことがある。進んだ変更が一覧のファイルを含まなければ、上の 2 つはどちらも通る。そのままマージすると、非公開の検査を受けていないマージ結果が公開の main に入る
 6. head の SHA を `sha` に渡してマージの API を呼ぶ。呼ぶ前に結果不明の記録を永続化し、応答を失っても呼び直さない。同じ Pull Request のマージの要求を送れるのは記録を作った 1 つの実行だけにする
 7. マージの後に、マージ先のブランチが記録の base のブランチと同じで、マージでできたコミットの最初の親が記録の base の先頭の SHA と同じで、世代が変わっていないことを確かめる。外れれば人へ戻す。マージは取り消せないので、読み直しの後の base の変更はマージの後の検出までしか扱えない
 
 人へ戻す知らせは、NDF の非公開の記録と持ち主への非公開の通知にだけ出し、公開の Pull Request・コメント・チェックには何も書かない。非公開リポジトリの実行の URL も書かない。外れ方の分類（未完了・ジョブを作る前の失敗・版の食い違い・探しの失敗）も、当たりの有無の手がかりになるので公開しない。
+
+#### 秘密を受けて動くコードと設定の一覧
+
+非公開の検査の結果は、次のコードと設定で決まる。上の手順 5 の照合と、[CI の検査の秘密と持ち主の操作](../operations/ci-checks.md) の手元で読んで確かめる手順は、この一覧を対象にする。秘密を受けて動くコードか設定を足すときは、この一覧と NDF の照合の対象に足す。
+
+| 対象 | 当たり方 |
+| --- | --- |
+| `.github/workflows/leak-check-secret.yml` | パスが同じ |
+| `tools/checks/export-tree.sh` | パスが同じ |
+| `tools/checks/leak-scan-secret.sh` | パスが同じ |
+| `tools/checks/leak-scan.sh` | パスが同じ |
+| `tools/checks/install-gitleaks.sh` | パスが同じ |
+| `tools/checks/leak_scan/`（検査の本体の Python のモジュール） | パスがこの接頭辞で始まる。今は無いモジュールも当たる |
+| `.gitleaks.toml` | パスが同じ |
+| `tools/checks/gitleaks-default.toml` | パスが同じ |
 
 検査を必須にするかは、NDF の利用者の設定（非公開リポジトリの名前を持つ所。リポジトリの外）と、公開のリポジトリの main の先頭の `.ndf/project.json` だけで決める。Pull Request の head とマージ先のブランチの `.ndf/project.json` は読まない。
 
@@ -297,6 +401,8 @@ NDF の側の機能はこのリポジトリの外にあり、まだ入ってい�
 | 取り出せない項目・書けない | 同上 | `export-tree: 木に取り出せない項目がある（<番号> 番目）`・`木を書き出せない（<番号> 番目）`・`履歴の項目を書き出せない（<番号> 番目）` | 1 |
 | 元の木か元の履歴と食い違う | 同上 | `export-tree: 取り出した木が元の木と一致しない`・`取り出した履歴が元の履歴と一致しない` | 1 |
 | 探す木の根に `.gitleaksignore` がある | `leak-scan.sh` | `leak-scan.sh` の誤りの行 | 2 |
+| `python3` が無い・道具の版が足りない・想定外の例外 | `leak-scan.sh`・`leak_scan/main.py` | 探しの種類の失敗の行と、理由の行 | 1 |
+| 読まれなかった対象を探せない・履歴を読み終えたことを確かめられない | `leak_scan/` | 「1 回の探し」の「失敗の行」 | 1 |
 
 - `export-tree.sh` は、頭の確かめの後、コマンドとシェルの診断（パスを含み得る）を作業のディレクトリの一時のファイルへ向け直し、読まずに消す。固定の知らせだけを元の標準エラーへ出す。固定の知らせを出さずに止まったときは `export-tree: 途中で失敗した（診断はパスを含み得るので伏せた）` を出す
 - 失敗した実行の後始末は無い。NDF は次のマージの試みで、今の値で起動し直す
@@ -328,15 +434,20 @@ NDF の側の機能はこのリポジトリの外にあり、まだ入ってい�
 
 - `leak-check-push` は依存を入れないので、main への push では漏れの検査の結合のテストを打たない。結合のテストは Pull Request の `leak-check` が打つ
 - 環境 `leak-scan` の秘密を変えるときは、世代の切り替えは要らない。main への push の探しは push のたびに今の秘密で動き、マージを決めないためである
-- 非公開の検査は、取り出した木・`paths/`・履歴の各層・`git` の範囲のそれぞれで gitleaks を 2 回打つ。`layers/` の層の数を n、`binary-text/` の層の数を m とすると、1 回の実行で 2 ×（3 + n + m）回になる。同じパスを何度も変えた Pull Request ほど時間が延びる
+- 非公開の検査は、取り出した木・`paths/`・履歴の各層・`git` の範囲のそれぞれで `leak-scan.sh` を 2 回打つ。`layers/` の層の数を n、`binary-text/` の層の数を m とすると、1 回の実行で 2 ×（3 + n + m）回になる。探し直す対象があれば、`leak-scan.sh` の 1 回につき gitleaks をもう 1 回打つ。同じパスを何度も変えた Pull Request ほど時間が延びる
 
 ## テスト観点
 
 | 観点 | 縛るテスト |
 | --- | --- |
 | 途中のコミットで足して後で消した、実際の値の規則にだけ当たる値を、`git --range <分岐点>..<head>` で当てる | 結合のテスト |
-| 途中のコミットにだけ在った、作り物の値を名前に含むパス（ファイルとディレクトリ）と、NUL を含むファイルの中の値を、`history` で当てる。マージコミットの木と `git --range` だけでは当たらない | 結合のテスト |
-| 履歴の中身にも、パスで当てる既定の規則（拡張子 `.p12` など）とパスで外す既定の許可（拡張子 `.png` など）が、木の探しと同じく効く。同じ blob を外すパスと外さないパスに置くと、外さない側だけが当たる | 結合のテスト |
+| サービスの token と、バイナリ・名前で外すファイル・アーカイブの中の値を、今の木と履歴で当てる | 結合のテスト |
+| 読まれなかった対象を探せないときと、目印が欠けるときは、当たりが無くても失敗し、ファイルの名前を出さない | 結合のテスト |
+| 名前の一部に許可の文字列を含む端点・置き場・ARN が当たり、許す形の例は当たらない | 結合のテスト |
+| サービス名と DNS の接尾辞に大文字を混ぜた端点が当たる | 結合のテスト |
+| `python3` が 3.11 より古いか、履歴の探しで `git` が 2.40 より古ければ、探しの固定の行と理由の行を出して 1 | 結合のテスト |
+| 途中のコミットにだけ在った、作り物の値を名前に含むパス（ファイルとディレクトリ）と、NUL を含むファイルの中の値を、`history` で当てる。パスの当たりはマージコミットの木と `git --range` だけでは当たらない | 結合のテスト |
+| 履歴の中身にも、パスで当てる既定の規則（拡張子 `.p12` など）と名前で外すファイル（拡張子 `.png` など）の探し直しが、木の探しと同じく効く | 結合のテスト |
 | 同じパスを 3 つのコミットで変えると 3 つの層に分かれ、同じ元のパスと blob の組は 1 回だけ書かれる。ファイル `a` をディレクトリ `a/` に変えると別の層に入る | 結合のテスト |
 | `.gitattributes` の `export-ignore`・`export-subst`・`text eol=crlf`・`ident` があっても、取り出した木のファイルの数と中身が blob と同じになる。`export-ignore` を付けたファイルの値も当たる | 結合のテスト |
 | base と head を合わせた後の木でだけ当たる値を、マージコミットの木の探しで当てる（base と head を別々に探すと当たらない） | 結合のテスト |
