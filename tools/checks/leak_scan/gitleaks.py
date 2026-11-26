@@ -21,6 +21,7 @@ _FIELD = re.compile(r' ([A-Za-z_][A-Za-z0-9_-]*)=("(?:[^"\\]|\\.)*"|\S*)')
 _COUNT = re.compile(r"^[0-9]{1,2}:[0-9]{2}[AP]M WRN leaks found: [0-9]+$")
 _ESCAPE = re.compile(r"\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[0-7]{3}|.)", re.DOTALL)
 _SIMPLE_ESCAPES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11}
+_WARNING_LEVELS = ("WRN", "ERR", "FTL")  # 警告と誤りの段
 
 
 def unquote(quoted: str) -> str:
@@ -94,7 +95,7 @@ def skip_lines(run: Run) -> list[LogLine]:
 
 
 def has_warning(run: Run) -> bool:
-    return any(line.level in ("WRN", "ERR", "FTL") for line in run.lines)
+    return any(line.level in _WARNING_LEVELS for line in run.lines)
 
 
 def has_abort(run: Run) -> bool:
@@ -167,12 +168,12 @@ def run_gitleaks(
             parsed = parse_log_line(raw)
             if parsed is None or is_count_line(raw):
                 continue
-            if ctx.paths and parsed.level in ("INF", "WRN", "ERR", "FTL"):
+            if ctx.paths and parsed.level in ("INF", *_WARNING_LEVELS):
                 sys.stderr.flush()
                 sys.stderr.buffer.write(raw)
                 sys.stderr.buffer.flush()
             # 使う行だけを持つ（trace の記録は大きく、当たった値を含む）
-            if parsed.level in ("WRN", "ERR", "FTL") or parsed.message.startswith(("skipping", "command aborted")):
+            if parsed.level in _WARNING_LEVELS or parsed.message.startswith(("skipping", "command aborted")):
                 lines.append(parsed)
     return Run(status, read_report(report), lines)
 
