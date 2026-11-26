@@ -47,9 +47,18 @@ export async function composeApp({ window: win }: BrowserEnv): Promise<AppDeps &
     };
   }
 
+  return { ...base, ...realDeps(win) };
+}
+
+type RealDeps = Pick<
+  AppDeps & BootDeps,
+  "serviceWorker" | "fetch" | "createAuth" | "connectivity" | "placeholder" | "frame"
+>;
+
+// ダミーでないときの、本物のブラウザーにつなぐ依存
+function realDeps(win: BrowserEnv["window"]): RealDeps {
   const log = createLogger({ request_id: "-", fn: "web", endpoint: "web" });
   return {
-    ...base,
     // 開発のサーバーには sw.js が無い
     serviceWorker: import.meta.env.PROD
       ? {
