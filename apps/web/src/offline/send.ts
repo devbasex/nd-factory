@@ -137,6 +137,7 @@ export type QueueSender = {
 type Conversing = { items?: { answer_tag?: string; id?: string }[] };
 type TimeRead = { apiNow: number | null; since: { perf: number; wall: number } };
 type Next = "next" | "stop";
+type Write = (tx: GuardedTx) => Promise<boolean>;
 
 const WITHDRAW = "organizer_messages.withdraw";
 const CREATE = "organizer_messages.create";
@@ -201,17 +202,20 @@ export function createSender(d: SendDeps): QueueSender {
   }
 
   // 会話の写しの先映しした項目に、成功の項目の ID を書く。写しか先映しした項目が無くても、写しが読んだときのままかを
-  // 書き込みの中で確かめる。読んだ後に別のタブの読み直しが先映しを書いていれば、照合が外れて読み直す
-  async function sentIdWrite(owner: Owner, item: OutboxItem, itemId: string) {
+  // 書き込みの中で確かめる。読んだ後に別のタブの読み直しが先映しを書いていれば、照合が外れて読み直す。
+  // 写しの行を確かめられなかった（復号できない行を消せなかった・消した後も復号できない）ときは "unconfirmed" を返す。
+  // 呼び出し元は件を消さずに読み直し、最後まで確かめられなければ返った ID を件に書いて送る列に残す
+  async function sentIdWrite(owner: Owner, item: OutboxItem, itemId: string): Promise<Write | "unconfirmed"> {
     const guard = await prepareGuard(d.db, owner);
-    if (guard === null) return null;
+    if (guard === null) return "unconfirmed";
     let { found, unreadable, unchanged } = await d.cache.readGuarded(guard, "organizer-messages", item.targetId);
     if (unreadable) {
       // 復号できない写しは、設計文書の「暗号化」のとおり写しをすべて消す。画面は写しが無いので読み直す。
-      // 消した後の行（無いこと）を読み直し、その照合を書き込みに使う
-      if ((await d.cache.dropAll(guard)) !== "committed") return null;
+      // 消した後の行（無いこと）か、別のタブが置き換えた行を読み直し、その照合を書き込みに使う。
+      // stale（同じセッションで見られる対象の記録が替わったときも含む）なら、写しに触れずに読んだ結果を捨てる
+      if ((await d.cache.dropAll(guard, unchanged)) === "stale") return "unconfirmed";
       ({ found, unreadable, unchanged } = await d.cache.readGuarded(guard, "organizer-messages", item.targetId));
-      if (unreadable) return null;
+      if (unreadable) return "unconfirmed";
     }
     const value = found?.value as Conversing | undefined;
     if (found === null || !value?.items?.some((i) => i.answer_tag === item.answerTag)) return unchanged;
@@ -260,6 +264,8 @@ export function createSender(d: SendDeps): QueueSender {
       // 保留の件は取り下げを ID で足すので、最後の回は写しへの ID の書き込みを諦めて取り下げの登録を優先する。
       // 送る列の件は、写しに先映しした項目が残る限り、最後の回も ID の書き込みと同じトランザクションでだけ消す
       const conversation = found.held && last ? null : await sentIdWrite(round.owner, item, itemId);
+      // 写しを確かめられなければ件を消さずに読み直す。最後の回でもだめなら、下で返った ID を件に書いて残す
+      if (conversation === "unconfirmed") continue;
       const writeConversation = async (tx: GuardedTx) => conversation === null || (await conversation(tx));
       if (found.held) {
         // 保留から先へは移らないので、取り下げを足すのと同じトランザクションで保留の件を消す
@@ -285,7 +291,7 @@ export function createSender(d: SendDeps): QueueSender {
       if (result === "committed") return true;
       if (!moved && !stale) return false;
     }
-    // 写しの照合が外れ続けたら、返った項目の ID を件に書いて送る列に残し、後続の件へ進む。
+    // 写しの照合が外れ続けるか写しを確かめられなかったら、返った項目の ID を件に書いて送る列に残し、後続の件へ進む。
     // 取り下げはこの ID で登録し、次の回は送り直さずにこの ID で写しへの反映だけをやり直す
     const noted = await d.outbox.noteSentItem(round.owner, item.answerTag, itemId, async (tx) => {
       await d.wait.clearIn(tx, waitSeen);

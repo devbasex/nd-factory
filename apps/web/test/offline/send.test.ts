@@ -113,7 +113,11 @@ async function setup() {
     conversationConflicts?: number;
     // 会話の写しを読んだ直後に、別のタブの読み直しを割り込ませる
     afterConversationRead?: () => Promise<void>;
-  } = {};
+    // 会話の写しを読んだ直後に、同じセッションのまま見られる対象の記録を書き直す回数
+    authzChanges?: number;
+    // 会話の写しを読んだ回数
+    conversationReads: number;
+  } = { conversationReads: 0 };
   // 応答の時刻を書いた直後（件の反映の前）に、ほかのタブの処理を割り込ませる
   const wait = {
     ...t.wait,
@@ -146,9 +150,16 @@ async function setup() {
     ...t.cache,
     readGuarded: async (guard, kind, targetId) => {
       const read = await t.cache.readGuarded(guard, kind, targetId);
+      hooks.conversationReads += 1;
       const hook = hooks.afterConversationRead;
       hooks.afterConversationRead = undefined;
       await hook?.();
+      const changes = hooks.authzChanges ?? 0;
+      if (changes > 0) {
+        hooks.authzChanges = changes - 1;
+        const record = { generation: changes, allowedProjectIds: [], listedSeq: 0, mismatchProjectIds: [], mismatchSeq: null, denied: [] };
+        await t.db.put("authz", { id: "authz", ...(await seal(t.keys.key, record)) });
+      }
       return read;
     },
     prepareReplace: async (guard, kind, targetId, value, fetchSeq) => {
@@ -543,6 +554,96 @@ describe("取り下げ", () => {
       return ok("msg-1");
     });
     expect(await t.run()).toBe("done");
+    expect(await t.db.count("outbox")).toBe(0);
+    const conversation = { organizerId: "org-1", projectId: "p-example" };
+    expect(await t.sender.withdraw(t.owner, item.answerTag, conversation)).toBe("enqueued");
+    expect((await t.outbox.readBatch()).items).toMatchObject([{ operation: "organizer_messages.withdraw", targetId: "msg-1" }]);
+    t.db.close();
+  });
+
+  // 会話の写しの行を、復号できない中身に書き換える
+  async function corrupt(t: Awaited<ReturnType<typeof setup>>) {
+    const row = (await t.db.getAll("snapshots")).find((r) => r.kind === "organizer-messages")!;
+    await t.db.put("snapshots", { ...row, data: new ArrayBuffer(32) });
+  }
+
+  // 会話とは別の、復号できる写しを置く
+  async function other(t: Awaited<ReturnType<typeof setup>>) {
+    const guard = (await prepareGuard(t.db, t.owner))!;
+    const write = (await t.cache.prepareReplace(guard, "self", "me", {}, await nextSeq(t.db)))!;
+    const tx = t.db.transaction(["keys", "login", "snapshots", "outbox", "held", "authz"], "readwrite");
+    await write(tx);
+    await tx.done;
+  }
+
+  it("送信の成功の後に会話の写しを復号できなければ、写しをすべて消し、同じセッションで読み直してから件を消す", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello", { targetId: "org-1" });
+    await project(t, item.answerTag);
+    await corrupt(t);
+    await other(t);
+    t.replies.push(() => ok("msg-1"));
+    expect(await t.run()).toBe("done");
+    // 復号できなかったときの読み出しと、消した後の読み直し
+    expect(t.hooks.conversationReads).toBe(2);
+    expect(await t.db.count("snapshots")).toBe(0);
+    expect(await t.db.count("outbox")).toBe(0);
+    t.db.close();
+  });
+
+  it("写しを消す前に同じセッションで見られる対象の記録が替われば、写しに触れずに読み直し、新しい記録で消してから件を消す", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello", { targetId: "org-1" });
+    await project(t, item.answerTag);
+    await corrupt(t);
+    t.hooks.authzChanges = 1;
+    t.replies.push(() => ok("msg-1"));
+    expect(await t.run()).toBe("done");
+    expect(t.hooks.authzChanges).toBe(0);
+    expect(await t.db.count("snapshots")).toBe(0);
+    expect(await t.db.count("outbox")).toBe(0);
+    t.db.close();
+  });
+
+  it("写しを確かめられないまま最後の回を終えたら、返った ID を件に書いて残し、次の回で写しを消してから件を消す", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello", { targetId: "org-1" });
+    await t.enqueue("users.update", "after");
+    await project(t, item.answerTag);
+    await corrupt(t);
+    t.hooks.authzChanges = 3;
+    t.replies.push(() => ok("msg-1"));
+    expect(await t.run()).toBe("done");
+    expect(t.sent()).toEqual(["hello", "after"]);
+    // 写しには触れていない
+    expect(await t.db.count("snapshots")).toBe(1);
+    expect((await t.outbox.readBatch()).items).toMatchObject([{ answerTag: item.answerTag, sentItemId: "msg-1" }]);
+    const before = t.requests.length;
+    expect(await t.run()).toBe("done");
+    expect(t.requests.length).toBe(before);
+    expect(await t.db.count("snapshots")).toBe(0);
+    expect(await t.db.count("outbox")).toBe(0);
+    t.db.close();
+  });
+
+  it("復号できない行を別のタブが消す前に置き換えていれば、写しを消さずに読み直し、返った ID を写しに書く", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello", { targetId: "org-1" });
+    await project(t, item.answerTag);
+    await corrupt(t);
+    await other(t);
+    t.replies.push(() => {
+      // 復号に失敗した直後に、別のタブの読み直しが会話の写しを書き直す
+      t.hooks.afterConversationRead = async () => {
+        const row = (await t.db.getAll("snapshots")).find((r) => r.kind === "organizer-messages")!;
+        await t.db.delete("snapshots", row.id);
+        await project(t, item.answerTag);
+      };
+      return ok("msg-1");
+    });
+    expect(await t.run()).toBe("done");
+    // 会話とは別の写しは残る
+    expect(await t.db.count("snapshots")).toBe(2);
     expect(await t.db.count("outbox")).toBe(0);
     const conversation = { organizerId: "org-1", projectId: "p-example" };
     expect(await t.sender.withdraw(t.owner, item.answerTag, conversation)).toBe("enqueued");

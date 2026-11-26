@@ -415,8 +415,8 @@ infra/lib/app-stack.ts
 | メソッド | 返り | 中身 |
 | --- | --- | --- |
 | `read(kind, targetId)` | `{ value, receivedAt, fetchSeq } \| null` | 14 日を過ぎた行・削除の印は `null`。復号できなければ全写しを消して `null` |
-| `readGuarded(guard, kind, targetId)` | `{ found, unreadable, unchanged }` | 14 日以内の値を復号できたときは、`found` に `{ value, fetchSeq }` を返す。行が無い・14 日を過ぎた・削除の印があるときは、`found` を `null`、`unreadable` を偽にする（キャッシュミス）。復号できないときは、`found` を `null`、`unreadable` を真にし、行も写しも消さずに返す。`unreadable` が真なら、呼び出し元は `dropAll` で写しをすべて消してから読み直す。`unchanged` は、書き込みのトランザクションの中で、読んだ行の `iv` が変わっていないこと（行が無かったときは、今も無いこと）を確かめる |
-| `dropAll(guard)` | `"committed" \| "stale"` | `commitGuarded` の中で写しをすべて消す。セッションが替わっていれば `stale` で何も消さない。`readGuarded` が復号できない行を見つけたときに呼び出し元が呼ぶ |
+| `readGuarded(guard, kind, targetId)` | `{ found, unreadable, unchanged }` | 次の順に判定する。行が無ければ、`found` を `null`、`unreadable` を偽にする（キャッシュミス）。行があれば先に復号を試み、失敗したら `found` を `null`、`unreadable` を真にし、行も写しも消さずに返す。復号できた行が 14 日を過ぎているか削除の印なら、`found` を `null`、`unreadable` を偽にする（キャッシュミス）。それ以外は `found` に `{ value, fetchSeq }` を返す。`unreadable` が真なら、呼び出し元は `unchanged` を渡して `dropAll` を呼び、写しをすべて消してから読み直す。`unchanged` は、書き込みのトランザクションの中で、読んだ行の `iv` が変わっていないこと（行が無かったときは、今も無いこと）を確かめる |
+| `dropAll(guard, seen)` | `"committed" \| "changed" \| "stale"` | `readGuarded` が復号できない行を見つけたときに呼び出し元が呼び、`commitGuarded` の中で写しをすべて消す。消す前に、同じトランザクションで `seen`（`readGuarded` の `unchanged`）を確かめる。復号できなかった行が別のタブで置き換わるか消えていれば、全消去の根拠が無いので何も消さずに `changed` を返す。呼び出し元は行を読み直す。セッションか見られる対象の記録の `iv` が替わっていれば、`stale` で何も消さない |
 | `prepareReplace(guard, kind, targetId, value, fetchSeq)` | 書き込みの 1 件か `null` | 表に無い種類・番号の古いレスポンス・印と一覧の記録に合わないものは `null` |
 | `applyOptimistic(guard, kind, targetId, change)` | `void` | 先映し（`fetchSeq` を変えない） |
 | `markGone(guard, kind, targetId, goneSeq)` | `void` | 削除の印 |
@@ -436,7 +436,7 @@ infra/lib/app-stack.ts
 | `commitGuarded` | `iv` の違い | 別タブの書き換え | 手順 3 の確認 | `stale` を返す | 出さない | 次の回で読み直す |
 | `commitGuarded` | `QuotaExceededError` | 容量の不足 | トランザクションの abort | 写しは捨てて表示を続ける。送る列の移動は呼び出し元へ返す | 写しは出さない | 次の読み出しで書き直す |
 | `createCacheStore` の `read` | 復号できない | 壊れ・キーの欠け | `unseal` | 全写しを消す | 読み直して描く。オフラインは空の状態 | 読み直し |
-| `createCacheStore` の `readGuarded` | 復号できない | 壊れ・キーの欠け | `unseal` | `unreadable` を真で返す。呼び出し元が `dropAll`（セッションを照合する）で全写しを消し、消した後の行を読み直す。`dropAll` が `stale` なら写しに触れずに捨てる | `read` と同じ（画面は写しが無いので読み直す。オフラインは空の状態） | 読み直し |
+| `createCacheStore` の `readGuarded` | 復号できない | 壊れ・キーの欠け | `unseal` | `unreadable` を真で返す。呼び出し元が `dropAll`（セッションと、復号できなかった行の `iv` を照合する）で全写しを消し、消した後の行を読み直す。`changed` なら消さずに、置き換わった行を読み直す。`stale` の場合はキャッシュを削除せず、読み込んだ結果を破棄する。送信の成功を会話のキャッシュに反映する処理（`send.ts` の `created`）は、送る列の件を消さずに、同じセッションなら行を読み直して反映を再試行する。そこでも反映できない場合は、返った項目の ID を送る列の件に書いて保持し、次の回に送り直さずに反映をやり直す | `read` と同じ（画面は写しが無いので読み直す。オフラインは空の状態） | 読み直し |
 
 ### 内部のデータと定数
 | 名前 | 種類 | 保存先 | 既定値 |

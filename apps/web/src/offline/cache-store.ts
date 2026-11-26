@@ -23,16 +23,17 @@ type Write = (tx: GuardedTx) => Promise<boolean>;
 
 export type CacheStore = {
   read(kind: SnapshotKind, targetId: string): Promise<{ value: unknown; receivedAt: number; fetchSeq: number } | null>;
-  // 写しを読み、読んだときから行が変わっていないことを書き込みの中で確かめる関数も返す。写しが無い・14 日を過ぎた・
-  // 削除の印なら found は null。復号できなければ unreadable を真にし、行も写しも消さない。呼び出し元は dropAll で
-  // 写しをすべて消し（セッションを照合する）、読み直しへ回す
+  // 写しを読み、読んだときから行が変わっていないことを書き込みの中で確かめる関数も返す。行が無ければ found は null。
+  // 行があれば先に復号し、復号できなければ unreadable を真にし、行も写しも消さない。呼び出し元は dropAll に unchanged を
+  // 渡して写しをすべて消し（セッションと行を照合する）、読み直しへ回す。復号できた行が 14 日を過ぎたか削除の印なら found は null
   readGuarded(
     guard: Guard,
     kind: SnapshotKind,
     targetId: string,
   ): Promise<{ found: { value: unknown; fetchSeq: number } | null; unreadable: boolean; unchanged: Write }>;
-  // 復号できない写しが見つかったときに、セッションを照合したうえで写しをすべて消す
-  dropAll(guard: Guard): Promise<"committed" | "stale">;
+  // 復号できない写しが見つかったときに、セッションと、復号できなかった行が読んだときのままか（seen）を照合したうえで
+  // 写しをすべて消す。行が別のタブで書き換わるか消えていれば changed で何も消さず、呼び出し元は行を読み直す
+  dropAll(guard: Guard, seen: Write): Promise<"committed" | "changed" | "stale">;
   prepareReplace(guard: Guard, kind: SnapshotKind, targetId: string, value: unknown, fetchSeq: number): Promise<Write | null>;
   applyOptimistic(guard: Guard, kind: SnapshotKind, targetId: string, change: (value: unknown) => unknown): Promise<void>;
   markGone(guard: Guard, kind: SnapshotKind, targetId: string, goneSeq: number): Promise<void>;
@@ -136,13 +137,19 @@ export function createCacheStore({ db, wallNow, log, notify }: CacheDeps): Cache
       return { found: fresh ? { value: body.value, fetchSeq: body.fetchSeq } : null, unreadable, unchanged: same };
     },
 
-    async dropAll(guard) {
+    async dropAll(guard, seen) {
+      let changed = false;
       const result = await commitGuarded(guard, async (tx) => {
+        // 復号できなかった行が既に置き換わっていれば、全消去の根拠が無い
+        if (!(await seen(tx))) {
+          changed = true;
+          return false;
+        }
         await tx.objectStore("snapshots").clear();
         return true;
       });
       if (result === "committed") log.warn("写しを復号できないため、写しをすべて消した", {});
-      return result;
+      return changed ? "changed" : result;
     },
 
     async prepareReplace(guard, kind, targetId, value, fetchSeq) {
