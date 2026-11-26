@@ -73,6 +73,15 @@ export function createCacheStore({ db, wallNow, log, notify }: CacheDeps): Cache
   const unchanged = async (tx: GuardedTx, id: string, iv: Uint8Array | null) =>
     sameBytes((await tx.objectStore("snapshots").get(id))?.iv ?? null, iv);
 
+  // 行の iv が読んだときのままなら行を置き換え、真を返す
+  const putIfUnchanged =
+    (id: string, seenIv: Uint8Array | null, next: ReturnType<typeof row>): Write =>
+    async (tx) => {
+      if (!(await unchanged(tx, id, seenIv))) return false;
+      await tx.objectStore("snapshots").put(next);
+      return true;
+    };
+
   const row = (id: string, kind: string, projectTags: string[], sealed: Sealed, receivedAt = wallNow()) => ({
     id,
     kind,
@@ -96,11 +105,7 @@ export function createCacheStore({ db, wallNow, log, notify }: CacheDeps): Cache
     const current = await load(key, id);
     if (current !== null && current.body.fetchSeq >= goneSeq) return null;
     const next = row(id, kind, current?.row.projectTags ?? [], await seal(key, { type: "gone", fetchSeq: goneSeq }));
-    return async (tx) => {
-      if (!(await unchanged(tx, id, current?.row.iv ?? null))) return false;
-      await tx.objectStore("snapshots").put(next);
-      return true;
-    };
+    return putIfUnchanged(id, current?.row.iv ?? null, next);
   }
 
   return {
@@ -190,11 +195,7 @@ export function createCacheStore({ db, wallNow, log, notify }: CacheDeps): Cache
       const body: Body = { ...current.body, value: change(current.body.value) };
       // 受け取った時刻と番号は変えない
       const next = row(id, kind, current.row.projectTags, await seal(key, body), current.row.receivedAt);
-      await commitGuarded(guard, async (tx) => {
-        if (!(await unchanged(tx, id, current.row.iv))) return false;
-        await tx.objectStore("snapshots").put(next);
-        return true;
-      });
+      await commitGuarded(guard, putIfUnchanged(id, current.row.iv, next));
     },
 
     async markGone(guard, kind, targetId, goneSeq) {
@@ -215,13 +216,7 @@ export function createCacheStore({ db, wallNow, log, notify }: CacheDeps): Cache
       if (current !== null && current.body.fetchSeq > fetchSeq) return;
       const projectTag = await tagOf(tagKey, scope.projectId);
       const record = row(lid, scope.kind, [projectTag], await seal(key, { type: "list", ids, fetchSeq }));
-      const writes: Write[] = [
-        async (tx) => {
-          if (!(await unchanged(tx, lid, current?.row.iv ?? null))) return false;
-          await tx.objectStore("snapshots").put(record);
-          return true;
-        },
-      ];
+      const writes: Write[] = [putIfUnchanged(lid, current?.row.iv ?? null, record)];
       // 一覧が返さなかった対象の写しは印に置き換える
       const rows = await db.getAllFromIndex("snapshots", "projectTags", projectTag);
       for (const found of rows) {
