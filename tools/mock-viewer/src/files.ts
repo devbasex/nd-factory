@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { extname, resolve, sep } from "node:path";
 
-// 利用者の Chrome でモックを開くオリジン。`*.localhost` はどの端末でも自分を指すので、名前の登録が要らない
+// モック専用の Chrome でモックを開くオリジン。`*.localhost` はどの端末でも自分を指すので、名前の登録が要らない
 export const MOCK_ORIGIN = "http://ndf-mock.localhost";
 
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
