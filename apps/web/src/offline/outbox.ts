@@ -3,7 +3,7 @@ import type { IDBPTransaction } from "idb";
 import { newIdempotencyKey } from "@nd-factory/core/ids";
 import { seal, tagOf, unseal } from "./crypto.ts";
 import { type DeviceDb, type DeviceSchema, type HeldRow, type HoldReason, nextSeq, type OutboxRow, readOwner } from "./db.ts";
-import { commitGuarded, type GuardedTx, type Owner, prepareGuard, sameBytes } from "./guarded-commit.ts";
+import { commitGuarded, type GuardedTx, type Owner, prepareGuard, sameBytes, sameRow } from "./guarded-commit.ts";
 import { MissingCheckError, missingChecks, operationClassOf } from "./operation-classes.ts";
 
 // 送る列（キャッシュして送ると確定待ち）。件は利用者の入力を持つので、端末の判断では消さず保留へ移す（IW13）
@@ -154,7 +154,7 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
     const next: OutboxRow = await resealedRow(key, row, change);
     const tx = await writing();
     const current = await tx.objectStore("outbox").get(item.answerTag);
-    const unchanged = current !== undefined && sameBytes(current.iv, item.iv);
+    const unchanged = sameRow(current, item.iv);
     if (unchanged) await tx.objectStore("outbox").put(next);
     await tx.done;
     return unchanged ? itemOf(key, next) : null;
@@ -232,7 +232,7 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
           const result = await commitGuarded(guard, async (tx) => {
             for (const old of replaced) {
               const current = await tx.objectStore("outbox").get(old.answerTag);
-              if (current === undefined || !sameBytes(current.iv, old.iv)) return false;
+              if (!sameRow(current, old.iv)) return false;
               await tx.objectStore("outbox").delete(old.answerTag);
             }
             await tx.objectStore("outbox").add(row);

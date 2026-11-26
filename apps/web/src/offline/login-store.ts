@@ -3,7 +3,7 @@ import type { StateStore } from "oidc-client-ts";
 import { seal, tagOf, unseal } from "./crypto.ts";
 import { createOwner, type DeviceDb, deleteDeviceDb, type KeyRow, readOwner } from "./db.ts";
 import { onForgetDeviceMemory } from "./erase.ts";
-import { sameBytes } from "./guarded-commit.ts";
+import { sameRow } from "./guarded-commit.ts";
 import { quarantinePending, restoreQuarantined } from "./quarantine.ts";
 
 // oidc-client-ts の userStore と、#4 が呼ぶ書き込み。set はメモリに留めるだけで、IndexedDB へは
@@ -97,7 +97,7 @@ export function createLoginStore({ openDb, flagged, log }: LoginDeps): LoginStor
       // 別のタブが行を書き直していれば、その新しい行は消さない
       const tx = db.transaction("login", "readwrite");
       const current = await tx.store.get("login");
-      const same = current !== undefined && sameBytes(current.iv, row.iv);
+      const same = sameRow(current, row.iv);
       if (same) await tx.store.delete("login");
       await tx.done;
       if (same) log.warn("ログインのキャッシュを読めないため消した");
@@ -215,7 +215,7 @@ export function createLoginStore({ openDb, flagged, log }: LoginDeps): LoginStor
         });
         const tx = db.transaction("login", "readwrite");
         const current = await tx.store.get("login");
-        const unchanged = current !== undefined && sameBytes(current.iv, row.iv) && !flagged();
+        const unchanged = sameRow(current, row.iv) && !flagged();
         if (unchanged) await tx.store.put(next);
         await tx.done;
         return unchanged;
@@ -248,7 +248,7 @@ export function createLoginStore({ openDb, flagged, log }: LoginDeps): LoginStor
         if (found === null || nowMs <= found.body.refreshExpiresAt) return false;
         const tx = db.transaction("login", "readwrite");
         const current = await tx.store.get("login");
-        const same = current !== undefined && sameBytes(current.iv, found.row.iv);
+        const same = sameRow(current, found.row.iv);
         if (same) await tx.store.delete("login");
         await tx.done;
         return same;

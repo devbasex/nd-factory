@@ -4,7 +4,7 @@ import type { Logger } from "@nd-factory/core/log";
 import { type ApiReply, type ApiSender, DEADLINE_MS, type SessionOwner } from "./api-transport.ts";
 import type { CacheStore } from "./cache-store.ts";
 import type { DeviceDb, HoldReason } from "./db.ts";
-import { commitGuarded, type GuardedTx, type Owner, prepareGuard, sameBytes } from "./guarded-commit.ts";
+import { commitGuarded, type GuardedTx, type Owner, prepareGuard, sameRow } from "./guarded-commit.ts";
 import { missingChecks, type OperationClass, operationClassOf } from "./operation-classes.ts";
 import { type Outbox, type OutboxItem, SessionChangedError } from "./outbox.ts";
 import { holdDenied } from "./revocation.ts";
@@ -242,7 +242,7 @@ export function createSender(d: SendDeps): QueueSender {
     try {
       await d.outbox.enqueue(round.owner, draft, async (tx) => {
         const held = await tx.objectStore("held").get(item.answerTag);
-        if (held === undefined || !sameBytes(held.iv, item.iv)) throw changed;
+        if (!sameRow(held, item.iv)) throw changed;
         if (conversation !== null && !(await conversation(tx))) throw stale;
         await tx.objectStore("held").delete(item.answerTag);
         await d.wait.clearIn(tx, waitSeen);
@@ -509,7 +509,7 @@ export function createSender(d: SendDeps): QueueSender {
                 { operation: WITHDRAW, targetId: item.sentItemId, projectId: item.projectId, input: {} },
                 async (tx) => {
                   const row = await tx.objectStore(store).get(answerTag);
-                  if (row === undefined || !sameBytes(row.iv, item.iv)) throw changed;
+                  if (!sameRow(row, item.iv)) throw changed;
                   await tx.objectStore(store).delete(answerTag);
                   return true;
                 },

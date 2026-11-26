@@ -31,6 +31,11 @@ export function sameBytes(a: Uint8Array | null, b: Uint8Array | null): boolean {
   return a.length === b.length && a.every((byte, i) => byte === b[i]);
 }
 
+// 行があり、その iv が読んだときと同じか
+export function sameRow(row: { iv: Uint8Array } | undefined, iv: Uint8Array): boolean {
+  return row !== undefined && sameBytes(row.iv, iv);
+}
+
 // このタブの利用者とセッションが、端末の持ち主とログインの行に合うときだけ、読んだ行を返す
 async function readSessionRows(db: DeviceDb, owner: Owner) {
   if (owner.flagged()) return null;

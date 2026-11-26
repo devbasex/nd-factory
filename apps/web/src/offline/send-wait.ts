@@ -1,6 +1,6 @@
 import { type Sealed, seal, unseal } from "./crypto.ts";
 import { type DeviceDb, readOwner } from "./db.ts";
-import { commitGuarded, type GuardedTx, type Owner, prepareGuard, sameBytes } from "./guarded-commit.ts";
+import { commitGuarded, type GuardedTx, type Owner, prepareGuard, sameBytes, sameRow } from "./guarded-commit.ts";
 
 // 429 の待機の期限と、最後に受けた API の時刻。タブをまたいで共有するので端末のデータベースに暗号化して置く
 
@@ -92,7 +92,7 @@ export function createSendWait({ db }: { db: DeviceDb }): SendWait {
   async function clearIn(tx: GuardedTx, seen: Uint8Array | null): Promise<void> {
     if (seen === null) return;
     const now = await tx.objectStore("wait").get("retry");
-    if (now !== undefined && sameBytes(now.iv, seen)) await tx.objectStore("wait").delete("retry");
+    if (sameRow(now, seen)) await tx.objectStore("wait").delete("retry");
   }
 
   return {
