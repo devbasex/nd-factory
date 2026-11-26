@@ -7,7 +7,6 @@ import { operationClassOf } from "./operation-classes.ts";
 
 // 送る列（キャッシュして送ると確定待ち）。件は利用者の入力を持つので、端末の判断では消さず保留へ移す（IW13）
 
-/** @internal */
 export type Draft = {
   operation: string;
   targetId: string;

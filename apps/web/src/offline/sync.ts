@@ -25,7 +25,6 @@ export type ListResult<T> = { kind: "ok"; items: T[] } | { kind: "denied" } | { 
 
 type Snapshot = { kind: SnapshotKind; targetId: string; value: unknown };
 
-/** @internal */
 export type ScreenRead =
   | {
       kind: "ok";
