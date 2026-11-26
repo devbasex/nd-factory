@@ -20,6 +20,8 @@
     // 落とすよう、入口のファイルの書き出しも照らす。生成を置く #2 の Pull Request で entry に "src/generated/**/*.ts!" を
     // 足し、画面から参照の無い生成したファイルも使われないファイルに数えない（生成先が空のうちは当たらない入口として誤りになる）
     "apps/web": {
+      // Service Worker は scripts/build-sw.ts が束ねる起点で、import では辿れない
+      "entry": ["src/sw/service-worker.ts!"],
       "includeEntryExports": true,
       // production の検査は配る src を対象にし、生成のスクリプト・e2e・テストの部品を数えない（#12）
       "project": ["**/*.{ts,tsx}!", "!scripts/**!", "!e2e/**!", "!test/**!"]

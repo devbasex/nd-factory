@@ -19,6 +19,8 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${PORT}`,
     locale: "ja-JP",
+    // 差し替えたネットワークを Service Worker が通り抜けないようにする。使う spec だけが許す
+    serviceWorkers: "block",
     trace: "retain-on-failure",
   },
   projects: WIDTHS.map(({ name, viewport }) => ({ name, use: { ...devices["Desktop Chrome"], viewport } })),

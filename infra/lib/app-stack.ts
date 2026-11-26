@@ -144,6 +144,8 @@ export class AppStack extends Stack {
       destinationBucket: webBucket,
       distribution,
       distributionPaths: ["/*"],
+      // 開いたままのページは前の版のチャンクを後から取るので、反映で旧いファイルを消さない（#12 の決定 2）
+      prune: false,
     });
 
     this.network = new Network(this, "Network", { cidr: infra.vpcCidr, names });

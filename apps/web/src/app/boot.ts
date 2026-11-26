@@ -14,6 +14,8 @@ export type BootDeps = {
   history: Pick<History, "replaceState">;
   sessionStorage: Pick<Storage, "getItem" | "setItem" | "removeItem">;
   createAuth: (config: WebConfig) => AuthClient;
+  // 本番の配信でだけ渡す。登録の失敗は起動を止めない
+  serviceWorker?: { register: (config: WebConfig) => Promise<void>; failed: (error: unknown) => void };
 };
 
 export type BootState =
@@ -44,6 +46,9 @@ export async function boot(deps: BootDeps): Promise<BootState> {
   } catch {
     return { kind: "config_unavailable" };
   }
+  const worker = deps.serviceWorker;
+  // 保存の完了を待つと最初の画面が遅れるので、待たない
+  if (worker !== undefined) void worker.register(config).catch(worker.failed);
   if (!config.login_ready) return { kind: "login_waiting" };
 
   const url = new URL(deps.location.href);

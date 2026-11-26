@@ -61,6 +61,26 @@ function setup(opts: {
   return { deps, auth, apiCalls, storage };
 }
 
+describe("Service Worker の登録", () => {
+  it("設定を読めた後に登録し、失敗しても起動を続ける", async () => {
+    const { deps } = setup({ config: { ...CONFIG, login_ready: false } });
+    const register = vi.fn(async () => {
+      throw new Error("unsupported");
+    });
+    const failed = vi.fn();
+    expect(await boot({ ...deps, serviceWorker: { register, failed } })).toEqual({ kind: "login_waiting" });
+    expect(register).toHaveBeenCalledWith({ ...CONFIG, login_ready: false });
+    await vi.waitFor(() => expect(failed).toHaveBeenCalledOnce());
+  });
+
+  it("設定を読めなければ登録しない", async () => {
+    const { deps } = setup({ configStatus: 500 });
+    const register = vi.fn(async () => {});
+    await boot({ ...deps, serviceWorker: { register, failed: () => {} } });
+    expect(register).not.toHaveBeenCalled();
+  });
+});
+
 describe("boot", () => {
   it("token があれば利用者を 1 回読んで ready", async () => {
     const s = setup({ user: { access_token: "tok", expired: false } });

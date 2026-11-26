@@ -131,6 +131,8 @@ describe("AppStack（client_id なし）", () => {
     const deploy = onlyResource(built.template, "Custom::CDKBucketDeployment");
     expect(deploy.props.SourceMarkers).toBeDefined();
     expect(deploy.props.DistributionPaths).toEqual(["/*"]);
+    // 開いたままのページが前の版のチャンクを取れるように、旧いファイルを消さない（#12 の決定 2）
+    expect(deploy.props.Prune).toBe(false);
   });
 
   it("経路は PUT /v1/users の 1 本で、JWT の認可が付く", () => {

@@ -1,9 +1,11 @@
 import { createClock } from "@nd-factory/core/clock";
+import { createLogger } from "@nd-factory/core/log";
 import { WebStorageStateStore } from "oidc-client-ts";
 import { createAuth } from "../auth.ts";
 import { createI18n } from "../i18n/context.ts";
 import { pickLocale } from "../i18n/locales.ts";
 import { createConnectivity } from "../offline/connectivity.ts";
+import { registerServiceWorker } from "../sw/register.ts";
 import { CATALOG } from "../ui/catalog.ts";
 import type { AppDeps } from "./App.tsx";
 import type { BootDeps } from "./boot.ts";
@@ -44,8 +46,17 @@ export async function composeApp({ window: win }: BrowserEnv): Promise<AppDeps &
     };
   }
 
+  const log = createLogger({ request_id: "-", fn: "web", endpoint: "web" });
   return {
     ...base,
+    // 開発のサーバーには sw.js が無い
+    serviceWorker: import.meta.env.PROD
+      ? {
+          register: registerServiceWorker,
+          failed: (error: unknown) =>
+            log.warn("Service Worker を登録できない", { error: error instanceof Error ? error.name : "unknown" }),
+        }
+      : undefined,
     // 大域の fetch を呼ぶのは起動の組み立ての 1 か所だけ
     fetch: (input, init) => win.fetch(input, init),
     // #4 の「サインインを確定する」呼び出しを有効にするまで、token はタブを閉じれば消える session storage にだけ置く

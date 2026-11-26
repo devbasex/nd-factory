@@ -11,6 +11,8 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: mode === "dummy" ? "dist-dummy" : "dist",
     emptyOutDir: true,
+    // Service Worker が事前に保存する一覧の元（scripts/build-sw.ts）
+    manifest: mode !== "dummy",
   },
   preview: {
     port: mode === "dummy" ? 4174 : 4173,
