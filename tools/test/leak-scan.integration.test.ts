@@ -786,8 +786,8 @@ function forkRepo(): { root: string; base: string } {
 }
 
 /** `input` を `git mktree` に渡して木を作り、その名前を返す（失敗なら投げる） */
-function mktree(root: string, input: string): string {
-  const tree = spawnSync("git", ["mktree"], { cwd: root, input, encoding: "utf8" });
+function mktree(root: string, input: string, ...options: string[]): string {
+  const tree = spawnSync("git", ["mktree", ...options], { cwd: root, input, encoding: "utf8" });
   if (tree.status !== 0) throw new Error("git mktree が失敗した");
   return tree.stdout.trim();
 }
@@ -811,9 +811,8 @@ function missingBlob(): string {
  */
 function commitFlatTree(root: string, entries: [name: string, blob: string, mode?: string][], parent?: string): string {
   const input = entries.map(([name, blob, mode = "100644"]) => `${mode} blob ${blob}\t${name}\n`).join("");
-  const tree = spawnSync("git", ["mktree", "--missing"], { cwd: root, input, encoding: "utf8" });
-  if (tree.status !== 0) throw new Error("git mktree が失敗した");
-  return git(root, "commit-tree", tree.stdout.trim(), ...(parent === undefined ? [] : ["-p", parent]), "-m", "flat");
+  const tree = mktree(root, input, "--missing");
+  return git(root, "commit-tree", tree, ...(parent === undefined ? [] : ["-p", parent]), "-m", "flat");
 }
 
 /** 中身を blob として倉庫に書き、名前を返す */
