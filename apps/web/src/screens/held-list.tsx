@@ -57,30 +57,35 @@ function Held({ view, onDiscard }: { view: HeldView; onDiscard: () => void }) {
 
 const hidden = (view: HeldView): HeldView => ({ ...view, content: null });
 
+// 読み出した項目と、読み出しを始めたときの記録の世代
+type Loaded = { mark: number; views: HeldView[] };
+
 function OpenList({ store, quarantined, read, authzMark, onClose, onChanged, onStale }: HeldListProps) {
   const { t } = useI18n();
-  const [views, setViews] = useState<HeldView[]>([]);
+  const [loaded, setLoaded] = useState<Loaded>({ mark: authzMark, views: [] });
   const [target, setTarget] = useState<Target | null>(null);
   const [failed, setFailed] = useState(false);
   // 後に始めた読み出しの結果だけを出す
   const latest = useRef(0);
 
   const stale = useCallback(() => {
-    setViews([]);
+    setLoaded((prev) => ({ ...prev, views: [] }));
     onClose();
     onStale();
   }, [onClose, onStale]);
 
   const reload = useCallback(async () => {
     const run = ++latest.current;
+    const mark = authzMark;
     const next = await read().catch(() => null);
     if (run !== latest.current) return;
     if (next === "stale") return stale();
     // 読めなければ、中身を出さない
-    setViews((prev) => (next === null ? prev.map(hidden) : next));
-  }, [read, stale]);
-  // 記録が書き換わったら、照合した結果を待たずに表示済みの中身を隠す
-  useEffect(() => setViews((prev) => prev.map(hidden)), [authzMark]);
+    setLoaded((prev) => (next === null ? { mark: prev.mark, views: prev.views.map(hidden) } : { mark, views: next }));
+  }, [read, stale, authzMark]);
+  // 記録が書き換わった（見られるプロジェクトや割り当てが変わった）後のレンダーでは、新しい世代で
+  // 読み直した結果が届くまで中身を出さない。副作用で隠すのを待たず、描く時点で世代を比べる
+  const views = loaded.mark === authzMark ? loaded.views : loaded.views.map(hidden);
   // 件数が変わるたびに quarantined が新しくなるので、そのたびに読み直す
   useEffect(() => void reload(), [reload, quarantined, authzMark, onChanged]);
 

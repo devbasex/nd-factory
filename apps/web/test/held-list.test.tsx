@@ -168,6 +168,21 @@ describe("HeldListDialog", () => {
     expect(host.textContent).not.toContain("作り物のコメント");
   });
 
+  it("記録が書き換わる前に始めた読み出しの結果は、書き換わった後に届いても中身を出さない", async () => {
+    let answer: (views: HeldView[]) => void = () => {};
+    const read = vi.fn(async (): Promise<HeldView[] | "stale"> => [visibleFieldsOf(item(), ALLOWED)]);
+    const { host, props, rerender } = setup([item()], { read });
+    await settle();
+    expect(host.textContent).toContain("作り物のコメント");
+    // 新しい世代で始めた読み出しは返らないまま、表示を確かめる
+    read.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    rerender(<HeldListDialog {...props} authzMark={1} />);
+    expect(host.textContent).not.toContain("作り物のコメント");
+    // 新しい世代で許された結果が届けば、中身を出す
+    await act(async () => answer([visibleFieldsOf(item(), ALLOWED)]));
+    expect(host.textContent).toContain("作り物のコメント");
+  });
+
   it("閉じていれば何も出さず、閉じるボタンで onClose を呼ぶ", async () => {
     expect(setup([item()], { open: false }).host.textContent).toBe("");
     const { host, props } = setup([item()]);
