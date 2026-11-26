@@ -3,8 +3,8 @@ import { ROUTE_OPERATIONS } from "./route-operations.generated.ts";
 
 // 画面マップの表。ルーター・ナビゲーション・e2e・操作の対応の検査がこの表を読む
 
-export type RouteId = keyof typeof ROUTE_OPERATIONS;
-export type RouteGroup = "signin" | "main" | "project" | "team" | "me";
+type RouteId = keyof typeof ROUTE_OPERATIONS;
+type RouteGroup = "signin" | "main" | "project" | "team" | "me";
 export type NavId = "organizers" | "approvals" | "sprints" | "settings";
 
 export type RouteDef = {

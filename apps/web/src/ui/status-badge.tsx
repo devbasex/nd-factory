@@ -12,7 +12,7 @@ const MARKS = {
   pending: "◌",
 } as const;
 
-export type Tone = keyof typeof MARKS;
+type Tone = keyof typeof MARKS;
 
 /** カタログのテストが調子の数を照合する @internal */
 export const TONES = Object.keys(MARKS) as Tone[];

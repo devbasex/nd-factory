@@ -1,6 +1,6 @@
 // 画面の言語の一覧と決め方。言語を足すときは翻訳のファイル 1 つと、ここの 1 行を足す
 
-export const LOCALES = ["ja", "en"] as const;
+const LOCALES = ["ja", "en"] as const;
 
 export type Locale = (typeof LOCALES)[number];
 

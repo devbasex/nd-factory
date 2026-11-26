@@ -1,11 +1,10 @@
 import type { WebConfig } from "@nd-factory/contracts/web-config";
-import { UserManager, WebStorageStateStore } from "oidc-client-ts";
+import { type StateStore, UserManager } from "oidc-client-ts";
 
-// 認可コードと PKCE（S256）のログインの部品を作る。token はタブを閉じれば消える session storage にだけ置く。
+// 認可コードと PKCE（S256）のログインの部品を作る。保存先は呼ぶ側が渡す。
 // 利用者プールのドメインは発見の文書を出さないため、端点をドメインから組み立てて渡す
-export function createAuth(config: WebConfig): UserManager {
+export function createAuth(config: WebConfig, stores: { userStore: StateStore; stateStore: StateStore }): UserManager {
   const domain = config.authority.replace(/\/+$/, "");
-  const store = new WebStorageStateStore({ store: window.sessionStorage });
   return new UserManager({
     authority: domain,
     client_id: config.client_id,
@@ -19,8 +18,8 @@ export function createAuth(config: WebConfig): UserManager {
       revocation_endpoint: `${domain}/oauth2/revoke`,
       end_session_endpoint: `${domain}/logout`,
     },
-    userStore: store,
-    stateStore: store,
+    userStore: stores.userStore,
+    stateStore: stores.stateStore,
     loadUserInfo: false,
     automaticSilentRenew: false,
     monitorSession: false,

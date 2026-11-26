@@ -202,7 +202,7 @@ export function buildConfig({ planNames }) {
   const syntax = (...groups) => ({ "no-restricted-syntax": ["error", ...groups.flat()] });
   return tseslint.config(
     {
-      ignores: ["**/node_modules/**", "**/dist/**", "**/cdk.out/**", "**/test-results/**", "**/playwright-report/**"],
+      ignores: ["**/node_modules/**", "**/dist/**", "**/dist-dummy/**", "**/cdk.out/**", "**/test-results/**", "**/playwright-report/**"],
     },
     {
       // 除外の注釈が使われなくなったら誤りにする（#1 の決定 9）。files を持たないのですべての塊に掛かる

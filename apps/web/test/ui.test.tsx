@@ -38,6 +38,7 @@ describe("部品のカタログ", () => {
     expect(CATALOG.map((c) => c.file).sort()).toEqual(files.sort());
     expect(CATALOG).toHaveLength(19);
     expect(new Set(CATALOG.map((c) => c.name)).size).toBe(19);
+    expect(CATALOG.filter((c) => c.component.name !== c.name)).toEqual([]);
   });
 });
 

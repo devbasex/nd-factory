@@ -31,6 +31,7 @@ export function formatRelative(iso: string, nowMs: number, o: FormatOpts): strin
   return format.format(Math.trunc(diff / HOUR_MS), "hour");
 }
 
+/** 数を出す画面は機能の画面（#28）が作る @internal */
 export function formatNumber(n: number, locale: Locale): string {
   return new Intl.NumberFormat(locale).format(n);
 }
