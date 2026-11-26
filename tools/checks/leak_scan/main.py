@@ -10,7 +10,9 @@ import signal
 import sys
 import tempfile
 import traceback
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import TypeVar
 
 # -I はスクリプトのディレクトリを読み込みの対象に入れないので、このディレクトリだけを足す
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -45,19 +47,32 @@ from model import (  # noqa: E402
 GITLEAKS_LOG_OPTS = "-m --text --no-textconv --no-ext-diff --no-renames"
 
 
-def _findings(run: Run) -> list[Finding]:
-    """目印を除いた当たり。パスだけで当てる規則（行の番号 0）は hunk ごとに当たるので、1 件にする。"""
+_Item = TypeVar("_Item")
+
+
+def _once_at_line_zero(
+    items: Iterable[_Item], finding_of: Callable[[_Item], Finding], key_of: Callable[[Finding], tuple[str, ...]]
+) -> list[_Item]:
+    """行の番号 0 の当たりは、同じキーのものを最初の 1 件にする。ほかの当たりはすべて残す。"""
     result, seen = [], set()
-    for finding in run.findings or []:
-        if finding.rule_id == MARKER_RULE:
-            continue
+    for item in items:
+        finding = finding_of(item)
         if finding.start_line == 0 and finding.end_line == 0:
-            key = (finding.rule_id, finding.file, finding.commit, finding.email)
+            key = key_of(finding)
             if key in seen:
                 continue
             seen.add(key)
-        result.append(finding)
+        result.append(item)
     return result
+
+
+def _findings(run: Run) -> list[Finding]:
+    """目印を除いた当たり。パスだけで当てる規則（行の番号 0）は hunk ごとに当たるので、1 件にする。"""
+    return _once_at_line_zero(
+        (finding for finding in run.findings or [] if finding.rule_id != MARKER_RULE),
+        lambda finding: finding,
+        lambda finding: (finding.rule_id, finding.file, finding.commit, finding.email),
+    )
 
 
 def _first_pass(outcome: Outcome, run: Run, mark: Mark) -> None:
@@ -82,14 +97,7 @@ def _second_pass(ctx: Context, repo: CopyRepo, mark: Mark, outcome: Outcome):
         outcome.marks.add(mark)
         return [], False
     outcome.marks |= marks
-    unique, seen = [], set()
-    for target, finding in found:
-        if finding.start_line == 0 and finding.end_line == 0:
-            key = (finding.rule_id, finding.email)
-            if key in seen:
-                continue
-            seen.add(key)
-        unique.append((target, finding))
+    unique = _once_at_line_zero(found, lambda pair: pair[1], lambda finding: (finding.rule_id, finding.email))
     return unique, not marks
 
 
