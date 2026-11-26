@@ -286,7 +286,7 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
 
 ### 規則を変える Pull Request をマージの直前に確かめる
 
-この節の手順 5 の手でのマージ（M1〜M6）は、`main` を更新できる主体を NDF のマージ用のアカウントだけに限る保護を付けた時点で使わなくなる。保護を付けた後は、人の端末からのマージを GitHub が拒むためである。その後の規則を変える Pull Request は、反映先の一覧を切り替えた後に、変更後の規則での履歴の探し（M2）を済ませた HEAD で承認を求め、承認した HEAD とマージ先を渡した `ndf ci merge` でマージする（[全体の設計の決定 142](../design/platform.md#決定の記録)）。この節は、切り替えの後の Pull Request で、その手順に書き換える。
+この節の手順 5 の手でのマージ（M1〜M6）は、反映先の一覧を切り替えた時点で使わなくなる。手でのマージはリリース承認ゲートを通らないためである。その後の規則を変える Pull Request は、変更後の規則での履歴の探し（M2）を済ませた HEAD で承認を求め、承認した HEAD とマージ先を渡した `ndf ci merge` でマージする（[全体の設計の決定 142](../design/platform.md#決定の記録)）。この節は、切り替えの後の Pull Request で、その手順に書き換える。
 
 マージの参照（`refs/pull/<番号>/merge`）を読むだけでは、GitHub がマージの候補を作り直す前の古いコミットでも一致してしまう。そのため、Pull Request の取得の API で候補を作り直させ、作り直した候補が探したマージコミットと同じことを確かめる（[マージできるかの確かめ方](https://docs.github.com/en/enterprise-server%403.21/rest/guides/using-the-rest-api-to-interact-with-your-git-database#checking-mergeability-of-pull-requests)）。
 
