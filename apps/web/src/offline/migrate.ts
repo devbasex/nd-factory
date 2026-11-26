@@ -15,6 +15,7 @@ const CURRENT: MigrationPlan = { version: 1, convert: {} };
 
 // キーの行はほかのすべての保存先が依存するため移さない。保留の件は移行の対象にしない
 const ORDER: StoreName[] = ["keys", "login", "pending", "outbox", "held", "wait", "authz", "snapshots", "seq"];
+const UNMIGRATED: ReadonlySet<StoreName> = new Set<StoreName>(["keys", "held", "seq"]);
 
 type Row = { id?: string; answerTag?: string; iv: Uint8Array<ArrayBuffer>; data: ArrayBuffer };
 type Change = { key: string; iv: Uint8Array; next: Row | null; hold?: HoldReason };
@@ -43,9 +44,9 @@ async function migrateStore(db: DeviceDb, store: StoreName, plan: MigrationPlan)
   const owner = await readOwner(db);
   if (owner === null || owner.migrated[store] >= plan.version) return true;
 
-  const rows = store === "keys" || store === "held" || store === "seq" ? [] : ((await db.getAll(store)) as Row[]);
+  const rows = UNMIGRATED.has(store) ? [] : ((await db.getAll(store)) as Row[]);
   // 写しは読み直せるため移さずに消す
-  const convert = store === "keys" || store === "held" || store === "seq" || store === "snapshots" ? undefined : plan.convert[store];
+  const convert = UNMIGRATED.has(store) || store === "snapshots" ? undefined : plan.convert[store as Converted];
   const changes: Change[] = [];
   if (convert !== undefined) {
     for (const row of rows) changes.push(await changeOf(owner, store, row, convert));
