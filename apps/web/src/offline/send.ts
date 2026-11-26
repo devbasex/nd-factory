@@ -225,19 +225,24 @@ export function createSender(d: SendDeps): QueueSender {
     return async (tx: GuardedTx) => (await unchanged(tx)) && (await replace(tx));
   }
 
-  // 取り下げで保留へ移った成功の件を消し、同じトランザクションで返った項目の取り下げを足す
+  // 取り下げで保留へ移った成功の件を消し、同じトランザクションで返った項目の取り下げを足す。
+  // item は送ったときに読んだ件で、保留の件がその iv のまま（取り下げは暗号文のまま移す）のときだけ当てる。
+  // 保留の件が無いか iv が違えば、何も変えずに changed を返す
   async function withdrawHeld(
     round: Round,
     item: OutboxItem,
     itemId: string,
     waitSeen: Uint8Array | null,
     conversation: ((tx: GuardedTx) => Promise<boolean>) | null,
-  ): Promise<"done" | "stale" | "session"> {
+  ): Promise<"done" | "stale" | "changed" | "session"> {
     const draft = { operation: WITHDRAW, targetId: itemId, projectId: item.projectId, input: {} };
     // 写しの照合が外れたら、enqueue の中で同じ写しのまま試し直さないよう、投げて抜ける
     const stale = new Error("会話の写しが読んだ後に変わった");
+    const changed = new Error("保留の件が送ったときの件と違う");
     try {
       await d.outbox.enqueue(round.owner, draft, async (tx) => {
+        const held = await tx.objectStore("held").get(item.answerTag);
+        if (held === undefined || !sameBytes(held.iv, item.iv)) throw changed;
         if (conversation !== null && !(await conversation(tx))) throw stale;
         await tx.objectStore("held").delete(item.answerTag);
         await d.wait.clearIn(tx, waitSeen);
@@ -245,6 +250,7 @@ export function createSender(d: SendDeps): QueueSender {
       });
     } catch (error) {
       if (error === stale) return "stale";
+      if (error === changed) return "changed";
       // セッションが替わったときは、何も変えずに回を止める。それ以外（保存の失敗）はそのまま投げる
       if (error instanceof SessionChangedError) return "session";
       throw error;
@@ -271,6 +277,8 @@ export function createSender(d: SendDeps): QueueSender {
         // 保留から先へは移らないので、取り下げを足すのと同じトランザクションで保留の件を消す
         const held = await withdrawHeld(round, item, itemId, waitSeen, conversation);
         if (held === "stale") continue;
+        // 保留の件が送ったときの件と違えば、送る列にも保留の件にも無いときと同じに、待機だけを解く
+        if (held === "changed") return d.wait.clear(round.owner, waitSeen);
         return held === "done";
       }
       const guard = await prepareGuard(d.db, round.owner);
@@ -293,17 +301,29 @@ export function createSender(d: SendDeps): QueueSender {
     }
     // 写しの照合が外れ続けるか写しを確かめられなかったら、返った項目の ID を件に書いて送る列に残し、後続の件へ進む。
     // 取り下げはこの ID で登録し、次の回は送り直さずにこの ID で写しへの反映だけをやり直す
-    const noted = await d.outbox.noteSentItem(round.owner, item.answerTag, itemId, async (tx) => {
+    const clearWait = async (tx: GuardedTx) => {
       await d.wait.clearIn(tx, waitSeen);
       return true;
-    });
-    if (noted === "noted") return true;
-    if (noted === "stale") return false;
-    // 書く前に取り下げが保留へ移したか、別のタブが消した
-    const found = await d.outbox.find(item.answerTag);
-    if (found === null) return d.wait.clear(round.owner, waitSeen);
-    if (!found.held) return false;
-    return (await withdrawHeld(round, item, itemId, waitSeen, null)) === "done";
+    };
+    let seenIv = item.iv;
+    // 送る列の件の iv が読んだときと違えば、同じ答えの ID で読み直して分け直す。読み直しは 1 回まで
+    for (let pass = 0; pass < 2; pass += 1) {
+      const noted = await d.outbox.noteSentItem(round.owner, item.answerTag, seenIv, itemId, clearWait);
+      if (noted === "noted") return true;
+      if (noted === "stale") return false;
+      // missing は書く前に取り下げが保留へ移したか、別のタブが消した。changed は送る列の件が書き換わった
+      const found = await d.outbox.find(item.answerTag);
+      if (found === null) return d.wait.clear(round.owner, waitSeen);
+      if (found.held) {
+        const held = await withdrawHeld(round, item, itemId, waitSeen, null);
+        if (held === "changed") return d.wait.clear(round.owner, waitSeen);
+        return held === "done";
+      }
+      if (noted === "missing") return false;
+      seenIv = found.item.iv;
+    }
+    // 読み直した後も書き換わっていたら、件も待機の行も変えずに段 2 を止める。次の回が送り直しか結果未確認を決める
+    return false;
   }
 
   // 成功した件を送る列（取り下げで移っていれば保留）から消すのと待機の解除を、セッションの照合と同じトランザクションで行う。
