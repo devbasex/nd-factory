@@ -14,8 +14,8 @@
 | `login.google.client_id` | 任意 | Google の Web アプリのクライアントの ID。secret は秘密の器 `<prefix>/<environment>/google-oauth` に入れる。値を入れて確かめた後にだけ書く（[idp-and-apps.md](idp-and-apps.md)） | アプリのスタック |
 | `pipeline` | 任意 | あるときだけ反映のパイプラインのスタックを作る | 反映のパイプラインのスタック |
 | `pipeline.repository` | `pipeline` があれば必須 | 起点のリポジトリ（`<組織>/<名前>`） | 同上 |
-| `pipeline.branch` | `pipeline` があれば必須 | 起点のブランチ | 同上 |
-| `pipeline.notify_emails` | 任意 | 承認の依頼と失敗の知らせの宛先 | 同上 |
+| `pipeline.branch` | `pipeline` があれば必須 | 起点のブランチ。英数字と `.` `_` `-` `/` だけを使う | 同上 |
+| `pipeline.notify_emails` | 任意 | 実行の失敗の通知の宛先 | 同上 |
 | `network.vpc_cidr` | 任意 | VPC の IPv4 の CIDR。接頭辞の長さは 16〜20 で、ホストの部分を 0 にする。無ければ `10.80.0.0/16` | アプリのスタック（ネットワーク） |
 | `progress_db.max_acu` | 任意 | 進行表の DB（Aurora Serverless v2）の最大 ACU。1〜16 の 0.5 刻み。無ければ `2` | アプリのスタック（進行表の DB） |
 | `budget.monthly_usd` | 任意 | 月の予算の額（ドル）。1〜100,000 の整数。無ければ `30` | アプリのスタック（費用の見張り） |
@@ -58,7 +58,13 @@
 
 1. 手元のコピーを直す
 2. 設置のコマンドでパイプラインのスタックの差分を見る: `npm run nd-setup -- diff --profile <profile> --settings ~/.config/nd-factory/<environment>.json --out <置き場> --stack pipeline`。差分に SSM のパラメーターの値の変化が出る
-3. 差分をリリース承認ゲートで承認した後にだけ `deploy` を打つ（自動の承認では通さない。[setup.md](setup.md#運用する環境) の「運用する環境」）
-4. パラメーターを書き換えてもアプリのスタックはまだ変わらない。次のパイプラインの実行（起点のブランチへの push か実行の開始）と、承認のアクションでの人の承認で反映される
+3. 差分をリリース承認ゲートで承認する（自動の承認では通さない。[setup.md](setup.md#運用する環境) の「運用する環境」）
+4. 承認の後、反映の段への遷移を止め、実行中の反映が終わるまで待つ。止めないまま書き換えると、古い設定で準備した実行が反映の段へ進みうる
+5. `deploy` を打つ
+6. [pipeline-approval.md の「設定を書き換える手順」](pipeline-approval.md#設定を書き換える手順) の 4 で、古い設定の実行を止める。その後は、参照先の 4 の判定と 5、6 に従う。レビュー済みの Pull Request のマージと遷移の再開は、参照先の 4 で先へ進めると判定した場合だけ行う
+
+パラメーターを書き換えただけでは、アプリのスタックは変わらない。遷移を戻せる環境では、手順 6 のマージで始まる実行が、新しい設定をアプリに反映する。遷移を止めたままにする環境では、アプリに以前の設定が残る。
+
+`environment_kind` が `production` の設定で `launch_declared` を真にすると、このパイプラインは反映を拒む。稼働中の API は以前の設定で動き続けるため、承認などの確定を人だけに限る動き（段階 `human`）への切り替えを確認するまで、商用利用を始めない。以前の段階が `ai` なら、それまでは任された AI のエージェントも確定できる。商用利用を始められる条件は、設計の[「人の確定の段階」の「商用利用の開始」](../design/api.md#人の確定の段階)にある。
 
 手元のコピーを失ったら、パラメーターから読み直す（`aws ssm get-parameter --name /<prefix>/<environment>/settings`）。

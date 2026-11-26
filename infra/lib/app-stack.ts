@@ -30,7 +30,7 @@ import { TaskPlatform } from "./tasks.ts";
 // アプリのスタック: 利用者プール・画面の配信・API・利用者の表・画面の設定の値と、
 // ネットワーク・進行表の DB・DB の用意の関数・ECS のクラスタ・費用の見張り。
 // 戻り先の URL が配信の名前を要り、画面の設定の値がすべてを要るため、1 つのスタックに置く。
-// 承認する人が 1 つの差分と確認の値で読めるよう、インフラの資源も同じスタックに置く
+// 1 つの差分と確認の値で反映する中身を縛れるよう、インフラの資源も同じスタックに置く
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const API_ENTRY = fileURLToPath(new URL("../../apps/api/src/users-handler.ts", import.meta.url));

@@ -12,7 +12,7 @@
 | `apps/web/` | 画面（React と TypeScript、Vite で束ねる）と e2e |
 | `infra/` | AWS CDK のスタック（アプリのスタック・反映のパイプライン）と設置のコマンド |
 | `tools/` | 参照の検査と CI の定義のテスト |
-| `docs/operations/` | 設置・設定のファイル・反映の承認・IdP のクライアントと App の作り方 |
+| `docs/operations/` | 設置・設定のファイル・反映のパイプライン・IdP のクライアントと App の作り方 |
 | `docs/design/` | nd-factory の承認済みの設計（全体・画面・API と MCP・実行・プラットフォーム・決定の記録・詳細設計）。入口は `overview.md`。子の課題はここを引いて詳細設計を書く |
 | `docs/design-process/` | 設計を作った経緯・作り方・開発の計画（設計そのものは持たない） |
 | `docs/specifications/` | 実装した機能の確定仕様（今のコードと一致する仕様。課題の設計と実装計画を、実装の後にここへ書き直す） |

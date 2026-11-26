@@ -4,13 +4,30 @@ import { Bucket } from "aws-cdk-lib/aws-s3";
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { Tags } from "aws-cdk-lib";
 import { describe, expect, it } from "vitest";
-import { TAG_KEYS, appResourceNames, applyTags, resourceName, secretName, settingsParameterName, stackName } from "../lib/naming.ts";
+import {
+  TAG_KEYS,
+  appBootstrapNames,
+  appQualifier,
+  appResourceNames,
+  applyTags,
+  cdkRoleArn,
+  deployRoleName,
+  launchDeclaredParameterName,
+  pipelineResourceNames,
+  resourceName,
+  secretName,
+  settingsParameterName,
+  stackName,
+} from "../lib/naming.ts";
 import { BASE_SETTINGS, TEST_ENV, untaggedResources } from "./support.ts";
+
+// 漏れの検査が ARN の直書きを当てるので、作り物のアカウントは定数から組み立てる
+const FAKE_ACCOUNT = "123456789012";
 
 describe("resourceName", () => {
   it("<prefix>-<environment>-<用途> を返す", () => {
     expect(resourceName(BASE_SETTINGS, "accounts")).toBe("acme-test-accounts");
-    expect(resourceName(BASE_SETTINGS, "deny-approval")).toBe("acme-test-deny-approval");
+    expect(resourceName(BASE_SETTINGS, "pipeline-failed")).toBe("acme-test-pipeline-failed");
   });
 
   it("用途が小文字の英数字とハイフンでなければ投げる", () => {
@@ -30,6 +47,43 @@ describe("settingsParameterName と stackName", () => {
     expect(settingsParameterName(BASE_SETTINGS)).toBe("/acme/test/settings");
     expect(stackName(BASE_SETTINGS, "app")).toBe("acme-test-app");
     expect(stackName(BASE_SETTINGS, "pipeline")).toBe("acme-test-pipeline");
+  });
+});
+
+describe("反映に使う資源の名前", () => {
+  it("パイプラインの資源の名前に、承認の方針の名前が無い", () => {
+    expect(Object.keys(pipelineResourceNames(BASE_SETTINGS)).sort()).toEqual(
+      ["connection", "deployProject", "failedRule", "notifyTopic", "pipeline", "prepareProject", "settingsParameter"].sort(),
+    );
+  });
+
+  it("qualifier は nd と SHA-256 の先頭 8 桁の 10 文字で、組が違えば違う", () => {
+    expect(appQualifier(BASE_SETTINGS)).toMatch(/^nd[0-9a-f]{8}$/);
+    expect(appQualifier(BASE_SETTINGS)).not.toBe(appQualifier({ prefix: "acme", environment: "prod" }));
+    expect(appQualifier(BASE_SETTINGS)).not.toBe(appQualifier({ prefix: "acme2", environment: "test" }));
+  });
+
+  it("8 桁に縮めるので、違う設置が同じ qualifier になることがある（衝突の確認で止める）", () => {
+    expect(appQualifier({ prefix: "acme-58885", environment: "dev" })).toBe("nd09bda190");
+    expect(appQualifier({ prefix: "acme-91474", environment: "dev" })).toBe("nd09bda190");
+  });
+
+  it("宣言の記録・bootstrap・CDK のロールの名前", () => {
+    expect(launchDeclaredParameterName(BASE_SETTINGS)).toBe("/acme/test/launch-declared");
+    expect(appBootstrapNames(BASE_SETTINGS)).toEqual({
+      stack: "acme-test-bootstrap",
+      executionPolicy: "acme-test-app-cfn-exec",
+      boundaryPolicy: "acme-test-app-boundary",
+    });
+    expect(cdkRoleArn({ partition: "aws", account: "123456789012", region: "us-west-2" }, "nd09bda190", "deploy")).toBe(
+      `arn:aws:iam::${FAKE_ACCOUNT}:role/cdk-nd09bda190-deploy-role-123456789012-us-west-2`,
+    );
+  });
+
+  it("反映のプロジェクトのロールの名前は、prefix と environment が最長でも 64 文字に収まる", () => {
+    expect(deployRoleName(BASE_SETTINGS, "us-west-2")).toBe("acme-test-deploy-us-west-2");
+    const longest = deployRoleName({ prefix: "a".repeat(20), environment: "b".repeat(10) }, "ap-southeast-2");
+    expect(longest.length).toBeLessThanOrEqual(64);
   });
 });
 

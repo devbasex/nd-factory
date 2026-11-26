@@ -23,10 +23,7 @@
       "includeEntryExports": true
     },
     // 合成の起点（cdk.json の app）と設置のコマンド（ルートのスクリプト nd-setup）は knip が拾う
-    "infra": {
-      // CDK の NodejsFunction が合成の時に実行ファイルとして読み、import では辿れない（#1）
-      "ignoreDependencies": ["esbuild"]
-    },
+    "infra": {},
     // 参照の検査の CLI（ルートのスクリプト ref-check）は knip が拾う
     "tools": {
       // モックのビューアーの起点。tools/mock-viewer/Dockerfile の CMD が打ち、import では辿れない（Skill mock-viewer）

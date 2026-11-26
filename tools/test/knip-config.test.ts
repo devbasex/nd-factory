@@ -286,14 +286,13 @@ describe("受け入れ条件 1・5・12: knip.jsonc の使っていないもの�
   it(
     "使われない ignoreDependencies の行で誤りになる（設定の手掛かり）",
     () => {
-      const ignoring = Object.entries(config.workspaces).filter(([, ws]) => (ws.ignoreDependencies ?? []).length > 0);
-      expect(ignoring.length).toBeGreaterThan(0);
-      for (const [dir] of ignoring) {
-        // 除外する依存を package.json から消すと、除外の行が使われなくなる
-        const run = runKnip(buildTree({ config, manifest: (d, m) => (d === dir ? { ...m, devDependencies: {} } : m) }));
-        expect(run.status, dir).toBe(1);
-        expect(run.output, dir).toMatch(/Configuration hints/);
-      }
+      // 設定が除外の行を持たなくても確かめられるよう、使われない行を足した設定で打つ
+      const tree = buildTree({ config });
+      const infra = { ...config.workspaces.infra, ignoreDependencies: ["nd-unused-dependency"] };
+      write(tree, "knip.jsonc", JSON.stringify({ ...config, workspaces: { ...config.workspaces, infra } }));
+      const run = runKnip(tree);
+      expect(run.status).toBe(1);
+      expect(run.output).toMatch(/Configuration hints/);
     },
     KNIP_TIMEOUT,
   );

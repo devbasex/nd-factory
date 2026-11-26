@@ -297,3 +297,26 @@ describe("infraValues", () => {
     expect(r.ok).toBe(true);
   });
 });
+
+describe("pipeline.branch の形", () => {
+  const withBranch = (branch: string) => ({ ...base(), pipeline: { repository: "example-org/example-app", branch } });
+  const schemaBranch = new RegExp(
+    (
+      JSON.parse(readFileSync(new URL("../schema/settings.schema.json", import.meta.url), "utf8")) as {
+        properties: { pipeline: { properties: { branch: { pattern: string } } } };
+      }
+    ).properties.pipeline.properties.branch.pattern,
+  );
+
+  it.each(["main", "release/v1", "feature_x-1.2"])("受ける（%s）", (branch) => {
+    expect(parseSettings(withBranch(branch)).ok).toBe(true);
+    expect(schemaBranch.test(branch)).toBe(true);
+  });
+
+  it.each(["*", "a?b", "a[0]", "{a}", "!main", "a\\b", "my branch", ""])("拒む（%j）", (branch) => {
+    const r = parseSettings(withBranch(branch));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.issues[0]).toMatch(/^pipeline\.branch: /);
+    expect(schemaBranch.test(branch)).toBe(false);
+  });
+});

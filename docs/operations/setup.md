@@ -141,11 +141,16 @@ npm run nd-setup -- deploy --profile <profile> --assembly <合成の結果の置
 4. [idp-and-apps.md](idp-and-apps.md) の順で Google のクライアントを作り、器へ secret を入れて確かめる
 5. 設定のファイルへ `client_id` を書き、`diff` と `deploy` を打ち直す
 
+パイプラインを併設する場合は、反映の前に [pipeline-approval.md](pipeline-approval.md) の移行の手順を行う。
+
 ### 運用する環境
 
-- 設置のコマンドで反映するのはパイプラインのスタックだけにする。`diff` に `--stack pipeline` を渡す。アプリのスタックは反映のパイプラインが、人の承認の後に反映する（[pipeline-approval.md](pipeline-approval.md)）
+- 設置のコマンドで反映するのはパイプラインのスタックだけにする。`diff` に `--stack pipeline` を渡す。アプリのスタックは反映のパイプラインが、人の承認を待たずに反映する（[pipeline-approval.md](pipeline-approval.md)）
 - パイプラインのスタックの `diff` の差分をリリース承認ゲートで承認した後にだけ `deploy` を打つ（自動の承認では通さない）。`deploy` に渡した確認の値は、承認の記録と一緒に控えておく。アプリのスタックはパイプラインのスタックと同じアカウントとリージョンに反映されるため、アプリのスタックを消して作り直すときの接続先の出所になる。設定を変えるときも同じ（[settings.md](settings.md) の「運用する環境で設定を変える」）
-- パイプラインのスタックを初めて反映した後は、GitHub との接続を有効にし、承認を拒む方針を AI の主体へ付けて確かめるまで、起点のブランチへ push しない（[pipeline-approval.md](pipeline-approval.md)）
+- パイプラインのスタックを反映する前に、次の 3 つを確認する。確認が済んだらスタックを反映し、初めての設置ではその後で GitHub との接続を有効にする。確認の方法と順序は [pipeline-approval.md の「順序のまとめ」](pipeline-approval.md#順序のまとめ) にある
+  - 起点のブランチの保護と、その保護を編集できる主体
+  - 信頼する基点（確認を始めるコミット）を決め、そこから起点のブランチの先端までの変更がすべて、レビューで承認された Pull Request を経て入ったこと
+  - 反映を操作できる主体と、設定を書き換えられる主体
 - 設定を変えるときの手順は [settings.md](settings.md) にある
 
 ### 進行表の DB のログと監査の設定
