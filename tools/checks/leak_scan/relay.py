@@ -59,6 +59,10 @@ class _File:
         self.new_end = 0
         self.has_hunk = False
 
+    def exclude_if_match(self, path: str | None, exclude: str) -> None:
+        """片側のパスが除くパスなら、このファイルを除く。一度除いたら戻さない。"""
+        self.excluded = self.excluded or (bool(exclude) and path == exclude)
+
 
 def rewrite_log(source: BinaryIO, sink: BinaryIO, state: dict) -> None:
     """目印の hunk を足し、除くファイルを落とし、写しの探しでは commit の行を元のコミットに書き換える。"""
@@ -161,12 +165,11 @@ def rewrite_log(source: BinaryIO, sink: BinaryIO, state: dict) -> None:
                 finish()
                 sink.write(line)
             elif current is not None and line.startswith(b"--- "):
-                path = _side(line, b"a/")
-                current.excluded = current.excluded or (bool(exclude) and path == exclude)
+                current.exclude_if_match(_side(line, b"a/"), exclude)
                 emit(line)
             elif current is not None and line.startswith(b"+++ "):
                 current.new_path = _side(line, b"b/")
-                current.excluded = current.excluded or (bool(exclude) and current.new_path == exclude)
+                current.exclude_if_match(current.new_path, exclude)
                 emit(line)
                 settle()
             elif line.startswith(b"\\"):
