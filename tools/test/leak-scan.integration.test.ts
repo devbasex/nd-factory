@@ -3,6 +3,7 @@ import { randomBytes, randomInt } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { beforeAll, describe, expect, it } from "vitest";
 import { requireBinary } from "./support/require-binary.ts";
 import { useTempTree, write } from "./support/temp-tree.ts";
@@ -2188,6 +2189,50 @@ describe("履歴のバイナリと読み終えたことの確かめ（#98 の 2�
     expect(result.findings).toEqual([]);
     expect(result.output).toContain(HISTORY_MESSAGE);
     expect(result.output).not.toContain("b.md");
+  }, TIMEOUT);
+
+  /**
+   * `cat-file --batch` が bad の blob で失敗する偽の git。失敗したプロセスはその後の要求にも答えないので、
+   * 後の blob を読めるのは、読み手を作り直したときだけになる
+   */
+  const brokenBlobGit = (bad: string) =>
+    fakePath("git", [
+      "#!/usr/bin/env python3",
+      "import os, subprocess, sys",
+      `real = ${JSON.stringify(which("git"))}`,
+      'if sys.argv[1:] != ["cat-file", "--batch"]:',
+      "    os.execv(real, [real, *sys.argv[1:]])",
+      "broken = False",
+      "for line in sys.stdin.buffer:",
+      `    broken = broken or line.strip() == b"${bad}"`,
+      '    answer = line.strip() + b" missing\\n" if broken else subprocess.run([real, *sys.argv[1:]], input=line, capture_output=True, check=True).stdout',
+      "    sys.stdout.buffer.write(answer)",
+      "    sys.stdout.buffer.flush()",
+    ]);
+
+  it("変更後の blob を読めなければ、その対象は中を探さず、読み手を作り直して後の対象を探し、履歴の固定の行で 1", () => {
+    const { root, base } = forkRepo();
+    const added = step(root, { "a.gz": gzipSync(tokenLine()), "b.gz": gzipSync(tokenLine()) });
+    const env = { ...process.env, PATH: brokenBlobGit(git(root, "rev-parse", `${added}:a.gz`)) };
+    const result = gitScan(root, DEFAULT_CONFIG, base, { env });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(HISTORY_MESSAGE);
+    expect(hits(result)).toEqual([["github-pat", "b.gz!b", added]]);
+  }, TIMEOUT);
+
+  it("変更前の blob を読めなければ、変更後の blob の当たりを帰属させずに出し、読み手を作り直して後の対象を探し、履歴の固定の行で 1", () => {
+    const token = fakeToken();
+    const { root } = forkRepo();
+    const added = step(root, { "a.dat": nul(`token ${token}\nfirst\n`) });
+    const changed = step(root, { "a.dat": nul(`token ${token}\nsecond\n`), "b.gz": gzipSync(tokenLine()) });
+    const env = { ...process.env, PATH: brokenBlobGit(git(root, "rev-parse", `${added}:a.dat`)) };
+    const result = gitScan(root, DEFAULT_CONFIG, added, { env });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(HISTORY_MESSAGE);
+    expect(hits(result)).toEqual([
+      ["github-pat", "a.dat", changed],
+      ["github-pat", "b.gz!b", changed],
+    ]);
   }, TIMEOUT);
 
   const dropMarker = (tag: string, select: string) =>
