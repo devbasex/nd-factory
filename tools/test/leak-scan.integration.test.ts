@@ -1,6 +1,6 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { randomInt } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { randomBytes, randomInt } from "node:crypto";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -319,10 +319,11 @@ describe("nd-factory の規則（.gitleaks.toml）", () => {
         "役割 arn:aws:iam::123456789012:role/acme-deploy",
         `作り物の UUID spr_00000000-0000-7000-8000-${uuidTail}`,
         `13 桁の数 ${digits(13)}`,
-        "置き場 arn:aws:s3:::<bucket> と arn:aws:s3:::${AssetsBucket} と arn:aws:s3:::acme-assets",
-        "置き場 arn:aws:s3:::assets.example.com と arn:aws:s3:::nd-EXAMPLE-logs",
+        "置き場 arn:aws:s3:::<bucket> と arn:aws:s3:::${AssetsBucket} と arn:aws:s3:::amzn-s3-demo-bucket",
+        `端点 https://amzn-s3-demo-bucket.${"s3.us-west-2.amazonaws.com"} と amzn-s3-demo-bucket.${"s3.amazonaws.com"}`,
         "端点 https://<api-id>.execute-api.<region>.amazonaws.com と https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com",
-        "端点 https://acme-test-login.auth.us-west-2.amazoncognito.com と https://EXAMPLE1234.cloudfront.net",
+        "端点 https://acme-cognito-login.auth.us-west-2.amazoncognito.com と https://EXAMPLE1234.cloudfront.net",
+        "端点 https://<prefix>-<environment>-login.auth.<リージョン>.amazoncognito.com",
         "端点 https://<bucket>.s3.<region>.amazonaws.com と ${AssetsBucket}.s3.${AWS::Region}.amazonaws.com と <bucket>.s3-us-west-2.amazonaws.com",
         "端点 https://s3.us-west-2.amazonaws.com/acme-assets と 置き場 arn:aws:s3:::<bucket>/key と 役割 arn:aws:iam::123456789012:role/${RoleName}",
         "",
@@ -442,24 +443,55 @@ describe("履歴の探し", () => {
   }, TIMEOUT);
 });
 
+/** PATH から実行ファイルを引く（偽の実行ファイルを PATH の先頭に置く前の本物） */
+function which(name: string): string {
+  const found = spawnSync("bash", ["-c", `command -v ${name}`], { encoding: "utf8" });
+  if (found.status !== 0) throw new Error(`${name} が PATH に無い`);
+  return found.stdout.trim();
+}
+
+/** 偽の実行ファイル `name` を置いた PATH を返す。`extra` は隣に置くファイル（名前と中身） */
+function fakePath(name: string, body: string[], extra: Record<string, string> = {}): string {
+  const bin = tempDir("leak-fake-bin-");
+  writeFileSync(join(bin, name), `${body.join("\n")}\n`, { mode: 0o755 });
+  for (const [file, content] of Object.entries(extra)) writeFileSync(join(bin, file), content);
+  return `${bin}:${process.env.PATH ?? ""}`;
+}
+
+/** gitleaks の隣の既定の設定のファイル（偽の gitleaks を置くときは隣に写す） */
+const defaultConfigBeside = () => ({ "gitleaks.default.toml": readFileSync(join(dirname(which("gitleaks")), "gitleaks.default.toml"), "utf8") });
+
+/**
+ * 本物の gitleaks を打ち、`after`（bash の行）で報告か記録を加工して、本物の終了コードで終える偽の gitleaks を置いた PATH を返す。
+ * `after` では、`$report`（報告のパス）・`$sub`（dir か git）・`$source`・`$tag`（報告の番号。1 回目か 2 回目か）・`$status` を使える
+ */
+function wrappedGitleaksPath(after: string[]): string {
+  return fakePath(
+    "gitleaks",
+    [
+      "#!/usr/bin/env bash",
+      'sub="$1"; source="$2"; report=""; args=("$@")',
+      'while (($# > 0)); do if [[ "$1" == --report-path ]]; then report="$2"; shift 2; else shift; fi; done',
+      'tag="${report##*report-}"; tag="${tag%.json}"',
+      "status=0",
+      `"${which("gitleaks")}" "\${args[@]}" || status=$?`,
+      ...after,
+      'exit "$status"',
+    ],
+    defaultConfigBeside(),
+  );
+}
+
 /**
  * 診断にファイルの名前を載せる偽の gitleaks を置いた PATH を返す（v8.30.1 の dir は読めないファイルの診断などに名前を載せる。
- * 実物で起こす条件は実行の環境に依るので、出力の扱いだけを偽の実行ファイルで確かめる）
+ * 実物で起こす条件は実行の環境に依るので、出力の扱いだけを偽の実行ファイルで確かめる）。本物を打った後に診断の行を足す
  */
-function fakeGitleaksPath(diagnostic: string, stderrLine = `stderr ${diagnostic}`, trailingLines = 0): string {
-  const bin = tempDir("leak-fake-bin-");
-  const body = [
-    "#!/usr/bin/env bash",
-    'report=""',
-    'while (($# > 0)); do if [[ "$1" == --report-path ]]; then report="$2"; shift 2; else shift; fi; done',
+function fakeGitleaksPath(diagnostic: string, stderrLine = `4:08PM INF stderr ${diagnostic}`, trailingLines = 0): string {
+  return wrappedGitleaksPath([
     `echo "stdout ${diagnostic}"`,
     `printf '%s\\n' '${stderrLine}' >&2`,
     `for ((i = 0; i < ${trailingLines}; i++)); do echo "filler line $i of the scan log, no level word here" >&2; done`,
-    "printf '[]' >\"$report\"",
-    "exit 0",
-  ].join("\n");
-  writeFileSync(join(bin, "gitleaks"), `${body}\n`, { mode: 0o755 });
-  return `${bin}:${process.env.PATH ?? ""}`;
+  ]);
 }
 
 describe("gitleaks の生の出力", () => {
@@ -473,7 +505,7 @@ describe("gitleaks の生の出力", () => {
       expect(hidden.output).not.toContain(realWord);
       const shown = scan(root, [mode, ND_CONFIG], { env });
       expect(shown.status).toBe(0);
-      expect(shown.output).toContain(`stderr docs/${realWord}.md`);
+      expect(shown.output).toContain(`INF stderr docs/${realWord}.md`);
     }, TIMEOUT);
   }
 });
@@ -490,7 +522,9 @@ function gitleaksCountLine(count: number): string {
   return `${esc}[90m4:08PM${esc}[0m ${esc}[31mWRN${esc}[0m ${esc}[1mleaks found: ${count}${esc}[0m`;
 }
 
-const SKIP_MESSAGE ="leak-scan: gitleaks が警告か誤りを出した";
+const SKIP_MESSAGE = "leak-scan: gitleaks が警告か誤りを出した";
+const UNSEARCHED_MESSAGE = "leak-scan: gitleaks が中身を読まずに飛ばしたファイルを探せなかった";
+const HISTORY_MESSAGE = "leak-scan: 履歴を最後まで探し終えたことを確かめられなかった";
 
 describe("読めずに飛ばした対象", () => {
   for (const mode of ["dir", "git"] as const) {
@@ -627,10 +661,16 @@ describe("生の出力を伏せた知らせ", () => {
       const hidden = scanLines(root, [mode, ND_CONFIG], env);
       expect(hidden.status).toBe(1);
       expect(hidden.stdout).toEqual([]);
-      expect(hidden.stderr).toEqual(["leak-scan: gitleaks の報告を読めない（終了コード 3）", HIDDEN_NOTE]);
+      const history = mode === "git" ? [HISTORY_MESSAGE] : [];
+      expect(hidden.stderr).toEqual([
+        "leak-scan: gitleaks の報告を読めない（終了コード 3）",
+        HIDDEN_NOTE,
+        ...history,
+        ...(mode === "git" ? [NAMES_NOTE] : []),
+      ]);
       const shown = scanLines(root, [mode, ND_CONFIG, "--paths"], env);
       expect(shown.status).toBe(1);
-      expect(shown.stderr).toEqual(["leak-scan: gitleaks の報告を読めない（終了コード 3）"]);
+      expect(shown.stderr).toEqual(["leak-scan: gitleaks の報告を読めない（終了コード 3）", ...history]);
     }, TIMEOUT);
   }
 
@@ -1458,7 +1498,7 @@ describe("取り出した木と履歴の探し（export-tree.sh と leak-scan-se
     rmSync(join(root, "bin.dat"));
     const head = commitAll(root, "remove");
     const out = exportedHistory(root, base, head);
-    expect(secretScan(root, ["git", "--range", `${base}..${head}`], { pattern: realWord }).output).toContain(countLine(0));
+    expect(secretScan(root, ["git", "--range", `${base}..${head}`], { pattern: realWord }).output).toContain(countLine(1));
     const result = secretScan(root, ["history", out], { pattern: realWord, require: true });
     expect(result.status).toBe(1);
     // layers/ の元のファイル（gitleaks がそのまま読める分）と binary-text/ の両方で当たる
@@ -1477,27 +1517,862 @@ describe("取り出した木と履歴の探し（export-tree.sh と leak-scan-se
     expect(result.output).toContain("keys/client.p12");
   }, TIMEOUT);
 
-  it("既定の全体の許可がパスで外すファイルの値は当てず、同じ中身を外さないパスに置けばそちらだけ当たる", () => {
-    const token = `token ${fakeToken()}\n`;
+  it("既定の全体の許可がパスで外すファイル（img/logo.png）の値も、名前を変えずに history で当たる", () => {
     const { root, base } = forkRepo();
-    write(root, "img/logo.png", token);
+    write(root, "img/logo.png", `token ${fakeToken()}\n`);
     commitAll(root, "png");
-    const pngOnly = commitAll(root, "noop");
-    expect(secretScan(root, ["history", exportedHistory(root, base, pngOnly)], { pattern: fakeWord() }).status).toBe(0);
-    write(root, "docs/a.md", token);
-    commitAll(root, "md");
     rmSync(join(root, "img"), { recursive: true });
-    rmSync(join(root, "docs"), { recursive: true });
     const head = commitAll(root, "remove");
     const result = secretScan(root, ["history", exportedHistory(root, base, head), "--details"], { pattern: fakeWord() });
     expect(result.status).toBe(1);
-    expect(result.output).toContain("leak-scan: 当たり github-pat docs/a.md:1");
-    expect(result.output).not.toContain("logo.png:");
+    expect(result.output).toContain("leak-scan: 当たり github-pat img/logo.png:1");
   }, TIMEOUT);
 
   it("history に export-tree.sh の範囲が空の出力先を渡すと、引数の誤りにならずに 0", () => {
     const { root, base } = forkRepo();
     const result = secretScan(root, ["history", exportedHistory(root, base, base)], { pattern: fakeWord() });
     expect(result).toEqual({ status: 0, output: `leak-scan-secret: 履歴 paths を探す\n${countLine(0)}\n` });
+  }, TIMEOUT);
+});
+
+// ここから #98: サービスの token、飛ばされるファイル、アーカイブ、読み終えたことの確かめ、絞った許可
+
+const base64url = (length: number) => pick("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_", length);
+
+/** 架空の委任の token（`ndfd_`）か手元のマシンの登録の token（`ndfm_`） */
+const serviceToken = (head: "ndfd" | "ndfm") =>
+  fake(() => `${head}_usr_${hex(12)}.id_${hex(12)}.${base64url(43)}`, /^ndf[dm]_usr_[0-9a-f]{12}\.id_[0-9a-f]{12}\.[0-9A-Za-z_-]{43}$/);
+
+/** 先頭に NUL を持つバイト列の後ろに本文を置く */
+const nul = (text: string) => Buffer.concat([Buffer.from([0, 1, 2, 10]), Buffer.from(text)]);
+/** ELF の頭を持つバイト列（gitleaks の dir が中身を読まずに飛ばす）。本文は 2 行目から。種類の判定には 52 バイトより長い頭が要る */
+const elf = (text: string) => Buffer.concat([Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0]), Buffer.alloc(64), Buffer.from(`\n${text}`)]);
+const tokenLine = () => `token ${fakeToken()}\n`;
+
+function writeBytes(root: string, path: string, body: Buffer | string): void {
+  mkdirSync(dirname(join(root, path)), { recursive: true });
+  writeFileSync(join(root, path), body);
+}
+
+function treeOf(files: Record<string, Buffer | string>): string {
+  const root = makeTree({});
+  for (const [path, body] of Object.entries(files)) writeBytes(root, path, body);
+  return root;
+}
+
+/** 空のコミットの後に files を足し、次のコミットで消した履歴 */
+function addedAndRemoved(files: Record<string, Buffer | string>): { root: string; base: string; added: string } {
+  const { root, base } = forkRepo();
+  for (const [path, body] of Object.entries(files)) writeBytes(root, path, body);
+  git(root, "add", "-A", "-f");
+  git(root, "commit", "-q", "-m", "add");
+  const added = git(root, "rev-parse", "HEAD");
+  for (const path of Object.keys(files)) rmSync(join(root, path));
+  commitAll(root, "remove");
+  return { root, base, added };
+}
+
+/** コミットを 1 つ足す。値が null のファイルは消す */
+function step(root: string, files: Record<string, Buffer | string | null>): string {
+  for (const [path, body] of Object.entries(files)) {
+    if (body === null) rmSync(join(root, path));
+    else writeBytes(root, path, body);
+  }
+  return commitAll(root, "step");
+}
+
+const gitScan = (root: string, config: string, base?: string, options?: Parameters<typeof scan>[2]) =>
+  scan(root, ["git", config, ...(base === undefined ? [] : ["--range", `${base}..HEAD`])], options);
+
+const hits = (result: ScanResult) => result.findings.map((f) => [f.RuleID, f.File, f.Commit]).sort();
+const places = (result: ScanResult) => result.findings.map((f) => [f.RuleID, f.File, f.StartLine]).sort();
+
+/** `[extend] path` で base を読み、extra を足した設定 */
+function extendConfig(base: string, extra: string): string {
+  const path = join(tempDir("leak-extend-"), "gitleaks.toml");
+  writeFileSync(path, `[extend]\npath = "${base}"\n\n${extra}`);
+  return path;
+}
+
+/** 既定の規則の設定の写しに extra を足した設定（`useDefault` を直に持つ形のまま） */
+function defaultWith(extra: string): string {
+  const path = join(tempDir("leak-default-"), "gitleaks-default.toml");
+  writeFileSync(path, `${readFileSync(DEFAULT_CONFIG, "utf8")}\n${extra}`);
+  return path;
+}
+
+/** 作業ディレクトリ dir で python3 のコードを打つ（アーカイブを作る） */
+function python(dir: string, code: string, input: string): void {
+  const result = spawnSync("python3", ["-I", "-c", code], { cwd: dir, input, encoding: "utf8" });
+  if (result.status !== 0) throw new Error(result.stderr);
+}
+
+/** 中身を JSON で受けて、形ごとのアーカイブを作るコード */
+const MAKE_ARCHIVES = `
+import bz2, gzip, io, json, lzma, sys, tarfile, zipfile
+spec = json.load(sys.stdin)
+secret = spec["secret"].encode()
+
+def zipped(members, method=zipfile.ZIP_DEFLATED):
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", method) as z:
+        for name, body in members:
+            z.writestr(name, body)
+    return out.getvalue()
+
+def tarred(members, fmt=tarfile.PAX_FORMAT):
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w", format=fmt) as t:
+        for name, body in members:
+            info = tarfile.TarInfo(name)
+            info.size = len(body)
+            t.addfile(info, io.BytesIO(body))
+    return out.getvalue()
+
+body = secret * 3
+inner = zipped([("deep.txt", body)])
+prefix = {"sh": b"#!/bin/sh\\nexit 0\\n", "elf": b"\\x7fELF\\x02\\x01\\x01\\x00" + bytes(64)}
+files = {}
+for kind in spec["kinds"]:
+    if kind == "good":
+        files["a.zip"] = zipped([("app.env", body), ("a.bin", body), ("lib.so", b"\\x7fELF\\x02\\x01\\x01\\x00\\n" + body)])
+        files["conf/app.env.gz"] = gzip.compress(body)
+        files["b.tar.gz"] = gzip.compress(tarred([("dir/t.txt", body)]))
+        files["nest.zip"] = zipped([("in.zip", inner)])
+        files["renamed.dat"] = zipped([("d.txt", body)])
+        files["x.bz2"] = bz2.compress(body)
+        files["y.xz"] = lzma.compress(body)
+        files["sfx-sh.run"] = prefix["sh"] + zipped([("s.txt", body)])
+        files["sfx-elf.run"] = prefix["elf"] + zipped([("e.txt", body)])
+        v7 = tarred([("old.txt", body)], tarfile.USTAR_FORMAT)
+        header = bytearray(v7[:512])
+        header[257:265] = bytes(8)
+        header[148:156] = b" " * 8
+        header[148:156] = ("%06o\\0 " % sum(header)).encode()
+        files["v7.tar"] = bytes(header) + v7[512:]
+        files["v7.tar.gz"] = gzip.compress(files["v7.tar"])
+    elif kind == "clean":
+        files["clean.zip"] = zipped([("a.txt", b"hello\\n"), ("empty", b""), ("sub/", b"")])
+        out = io.BytesIO()
+        with tarfile.open(fileobj=out, mode="w") as t:
+            root = tarfile.TarInfo("./")
+            root.type = tarfile.DIRTYPE
+            t.addfile(root)
+        files["clean.tar"] = out.getvalue()
+        files["notes.zip"] = b"just text\\n"
+        files["notes.br"] = b"just text\\n"
+    elif kind.startswith("bad:"):
+        name = kind[4:]
+        z = zipped([("m.txt", body * 20)])
+        if name == "cut.zip": data = z[:len(z) // 2]
+        elif name == "cut.gz": data = gzip.compress(body * 20)[:40]
+        elif name == "broken.zip":
+            data = bytearray(z)
+            for i in range(40, 60): data[i] ^= 0xFF
+            data = bytes(data)
+        elif name == "encrypted.zip":
+            data = bytearray(z)
+            data[6] |= 1
+            data[data.index(b"PK\\x01\\x02") + 8] |= 1
+            data = bytes(data)
+        elif name == "a.7z": data = b"7z\\xbc\\xaf\\x27\\x1c" + bytes(40)
+        elif name in ("method.zip", "method-sfx.run"):
+            data = bytearray(z)
+            data[8] = 6
+            data[data.index(b"PK\\x01\\x02") + 10] = 6
+            data = bytes(data)
+            if name == "method-sfx.run": data = prefix["sh"] + data[:data.index(b"PK\\x01\\x02")]
+        elif name == "sfx-sh-cut.run": data = prefix["sh"] + z[:z.index(b"PK\\x01\\x02")]
+        elif name == "sfx-elf-cut.run": data = prefix["elf"] + z[:z.index(b"PK\\x01\\x02")]
+        elif name == "sfx-boundary.run": data = b"#" * ((1 << 20) - 10) + z[:z.index(b"PK\\x01\\x02")]
+        elif name == "deep.zip":
+            data = inner
+            for i in range(6): data = zipped([("n%d.zip" % i, data)])
+        elif name == "data.br": data = b"\\x0b\\x02\\x80\\x00\\xff"
+        elif name == "dotdot.zip": data = zipped([("../m.txt", body)])
+        elif name == "v7-cut.tar.gz":
+            t = bytearray(tarred([("old.txt", body * 100)], tarfile.USTAR_FORMAT)[:1024])
+            t[257:265] = bytes(8)
+            t[148:156] = b" " * 8
+            t[148:156] = ("%06o\\0 " % sum(t[:512])).encode()
+            data = gzip.compress(bytes(t))
+        else: raise SystemExit("unknown " + name)
+        files[name] = data
+    elif kind == "limit-one":
+        files["one.zip"] = zipped([("m", b"a" * 5000)])
+    elif kind == "limit-sum":
+        files["sum.zip"] = zipped([("m1", b"a" * 3000), ("m2", b"b" * 3000)])
+    elif kind in ("limit-pax", "limit-gnu"):
+        out = io.BytesIO()
+        fmt = tarfile.PAX_FORMAT if kind == "limit-pax" else tarfile.GNU_FORMAT
+        with tarfile.open(fileobj=out, mode="w", format=fmt) as t:
+            info = tarfile.TarInfo("n" * 20000 if kind == "limit-gnu" else "e")
+            if kind == "limit-pax": info.pax_headers = {"comment": "c" * 20000}
+            t.addfile(info)
+        files[kind + ".tar"] = out.getvalue()
+import os
+for name, data in files.items():
+    os.makedirs(os.path.dirname(name) or ".", exist_ok=True)
+    open(name, "wb").write(data)
+`;
+
+/** python で作ったアーカイブを、名前と中身の組で返す */
+function archives(kinds: string[], secret = tokenLine()): Record<string, Buffer> {
+  const dir = tempDir("leak-archives-");
+  python(dir, MAKE_ARCHIVES, JSON.stringify({ kinds, secret }));
+  const { files } = listOutput(dir);
+  return Object.fromEntries(files.map((name) => [name, readFileSync(join(dir, name))]));
+}
+
+describe("サービスの token（#98 の 1）", () => {
+  it("委任の token と登録の token が、今の木と途中のコミットの両方で当たる", () => {
+    const files = { "docs/d.md": `${serviceToken("ndfd")}\n`, "docs/m.md": `${serviceToken("ndfm")}\n` };
+    const tree = scan(treeOf(files), ["dir", ND_CONFIG]);
+    expect(tree.status).toBe(1);
+    expect(rulesByFile(tree.findings)).toEqual({ "docs/d.md": ["nd-delegation-token"], "docs/m.md": ["nd-machine-token"] });
+    const { root, base, added } = addedAndRemoved(files);
+    const history = gitScan(root, ND_CONFIG, base);
+    expect(history.status).toBe(1);
+    expect(hits(history)).toEqual([
+      ["nd-delegation-token", "docs/d.md", added],
+      ["nd-machine-token", "docs/m.md", added],
+    ]);
+  }, TIMEOUT);
+});
+
+describe("今の木の探し直し（#98 の 3・4）", () => {
+  it("NUL を含むファイル・ELF の頭・RTF の頭・名前に .br を含むファイルの値が、元のパスと行で当たる", () => {
+    const root = treeOf({
+      nulfile: nul(tokenLine()),
+      "bin/elf": elf(tokenLine()),
+      "doc.rtf.txt": `{\\rtf1 x}\n${tokenLine()}`,
+      "log.browser.test.ts": tokenLine(),
+    });
+    const result = scan(root, ["dir", DEFAULT_CONFIG]);
+    expect(result.status).toBe(1);
+    expect(places(result)).toEqual([
+      ["github-pat", "bin/elf", 2],
+      ["github-pat", "doc.rtf.txt", 2],
+      ["github-pat", "log.browser.test.ts", 1],
+      ["github-pat", "nulfile", 2],
+    ]);
+    expect(result.output).not.toContain(UNSEARCHED_MESSAGE);
+  }, TIMEOUT);
+
+  it("木の根の 1 という名前のファイルと foo.zip という名前のテキストが、それぞれ当たる", () => {
+    const root = treeOf({ "1": elf(tokenLine()), "foo.zip": tokenLine() });
+    expect(places(scan(root, ["dir", DEFAULT_CONFIG]))).toEqual([
+      ["github-pat", "1", 2],
+      ["github-pat", "foo.zip", 1],
+    ]);
+  }, TIMEOUT);
+
+  it("呼び出し元の GIT_DIR などがあっても、元のリポジトリに書き込まずに探し直す", () => {
+    const { root } = makeRepo({ "docs/a.md": "中身\n" }, "first");
+    writeBytes(root, "e", elf(tokenLine()));
+    writeBytes(root, "a.bin", tokenLine());
+    const state = () => [git(root, "rev-parse", "HEAD"), git(root, "for-each-ref"), readFileSync(join(root, ".git", "index")).toString("hex")];
+    const before = state();
+    const env = {
+      ...process.env,
+      GIT_DIR: join(root, ".git"),
+      GIT_WORK_TREE: root,
+      GIT_INDEX_FILE: join(root, ".git", "index"),
+    };
+    const result = scan(root, ["dir", DEFAULT_CONFIG], { env });
+    expect(places(result)).toEqual([
+      ["github-pat", "a.bin", 1],
+      ["github-pat", "e", 2],
+    ]);
+    expect(state()).toEqual(before);
+  }, TIMEOUT);
+
+  it("パスだけの規則と規則単位のパスの許可が、飛ばされるファイルの元のパスに効く", () => {
+    const rule = `[[rules]]\nid = "nd-test-p12"\ndescription = "p12"\npath = '''\\.p12'''\n`;
+    const files = { "keys/a.p12": elf("x\n"), "keys/b.p12.gz": "text\n" };
+    const result = scan(treeOf(files), ["dir", extendConfig(ND_CONFIG, rule)]);
+    expect(places(result)).toEqual([
+      ["nd-test-p12", "keys/a.p12", 0],
+      ["nd-test-p12", "keys/b.p12.gz", 0],
+    ]);
+    expect(result.findings.map((f) => f.EndLine)).toEqual([0, 0]);
+    const allowed = scan(treeOf(files), ["dir", extendConfig(ND_CONFIG, `${rule}\n[[rules.allowlists]]\npaths = ['''^keys/''']\n`)]);
+    expect(allowed.status).toBe(0);
+    expect(allowed.output).not.toContain(UNSEARCHED_MESSAGE);
+  }, TIMEOUT);
+
+  it("コミットを条件にする許可は今の木には効かず、Commit は空になる", () => {
+    const token = fakeToken();
+    const config = defaultWith(
+      `[[rules]]\nid = "github-pat"\n[[rules.allowlists]]\ncondition = "AND"\ncommits = ["${hex(40)}"]\nregexes = ['''${token}''']\n`,
+    );
+    const result = scan(treeOf({ e: elf(`token ${token}\n`) }), ["dir", config]);
+    expect(hits(result)).toEqual([["github-pat", "e", ""]]);
+  }, TIMEOUT);
+
+  it("報告が壊れていても、飛ばしたファイルの当たりを出す", () => {
+    const env = { ...process.env, PATH: wrappedGitleaksPath(['[[ "$tag" == 1 ]] && printf "{" >"$report"']) };
+    const result = scan(treeOf({ e: elf(tokenLine()) }), ["dir", DEFAULT_CONFIG], { env });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("gitleaks の報告を読めない");
+    expect(places(result)).toEqual([["github-pat", "e", 2]]);
+  }, TIMEOUT);
+
+  it("1 回目と 2 回目の両方に当たりがあっても、失敗の行を出さない", () => {
+    const result = scan(treeOf({ "a.md": tokenLine(), e: elf(tokenLine()) }), ["dir", DEFAULT_CONFIG]);
+    expect(result.status).toBe(1);
+    expect(result.findings).toHaveLength(2);
+    expect(result.output).not.toContain(SKIP_MESSAGE);
+    expect(result.output).not.toContain(UNSEARCHED_MESSAGE);
+  }, TIMEOUT);
+
+  it("--paths を渡しても、当たった値と trace の行を出さない", () => {
+    const values = [fakeToken(), fakeToken()];
+    const result = scan(treeOf({ "a.md": `token ${values[0]}\n`, e: elf(`token ${values[1]}\n`) }), ["dir", DEFAULT_CONFIG]);
+    expect(result.findings).toHaveLength(2);
+    expect(values.filter((value) => shownText(result).includes(value))).toEqual([]);
+    expect(result.output).not.toMatch(/ (DBG|TRC) /);
+    expect(result.output).not.toContain("leaks found");
+  }, TIMEOUT);
+
+  /** 偽の gitleaks が 2 回目（か 1 回目の記録）を壊す。当たりの無い飛ばされるファイルだけの木で 1 になる */
+  it.each([
+    ["2 回目の終了コードが 2", '[[ "$tag" == 2 ]] && status=2'],
+    ["2 回目の報告が無い", '[[ "$tag" == 2 ]] && rm -f "$report"'],
+    ["2 回目の報告が配列でない", '[[ "$tag" == 2 ]] && echo "{}" >"$report"'],
+    ["2 回目の報告が空（目印が無い）", '[[ "$tag" == 2 ]] && { echo "[]" >"$report"; status=0; }'],
+    [
+      "2 回目の当たりが対象に無いパス",
+      `[[ "$tag" == 2 ]] && sed -i 's/"File": "e"/"File": "other"/' "$report"`,
+    ],
+    ["2 回目が飛ばす", `[[ "$tag" == 2 ]] && echo "4:08PM DBG skipping binary file path=e" >&2`],
+    ["2 回目が command aborted", `[[ "$tag" == 2 ]] && echo "4:08PM DBG command aborted: x" >&2`],
+    ["1 回目に知らない skipping の行", `[[ "$tag" == 1 ]] && echo "4:08PM DBG skipping file: new reason path=e" >&2`],
+    ["1 回目に path を読めない行", `[[ "$tag" == 1 ]] && echo "4:08PM DBG skipping binary file" >&2`],
+  ])("探し直しの失敗（%s）は、当たりが無くても固定の行で 1", (_label, line) => {
+    const name = fakeWord();
+    const root = treeOf({ e: elf("x\n"), [`${name}.md`]: "中身\n" });
+    expect(scan(root, ["dir", DEFAULT_CONFIG]).status).toBe(0);
+    const result = scan(root, ["dir", DEFAULT_CONFIG], { paths: false, env: { ...process.env, PATH: wrappedGitleaksPath([line]) } });
+    expect(result.status).toBe(1);
+    expect(result.findings).toEqual([]);
+    expect(result.output).toContain(UNSEARCHED_MESSAGE);
+    expect(result.output).not.toContain(name);
+  }, TIMEOUT);
+
+  it("2 回目の目印だけを除くと失敗する", () => {
+    const drop = `[[ "$tag" == 2 ]] && jq 'map(select(.RuleID != "leak-scan-marker"))' "$report" >"$report.t" && mv "$report.t" "$report"`;
+    const result = scan(treeOf({ e: elf("x\n") }), ["dir", DEFAULT_CONFIG], { env: { ...process.env, PATH: wrappedGitleaksPath([drop]) } });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(UNSEARCHED_MESSAGE);
+  }, TIMEOUT);
+
+  it("対象外の行（ディレクトリの許可・設定のファイル・規則の許可・空のファイル・シンボリックリンク・skipping finding）だけなら 0", () => {
+    const root = treeOf({ empty: "", "a.md": "中身\n", "keys/e": elf("x\n") });
+    symlinkSync("a.md", join(root, "link"));
+    writeFileSync(
+      join(root, "cfg.toml"),
+      `[extend]\npath = "${ND_CONFIG}"\n\n[[rules]]\nid = "nd-test-a"\ndescription = "a"\nregex = '''zz-noth[i]ng'''\n[[rules.allowlists]]\npaths = ['''a\\.md''']\n`,
+    );
+    const result = scan(root, ["dir", join(root, "cfg.toml")]);
+    expect(result.findings).toEqual([]);
+    expect(result.status).toBe(0);
+  }, TIMEOUT);
+
+  it("既定の全体の許可のパス条件を外せなければ、全体の許可が外すファイルがあると 1", () => {
+    const real = wrappedGitleaksPath([]);
+    rmSync(join(real.split(":")[0] ?? "", "gitleaks.default.toml"));
+    const result = scan(treeOf({ "a.bin": "x\n" }), ["dir", DEFAULT_CONFIG], { env: { ...process.env, PATH: real } });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(UNSEARCHED_MESSAGE);
+  }, TIMEOUT);
+
+  it("python3 が無ければ、探しの固定の行で 1", () => {
+    const bin = tempDir("leak-nopython-");
+    for (const name of ["bash", "git", "dirname"]) symlinkSync(which(name), join(bin, name));
+    const { root } = makeRepo({ "a.md": "中身\n" }, "first");
+    for (const [mode, message] of [["dir", UNSEARCHED_MESSAGE], ["git", HISTORY_MESSAGE]] as const) {
+      const result = spawnSync(join(bin, "bash"), [SCRIPT, mode, ND_CONFIG], { cwd: root, encoding: "utf8", env: { PATH: bin } });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(message);
+    }
+  }, TIMEOUT);
+});
+
+describe("名前で外すファイル（#98 の決定 6）", () => {
+  it("追跡していない依存のディレクトリは当てず、追跡したもの・vendor・img は木と履歴で当たる", () => {
+    const untracked = makeRepo({ "a.md": "中身\n" }, "first").root;
+    writeBytes(untracked, "node_modules/p/i.js", tokenLine());
+    expect(scan(untracked, ["dir", DEFAULT_CONFIG]).status).toBe(0);
+
+    const files = {
+      "node_modules/p/i.js": tokenLine(),
+      "bower_components/p/i.js": tokenLine(),
+      "vendor/acme/a.bin": tokenLine(),
+      "img/logo.png": tokenLine(),
+      "docs/gitleaks.toml.md": tokenLine(),
+      "gitleaks.toml.d/x": tokenLine(),
+      "docs/verification-metadata.xml": tokenLine(),
+    };
+    const expected = Object.keys(files).sort().map((path) => ["github-pat", path, 1]);
+    const tracked = treeOf(files);
+    initRepo(tracked);
+    git(tracked, "add", "-A", "-f");
+    git(tracked, "commit", "-q", "-m", "add");
+    expect(places(scan(tracked, ["dir", DEFAULT_CONFIG]))).toEqual(expected);
+    const { root, base } = addedAndRemoved(files);
+    expect(places(gitScan(root, DEFAULT_CONFIG, base))).toEqual(expected);
+    // Git のリポジトリでないディレクトリでは、依存のディレクトリの下も除かない
+    expect(places(scan(treeOf({ "node_modules/p/i.js": tokenLine() }), ["dir", DEFAULT_CONFIG]))).toEqual([
+      ["github-pat", "node_modules/p/i.js", 1],
+    ]);
+  }, TIMEOUT);
+
+  it("ファイル名を条件にする規則が、外れたディレクトリと名前でアーカイブと見なす所でも当たる", () => {
+    const password = alnum(24);
+    const body = `<configuration>\n<packageSourceCredentials>\n<add key="ClearTextPassword" value="${password}" />\n</packageSourceCredentials>\n</configuration>\n`;
+    const files = { "gitleaks.toml.d/NuGet.config": body };
+    const expected = [["nuget-config-password", "gitleaks.toml.d/NuGet.config", 3]];
+    expect(places(scan(treeOf(files), ["dir", DEFAULT_CONFIG]))).toEqual(expected);
+    const { root, base } = addedAndRemoved(files);
+    expect(places(gitScan(root, DEFAULT_CONFIG, base))).toEqual(expected);
+    expect(places(scan(treeOf({ "acme.gem/NuGet.config": body }), ["dir", DEFAULT_CONFIG]))).toEqual([
+      ["nuget-config-password", "acme.gem/NuGet.config", 3],
+    ]);
+  }, TIMEOUT);
+
+  it("pnpm-lock.yaml の Kubernetes の Secret の形が、木と履歴で元のパスで当たる", () => {
+    const files = {
+      "pnpm-lock.yaml": `apiVersion: v1\nkind: Secret\nmetadata:\n  name: x\ndata:\n  password: ${randomBytes(24).toString("base64")}\n`,
+    };
+    const secrets = (result: ScanResult) => places(result).filter(([rule]) => rule === "kubernetes-secret-yaml");
+    const expected = [["kubernetes-secret-yaml", "pnpm-lock.yaml", 2]];
+    expect(secrets(scan(treeOf(files), ["dir", DEFAULT_CONFIG]))).toEqual(expected);
+    const { root, base } = addedAndRemoved(files);
+    expect(secrets(gitScan(root, DEFAULT_CONFIG, base))).toEqual(expected);
+  }, TIMEOUT);
+
+  it("ディレクトリを限った規則単位の許可が、探し直しでも元のパスに効く", () => {
+    const line = tokenLine();
+    const config = defaultWith(`[[rules]]\nid = "github-pat"\n[[rules.allowlists]]\npaths = ['''^docs/allowed/''']\n`);
+    const files = { "docs/allowed/a.bin": line, "docs/other/a.bin": line };
+    expect(places(scan(treeOf(files), ["dir", config]))).toEqual([["github-pat", "docs/other/a.bin", 1]]);
+    const { root, base } = addedAndRemoved(files);
+    expect(places(gitScan(root, config, base))).toEqual([["github-pat", "docs/other/a.bin", 1]]);
+  }, TIMEOUT);
+
+  it("外れたディレクトリの空のファイルは通し、読めないファイルは失敗にする", () => {
+    const root = treeOf({ "gitleaks.toml.d/empty": "", "gitleaks.toml.d/a": "中身\n" });
+    expect(scan(root, ["dir", DEFAULT_CONFIG]).status).toBe(0);
+    if (process.getuid?.() === 0) return;
+    writeBytes(root, "gitleaks.toml.d/closed", "x\n");
+    chmodSync(join(root, "gitleaks.toml.d/closed"), 0o000);
+    const result = scan(root, ["dir", DEFAULT_CONFIG]);
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(UNSEARCHED_MESSAGE);
+  }, TIMEOUT);
+});
+
+describe("履歴のバイナリと読み終えたことの確かめ（#98 の 2・4）", () => {
+  it("NUL を含むファイル・ELF の頭・-diff を付けたファイルの、途中のコミットの値が当たる", () => {
+    const { root, base } = forkRepo();
+    const added = step(root, { nulfile: nul(tokenLine()), e: elf(tokenLine()), "t.dat": tokenLine(), ".gitattributes": "t.dat -diff\n" });
+    step(root, { nulfile: null, e: null, "t.dat": null, ".gitattributes": null });
+    const result = gitScan(root, DEFAULT_CONFIG, base);
+    expect(result.status).toBe(1);
+    expect(hits(result)).toEqual([
+      ["github-pat", "e", added],
+      ["github-pat", "nulfile", added],
+      ["github-pat", "t.dat", added],
+    ]);
+  }, TIMEOUT);
+
+  it("要求の事象 2 の blob.bin が、履歴と今の木で元のパスで当たる", () => {
+    const secret = `aws_secret_access_key = "${alnum(40)}"\n`;
+    const files = { "text.txt": secret, "blob.bin": nul(secret) };
+    const { root, base, added } = addedAndRemoved(files);
+    expect(hits(gitScan(root, DEFAULT_CONFIG, base))).toEqual([
+      ["generic-api-key", "blob.bin", added],
+      ["generic-api-key", "text.txt", added],
+    ]);
+    expect(rulesByFile(scan(treeOf(files), ["dir", DEFAULT_CONFIG]).findings)["blob.bin"]).toEqual(["generic-api-key"]);
+  }, TIMEOUT);
+
+  it("同じ行の 2 つの秘密は 2 件、バイナリに足した 1 つの秘密は 1 件", () => {
+    const { root, base } = forkRepo();
+    step(root, { one: nul(tokenLine()), two: nul(`${fakeToken()} ${fakeToken()}\n`) });
+    expect(gitScan(root, DEFAULT_CONFIG, base).findings.map((f) => f.File).sort()).toEqual(["one", "two", "two"]);
+  }, TIMEOUT);
+
+  it.each(["a.dat", "a.bin"])("旧い値の残る %s の別の行を変えるコミットは当たらず、足したコミットだけが当たる", (name) => {
+    const token = fakeToken();
+    const { root, base } = forkRepo();
+    const added = step(root, { [name]: nul(`token ${token}\nfirst\n`) });
+    step(root, { [name]: nul(`token ${token}\nsecond\n`) });
+    expect(gitScan(root, DEFAULT_CONFIG, added).status).toBe(0);
+    expect(hits(gitScan(root, DEFAULT_CONFIG, base))).toEqual([["github-pat", name, added]]);
+    const config = defaultWith(
+      `[[rules]]\nid = "github-pat"\n[[rules.allowlists]]\ncondition = "AND"\ncommits = ["${added}"]\nregexes = ['''${token}''']\n`,
+    );
+    expect(gitScan(root, config).status).toBe(0);
+  }, TIMEOUT);
+
+  it.each(["a.dat", "a.bin"])("元のコミットを条件にする許可が、%s の写しの探しにも効く", (name) => {
+    const token = fakeToken();
+    const { root, base } = forkRepo();
+    const x = step(root, { [name]: nul(`token ${token}\n`) });
+    step(root, { [name]: null });
+    const y = step(root, { [name]: nul(`token ${token}\n`) });
+    const config = defaultWith(
+      `[[rules]]\nid = "github-pat"\n[[rules.allowlists]]\ncondition = "AND"\ncommits = ["${x}"]\nregexes = ['''${token}''']\n`,
+    );
+    expect(hits(gitScan(root, config, base))).toEqual([["github-pat", name, y]]);
+    expect(scan(root, ["git", config, "--range", `${base}..${x}`]).status).toBe(0);
+  }, TIMEOUT);
+
+  const pairRule = `[[rules]]\nid = "nd-test-pair"\ndescription = "隣り合う 2 行"\nregex = '''nd-first-half\\nnd-second-half'''\n`;
+
+  it.each(["a.dat", "a.bin"])("%s で、行を足して成立する秘密と、行の削除だけで成立する秘密が当たる", (name) => {
+    const config = defaultWith(pairRule);
+    const { root, base } = forkRepo();
+    step(root, { [name]: nul("nd-first-half\n") });
+    const completed = step(root, { [name]: nul("nd-first-half\nnd-second-half\n") });
+    step(root, { [name]: null });
+    expect(hits(gitScan(root, config, base))).toEqual([["nd-test-pair", name, completed]]);
+
+    const other = forkRepo();
+    step(other.root, { [name]: nul("nd-first-half\nbetween\nnd-second-half\n") });
+    const joined = step(other.root, { [name]: nul("nd-first-half\nnd-second-half\n") });
+    step(other.root, { [name]: null });
+    expect(hits(gitScan(other.root, config, other.base))).toEqual([["nd-test-pair", name, joined]]);
+
+    const old = forkRepo();
+    const before = step(old.root, { [name]: nul("nd-first-half\nnd-second-half\nextra\n") });
+    step(old.root, { [name]: nul("nd-first-half\nnd-second-half\n") });
+    expect(gitScan(old.root, config, before).status).toBe(0);
+  }, TIMEOUT);
+
+  it.each(["a.dat", "a.bin"])("%s の真ん中の版にだけある値が当たる", (name) => {
+    const { root, base } = forkRepo();
+    step(root, { [name]: nul("one\n") });
+    const middle = step(root, { [name]: nul(`one\n${tokenLine()}`) });
+    step(root, { [name]: nul("one\n") });
+    expect(hits(gitScan(root, DEFAULT_CONFIG, base))).toEqual([["github-pat", name, middle]]);
+  }, TIMEOUT);
+
+  it("途中のコミットの .gitattributes だけが付ける -diff も、そのコミットの属性で読む", () => {
+    const config = defaultWith(pairRule);
+    const { root, base } = forkRepo();
+    step(root, { "t.txt": "nd-first-half\n" });
+    const marked = step(root, { "t.txt": "nd-first-half\nnd-second-half\n", ".gitattributes": "t.txt -diff\n" });
+    step(root, { "t.txt": null, ".gitattributes": null });
+    expect(hits(gitScan(root, config, base))).toEqual([["nd-test-pair", "t.txt", marked]]);
+  }, TIMEOUT);
+
+  it("サブモジュールを同じパスのバイナリに置き換えたコミットを探せる", () => {
+    for (const [body, status] of [[nul("x\n"), 0], [nul(tokenLine()), 1]] as const) {
+      const { root, head } = makeRepo({ "a.md": "中身\n" }, "first");
+      git(root, "update-index", "--add", "--cacheinfo", `160000,${head},sub`);
+      git(root, "commit", "-q", "-m", "sub");
+      const base = git(root, "rev-parse", "HEAD");
+      git(root, "rm", "-q", "--cached", "sub");
+      writeBytes(root, "sub", body);
+      const replaced = commitAll(root, "replace");
+      const result = gitScan(root, DEFAULT_CONFIG, base);
+      expect(result.status).toBe(status);
+      expect(result.findings.map((f) => f.Commit)).toEqual(status === 0 ? [] : [replaced]);
+    }
+  }, TIMEOUT);
+
+  /** 空白と日本語の名前・引用が要る名前・名前の変更・マージ・モードだけの変更・空のファイルを持つ秘密の無い範囲 */
+  function variedRepo(): { root: string; base: string } {
+    const { root, head: base } = makeRepo({ "空白 と 日本語.md": "一\n", "q\"uote.md": "一\n", "old.md": "中身\n", "run.sh": "echo\n" }, "base");
+    git(root, "checkout", "-q", "-b", "side");
+    step(root, { "side.md": "side\n", "空白 と 日本語.md": "二\n", "q\"uote.md": "二\n", "empty": "" });
+    git(root, "checkout", "-q", "main");
+    git(root, "mv", "old.md", "new.md");
+    chmodSync(join(root, "run.sh"), 0o755);
+    step(root, { "main.md": "no newline" });
+    git(root, "merge", "-q", "--no-ff", "--no-commit", "side");
+    step(root, { "merged.md": "merged\n", "main.md": "changed" });
+    return { root, base };
+  }
+
+  it("いろいろな形の変更を含む秘密の無い範囲は 0 で、目印は出力にも報告にも出ない", () => {
+    const { root, base } = variedRepo();
+    for (const config of [ND_CONFIG, DEFAULT_CONFIG]) {
+      const result = gitScan(root, config, base);
+      expect(result.status).toBe(0);
+      expect(result.findings).toEqual([]);
+      expect(shownText(result)).not.toContain("leak-scan-marker");
+      expect(result.output).not.toContain("leaks found");
+    }
+    expect(gitScan(root, ND_CONFIG).status).toBe(0);
+  }, TIMEOUT);
+
+  it("利用者の Git の設定が色と見出しの形を変えても探せる", () => {
+    const { root, base } = variedRepo();
+    const globalConfig = join(tempDir("leak-gitconfig-"), "config");
+    writeFileSync(globalConfig, "[color]\n\tui = always\n\tdiff = always\n[diff]\n\tnoprefix = true\n");
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: globalConfig };
+    expect(gitScan(root, ND_CONFIG, base, { env }).status).toBe(0);
+    const added = step(root, { "t.md": `x\n${tokenLine()}`, "t.bin": tokenLine() });
+    expect(places(gitScan(root, DEFAULT_CONFIG, base, { env }))).toEqual([
+      ["github-pat", "t.bin", 1],
+      ["github-pat", "t.md", 2],
+    ]);
+    expect(gitScan(root, DEFAULT_CONFIG, base, { env }).findings.map((f) => f.Commit)).toEqual([added, added]);
+  }, TIMEOUT);
+
+  it("渡した設定のファイルを変えるコミットは、その差分を探さず、失敗にもしない", () => {
+    const { root, base } = forkRepo();
+    step(root, { ".gitleaks.toml": `${readFileSync(ND_CONFIG, "utf8")}\n# ${"arn:aws:s3"}:::nd-${lower(10)}\n` });
+    const result = gitScan(root, join(root, ".gitleaks.toml"), base);
+    expect(result.status).toBe(0);
+    expect(result.findings).toEqual([]);
+  }, TIMEOUT);
+
+  /** `log -p` の出力か終了コードを壊す偽の git */
+  const fakeGit = (filter: string, status = "$?") => {
+    const real = which("git");
+    return fakePath("git", [
+      "#!/usr/bin/env bash",
+      `if [[ " $* " == *" log "* && " $* " == *" -p "* ]]; then`,
+      `  "${real}" "$@" | ${filter}`,
+      `  exit ${status}`,
+      "fi",
+      `exec "${real}" "$@"`,
+    ]);
+  };
+
+  it.each([
+    ["パッチから 1 つのファイルの差分を丸ごと除く", "awk '/^diff --git /{skip = index($0, \"b.md\") > 0} /^commit /{skip = 0} !skip'", "0"],
+    ["hunk の行の数を多くする", "sed 's/^@@ -0,0 +1 @@/@@ -0,0 +1,9 @@/'", "0"],
+    ["内部の git log が途中で 0 以外", "cat", "3"],
+  ])("%s と、当たりが無くても履歴の固定の行で 1", (_label, filter, status) => {
+    const { root, base } = forkRepo();
+    step(root, { "a.md": "一\n", "b.md": "二\n" });
+    expect(gitScan(root, ND_CONFIG, base).status).toBe(0);
+    const result = gitScan(root, ND_CONFIG, base, { paths: false, env: { ...process.env, PATH: fakeGit(filter, status) } });
+    expect(result.status).toBe(1);
+    expect(result.findings).toEqual([]);
+    expect(result.output).toContain(HISTORY_MESSAGE);
+    expect(result.output).not.toContain("b.md");
+  }, TIMEOUT);
+
+  const dropMarker = (tag: string, select: string) =>
+    `[[ "$tag" == ${tag} ]] && jq '([.[] | select(.RuleID == "leak-scan-marker"${select})] | first) as $one | map(select(. != $one))' "$report" >"$report.t" && mv "$report.t" "$report"`;
+
+  it.each([
+    ["1 回目の目印を 1 件除く", dropMarker("1", "")],
+    ["写しの目印を 1 件除く", dropMarker("2", "")],
+    ["写しが command aborted", `[[ "$tag" == 2 ]] && echo "4:08PM DBG command aborted: x" >&2`],
+    ["写しの報告が無い", '[[ "$tag" == 2 ]] && rm -f "$report"'],
+  ])("%s と、履歴の固定の行だけを出して 1", (_label, line) => {
+    const { root, base } = forkRepo();
+    step(root, { "a.md": "一\n", n: nul("x\n"), "z.bin": "y\n" });
+    expect(gitScan(root, DEFAULT_CONFIG, base).status).toBe(0);
+    const result = gitScan(root, DEFAULT_CONFIG, base, { env: { ...process.env, PATH: wrappedGitleaksPath([line]) } });
+    expect(result.status).toBe(1);
+    expect(result.findings).toEqual([]);
+    expect(result.output).toContain(HISTORY_MESSAGE);
+    expect(result.output).not.toContain(UNSEARCHED_MESSAGE);
+  }, TIMEOUT);
+
+  it("同じ写しのパスの 2 つの対象で、片方の目印だけを除くと 1", () => {
+    const { root, base } = forkRepo();
+    step(root, { "a.bin": "一\n" });
+    step(root, { "a.bin": "二\n" });
+    const result = gitScan(root, DEFAULT_CONFIG, base, { env: { ...process.env, PATH: wrappedGitleaksPath([dropMarker("2", "")]) } });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(HISTORY_MESSAGE);
+  }, TIMEOUT);
+
+  it("マージのコミットは親ごとに目印を確かめる", () => {
+    const { root, head: base } = makeRepo({ "a.md": "一\n二\n三\n四\n五\n" }, "base");
+    git(root, "checkout", "-q", "-b", "side");
+    const side = step(root, { "a.md": "side\n二\n三\n四\n五\n" });
+    git(root, "checkout", "-q", "main");
+    step(root, { "a.md": "一\n二\n三\n四\nmain\n" });
+    git(root, "merge", "-q", "--no-ff", "-m", "merge", "side");
+    expect(gitScan(root, ND_CONFIG, base).status).toBe(0);
+    const drop = `[[ "$tag" == 1 ]] && jq 'map(select((.Match | contains("-${side}-")) | not))' "$report" >"$report.t" && mv "$report.t" "$report"`;
+    const result = gitScan(root, ND_CONFIG, base, { env: { ...process.env, PATH: wrappedGitleaksPath([drop]) } });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(HISTORY_MESSAGE);
+  }, TIMEOUT);
+
+  it("別のコミットの全体の許可の行を、除外の根拠にしない", () => {
+    const { root, base } = forkRepo();
+    const a = step(root, { "a.md": "一\n" });
+    const b = step(root, { "a.md": "二\n" });
+    for (const line of [`commit=${a} path=a.md`, "path=a.md"]) {
+      const after = [
+        '[[ "$tag" == 1 ]] && {',
+        `  jq 'map(select(.Commit != "${b}"))' "$report" >"$report.t" && mv "$report.t" "$report"`,
+        `  echo "4:08PM TRC skipping file: global allowlist ${line}" >&2`,
+        "}",
+      ];
+      const result = gitScan(root, ND_CONFIG, base, { env: { ...process.env, PATH: wrappedGitleaksPath(after) } });
+      expect(result.status).toBe(1);
+      expect(result.output).toContain(HISTORY_MESSAGE);
+    }
+  }, TIMEOUT);
+
+  it("非公開の探しの --count-only は、当たりと履歴の失敗が同時なら失敗の行も出す", () => {
+    const realWord = fakeWord();
+    const { root, base } = forkRepo();
+    step(root, { "a.md": `名前 ${realWord}\n`, n: nul("x\n") });
+    const path = wrappedGitleaksPath(['[[ "$tag" == 2 ]] && rm -f "$report"']);
+    const result = secretScan(root, ["git", "--range", `${base}..HEAD`, "--count-only"], { pattern: realWord, path });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(countLine(1));
+    expect(result.output).toContain("leak-scan-secret: nd-real-value の探しが失敗した");
+  }, TIMEOUT);
+});
+
+describe("アーカイブと圧縮ファイル（#98 の 4・決定 8）", () => {
+  const goodPaths = [
+    "a.zip!a.bin",
+    "a.zip!app.env",
+    "a.zip!lib.so",
+    "b.tar.gz!b.tar!dir/t.txt",
+    "conf/app.env.gz!app.env",
+    "nest.zip!in.zip!deep.txt",
+    "renamed.dat!d.txt",
+    "sfx-elf.run!e.txt",
+    "sfx-sh.run!s.txt",
+    "v7.tar!old.txt",
+    "v7.tar.gz!v7.tar!old.txt",
+    "x.bz2!x",
+    "y.xz!y",
+  ];
+
+  it("圧縮した秘密が、木と履歴で <アーカイブ>!<中のパス> で当たる", () => {
+    const files = archives(["good"]);
+    const inside = (result: ScanResult) => [...new Set(result.findings.map((f) => f.File).filter((f) => f.includes("!")))].sort();
+    const tree = scan(treeOf(files), ["dir", DEFAULT_CONFIG]);
+    expect(tree.status).toBe(1);
+    expect(inside(tree)).toEqual(goodPaths);
+    const { root, base } = addedAndRemoved(files);
+    const history = gitScan(root, DEFAULT_CONFIG, base);
+    expect(history.status).toBe(1);
+    expect(history.output).not.toContain(HISTORY_MESSAGE);
+    expect(inside(history)).toEqual(goodPaths);
+  }, TIMEOUT);
+
+  it("ルート直下のメンバーに、ファイル名を条件にする規則が当たる", () => {
+    const secret = tokenLine();
+    const config = extendConfig(ND_CONFIG, `[[rules]]\nid = "nd-test-env"\ndescription = "env"\npath = '''(^|/)app\\.env$'''\nregex = '''token'''\n`);
+    const files = { "a.zip": archives(["good"], secret)["a.zip"] ?? Buffer.alloc(0) };
+    expect(scan(treeOf(files), ["dir", config]).findings.map((f) => f.File)).toContain("a.zip!app.env");
+    const { root, base } = addedAndRemoved(files);
+    expect(gitScan(root, config, base).findings.map((f) => f.File)).toContain("a.zip!app.env");
+  }, TIMEOUT);
+
+  it("秘密の無いアーカイブと、名前だけがアーカイブのテキストは、木と履歴で 0", () => {
+    const files = archives(["clean"]);
+    expect(scan(treeOf(files), ["dir", DEFAULT_CONFIG]).output).not.toContain("leak-scan:");
+    const { root, base } = addedAndRemoved(files);
+    const result = gitScan(root, DEFAULT_CONFIG, base);
+    expect(result.output).not.toContain("leak-scan:");
+    expect(result.status).toBe(0);
+    const secret = tokenLine();
+    expect(places(scan(treeOf({ "notes.zip": secret, "notes.br": secret }), ["dir", DEFAULT_CONFIG]))).toEqual([
+      ["github-pat", "notes.br", 1],
+      ["github-pat", "notes.zip", 1],
+    ]);
+  }, TIMEOUT);
+
+  it.each([
+    "cut.zip",
+    "cut.gz",
+    "broken.zip",
+    "encrypted.zip",
+    "a.7z",
+    "method.zip",
+    "method-sfx.run",
+    "sfx-sh-cut.run",
+    "sfx-elf-cut.run",
+    "sfx-boundary.run",
+    "deep.zip",
+    "data.br",
+    "dotdot.zip",
+    "v7-cut.tar.gz",
+  ])("展開できない %s は、当たりが無くても木と履歴で固定の行で 1", (name) => {
+    // 秘密は秘密の形でない値にする（当たりが無くても失敗することを確かめる）
+    const files = archives([`bad:${name}`], `plain ${fakeWord()}\n`);
+    const tree = scan(treeOf(files), ["dir", ND_CONFIG], { paths: false });
+    expect(tree.status).toBe(1);
+    expect(tree.findings).toEqual([]);
+    expect(tree.output).toContain(UNSEARCHED_MESSAGE);
+    expect(tree.output).not.toContain(name);
+    const { root, base } = addedAndRemoved(files);
+    const history = gitScan(root, ND_CONFIG, base, { paths: false });
+    expect(history.status).toBe(1);
+    expect(history.findings).toEqual([]);
+    expect(history.output).toContain(HISTORY_MESSAGE);
+  }, TIMEOUT);
+
+  it.each(["limit-one", "limit-sum", "limit-pax", "limit-gnu"])("展開の上限を超える %s は、木と履歴で 1", (kind) => {
+    const files = archives([kind]);
+    const env = { ...process.env, LEAK_SCAN_EXPAND_LIMIT: "4000" };
+    expect(scan(treeOf(files), ["dir", ND_CONFIG]).status).toBe(0);
+    const tree = scan(treeOf(files), ["dir", ND_CONFIG], { env });
+    expect(tree.status).toBe(1);
+    expect(tree.output).toContain(UNSEARCHED_MESSAGE);
+    const { root, base } = addedAndRemoved(files);
+    const history = gitScan(root, ND_CONFIG, base, { env });
+    expect(history.status).toBe(1);
+    expect(history.output).toContain(HISTORY_MESSAGE);
+  }, TIMEOUT);
+});
+
+describe("絞った許可（#98 の 5・決定 5）", () => {
+  const S3 = "s3.amazonaws.com";
+  const cognito = "auth.us-west-2.amazoncognito.com";
+  const s3Arn = "arn:aws:s3:::";
+  const iam = `arn:aws:iam::${"123456789012"}:`;
+  const word = () => `nd${lower(10)}`;
+
+  it("main の履歴の旧い値の許可は、並べたコミットの外では効かない", () => {
+    const { root, base } = forkRepo();
+    step(root, { "e.md": `https://acme-bucket.s3.${"us-west-2.amazonaws.com"}/p\n${s3Arn}acme-assets\n` });
+    expect(rulesByFile(gitScan(root, ND_CONFIG, base).findings)).toEqual({ "e.md": ["nd-aws-arn-s3", "nd-aws-endpoint"] });
+  }, TIMEOUT);
+
+  it("実際の名前になり得る端点・置き場・ARN・資源の ID は当たる", () => {
+    const endpoints = [
+      `data-example.com-logs.${S3}`,
+      `real-<env>.${S3}`,
+      `${word()}.example.com.${"s3-website-us-west-2.amazonaws.com"}`,
+      `${word()}-EXAMPLE-${word()}.${"cloudfront.net"}`,
+      `EXAMPLE1234.${"execute-api.us-west-2.amazonaws.com"}`,
+      `acme-${word()}.${S3}`,
+      `acme-${word()}-login.${cognito}`,
+      // infra のテストが組み立てる端点と同じ値
+      `${["acme", "test", "login"].join("-")}.${cognito}`,
+      `amzn-s3-demo-${word()}-${word()}-s3alias.${S3}`,
+    ];
+    const buckets = ["data-example.com-logs", `acme-${word()}`, `amzn-s3-demo-${word()}-${word()}-s3alias`, `real-${word()}`];
+    const arns = [
+      `${iam}role/${word()}`,
+      `${iam}role/acme-${word()}`,
+      `${iam}role/${word()}-EXAMPLE`,
+      `${iam}role/${word()}.example.com`,
+      `${iam}role/<name>-${word()}`,
+    ];
+    const root = makeTree({
+      "e.md": endpoints.map((host) => `https://${host}/p\n`).join(""),
+      "s.md": buckets.map((name) => `${s3Arn}${name}\n`).join(""),
+      "a.md": arns.map((arn) => `${arn}\n`).join(""),
+      "r.md": `vpc-${["1234", "5678", "9012"].join("")}${hex(5)}\n`,
+    });
+    const result = scan(root, ["dir", ND_CONFIG]);
+    const lines = (rule: string) => result.findings.filter((f) => f.RuleID === rule).map((f) => f.StartLine).sort((a, b) => a - b);
+    expect(lines("nd-aws-endpoint")).toEqual(endpoints.map((_, i) => i + 1));
+    expect(lines("nd-aws-arn-s3")).toEqual(buckets.map((_, i) => i + 1));
+    expect(lines("nd-aws-arn")).toEqual(arns.map((_, i) => i + 1));
+    expect(lines("nd-aws-resource-id")).toEqual([1]);
   }, TIMEOUT);
 });
