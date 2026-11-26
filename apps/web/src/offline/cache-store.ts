@@ -23,6 +23,12 @@ type Write = (tx: GuardedTx) => Promise<boolean>;
 
 export type CacheStore = {
   read(kind: SnapshotKind, targetId: string): Promise<{ value: unknown; receivedAt: number; fetchSeq: number } | null>;
+  // 写しを読み、読んだときから行が変わっていないことを書き込みの中で確かめる関数も返す。写しが無いか読めなければ found は null
+  readGuarded(
+    guard: Guard,
+    kind: SnapshotKind,
+    targetId: string,
+  ): Promise<{ found: { value: unknown; fetchSeq: number } | null; unchanged: Write }>;
   prepareReplace(guard: Guard, kind: SnapshotKind, targetId: string, value: unknown, fetchSeq: number): Promise<Write | null>;
   applyOptimistic(guard: Guard, kind: SnapshotKind, targetId: string, change: (value: unknown) => unknown): Promise<void>;
   markGone(guard: Guard, kind: SnapshotKind, targetId: string, goneSeq: number): Promise<void>;
@@ -107,6 +113,16 @@ export function createCacheStore({ db, wallNow, log, notify }: CacheDeps): Cache
       }
       if (found === null || found.body.type !== "value" || wallNow() - found.row.receivedAt > SNAPSHOT_TTL_MS) return null;
       return { value: found.body.value, receivedAt: found.row.receivedAt, fetchSeq: found.body.fetchSeq };
+    },
+
+    async readGuarded(guard, kind, targetId) {
+      const id = await tagOf(guard.keys.tagKey, kind, targetId);
+      const current = await db.get("snapshots", id);
+      const iv = current?.iv ?? null;
+      const same: Write = (tx) => unchanged(tx, id, iv);
+      const body = current === undefined ? null : await unseal<Body>(guard.keys.key, current).catch(() => null);
+      const fresh = body?.type === "value" && current !== undefined && wallNow() - current.receivedAt <= SNAPSHOT_TTL_MS;
+      return { found: fresh ? { value: body.value, fetchSeq: body.fetchSeq } : null, unchanged: same };
     },
 
     async prepareReplace(guard, kind, targetId, value, fetchSeq) {

@@ -111,6 +111,8 @@ async function setup() {
     afterApiTime?: () => Promise<void>;
     // 会話の写しの書き込みを用意した直後に、別のタブの読み直しで写しを書き換える回数
     conversationConflicts?: number;
+    // 会話の写しを読んだ直後に、別のタブの読み直しを割り込ませる
+    afterConversationRead?: () => Promise<void>;
   } = {};
   // 応答の時刻を書いた直後（件の反映の前）に、ほかのタブの処理を割り込ませる
   const wait = {
@@ -142,6 +144,13 @@ async function setup() {
   };
   const cache: typeof t.cache = {
     ...t.cache,
+    readGuarded: async (guard, kind, targetId) => {
+      const read = await t.cache.readGuarded(guard, kind, targetId);
+      const hook = hooks.afterConversationRead;
+      hooks.afterConversationRead = undefined;
+      await hook?.();
+      return read;
+    },
     prepareReplace: async (guard, kind, targetId, value, fetchSeq) => {
       const write = await t.cache.prepareReplace(guard, kind, targetId, value, fetchSeq);
       const conflicts = hooks.conversationConflicts ?? 0;
@@ -492,15 +501,47 @@ describe("取り下げ", () => {
     t.db.close();
   });
 
-  it("会話の写しの照合が最後の回まで外れたら、件を残して回を止め、次の回の送り直しで返った ID を写しに書く", async () => {
+  it("会話の写しの照合が最後の回まで外れたら、返った ID を件に書いて後続の件を送り、次の回は送り直さずに写しに書く", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello", { targetId: "org-1" });
+    await t.enqueue("users.update", "after");
+    await project(t, item.answerTag);
+    t.hooks.conversationConflicts = 3;
+    t.replies.push(() => ok("msg-1"));
+    expect(await t.run()).toBe("done");
+    expect(t.sent()).toEqual(["hello", "after"]);
+    expect((await t.outbox.readBatch()).items).toMatchObject([{ answerTag: item.answerTag, sentItemId: "msg-1" }]);
+    const before = t.requests.length;
+    expect(await t.run()).toBe("done");
+    // 送り直しも時刻の読み直しもしない
+    expect(t.requests.length).toBe(before);
+    expect(await t.db.count("outbox")).toBe(0);
+    const conversation = { organizerId: "org-1", projectId: "p-example" };
+    expect(await t.sender.withdraw(t.owner, item.answerTag, conversation)).toBe("enqueued");
+    expect((await t.outbox.readBatch()).items).toMatchObject([{ operation: "organizer_messages.withdraw", targetId: "msg-1" }]);
+    t.db.close();
+  });
+
+  it("返った ID を件に書いて残した後に取り下げると、保留へ移さずその ID で取り下げを足す", async () => {
     const t = await setup();
     const item = await t.enqueue("organizer_messages.create", "hello", { targetId: "org-1" });
     await project(t, item.answerTag);
     t.hooks.conversationConflicts = 3;
     t.replies.push(() => ok("msg-1"));
-    expect(await t.run()).toBe("stopped");
-    expect((await t.outbox.readBatch()).items).toMatchObject([{ answerTag: item.answerTag, sendStarted: true }]);
-    t.replies.push(() => ok("msg-1"));
+    expect(await t.run()).toBe("done");
+    expect(await t.sender.withdraw(t.owner, item.answerTag)).toBe("enqueued");
+    expect(await t.db.count("held")).toBe(0);
+    expect((await t.outbox.readBatch()).items).toMatchObject([{ operation: "organizer_messages.withdraw", targetId: "msg-1" }]);
+    t.db.close();
+  });
+
+  it("先映しが無いと読んだ後に別のタブの読み直しが先映しを書いたら、読み直して返った ID を写しに書く", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello", { targetId: "org-1" });
+    t.replies.push(() => {
+      t.hooks.afterConversationRead = () => project(t, item.answerTag);
+      return ok("msg-1");
+    });
     expect(await t.run()).toBe("done");
     expect(await t.db.count("outbox")).toBe(0);
     const conversation = { organizerId: "org-1", projectId: "p-example" };

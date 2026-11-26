@@ -30,6 +30,8 @@ export type OutboxBody = Omit<Draft, "pressedFloor"> & {
   sentAt: number | null;
   // サーバーが拒んだ件を保留にするときに足す
   result?: { status: number; reason: string };
+  // 会話への送信の成功が返した項目の ID。会話の写しへ書けないまま件を残すときに足す
+  sentItemId?: string;
 };
 
 export type OutboxItem = OutboxBody & Pick<OutboxRow, "answerTag" | "targetTag" | "kind" | "projectTag" | "iv">;
@@ -70,6 +72,14 @@ export type Outbox = {
   takeBack(item: OutboxItem, outcome: Exclude<Outcome, { kind: "keep" }>): Promise<boolean>;
   readBatch(): Promise<{ items: OutboxItem[]; unreadable: string[] }>;
   markSendStarted(item: OutboxItem, sentAt: number | null): Promise<OutboxItem | null>;
+  // 成功の応答が返した項目の ID を、送る列の件に書く。also は同じ照合したトランザクションで書くもの。
+  // 件が送る列に無ければ missing、セッションが替わったか行が変わり続ければ stale
+  noteSentItem(
+    owner: Owner,
+    answerTag: string,
+    itemId: string,
+    also?: (tx: GuardedTx) => Promise<boolean>,
+  ): Promise<"noted" | "missing" | "stale">;
   // 印を戻した件を返す。置き換えられて消えたか、行が変わっていれば null
   unmarkSendStarted(item: OutboxItem): Promise<OutboxItem | null>;
   settle(item: OutboxItem, outcome: Outcome): Promise<"removed" | "held" | "kept" | "missing">;
@@ -233,6 +243,26 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
 
     // 送り始めた時刻は 1 回目だけ書く。書き直すと冪等キーの保持期間が延びる
     markSendStarted: (item, sentAt) => rewrite(item, item.sendStarted ? {} : { sendStarted: true, sentAt }),
+
+    async noteSentItem(owner, answerTag, itemId, also) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const guard = await prepareGuard(db, owner);
+        if (guard === null) return "stale";
+        const row = await db.get("outbox", answerTag);
+        if (row === undefined) return "missing";
+        const { key } = guard.keys;
+        const body: OutboxBody = { ...(await unseal<OutboxBody>(key, row)), sentItemId: itemId };
+        const next: OutboxRow = { ...row, ...(await seal(key, body)) };
+        const result = await commitGuarded(guard, async (tx) => {
+          const current = await tx.objectStore("outbox").get(answerTag);
+          if (current === undefined || !sameBytes(current.iv, row.iv)) return false;
+          await tx.objectStore("outbox").put(next);
+          return also === undefined ? true : also(tx);
+        });
+        if (result === "committed") return "noted";
+      }
+      return "stale";
+    },
 
     async unmarkSendStarted(item) {
       const same = await db.getAllFromIndex("outbox", "targetTag", item.targetTag);

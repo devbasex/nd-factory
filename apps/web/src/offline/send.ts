@@ -4,7 +4,7 @@ import type { Logger } from "@nd-factory/core/log";
 import { type ApiReply, type ApiSender, DEADLINE_MS, type SessionOwner } from "./api-transport.ts";
 import type { CacheStore } from "./cache-store.ts";
 import type { DeviceDb, HoldReason } from "./db.ts";
-import { commitGuarded, type GuardedTx, type Owner, prepareGuard } from "./guarded-commit.ts";
+import { commitGuarded, type GuardedTx, type Owner, prepareGuard, sameBytes } from "./guarded-commit.ts";
 import { missingChecks, type OperationClass, operationClassOf } from "./operation-classes.ts";
 import { type Outbox, type OutboxItem, SessionChangedError } from "./outbox.ts";
 import { holdDenied } from "./revocation.ts";
@@ -200,15 +200,45 @@ export function createSender(d: SendDeps): QueueSender {
     if (why === "unknown" && item.kind === "queued") await round.revert(item);
   }
 
-  // 会話の写しの先映しした項目に、成功の項目の ID を書く。写しか先映しした項目が無ければ書くものは無い（null）
+  // 会話の写しの先映しした項目に、成功の項目の ID を書く。写しか先映しした項目が無くても、写しが読んだときのままかを
+  // 書き込みの中で確かめる。読んだ後に別のタブの読み直しが先映しを書いていれば、照合が外れて読み直す
   async function sentIdWrite(owner: Owner, item: OutboxItem, itemId: string) {
     const guard = await prepareGuard(d.db, owner);
-    const found = await d.cache.read("organizer-messages", item.targetId);
-    if (guard === null || found === null) return null;
-    const value = found.value as Conversing;
-    if (!value.items?.some((i) => i.answer_tag === item.answerTag)) return null;
+    if (guard === null) return null;
+    const { found, unchanged } = await d.cache.readGuarded(guard, "organizer-messages", item.targetId);
+    const value = found?.value as Conversing | undefined;
+    if (found === null || !value?.items?.some((i) => i.answer_tag === item.answerTag)) return unchanged;
     const items = value.items.map((i) => (i.answer_tag === item.answerTag ? { ...i, id: itemId } : i));
-    return d.cache.prepareReplace(guard, "organizer-messages", item.targetId, { ...value, items }, found.fetchSeq);
+    const replace = await d.cache.prepareReplace(guard, "organizer-messages", item.targetId, { ...value, items }, found.fetchSeq);
+    if (replace === null) return unchanged;
+    return async (tx: GuardedTx) => (await unchanged(tx)) && (await replace(tx));
+  }
+
+  // 取り下げで保留へ移った成功の件を消し、同じトランザクションで返った項目の取り下げを足す
+  async function withdrawHeld(
+    round: Round,
+    item: OutboxItem,
+    itemId: string,
+    waitSeen: Uint8Array | null,
+    conversation: ((tx: GuardedTx) => Promise<boolean>) | null,
+  ): Promise<"done" | "stale" | "session"> {
+    const draft = { operation: WITHDRAW, targetId: itemId, projectId: item.projectId, input: {} };
+    // 写しの照合が外れたら、enqueue の中で同じ写しのまま試し直さないよう、投げて抜ける
+    const stale = new Error("会話の写しが読んだ後に変わった");
+    try {
+      await d.outbox.enqueue(round.owner, draft, async (tx) => {
+        if (conversation !== null && !(await conversation(tx))) throw stale;
+        await tx.objectStore("held").delete(item.answerTag);
+        await d.wait.clearIn(tx, waitSeen);
+        return true;
+      });
+    } catch (error) {
+      if (error === stale) return "stale";
+      // セッションが替わったときは、何も変えずに回を止める。それ以外（保存の失敗）はそのまま投げる
+      if (error instanceof SessionChangedError) return "session";
+      throw error;
+    }
+    return "done";
   }
 
   // 件を消すのと会話の写しと待機の解除を 1 度に書く。取り下げた後の成功なら、返った項目の取り下げを足す
@@ -226,23 +256,9 @@ export function createSender(d: SendDeps): QueueSender {
       const writeConversation = async (tx: GuardedTx) => conversation === null || (await conversation(tx));
       if (found.held) {
         // 保留から先へは移らないので、取り下げを足すのと同じトランザクションで保留の件を消す
-        const draft = { operation: WITHDRAW, targetId: itemId, projectId: item.projectId, input: {} };
-        // 写しの照合が外れたら、enqueue の中で同じ写しのまま試し直さないよう、投げて抜ける
-        const stale = new Error("会話の写しが読んだ後に変わった");
-        try {
-          await d.outbox.enqueue(round.owner, draft, async (tx) => {
-            if (!(await writeConversation(tx))) throw stale;
-            await tx.objectStore("held").delete(item.answerTag);
-            await d.wait.clearIn(tx, waitSeen);
-            return true;
-          });
-        } catch (error) {
-          if (error === stale) continue;
-          // セッションが替わったときは、何も変えずに回を止める。それ以外（保存の失敗）はそのまま投げる
-          if (error instanceof SessionChangedError) return false;
-          throw error;
-        }
-        return true;
+        const held = await withdrawHeld(round, item, itemId, waitSeen, conversation);
+        if (held === "stale") continue;
+        return held === "done";
       }
       const guard = await prepareGuard(d.db, round.owner);
       if (guard === null) return false;
@@ -262,9 +278,19 @@ export function createSender(d: SendDeps): QueueSender {
       if (result === "committed") return true;
       if (!moved && !stale) return false;
     }
-    // 写しの照合が外れ続けたら、ID を失わないよう件を送り始めの印つきのまま残して回を止める。
-    // 次の回が同じ冪等キーで送り直し、返った同じ項目の ID で反映し直す
-    return false;
+    // 写しの照合が外れ続けたら、返った項目の ID を件に書いて送る列に残し、後続の件へ進む。
+    // 取り下げはこの ID で登録し、次の回は送り直さずにこの ID で写しへの反映だけをやり直す
+    const noted = await d.outbox.noteSentItem(round.owner, item.answerTag, itemId, async (tx) => {
+      await d.wait.clearIn(tx, waitSeen);
+      return true;
+    });
+    if (noted === "noted") return true;
+    if (noted === "stale") return false;
+    // 書く前に取り下げが保留へ移したか、別のタブが消した
+    const found = await d.outbox.find(item.answerTag);
+    if (found === null) return d.wait.clear(round.owner, waitSeen);
+    if (!found.held) return false;
+    return (await withdrawHeld(round, item, itemId, waitSeen, null)) === "done";
   }
 
   // 成功した件を送る列（取り下げで移っていれば保留）から消すのと待機の解除を、セッションの照合と同じトランザクションで行う。
@@ -335,6 +361,10 @@ export function createSender(d: SendDeps): QueueSender {
     const cls = operationClassOf(original.operation);
     const idempotent = idempotentOf(original.operation);
     const resent = original.sendStarted;
+    if (original.operation === CREATE && original.sentItemId !== undefined) {
+      // 前の回で成功を受けた件。送り直さず、受けた項目の ID で写しへの反映だけをやり直す
+      return (await created(round, original, original.sentItemId, null)) ? "next" : "stop";
+    }
     let item = original;
     // 照合の値がそろわない確定待ちは送らない。読んだときの値が無ければ、サーバーは古い判断を拒めない
     if (missingChecks(item.operation, item.check).length > 0) {
@@ -435,8 +465,29 @@ export function createSender(d: SendDeps): QueueSender {
         for (let attempt = 0; attempt < 3; attempt += 1) {
           const found = await d.outbox.find(answerTag);
           if (found === null) break;
-          if (found.held) return "held";
           const { item } = found;
+          if (item.sentItemId !== undefined) {
+            // 成功を受けたが写しへ反映できていない件。受けた項目の ID で取り下げを足し、同じトランザクションで件を消す
+            const store = found.held ? "held" : "outbox";
+            const changed = new Error("取り下げる件が読んだ後に変わった");
+            try {
+              await d.outbox.enqueue(
+                owner,
+                { operation: WITHDRAW, targetId: item.sentItemId, projectId: item.projectId, input: {} },
+                async (tx) => {
+                  const row = await tx.objectStore(store).get(answerTag);
+                  if (row === undefined || !sameBytes(row.iv, item.iv)) throw changed;
+                  await tx.objectStore(store).delete(answerTag);
+                  return true;
+                },
+              );
+            } catch (error) {
+              if (error === changed) continue;
+              throw error;
+            }
+            return "enqueued";
+          }
+          if (found.held) return "held";
           const outcome = item.sendStarted
             ? { kind: "hold" as const, reason: "unknown-result" as const }
             : { kind: "remove" as const };

@@ -415,6 +415,7 @@ infra/lib/app-stack.ts
 | メソッド | 返り | 中身 |
 | --- | --- | --- |
 | `read(kind, targetId)` | `{ value, receivedAt, fetchSeq } \| null` | 14 日を過ぎた行・削除の印は `null`。復号できなければ全写しを消して `null` |
+| `readGuarded(guard, kind, targetId)` | `{ found, unchanged }` | `found` は `read` と同じ条件で値か `null`。`unchanged` は書き込みの中で、行が読んだときのまま（無ければ無いまま）かを確かめる |
 | `prepareReplace(guard, kind, targetId, value, fetchSeq)` | 書き込みの 1 件か `null` | 表に無い種類・番号の古いレスポンス・印と一覧の記録に合わないものは `null` |
 | `applyOptimistic(guard, kind, targetId, change)` | `void` | 先映し（`fetchSeq` を変えない） |
 | `markGone(guard, kind, targetId, goneSeq)` | `void` | 削除の印 |
@@ -516,6 +517,7 @@ type OperationClass =
 | `enqueue(owner, draft)` | `OutboxItem` | `nd-outbox` の錠の中で番号を取り、同じ対象の未送信の確定待ちは置き換える。`online` の操作は受けない（IW4）。照合の値がそろわない確定待ちは保存せず `MissingCheckError` を投げ、画面は「対象を開き直してから、もう一度操作してください」と出す。送る側も、照合の値がそろわない確定待ちは送らず、保留へ移す（一度も送っていなければ `unmigrated`、送り始めていれば `unknown-result`） |
 | `readBatch()` | `{ items: OutboxItem[]; unreadable: string[] }` | 錠の中で全件読み、`seq` の順に返す |
 | `markSendStarted(item, sentAt)` | `OutboxItem \| null` | `iv` を確かめて印を真にする |
+| `noteSentItem(owner, answerTag, itemId, also?)` | `"noted" \| "missing" \| "stale"` | セッションと行の `iv` を確かめ、会話への送信の成功が返した項目の ID を件の `sentItemId` に書く。`also` は同じトランザクションで書く |
 | `unmarkSendStarted(item)` | `void` | 設計文書の「会話の項目の取り下げ」の手順 4（送り始めた印を戻す）。同じ対象の確定待ちが後ろに足されていれば、印を戻さずに元の件を消す |
 | `settle(item, outcome)` | `"removed" \| "held" \| "kept" \| "missing"` | 送る列と保留の件を `answerTag` で引き、1 トランザクションで消すか移す |
 | `moveToHeld(tags, reason)` | `number` | 暗号文のまま保留へ移す |
@@ -814,6 +816,7 @@ type OperationClass =
 | `createSendWait` の `readApiTime` | 復号できない | 壊れ | `unseal` | 値なし（`null`）として返し、行は消さない。保存済みの API 時刻を取得できなかったものとして扱う。待機の期限（`retry` 行）は別の行なので、この失敗では変えない | 出さない | 破損した行は、次の `writeApiTime` が置き換える |
 | `createSendWait` の `write`・`writeApiTime`・`clear` | セッションが合わない | 別タブの利用者の切り替え・入り直し・サインアウト | `commitGuarded` の照合 | 何も書かず消さず、偽を返す | 出さない | 送る処理はその応答を反映せずに回を止める |
 | `sendQueue` の成功した件の反映 | セッションが合わない | 応答を待つ間の、別タブの利用者の切り替え・入り直し・サインアウト | `commitGuarded` の照合 | 成功した件の反映（送る列か保留からの削除、作成した項目の ID の書き込み）と待機の解除（`clearIn`）を、同じセッション照合を通した 1 つのトランザクションで行う。照合が外れたら、件と待機の行をどちらも変えない | 出さない | その回を止める。件は送り始めの印つきで残り、次の回が送り直しか結果未確認を決める |
+| `sendQueue` の会話への送信の成功の反映 | 会話の写しの照合が外れ続ける | 別タブの読み直しが写しを書き続ける | 写しの行の `iv` の照合 | 3 回で諦め、返った項目の ID を件の `sentItemId` に書いて送る列に残す（`noteSentItem`。待機の解除も同じトランザクション） | 出さない | 回を止めずに後続の件へ進む。次の回は送り直さずにその ID で写しへ書き直す。取り下げはその ID で足す |
 | `applyRevocation`・`holdDenied` | `stale` | 別タブの書き換え | `commitGuarded` | 回を止める | 出さない | 次の回で段 1 から |
 | `sendQueue` | 一時の失敗 | 503・429・通信 | `classifyResult` | その回の段 2 を止める（IW12） | 「読み直せませんでした（時刻）」 | 30 秒後 |
 | `sendQueue` | 401 | token・セッション | 同上 | 止めて #4 の 401 の扱いへ持ち主つきで渡す | #4 の表示 | 件は残る |
