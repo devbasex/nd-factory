@@ -179,7 +179,7 @@ describe("そろえ方", () => {
   it("待機の期限までは段 2 だけを打たない", async () => {
     const t = await setup();
     await t.enqueue("questions.answer");
-    await t.wait.write({ retryUntil: NOW + 1, backoffMs: 0 });
+    await t.wait.write(t.owner, { retryUntil: NOW + 1, backoffMs: 0 });
     expect(await t.sync.runOnce()).toMatchObject({ sent: "skipped" });
     expect(t.order).toEqual(["projects", "teams", "screen", "lists"]);
     t.state.wall = NOW + 1;

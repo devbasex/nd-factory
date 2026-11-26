@@ -24,67 +24,74 @@ export function retryUntilFrom(retryAfter: string | null, date: string | null, n
 }
 
 export type SendWait = {
+  // 読めない行は無いものとして返す。消すのは、照合して書くトランザクションの中だけ
   read(): Promise<RetryWait | null>;
-  write(wait: RetryWait): Promise<void>;
-  clear(): Promise<void>;
   readApiTime(): Promise<number | null>;
-  // owner はその Date を受けたリクエストのセッション。端末の持ち主とログインの行に合うときだけ、
-  // 照合と同じトランザクションで書く（別のタブで替わった後の新しいセッションへ、旧い応答の時刻を書かない）
-  writeApiTime(owner: Owner, ms: number): Promise<void>;
+  // 書き込みと解除は、owner（その応答を受けたリクエストのセッション）が端末の持ち主とログインの行に合うときだけ、
+  // 照合と同じトランザクションで行う。別のタブで替わった後の新しいセッションの行を、旧い応答で書き換えない。
+  // 戻り値が偽なら、セッションが合わなかったので書いていない
+  write(owner: Owner, wait: RetryWait): Promise<boolean>;
+  clear(owner: Owner): Promise<boolean>;
+  writeApiTime(owner: Owner, ms: number): Promise<boolean>;
 };
 
+type WaitId = "retry" | "api-time";
+// value が null なら、行はあるが復号できない
+type Loaded<T> = { value: T | null; iv: Uint8Array } | null;
+
 export function createSendWait({ db }: { db: DeviceDb }): SendWait {
-  async function load<T>(id: "retry" | "api-time"): Promise<{ value: T; iv: Uint8Array } | null> {
+  // key を渡さなければ、端末の持ち主の鍵で読む
+  async function load<T>(id: WaitId, key?: CryptoKey): Promise<Loaded<T>> {
     const row = await db.get("wait", id);
-    const owner = await readOwner(db);
-    if (row === undefined || owner === null) return null;
+    const readKey = key ?? (await readOwner(db))?.key;
+    if (row === undefined || readKey === undefined) return null;
     try {
-      return { value: await unseal<T>(owner.key, row), iv: row.iv };
+      return { value: await unseal<T>(readKey, row), iv: row.iv };
     } catch {
-      await db.delete("wait", id);
-      return null;
+      return { value: null, iv: row.iv };
     }
   }
 
-  // 保存済みの値より後のときだけ書く。比べた後に行が変わっていれば比べ直す
-  async function writeLater<T>(id: "retry" | "api-time", value: T, at: (v: T) => number): Promise<void> {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const owner = await readOwner(db);
-      if (owner === null) return;
-      const current = await load<T>(id);
-      if (current !== null && at(current.value) >= at(value)) return;
-      const sealed: Sealed = await seal(owner.key, value);
-      const tx = db.transaction("wait", "readwrite");
-      const now = await tx.store.get(id);
-      const unchanged = sameBytes(now?.iv ?? null, current?.iv ?? null);
-      if (unchanged) await tx.store.put({ id, ...sealed });
-      await tx.done;
-      if (unchanged) return;
-    }
-  }
-
-  async function writeApiTime(owner: Owner, ms: number): Promise<void> {
+  // 照合と同じトランザクションで、読んだときから行の IV が変わっていなければ change を行う。
+  // change が undefined を返せば書かずに終える。IV が変わっていれば読み直す（3 回まで）
+  async function guardedUpdate<T>(
+    owner: Owner,
+    id: WaitId,
+    change: (current: Loaded<T>) => T | "delete" | undefined,
+  ): Promise<boolean> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const guard = await prepareGuard(db, owner, { readAuthz: false });
-      if (guard === null) return;
-      const current = await load<number>("api-time");
-      if (current !== null && current.value >= ms) return;
-      const sealed: Sealed = await seal(guard.keys.key, ms);
+      if (guard === null) return false;
+      const current = await load<T>(id, guard.keys.key);
+      const next = change(current);
+      if (next === undefined) return true;
+      const sealed: Sealed | null = next === "delete" ? null : await seal(guard.keys.key, next);
+      let moved = false;
       const result = await commitGuarded(guard, async (tx) => {
-        const now = await tx.objectStore("wait").get("api-time");
-        if (!sameBytes(now?.iv ?? null, current?.iv ?? null)) return false;
-        await tx.objectStore("wait").put({ id: "api-time", ...sealed });
+        const now = await tx.objectStore("wait").get(id);
+        moved = !sameBytes(now?.iv ?? null, current?.iv ?? null);
+        if (moved) return false;
+        if (sealed === null) await tx.objectStore("wait").delete(id);
+        else await tx.objectStore("wait").put({ id, ...sealed });
         return true;
       });
-      if (result === "committed") return;
+      if (result === "committed") return true;
+      if (!moved) return false;
     }
+    return true;
   }
+
+  // 保存済みの値より後のときだけ書く。読めない行は置き換える
+  const writeLater =
+    <T>(value: T, at: (v: T) => number) =>
+    (current: Loaded<T>): T | undefined =>
+      current !== null && current.value !== null && at(current.value) >= at(value) ? undefined : value;
 
   return {
     read: async () => (await load<RetryWait>("retry"))?.value ?? null,
-    write: (wait) => writeLater("retry", wait, (w) => w.retryUntil),
-    clear: () => db.delete("wait", "retry"),
     readApiTime: async () => (await load<number>("api-time"))?.value ?? null,
-    writeApiTime,
+    write: (owner, wait) => guardedUpdate(owner, "retry", writeLater(wait, (w) => w.retryUntil)),
+    clear: (owner) => guardedUpdate<RetryWait>(owner, "retry", (current) => (current === null ? undefined : "delete")),
+    writeApiTime: (owner, ms) => guardedUpdate(owner, "api-time", writeLater(ms, (v) => v)),
   };
 }

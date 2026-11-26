@@ -152,14 +152,14 @@ describe("待機の期限", () => {
     const db = await openDb();
     const { owner } = await signedIn(db);
     const wait = createSendWait({ db });
-    await wait.write({ retryUntil: 2_000, backoffMs: 60_000 });
-    await wait.write({ retryUntil: 1_000, backoffMs: 0 });
+    await wait.write(owner, { retryUntil: 2_000, backoffMs: 60_000 });
+    await wait.write(owner, { retryUntil: 1_000, backoffMs: 0 });
     expect(await wait.read()).toEqual({ retryUntil: 2_000, backoffMs: 60_000 });
     await wait.writeApiTime(owner, 500);
     await wait.writeApiTime(owner, 400);
     expect(await wait.readApiTime()).toBe(500);
     expect(new TextDecoder().decode((await db.get("wait", "retry"))!.data)).not.toContain("2000");
-    await wait.clear();
+    await wait.clear(owner);
     expect(await wait.read()).toBeNull();
     db.close();
   });
@@ -169,8 +169,13 @@ describe("待機の期限", () => {
     const { owner } = await signedIn(db);
     const wait = createSendWait({ db });
     // 別のタブで入り直した後に、旧いセッションの応答の時刻が届く
-    await wait.writeApiTime({ ...owner, fingerprint: "fp-other" }, 500);
+    await expect(wait.writeApiTime({ ...owner, fingerprint: "fp-other" }, 500)).resolves.toBe(false);
     expect(await wait.readApiTime()).toBeNull();
+    // 待機の期限の書き込みと解除も、旧いセッションでは行わない
+    await wait.write(owner, { retryUntil: 2_000, backoffMs: 0 });
+    await expect(wait.clear({ ...owner, fingerprint: "fp-other" })).resolves.toBe(false);
+    await expect(wait.write({ ...owner, fingerprint: "fp-other" }, { retryUntil: 9_000, backoffMs: 0 })).resolves.toBe(false);
+    expect(await wait.read()).toEqual({ retryUntil: 2_000, backoffMs: 0 });
     // 利用者の切り替えに伴う隔離の間も書かない
     const keys = (await db.get("keys", "main"))!;
     await db.put("keys", { ...keys, switching: true });
@@ -179,12 +184,18 @@ describe("待機の期限", () => {
     db.close();
   });
 
-  it("復号できない行は消して無いものにする", async () => {
+  it("復号できない行は読むときは無いものとし、照合して書くときだけ置き換える", async () => {
     const db = await openDb();
-    await signedIn(db);
-    await db.put("wait", { id: "retry", iv: new Uint8Array(12), data: new ArrayBuffer(16) });
-    expect(await createSendWait({ db }).read()).toBeNull();
-    expect(await db.get("wait", "retry")).toBeUndefined();
+    const { owner } = await signedIn(db);
+    const wait = createSendWait({ db });
+    await db.put("wait", { id: "api-time", iv: new Uint8Array(12), data: new ArrayBuffer(16) });
+    expect(await wait.readApiTime()).toBeNull();
+    // 読んだだけでは消さない。別のタブが後から書いた行を、遅れた読み出しが消さないようにするため
+    expect(await db.get("wait", "api-time")).toBeDefined();
+    await wait.writeApiTime({ ...owner, fingerprint: "fp-other" }, 500);
+    expect((await db.get("wait", "api-time"))!.iv).toEqual(new Uint8Array(12));
+    await wait.writeApiTime(owner, 500);
+    expect(await wait.readApiTime()).toBe(500);
     db.close();
   });
 });

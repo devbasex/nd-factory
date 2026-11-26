@@ -166,16 +166,19 @@ export function createSender(d: SendDeps): QueueSender {
     d.log.info("送る列の件を扱った", { operation: item.operation, result: kind, reason });
   }
 
-  async function note(round: Round, date: string | null): Promise<void> {
+  // 偽なら、応答を待つ間に別のタブでセッションが替わったので書いていない。その応答は反映しない
+  async function note(round: Round, date: string | null): Promise<boolean> {
     const ms = dateOf(date);
-    if (ms === null) return;
+    if (ms === null) return true;
+    if (!(await d.wait.writeApiTime(round.owner, ms))) return false;
     round.apiNow = ms;
-    await d.wait.writeApiTime(round.owner, ms);
+    return true;
   }
 
-  async function rateLimit(retryAfter: string | null, date: string | null): Promise<void> {
+  // 待機の期限は、その 429 を受けたセッションの照合と同じトランザクションで書く
+  async function rateLimit(round: Round, retryAfter: string | null, date: string | null): Promise<void> {
     const current = await d.wait.read();
-    await d.wait.write(retryUntilFrom(retryAfter, date, d.wallNow(), current?.backoffMs ?? 0));
+    await d.wait.write(round.owner, retryUntilFrom(retryAfter, date, d.wallNow(), current?.backoffMs ?? 0));
   }
 
   // 件ごとに送る直前に API の今の時刻を読む。この回で前に受けた Date は使わない
@@ -184,9 +187,9 @@ export function createSender(d: SendDeps): QueueSender {
     const reply = await d.send({ name: "projects.list", items: [{}], round: round.owner });
     if (reply.kind !== "response") return null;
     if (reply.status === 401) round.onAuth(reply.owner);
-    if (reply.status === 429) await rateLimit(reply.retryAfter, reply.date);
+    if (reply.status === 429) await rateLimit(round, reply.retryAfter, reply.date);
     if (reply.status !== 200 || !reply.result.ok) return null;
-    await note(round, reply.date);
+    if (!(await note(round, reply.date))) return null;
     return { apiNow: dateOf(reply.date), since };
   }
 
@@ -249,7 +252,7 @@ export function createSender(d: SendDeps): QueueSender {
         if (found !== null && !found.held) await d.outbox.unmarkSendStarted(found.item);
       }
       if (decision.kind === "auth") round.onAuth(reply.owner);
-      else if (decision.rateLimited && reply.kind === "response") await rateLimit(reply.retryAfter, reply.date);
+      else if (decision.rateLimited && reply.kind === "response") await rateLimit(round, reply.retryAfter, reply.date);
       return "stop";
     }
     if (decision.kind === "done") {
@@ -258,7 +261,8 @@ export function createSender(d: SendDeps): QueueSender {
       if (item.operation === CREATE && itemId !== undefined) {
         if (!(await created(round, item, itemId))) return "stop";
       } else await d.outbox.settle(item, { kind: "remove" });
-      await d.wait.clear();
+      // 待機の解除も、この応答を受けたセッションの照合と同じトランザクションで行う
+      if (!(await d.wait.clear(round.owner))) return "stop";
       if (item.kind === "confirm") report(round, item, "confirmed");
       return "next";
     }
@@ -346,8 +350,9 @@ export function createSender(d: SendDeps): QueueSender {
         continue;
       }
       // レスポンスを反映する前に持ち主を照合し直す
+      // 時刻の保存がセッションの変更で中止されたときも、旧い応答を反映しない
       if ((await prepareGuard(d.db, round.owner)) === null) return "stop";
-      if (reply.kind === "response") await note(round, reply.date);
+      if (reply.kind === "response" && !(await note(round, reply.date))) return "stop";
       const decision = classifyResult({
         cls,
         resent,

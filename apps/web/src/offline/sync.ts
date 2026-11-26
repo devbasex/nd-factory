@@ -121,7 +121,7 @@ export function createSync(d: SyncDeps): Sync {
   async function noteDate<T extends { kind: string; date?: string | null }>(result: T, owner: Owner): Promise<T> {
     const ms = result.kind === "ok" && typeof result.date === "string" ? Date.parse(result.date) : Number.NaN;
     if (!Number.isNaN(ms)) {
-      await d.wait.writeApiTime(owner, ms);
+      if (!(await d.wait.writeApiTime(owner, ms))) throw new Stop("持ち主の照合が外れた");
       await guardOf(owner);
       roundDate = ms;
     }
