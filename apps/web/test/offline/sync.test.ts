@@ -109,6 +109,34 @@ describe("そろえ方", () => {
     t.db.close();
   });
 
+  it("projects.list を読み切れない回は、送り始めたまま結果の無い件も保留へ移さない", async () => {
+    const t = await setup();
+    const item = await t.enqueue("projects.close", "c");
+    await t.outbox.markSendStarted(item, NOW);
+    t.readers.projects = async () => ({ kind: "temporary" });
+    expect(await t.sync.runOnce()).toMatchObject({ kind: "failed" });
+    expect(await t.db.count("outbox")).toBe(1);
+    expect(await t.held()).toEqual([]);
+    t.readers.projects = async () => found([{ id: "p-example", teamId: "t-a" }]);
+    await t.sync.runOnce();
+    expect(await t.held()).toEqual(["unknown-result"]);
+    expect(t.writes()).toEqual([]);
+    t.db.close();
+  });
+
+  it("初回の送信の sentAt には、段 1 の一覧の応答で受けた最後の Date を使う", async () => {
+    const t = await setup();
+    const date = "Wed, 25 Nov 2026 23:00:00 GMT";
+    t.readers.teams = async () => ({ kind: "ok", items: [{ id: "t-a" }], date });
+    await t.enqueue("organizer_messages.create", "hello");
+    // 送信の応答を失う
+    t.replies.push(() => new TypeError("network"));
+    await t.sync.runOnce();
+    expect((await t.outbox.readBatch()).items).toMatchObject([{ sendStarted: true, sentAt: Date.parse(date) }]);
+    await expect(t.wait.readApiTime()).resolves.toBe(Date.parse(date));
+    t.db.close();
+  });
+
   it("見られなくなったプロジェクトの件は送らず保留に移し、場所の一覧を置き換える", async () => {
     const t = await setup();
     await t.enqueue("questions.answer", "q", { projectId: "p-lost" });

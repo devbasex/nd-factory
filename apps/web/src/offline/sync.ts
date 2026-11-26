@@ -19,9 +19,13 @@ import type { SnapshotKind } from "./snapshot-kinds.ts";
 const RELOAD_INTERVAL_MS = 30_000;
 const SYNC_LOCK = "nd-sync";
 
-// 一覧は全ページを読み終えた結果にする
+// 一覧は全ページを読み終えた結果にする。date は最後のページの応答の Date ヘッダーの値（読めなければ無し）
 /** @internal */
-export type ListResult<T> = { kind: "ok"; items: T[] } | { kind: "denied" } | { kind: "temporary" } | { kind: "auth" };
+export type ListResult<T> =
+  | { kind: "ok"; items: T[]; date?: string | null }
+  | { kind: "denied" }
+  | { kind: "temporary" }
+  | { kind: "auth" };
 
 type Snapshot = { kind: SnapshotKind; targetId: string; value: unknown };
 
@@ -110,14 +114,25 @@ export function createSync(d: SyncDeps): Sync {
     return result as Exclude<T, { kind: "auth" }>;
   }
 
+  // この回で一覧の読み出しが受けた最後の API の Date。段 2 の初回の送信の sentAt に使う
+  let roundDate: number | null = null;
+  async function noteDate<T extends { kind: string; date?: string | null }>(result: T): Promise<T> {
+    const ms = result.kind === "ok" && typeof result.date === "string" ? Date.parse(result.date) : Number.NaN;
+    if (!Number.isNaN(ms)) {
+      roundDate = ms;
+      await d.wait.writeApiTime(ms);
+    }
+    return result;
+  }
+
   // projects.list と teams.list を読んで、見られる範囲をそろえる。読み切れなければ null
   async function refresh(owner: Owner, deniedTeams: string[] = []): Promise<{ mismatch: Set<string> } | null> {
     const projectsStartSeq = await nextSeq(d.db);
-    const projects = checked(await d.readers.projects(owner), owner);
+    const projects = await noteDate(checked(await d.readers.projects(owner), owner));
     const listedSeq = await nextSeq(d.db);
     if (projects.kind !== "ok") return null;
     const teamsStartSeq = await nextSeq(d.db);
-    const teams = checked(await d.readers.teams(owner), owner);
+    const teams = await noteDate(checked(await d.readers.teams(owner), owner));
     const teamsEndSeq = await nextSeq(d.db);
     const read: ListsRead = {
       projects: projects.items,
@@ -162,14 +177,13 @@ export function createSync(d: SyncDeps): Sync {
 
   // 段 1。受け入れの確定待ちは、受け入れ先のチームの受け入れ待ちの一覧で決める
   async function stage1(owner: Owner, batch: OutboxItem[]) {
-    for (const item of batch.filter(unconfirmable)) await hold(item, "unknown-result");
     const accepts = batch.filter((item) => item.transfer !== undefined && !item.sendStarted);
     const unavailable: OutboxItem[] = [];
     const deniedTeams: string[] = [];
     let unverified = false;
     // projects.list を読めない回は、何も移さない
     for (const teamId of new Set(accepts.map((item) => item.transfer!.teamId))) {
-      const result = checked(await d.readers.transfers(owner, teamId), owner);
+      const result = await noteDate(checked(await d.readers.transfers(owner, teamId), owner));
       const mine = accepts.filter((item) => item.transfer!.teamId === teamId);
       if (result.kind === "temporary") unverified = true;
       else if (result.kind === "denied") {
@@ -178,7 +192,13 @@ export function createSync(d: SyncDeps): Sync {
       } else unavailable.push(...mine.filter((item) => !result.items.some((t) => t.id === item.transfer!.transferId)));
     }
     const refreshed = await refresh(owner, deniedTeams);
+    // projects.list を全ページ読み終えるまでは、どの件も保留へ移さない（IW5）
     if (refreshed === null) return null;
+    for (const item of batch.filter(unconfirmable)) {
+      // 失効の反映が先に保留へ移した件は、その理由のままにする
+      const found = await d.outbox.find(item.answerTag);
+      if (found !== null && !found.held) await hold(found.item, "unknown-result");
+    }
     for (const item of unavailable) await hold(item, "transfer-unavailable");
     if (deniedTeams.length > 0) await refresh(owner);
     return { ...refreshed, unverified };
@@ -224,7 +244,8 @@ export function createSync(d: SyncDeps): Sync {
     const round: Round = {
       owner,
       mismatchProjectIds: mismatch,
-      apiNow: null,
+      // 段 1 で受けた最後の Date から始める。段 2 の応答を受けるたびに送る側が書き換える
+      apiNow: roundDate,
       // 先映しした値を、反映されたかのように出し続けない
       async revert(item) {
         const fetchSeq = await nextSeq(d.db);
@@ -248,6 +269,7 @@ export function createSync(d: SyncDeps): Sync {
     let reloadFailedAt: number | null = null;
     let stage = 1;
     try {
+      roundDate = null;
       // この回の対象は段 1 の初めに決める。後から足された件は次の回に回す
       const batch = (await d.outbox.readBatch()).items;
       const first = await stage1(owner, batch);
