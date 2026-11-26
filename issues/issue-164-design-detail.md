@@ -45,9 +45,9 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | `infra/lib/pipeline-stack.ts` | 変更 | パイプラインの段・権限・トリガーと、2 つの CodeBuild の手順を作る | `naming.ts`・`assembly-digest.ts`・esbuild | `PipelineStack` | `bundleDeployGuard`（新設）、`guardConfig`（新設）、`prepareBuildSpec`・`deployBuildSpec`・`constructor`（変更） |
 | `infra/lib/naming.ts` | 変更 | 設置ごとの qualifier と、反映に使う資源の名前を返す | `aws-cdk-lib`・`node:crypto` | モジュール | `appQualifier`・`launchDeclaredParameterName`・`deployRoleName`・`appBootstrapNames`・`cdkRoleArn`（新設）、`pipelineResourceNames`（変更） |
 | `infra/lib/confirmation-stage.ts` | 新設 | 設定の値と宣言の記録から、段階と反映を拒むかを決める | 無し | モジュール | `confirmationStage`・`refusalReason`（新設） |
-| `infra/lib/assembly-check.ts` | 新設 | 合成の結果の形と、中の段階の値を調べる | `node:fs`・`node:crypto`・`node:path` | モジュール | `checkAssembly`・`checkTemplateStage`（新設） |
-| `infra/lib/deploy-guard.ts` | 新設 | `cdk deploy` の直前の検査を順に打ち、1 つでも満たさなければ非 0 で終わる | `assembly-check.ts`・`confirmation-stage.ts`・`node:child_process` | モジュール | `runDeployGuard`・`checkTrigger`・`checkSettings`・`checkExecutionRole`・`checkSimulations`・`checkBootstrapVersion`・`awsCli`・`main`（新設） |
-| `infra/lib/app-bootstrap-template.ts` | 新設 | CDK の標準の bootstrap のテンプレートに、設置ごとの制約を当てる | `yaml` | モジュール | `appExecutionPolicy`・`restrictBootstrapTemplate`（新設） |
+| `infra/lib/assembly-check.ts` | 新設 | 合成の結果の形と、中の段階の値と IAM のロールを調べる | `node:fs`・`node:crypto`・`node:path` | モジュール | `checkAssembly`・`checkTemplateStage`・`checkTemplateRoles`（新設） |
+| `infra/lib/deploy-guard.ts` | 新設 | `cdk deploy` の直前の検査を順に打ち、1 つでも満たさなければ非 0 で終わる | `assembly-check.ts`・`confirmation-stage.ts`・`node:child_process` | モジュール | `runDeployGuard`・`checkTrigger`・`checkSettings`・`checkExecutionRole`・`checkSimulations`・`checkBootstrapVersion`・`checkTemplateObject`・`awsCli`・`main`（新設） |
+| `infra/lib/app-bootstrap-template.ts` | 新設 | CDK の標準の bootstrap のテンプレートに、設置ごとの制約を当てる | `yaml` | モジュール | `appExecutionPolicy`・`appPermissionsBoundary`・`restrictBootstrapTemplate`（新設） |
 | `infra/lib/bootstrap-collision.ts` | 新設 | qualifier が別の設置と衝突しないかを判定する | 無し | モジュール | `checkQualifier`（新設） |
 | `infra/bin/app-bootstrap.ts` | 新設 | 衝突の確認と、テンプレートの書き出しのコマンド | `lib/` の 3 モジュール・`setup/aws-reader.ts`・AWS SDK | モジュール | `parseArgs`・`bootstrapReader`・`mainAppBootstrap`（新設） |
 | `infra/bin/app.ts` | 変更 | `pipeline` がある設置のアプリのスタックを、アプリ専用の qualifier で合成する | `naming.ts` | モジュール | `buildApp`（変更） |
@@ -113,7 +113,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | `bundleDeployGuard` | `infra/lib/pipeline-stack.ts` | 新設 | `() => string` | `deploy-guard.ts` を束ねて gzip の base64 で返す |
 | `confirmationStage` | `infra/lib/confirmation-stage.ts` | 新設 | `(settings: unknown) => "ai" \| "human"` | 2 つのキーから期待する段階を決める |
 | `refusalReason` | `infra/lib/confirmation-stage.ts` | 新設 | `(settings: unknown \| undefined, record: RecordState) => string \| null` | 反映を拒む理由を返す（拒まなければ `null`） |
-| `checkAssembly` | `infra/lib/assembly-check.ts` | 新設 | `(dir: string, config: GuardConfig) => { templateFile: string; requiredBootstrapVersion: number }` | 合成の結果が、許した形のアプリのスタックだけであることを確かめる |
+| `checkAssembly` | `infra/lib/assembly-check.ts` | 新設 | `(dir: string, config: GuardConfig) => { templateFile: string; templateKey: string; requiredBootstrapVersion: number }` | 合成の結果が、許した形のアプリのスタックだけであることを確かめる |
 | `checkTemplateStage` | `infra/lib/assembly-check.ts` | 新設 | `(template: unknown, expected: "ai" \| "human") => string[]` | テンプレートの段階の値の違反を返す |
 | `runDeployGuard` | `infra/lib/deploy-guard.ts` | 新設 | `(dir: string, env: Record<string, string \| undefined>, aws: AwsCli) => Promise<void>` | 下の「処理の手順」の順に検査を打つ |
 | `checkTrigger` | `infra/lib/deploy-guard.ts` | 新設 | `(config: GuardConfig, executionId: string, aws: AwsCli) => Promise<void>` | 自分の実行の始まり方が `WebhookV2` であることを確かめる |
@@ -121,6 +121,8 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | `checkExecutionRole` | `infra/lib/deploy-guard.ts` | 新設 | `(config: GuardConfig, aws: AwsCli) => Promise<void>` | 実行のロールの管理ポリシーがアプリ専用の 1 つだけで、インラインポリシーが無いことを確かめる |
 | `checkSimulations` | `infra/lib/deploy-guard.ts` | 新設 | `(config: GuardConfig, aws: AwsCli) => Promise<void>` | 実効の権限の許可と拒否を、期待の表と照らす |
 | `checkBootstrapVersion` | `infra/lib/deploy-guard.ts` | 新設 | `(config: GuardConfig, required: number, aws: AwsCli) => Promise<void>` | アプリ専用の bootstrap の版が求める版以上であることを確かめる |
+| `checkTemplateRoles` | `infra/lib/assembly-check.ts` | 新設 | `(template: unknown, boundaryArn: string) => string[]` | テンプレートの IAM の違反（境界の無いロール、AWS のサービス以外を信頼するロール、ユーザー・グループ・アクセスキー）を返す |
+| `checkTemplateObject` | `infra/lib/deploy-guard.ts` | 新設 | `(config: GuardConfig, template: { file: string; key: string }, aws: AwsCli) => Promise<void>` | S3 のテンプレートのオブジェクトの中身が、検査したファイルと同じであることを確かめる |
 | `awsCli` | `infra/lib/deploy-guard.ts` | 新設 | `(args: string[], env?: Record<string, string>) => Promise<{ status: number; stdout: string; stderr: string }>`（型 `AwsCli`） | AWS CLI をシェルを通さずに打つ |
 | `main` | `infra/lib/deploy-guard.ts` | 新設 | `() => Promise<void>` | `argv[2]` と環境変数で `runDeployGuard` を打ち、失敗を 1 行で出して終了コード 1 にする |
 
@@ -147,6 +149,9 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 - `checkBootstrapVersion`
   - 事後条件: 版は `/cdk-bootstrap/<qualifier>/version` から読む。反映のプロジェクト（CodeBuild）のロールの権限の一覧（決定 6）には、このパラメーターの読み取りが無い。反映のロール（`cdk deploy` が引き受けるロール）は標準のテンプレートで読める。そのため、反映のロールを引き受けた資格情報で読む
   - 副作用: `sts:AssumeRole`、SSM の読み取り。引き受けた資格情報は子プロセスの環境変数にだけ渡す
+- `checkTemplateObject`
+  - 事後条件: ファイルの公開のロールを引き受けて、`template.key` のオブジェクトを読み、SHA-256 が `template.file` と同じなら正常に返る。オブジェクトが無いときだけ、そのファイルを置いてから読み直す。違い・読み取りや書き込みの失敗は例外にする
+  - 副作用: `sts:AssumeRole`、S3 の読み取りと、無いときの書き込み
 - `checkAssembly`・`awsCli`
   - 副作用: `checkAssembly` はファイルの読み取り、`awsCli` は外部コマンド
 - `main`
@@ -167,9 +172,10 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | `checkExecutionRole` | 付いた管理ポリシーが 1 つでない・ARN が違う・インラインポリシーがある・取得の失敗 | bootstrap の後の変更 | 応答 |
 | `checkSimulations` | 期待の表と違う判定・取得の失敗・応答に判定が無い | 権限の広げ過ぎ・不足 | 応答の `EvalDecision` |
 | `checkBootstrapVersion` | 引き受けの失敗・版が無い・数でない・足りない | bootstrap が古い・未作成 | 応答と比較 |
+| `checkTemplateObject` | 引き受け・読み書きの失敗、中身の違い | 先に置かれた別の中身・権限の不足 | SHA-256 の比較 |
 | `bundleDeployGuard` | 束ねの失敗 | 構文の誤り・ファイルが無い | esbuild の例外。パイプラインのスタックの合成が止まる（AWS は変わらない） |
 
-`checkTemplateStage` の違反は戻り値で返し、`runDeployGuard` が 1 件でもあれば止める。統合か Lambda オーソライザーの呼び出し先を関数に結び付けられない場合も違反の 1 件にする。
+`checkTemplateStage` と `checkTemplateRoles` の違反は戻り値で返し、`runDeployGuard` が 1 件でもあれば止める。統合か Lambda オーソライザーの呼び出し先を関数に結び付けられない場合も違反の 1 件にする。
 
 ### 処理の手順
 
@@ -181,9 +187,10 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | 2 | `checkSettings` | 版と SHA-256 が準備と同じ |
 | 3 | `refusalReason` | `null` |
 | 4 | `checkAssembly` | 下の表のすべて |
-| 5 | `checkTemplateStage`（4 が返したテンプレート、`confirmationStage` の段階） | 違反が 0 件 |
+| 5 | `checkTemplateStage`（4 が返したテンプレート、`confirmationStage` の段階）と `checkTemplateRoles` | 違反が 0 件 |
 | 6 | `checkExecutionRole`・`checkSimulations` | 期待どおり |
 | 7 | `checkBootstrapVersion`（4 が返した求める版） | 版が足りる |
+| 8 | `checkTemplateObject`（4 が返したファイルとキー） | S3 の中身が検査したファイルと同じ |
 
 段階の判定（`confirmationStage`・`refusalReason`）:
 
@@ -207,7 +214,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | アセット | `dockerImages` が空。`files` の `source` のキーは `path` と `packaging` だけ（`executable` を拒む）。`path` は合成の結果の中の相対パスで、`..` とリンクを含まない。置き先のバケットはアプリ専用の qualifier のもの |
 | テンプレートの実体 | `stackTemplateAssetObjectUrl` があり、`templateFile` のアセットの置き先と同じで、キーが `<templateFile の中身の SHA-256>.json` である。ほかのアセットのキーは `.json` で終わらない |
 
-最後の行は、検査したファイルと反映されるテンプレートを同じにするためにある。`cdk deploy`（2.1148.1）は、`stackTemplateAssetObjectUrl` があると、手元のテンプレートではなくその S3 の URL を CloudFormation に渡す。同じキーのオブジェクトがあればアップロードを省く。成果物の種類の一覧とキーの形が実際の合成の結果と合うことは、アプリのスタックを合成して受け入れるテストで確かめる。合わなければ条件を緩めず、設計へ戻す。
+最後の行は、検査したファイルと反映されるテンプレートを同じにするためにある。`cdk deploy`（2.1148.1）は、`stackTemplateAssetObjectUrl` があると、手元のテンプレートではなくその S3 の URL を CloudFormation に渡す。同じキーのオブジェクトがあればアップロードを省く。キーの一致だけでは置かれた中身が分からないので、`checkTemplateObject` が中身も比べる。成果物の種類の一覧とキーの形が実際の合成の結果と合うことは、アプリのスタックを合成して受け入れるテストで確かめる。合わなければ条件を緩めず、設計へ戻す。
 
 段階の値の対象（`checkTemplateStage`）:
 
@@ -226,6 +233,9 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | 実行のロール | `codepipeline:UpdatePipeline` | このパイプライン | 拒否 |
 | 実行のロール | `ssm:PutParameter` | 設定のパラメーター | 拒否 |
 | 実行のロール | `ssm:PutParameter`・`ssm:DeleteParameter` | 宣言の記録 | 拒否 |
+| 実行のロール | `iam:CreateRole`（境界を指定しない） | アプリのスタックのロール | 拒否 |
+| 実行のロール | `iam:DeleteRolePermissionsBoundary` | アプリのスタックのロール | 拒否 |
+| 実行のロール | `iam:CreatePolicyVersion` | 境界と実行の管理ポリシー | 拒否 |
 
 `cloudformation:RoleArn` は、決定 6 の表が値を渡すとする行だけ `--context-entries`（型 `string`）で渡す。「拒否」は判定が `allowed` でないことである。
 
@@ -233,7 +243,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `GuardConfig` | 型: `partition`・`account`・`region`・`appStack`・`pipelineName`・`pipelineStack`・`settingsParameter`・`recordParameter`・`qualifier`・`deployRoleName`・`appArns`（実行・反映のロール、アセットのバケット、実行の管理ポリシー） | `infra/lib/assembly-check.ts` | — |
+| `GuardConfig` | 型: `partition`・`account`・`region`・`appStack`・`pipelineName`・`pipelineStack`・`settingsParameter`・`recordParameter`・`qualifier`・`deployRoleName`・`appArns`（実行・反映・ファイルの公開のロール、アセットのバケット、実行の管理ポリシー、境界の管理ポリシー） | `infra/lib/assembly-check.ts` | — |
 | `RecordState` | 型: `"present" \| "absent" \| "unreadable"` | `infra/lib/confirmation-stage.ts` | — |
 | `ALLOWED_ARTIFACT_TYPES` | 定数 | `infra/lib/assembly-check.ts` | 上の 4 種類 |
 | `STACK_SIMULATION_CASES` | 定数 | `infra/lib/deploy-guard.ts` | 決定 6 の表の 5 行 |
@@ -254,7 +264,8 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | `confirmationStage`・`refusalReason` | `settingsSchema`（`packages/contracts`） | `packages/contracts/src/settings.ts` を読む | 使えない。2 つのキーは #181 で足し、検査は zod を束ねない |
 | `checkAssembly` | `cxapi` の合成の結果の読み取り、`assemblyDigest`、`nd-setup.ts` の `checkBootstrap` | `grep -rn "manifest" infra --include=*.ts` | 使えない。反映の段に `aws-cdk-lib` が無く、`infra/setup/` は変えない。求める版は同じく成果物の最大値にする |
 | `checkTemplateStage` | `aws-cdk-lib/assertions` の `Template` | `infra/test/pipeline-stack.test.ts` を読む | テスト用で、反映の段に無い |
-| `runDeployGuard`・`checkTrigger`・`checkSettings`・`checkExecutionRole`・`checkSimulations`・`checkBootstrapVersion` | `infra/setup/aws-reader.ts` | 同ファイルを読む | 使えない。SDK と profile を前提にし、反映の段に `node_modules` が無い |
+| `checkTemplateRoles` | `aws-cdk-lib/assertions` の `Template` | `infra/test/pipeline-stack.test.ts` を読む | テスト用で、反映の段に無い |
+| `runDeployGuard`・`checkTrigger`・`checkSettings`・`checkExecutionRole`・`checkSimulations`・`checkBootstrapVersion`・`checkTemplateObject` | `infra/setup/aws-reader.ts` | 同ファイルを読む | 使えない。SDK と profile を前提にし、反映の段に `node_modules` が無い |
 | `awsCli` | `nd-setup.ts` の `runCommand` | `infra/setup/nd-setup.ts` を読む | 使えない。出力を端末へ流すだけで、受け取らない |
 | `main` | 無し | `ls infra/lib infra/bin` | 束ねた検査の起点として要る |
 
@@ -275,6 +286,8 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | `checkExecutionRole` | 管理ポリシー 1 つ | — | `AdministratorAccess` の追加・インラインポリシー |
 | `checkSimulations` | 期待どおり | — | 決定 6 のテスト設計の 6 ケース |
 | `checkBootstrapVersion` | 版が同じ | 版が 1 大きい | 版が無い・足りない・引き受けの失敗 |
+| `checkTemplateRoles` | 境界を持ちサービスだけを信頼するロール | ロールが無い | 境界が無い・違う境界・AWS の主体を信頼・ユーザーがある |
+| `checkTemplateObject` | 同じ中身 | オブジェクトが無く、置いて読み直す | 違う中身・読めない・置けない |
 | `awsCli`・`main` | `main` は成功で 0 | — | `main` は失敗で 1 と理由の 1 行。`awsCli` は偽の関数に差し替えるので単体では打たない |
 
 ## パイプラインのスタック
@@ -337,7 +350,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | `appQualifier` | `infra/lib/naming.ts` | 新設 | `(s: Naming) => string` | `nd` と、`<prefix>/<environment>` の SHA-256 の先頭 8 桁を返す |
 | `launchDeclaredParameterName` | `infra/lib/naming.ts` | 新設 | `(s: Naming) => string` | `/<prefix>/<environment>/launch-declared` を返す |
 | `deployRoleName` | `infra/lib/naming.ts` | 新設 | `(s: Naming, region: string) => string` | `<prefix>-<environment>-deploy-<region>` を返す |
-| `appBootstrapNames` | `infra/lib/naming.ts` | 新設 | `(s: Naming) => { stack: string; executionPolicy: string }` | `<prefix>-<environment>-bootstrap` と `<prefix>-<environment>-app-cfn-exec` を返す |
+| `appBootstrapNames` | `infra/lib/naming.ts` | 新設 | `(s: Naming) => { stack: string; executionPolicy: string; boundaryPolicy: string }` | `<prefix>-<environment>-bootstrap`・`<prefix>-<environment>-app-cfn-exec`・`<prefix>-<environment>-app-boundary` を返す |
 | `cdkRoleArn` | `infra/lib/naming.ts` | 新設 | `(t: { partition: string; account: string; region: string }, qualifier: string, kind: string) => string` | CDK の bootstrap のロールの ARN を返す |
 
 `nd-setup.ts` は `pipelineResourceNames` の返りを列挙して表示するだけなので、キーが 1 つ減っても `infra/setup/` は変えない。ロールの名前は最長 52 文字で、IAM の上限 64 に収まる。
@@ -367,7 +380,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `buildApp` | `infra/bin/app.ts` | 変更 | `(app: App, env: NodeJS.ProcessEnv) => void`（変えない） | `settings.pipeline` があるときだけ、`AppStack` に `new DefaultStackSynthesizer({ qualifier: appQualifier(settings) })` を渡す |
+| `buildApp` | `infra/bin/app.ts` | 変更 | `(app: App, env: NodeJS.ProcessEnv) => void`（変えない） | `settings.pipeline` があるときだけ、`AppStack` に `new DefaultStackSynthesizer({ qualifier: appQualifier(settings) })` を渡し、`PermissionsBoundary.of(appStack)` で `appBootstrapNames(settings).boundaryPolicy` の境界を付ける |
 
 `pipeline` が無い設置と `PipelineStack` は既定のままにする。`infra/lib/app-stack.ts` は、先頭のコメントの「承認する人が」の理由を、決定 89（`docs/design/platform.md`）の新しい題に合わせた文に直すだけである。
 
@@ -375,7 +388,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `buildApp` | `pipeline` がある設定のアプリのスタックのロールがアプリ専用の qualifier | `ND_STACKS=app` でも同じ | `pipeline` が無い設定とパイプラインのスタックは `hnb659fds` のまま |
+| `buildApp` | `pipeline` がある設定のアプリのスタックのロールがアプリ専用の qualifier で、すべての `AWS::IAM::Role` が境界を持つ | `ND_STACKS=app` でも同じ | `pipeline` が無い設定とパイプラインのスタックは `hnb659fds` のまま |
 
 ## アプリ専用の bootstrap
 
@@ -388,6 +401,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `appExecutionPolicy` | `infra/lib/app-bootstrap-template.ts` | 新設 | `(input: BootstrapInput) => PolicyDocument` | 実行のロールの許可と拒否を作る |
+| `appPermissionsBoundary` | `infra/lib/app-bootstrap-template.ts` | 新設 | `(input: BootstrapInput) => PolicyDocument` | アプリのロールの境界を、定数 `APP_BOUNDARY` から作る |
 | `restrictBootstrapTemplate` | `infra/lib/app-bootstrap-template.ts` | 新設 | `(templateYaml: string, input: BootstrapInput) => string` | 標準のテンプレートに下の表の変更を当て、JSON で返す |
 
 `BootstrapInput` は `{ partition, account, region, settings: Naming, directRoleArns: string[] }` である。
@@ -396,9 +410,12 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | --- | --- |
 | `BootstrapVariant` の既定値 | `nd-factory app`（CLI が標準のテンプレートで上書きしないようにする） |
 | `DeploymentActionRole` の信頼ポリシー | 主体はアカウントのまま、引き受けとセッションタグの文の `aws:PrincipalArn` を、反映のプロジェクトのロールと `directRoleArns` に限る |
-| 同ロールの CloudFormation の書き込み | 標準が持つ書き込み（変更セットの操作、作成・更新・ロールバック、`DeleteStack`、`UpdateTerminationProtection`）の対象を、すべて `stack/<prefix>-<environment>-app/*` にする。`CreateStack`・`UpdateStack`・`CreateChangeSet` には `cloudformation:RoleArn` の条件を付ける。標準に無い書き込み（`SetStackPolicy`）は足さない。スタックの再構成（`Refactor` の文）は外す |
+| 同ロールの CloudFormation の書き込み | 標準が持つ書き込み（変更セットの操作、作成・更新・ロールバック、`DeleteStack`、`UpdateTerminationProtection`）の対象を、すべて `stack/<prefix>-<environment>-app/*` にする。`CreateStack`・`UpdateStack`・`CreateChangeSet` には `cloudformation:RoleArn` の条件を付ける。標準に無い書き込み（`SetStackPolicy`）は足さない。スタックの再構成（`Refactor` の文）は外す。ほかの主体に拒む一覧には `SetStackPolicy` が入る（設計文書の決定 6 の 2 つの一覧） |
 | 同ロールの `iam:PassRole` | 標準のまま（アプリ専用の実行のロールだけ）であることを確かめる |
 | `NdExecutionPolicy`（足す） | 名前が `appBootstrapNames().executionPolicy` の管理ポリシー。中身は `appExecutionPolicy` |
+| `NdAppBoundary`（足す） | 名前が `appBootstrapNames().boundaryPolicy` の管理ポリシー。中身は `appPermissionsBoundary` |
+| `FilePublishingRole`・`ImagePublishingRole` の信頼ポリシー | `DeploymentActionRole` と同じ `aws:PrincipalArn` に限る |
+| `StagingBucketPolicy` | ファイルの公開のロール以外の `aws:PrincipalArn` による `s3:PutObject*`・`s3:DeleteObject*` を拒否する文を足す |
 | `CloudFormationExecutionRole` | `DependsOn: NdExecutionPolicy`。管理ポリシーは `--cloudformation-execution-policies` で渡す ARN（上の名前の ARN）を使う |
 
 実行の管理ポリシーは、`--cloudformation-execution-policies` で渡す前に存在しなければならない。テンプレートに入れて `DependsOn` で順序を付けるので、bootstrap の外で方針を作る操作は増えない。
@@ -409,7 +426,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 - `restrictBootstrapTemplate`
   - 事後条件: `DeploymentActionRole` の文が、知っている `Sid` と形だけであることを確かめてから変える
 
-実行のロールの許可には、アプリのスタックのロールを作って方針を付ける操作が入る。拒否の文は実行のロール自身の操作を縛るが、**作ったロールが持てる権限は縛らない**。アプリのスタックが作るロールにアクセス許可の境界を求めるかは、設計文書に決定が無い。
+実行のロールの許可には、アプリのスタックのロールを作って方針を付ける操作が入る。作ったロールが持てる権限は、アクセス許可の境界で縛る。IAM の操作の条件は、設計文書の決定 6 の「アプリのスタックが作るロールの上限」の表のとおりにする。境界の本体は `appPermissionsBoundary` が作る。
 
 ### 異常系の処理
 
@@ -422,6 +439,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `EXECUTION_ALLOW` | 定数 | `infra/lib/app-bootstrap-template.ts` | アプリのスタックの合成に現れる資源の型ごと |
+| `APP_BOUNDARY` | 定数 | `infra/lib/app-bootstrap-template.ts` | アプリのロールが使う操作と、この設置の資源の ARN の形 |
 
 51,200 バイトは、`TemplateBody` で渡せる CloudFormation の上限である。初めての bootstrap にはテンプレートを置くバケットが無い。
 
@@ -429,15 +447,16 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `appExecutionPolicy` | `aws-cdk-lib/aws-iam` の `PolicyDocument` | `infra/lib/pipeline-stack.ts` を読む | 使わない。テンプレートの JSON に直に入れる |
+| `appExecutionPolicy`・`appPermissionsBoundary` | `aws-cdk-lib/aws-iam` の `PolicyDocument` | `infra/lib/pipeline-stack.ts` を読む | 使わない。テンプレートの JSON に直に入れる |
 | `restrictBootstrapTemplate` | `cdk bootstrap --show-template`、`yaml`（`tools` の依存） | `tools/package.json`、標準のテンプレートを読む | `yaml` を使う。子プロセスは起こさず、パッケージのファイルを読む |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `appExecutionPolicy` | 実際に合成したアプリのスタックの資源の型がすべて `EXECUTION_ALLOW` にある。拒否の文がそろう | `prefix` が最長 | `Resource: "*"` と `*:*` の許可が無い |
-| `restrictBootstrapTemplate` | 打つ版の標準のテンプレートで、信頼・対象・条件・`PassRole`・`DependsOn` が上の表のとおり | `directRoleArns` が空 | 知らない文を足したテンプレートで例外 |
+| `appPermissionsBoundary` | 合成したアプリのロールの操作が境界の許可に含まれる | `prefix` が最長 | IAM の書き込みと 2 つのパラメーターの書き込みを許さない |
+| `appExecutionPolicy` | 実際に合成したアプリのスタックの資源の型がすべて `EXECUTION_ALLOW` にある。拒否の文と IAM の条件がそろう | `prefix` が最長 | `Resource: "*"` と `*:*` の許可が無い |
+| `restrictBootstrapTemplate` | 打つ版の標準のテンプレートで、信頼・対象・条件・`PassRole`・`DependsOn`・バケットの方針が上の表のとおり。反映のロールの CloudFormation の書き込みが「反映のロールに許す書き込み」の 9 つと一致し、`SetStackPolicy` が無い | `directRoleArns` が空 | 知らない文を足したテンプレートで例外 |
 
 ## qualifier の衝突の確認
 
