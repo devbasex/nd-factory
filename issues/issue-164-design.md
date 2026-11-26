@@ -438,7 +438,7 @@ graph LR
        - 採らなかった案: 1 つのアプリ専用の bootstrap を共有し、反映のロールの対象に全設置のアプリのスタックを並べる。資源は少ないが、設置の間に境界が無い
      - 反映のロールが操作できるスタックと渡せるロール: 実行ポリシーの制約だけでは境界にならない。CloudFormation は、既にあるスタックの更新では、実行のロールを指定しなくても前に関連付けたサービスロールを使う（[CloudFormation のサービスロール](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-iam-servicerole.html)）。パイプラインのスタックには既定の qualifier の実行のロールが関連付いているので、スタックを限らない反映のロールは、そのロールの権限でパイプラインのスタックを更新できる。そこで、アプリ専用の bootstrap はテンプレートをカスタマイズして作り（`cdk bootstrap --template`）、反映のロール（`cdk deploy` が引き受けるロール）の IAM を次のとおり限る
        - CloudFormation の書き込みの操作（スタックの作成・更新・削除・ロールバック・変更セットの作成と実行と削除・スタックのポリシーと削除の保護の変更）の対象は、その設置のアプリのスタック `<prefix>-<environment>-app` の ARN だけにする。読み取りの操作は限らない
-       - スタックの作成・更新と変更セットの作成は、`cloudformation:RoleArn` の条件で、アプリ専用の実行のロールを指定した場合だけ許す
+       - スタックの作成・更新と変更セットの作成は、`cloudformation:RoleArn` の条件で、アプリ専用の実行のロールを指定した場合だけ許す。変更セットの実行にはこの条件を付けない。`ExecuteChangeSet` にはこの条件キーが無く、付けると常に拒否になるためである。削除にも付けず、対象の ARN だけで限る
        - `iam:PassRole` で渡せるロールは、アプリ専用の実行のロールだけにする
        - テンプレートに実際の値は書かない。アプリのスタックの名前と、引き受けを許す ARN は、bootstrap を打つときに与える。設置を足すときは、その設置の bootstrap を新しく作り、ほかの設置の bootstrap は変えない（P1。A1）。CDK のバージョンに合わせて bootstrap の版を上げるときは、新しい標準のテンプレートに同じ制約を当て直す
        - bootstrap の後でロールに方針を足す形は採らない。テンプレートの外の変更になり、パイプラインと設置のコマンドの外で資源を変える操作（P1）が増える
@@ -482,10 +482,19 @@ graph LR
      - 合成の結果の各スタックが使う実行のロールが、アプリ専用の qualifier の実行のロールの ARN と同じである（合成の結果の成果物の定義から読む）。ブランチのコードが別の qualifier や実行のロールを指していれば拒む
      - その実行のロールに付いた管理ポリシーが上の管理ポリシーだけで、インラインポリシーが無く、`AdministratorAccess` が付いていない
      - `iam:SimulatePrincipalPolicy` で、拒む対象の操作（パイプラインのスタックの更新、パイプラインと反映のプロジェクトのロールの変更、設定のパラメーターへの `ssm:PutParameter`、宣言の記録への `ssm:PutParameter`・`ssm:DeleteParameter`）が拒否になる。実効の権限で確かめる
-     - `iam:SimulatePrincipalPolicy` で、反映のロールの CloudFormation の書き込み（`UpdateStack`・`CreateChangeSet`・`ExecuteChangeSet`・`DeleteStack`）を、対象のスタックを変えて確かめる。どの呼び出しにも、条件のキー `cloudformation:RoleArn` の値として、アプリ専用の実行のロールの ARN を `ContextEntries` で渡す。値を渡さないと、対象を広げたポリシーでも必須の条件が欠けて拒否になり、広げたことを見逃すためである
-       - この設置のアプリのスタック: 許可になる（同じ条件の値で許可になることを確かめ、下の拒否が条件の欠けによるものでないことを示す）
-       - パイプラインのスタック: 拒否になる
-       - 別の設置のアプリのスタック: 拒否になる。反映の手順は、作り物の名前の ARN `<prefix>-nd-other-app` と `nd-other-<environment>-app` の 2 つで確かめる。名前の一部を `*` にした対象も見つけるためである
+     - `iam:SimulatePrincipalPolicy` で、反映のロールの CloudFormation の書き込みを、対象のスタックを変えて確かめる。条件のキー `cloudformation:RoleArn` の値は、実際の要求に合わせて操作ごとに `ContextEntries` で渡すか、渡さない。どの操作がこのキーを持つかは [CloudFormation の認可のリファレンス](https://docs.aws.amazon.com/service-authorization/latest/reference/list_cloudformation.html)による。結果は次の表のとおりでなければならない
+
+       | 操作 | `cloudformation:RoleArn` の値 | この設置のアプリのスタック | パイプラインのスタックと別の設置のアプリのスタック |
+       | --- | --- | --- | --- |
+       | `UpdateStack`・`CreateChangeSet` | アプリ専用の実行のロールの ARN | 許可 | 拒否 |
+       | `UpdateStack`・`CreateChangeSet` | 渡さない | 拒否 | 拒否 |
+       | `ExecuteChangeSet` | 渡さない（この操作には無いキー） | 許可 | 拒否 |
+       | `DeleteStack` | アプリ専用の実行のロールの ARN | 許可 | 拒否 |
+       | `DeleteStack` | 渡さない | 許可 | 拒否 |
+
+       - 値を渡す行は、対象を広げたポリシーを見つけるためにある。値を渡さないと、必須の条件が欠けて拒否になり、広げたことを見逃す
+       - この設置のアプリのスタックが許可になる行は、ほかの対象の拒否が条件の欠けによるものでないことを示す
+       - 別の設置のアプリのスタックは、作り物の名前の ARN `<prefix>-nd-other-app` と `nd-other-<environment>-app` の 2 つで確かめる。名前の一部を `*` にした対象も見つけるためである
      - `iam:SimulatePrincipalPolicy` で、アプリ専用の実行のロール以外のロール（既定の qualifier の実行のロールと、別の qualifier の実行のロール）への `iam:PassRole` が拒否になる
      - アプリ専用の qualifier の bootstrap の版が、合成の結果の求める版以上である
    - 反映のプロジェクトのロール・反映のロール・実行のロールのすべてでこの制約が効くまで、反映の段への遷移を戻さない。実装 PR は、今のロールの権限を調べて差分を示し、リリース承認ゲートで承認を受ける（A1）
@@ -613,7 +622,7 @@ graph LR
 | 決定 6（アセンブリの形式） | 反映の手順で、`cdk deploy` より前に、合成の結果のスタックが許可リストのアプリのスタックだけで種類が CloudFormation のスタックだけであること、アセットの定義に `executable` を持つ `source` が無いことを確かめ、違えば `exit 1` する。正常な合成の結果（`NodejsFunction` の Lambda アセットとそのマニフェストを含む）を受け入れるケースと、実行のロールに `AdministratorAccess` が付いているときに拒むケースも打つ。反映のプロジェクトのロールが、決定 6 の「反映のプロジェクトのロールの権限」の一覧だけを持ち、パイプラインのスタックの更新・IAM の変更・パイプラインの定義の変更を許さない。`executable` を持つアセット・許可リストに無いスタック・許可外の種類の成果物・余分な権限の 4 ケースを別々に打つ | 検査の行を消す・`executable` を許す・ロールの権限を広げると落ちる |
 | 決定 6（段階の判定の契約） | `packages/contracts/test/fixtures/confirmation-stage-cases.json` の全行（入力は設定の値と宣言の記録）で、反映側の判定が期待する段階と拒否の有無を返す。パラメーターの取得に失敗する行は期待する段階を持たず、反映の拒否だけを確かめる。#181 の合成側のテストは、合成の設定の入力と期待する段階がある行を打ち、段階だけを検査する。表に、キーが無い（宣言の記録が無い・ある）・2 つのキーの片方だけが欠ける、または不正（キーごと）・記録を読めない・保持の上限に達した宣言していない環境（版の番号が 101 以上で記録が無い。拒まない）の行がある | 表を使わず判定を別に書く・片方だけ規則を変えると落ちる |
 | 決定 6（宣言の記録。#181） | 宣言した本番の設定でパイプラインのスタックを合成すると、宣言の記録のパラメーターが `DeletionPolicy: RetainExceptOnCreate` で入る。ほかの設定では入らない | 削除の方針を外す・条件を `environment_kind` だけにすると落ちる |
-| 決定 6（反映のロールの制限） | qualifier が `prefix` と `environment` の組ごとに違う値になる（`infra/test/naming.test.ts`）。アプリ専用の bootstrap のテンプレートで、反映のロールの信頼ポリシーが、与えた ARN の引き受けだけを許す。反映のロールの CloudFormation の書き込みの対象がその設置のアプリのスタックの ARN だけで、作成・更新・変更セットの作成に `cloudformation:RoleArn` の条件があり、`iam:PassRole` の対象がアプリ専用の実行のロールだけである。反映の手順の CloudFormation の書き込みのシミュレーションは、`cloudformation:RoleArn` にアプリ専用の実行のロールの ARN を渡す。同じ条件の値で、対象のアプリのスタックが許可、パイプラインのスタックと別の設置のアプリのスタックが拒否のときだけ進む。偽の応答で、対象のアプリが拒否・パイプラインが許可・別の設置が許可・既定の実行のロールの `PassRole` が許可の 4 ケースを別々に打ち、どれも `exit 1` する（`infra/test/pipeline-stack.test.ts`） | qualifier を固定の値にする・対象を `*` に広げる・信頼ポリシーをアカウント全体にする・条件を外す・`ContextEntries` を渡さない・許可の確認か別の設置の確認を消す・シミュレーションの行を消すと落ちる |
+| 決定 6（反映のロールの制限） | qualifier が `prefix` と `environment` の組ごとに違う値になる（`infra/test/naming.test.ts`）。アプリ専用の bootstrap のテンプレートで、反映のロールの信頼ポリシーが、与えた ARN の引き受けだけを許す。反映のロールの CloudFormation の書き込みの対象がその設置のアプリのスタックの ARN だけで、作成・更新・変更セットの作成に `cloudformation:RoleArn` の条件があり、`iam:PassRole` の対象がアプリ専用の実行のロールだけである。反映の手順の CloudFormation の書き込みのシミュレーションは、決定 6 の「反映の直前の確認」の表のとおり、操作ごとに `cloudformation:RoleArn` の値を渡すか渡さないかを分け、結果が表と同じときだけ進む。偽の応答で、次の 6 ケースを別々に打ち、どれも `exit 1` する: 値を渡した対象のアプリの `UpdateStack` が拒否、値を渡さない対象のアプリの `UpdateStack` が許可、対象のアプリの `ExecuteChangeSet` が拒否、パイプラインが許可、別の設置が許可、既定の実行のロールの `PassRole` が許可（`infra/test/pipeline-stack.test.ts`） | qualifier を固定の値にする・対象を `*` に広げる・信頼ポリシーをアカウント全体にする・条件を外す・`UpdateStack` と `CreateChangeSet` に `ContextEntries` を渡さない・`ExecuteChangeSet` に `cloudformation:RoleArn` を渡す・値を渡さない確認を消す・許可の確認か別の設置の確認を消す・シミュレーションの行を消すと落ちる |
 | 決定 6（qualifier の衝突） | 固定の衝突ケースを使う。`acme-58885/dev` と `acme-91474/dev` の qualifier がどちらも `nd09bda190` になる（`infra/test/naming.test.ts`）。AWS の読み取りを差し替え、先の設置が `nd09bda190` を使っている状態で、後の設置の確認が非 0 で終わる。新しく作る場合と、この設置のものを更新する場合は成功する。同じ名前のスタックのタグか qualifier が違う場合、作成か更新が終わっていない場合、読み取りに失敗した場合は非 0 で終わる。併設する人の移行の手順で、確認のコマンドが `cdk bootstrap` より前にある（読んで確認） | バージョンのパラメーターを見ない・タグを比べない・読み取りの失敗を成功にする・手順から確認を消すと落ちる |
 | 決定 6（直接反映の拒否。#181） | 設置のコマンドのアプリのスタックを含む `diff` と `deploy` が、決定 6 の「人がアプリのスタックを直接反映してよい条件」の 4 つの条件のどれかに当たれば反映せずに止まる（`infra/test/nd-setup.test.ts`）。`pipeline` が無い設定でも、反映先に宣言の記録があるか、宣言した本番を示す設定のパラメーターがあれば止まる。宣言の前に保存した合成の結果の `deploy` と、判定に使う内容を持たない保存結果の `deploy` も止まる。`--stack pipeline` だけ・設定のパラメーターも記録も無い `pipeline` の無い設定・宣言していなくて記録が無い環境・`pipeline` の無い設定で 2 つの読み取りが `AccessDenied` の場合では止まらない。`pipeline` がある設定の `AccessDenied` と、`pipeline` の無い設定の `AccessDenied` 以外の読み取りの失敗では止まる | 検査を消す・`diff` だけに置く・渡した設定のファイルだけで判定する・渡した設定に `pipeline` が無ければ記録を読まない・`pipeline` の無い設定の `AccessDenied` で止める・`pipeline` がある設定の `AccessDenied` を通すと落ちる |
 | 決定 6（宣言した本番での反映の拒否） | 反映の手順（`infra/test/pipeline-stack.test.ts`）で、`cdk deploy` より前に、設定の値が `launch_declared` 真かつ `environment_kind` が `production` なら `exit 1` する。キーが無い・値の形が違う（期待する段階が `human` になる）・宣言していない本番・開発の設定では、この行で止まらない | 拒否の行を消す・`cdk deploy` の後へ動かす・`environment_kind` だけで判定すると落ちる |
