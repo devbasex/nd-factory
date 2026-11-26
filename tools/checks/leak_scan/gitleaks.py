@@ -14,6 +14,8 @@ from typing import Mapping
 from model import MARKER_RULE, ConfigError, Context, Finding, LogLine, Run, SkipKind
 
 DEFAULT_CONFIG_NAME = "gitleaks.default.toml"  # install-gitleaks.sh が gitleaks の隣に置く
+# -m: そのままではマージのコミットの差分が出ない。--text など: Git がバイナリとしたファイルの中身も読ませる
+GITLEAKS_LOG_OPTS = "-m --text --no-textconv --no-ext-diff --no-renames"
 
 _ANSI = re.compile(rb"\x1b\[[0-9;]*m")
 _LINE = re.compile(r"^\S+ (TRC|DBG|INF|WRN|ERR|FTL)(?: (.*))?$", re.DOTALL)

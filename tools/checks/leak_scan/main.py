@@ -43,9 +43,6 @@ from model import (  # noqa: E402
     Target,
 )
 
-# -m: そのままではマージのコミットの差分が出ない。--text など: Git がバイナリとしたファイルの中身も読ませる
-GITLEAKS_LOG_OPTS = "-m --text --no-textconv --no-ext-diff --no-renames"
-
 
 _Item = TypeVar("_Item")
 
@@ -229,7 +226,7 @@ def run_git(ctx: Context) -> Outcome:
         outcome.marks.add(Mark.HISTORY)
     listed = ctx.work / "listed"
     config, env = Path(ctx.config_arg), dict(os.environ)
-    log_opts = GITLEAKS_LOG_OPTS
+    log_opts = gitleaks.GITLEAKS_LOG_OPTS
     if ctx.range:
         log_opts += f" {ctx.range}"
     try:

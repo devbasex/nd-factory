@@ -124,9 +124,8 @@ class CopyRepo:
         rewrite = {str(n): t.commit for n, (t, _) in self.targets.items() if t.commit and not t.before}
         state = {"marker_prefix": ctx.marker_prefix, "rewrite": rewrite}
         env = install_relay(ctx.work / "relay-2", state, self._env)
-        run = gitleaks.run_gitleaks(
-            ctx, "git", self.root, config, "2", "-m --all --text --no-textconv --no-ext-diff --no-renames", env
-        )
+        log_opts = f"{gitleaks.GITLEAKS_LOG_OPTS} --all"
+        run = gitleaks.run_gitleaks(ctx, "git", self.root, config, "2", log_opts, env)
         found, matched = self._match_findings(run.findings or [], rewrite)
         ok = _is_complete_run(run) and matched
         return found, set() if ok else {mark}
