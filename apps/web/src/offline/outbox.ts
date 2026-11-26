@@ -140,13 +140,18 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
     return { ...(await unseal<OutboxBody>(key, row)), ...columns };
   }
 
+  // 行を復号して本文の一部を差し替え、暗号化し直した行
+  async function resealedRow<R extends OutboxRow>(key: CryptoKey, row: R, change: Partial<OutboxBody>): Promise<R> {
+    const body: OutboxBody = { ...(await unseal<OutboxBody>(key, row)), ...change };
+    return { ...row, ...(await seal(key, body)) };
+  }
+
   // 件の中身を書き直す。読んだ後に行が変わっていれば null
   async function rewrite(item: OutboxItem, change: Partial<OutboxBody>): Promise<OutboxItem | null> {
     const { key } = await ownerKeys();
     const row = await db.get("outbox", item.answerTag);
     if (row === undefined || !sameBytes(row.iv, item.iv)) return null;
-    const body: OutboxBody = { ...(await unseal<OutboxBody>(key, row)), ...change };
-    const next: OutboxRow = { ...row, ...(await seal(key, body)) };
+    const next: OutboxRow = await resealedRow(key, row, change);
     const tx = await writing();
     const current = await tx.objectStore("outbox").get(item.answerTag);
     const unchanged = current !== undefined && sameBytes(current.iv, item.iv);
@@ -269,8 +274,7 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
       if (row === undefined) return "missing";
       if (!sameBytes(row.iv, seenIv)) return "changed";
       const { key } = guard.keys;
-      const body: OutboxBody = { ...(await unseal<OutboxBody>(key, row)), sentItemId: itemId };
-      const next: OutboxRow = { ...row, ...(await seal(key, body)) };
+      const next: OutboxRow = await resealedRow(key, row, { sentItemId: itemId });
       // 書き込みの中で件の行が無いか変わっていたと分かったら、ここに残す
       const gone: { why: "missing" | "changed" | null } = { why: null };
       const result = await commitGuarded(guard, async (tx) => {
@@ -308,7 +312,8 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
       if (outcome.kind === "hold" && outcome.result !== undefined) {
         const row = (await db.get("outbox", item.answerTag)) ?? (await db.get("held", item.answerTag));
         if (row !== undefined) {
-          sealed = await seal(key, { ...(await unseal<OutboxBody>(key, row)), result: outcome.result });
+          const { iv, data } = await resealedRow(key, row, { result: outcome.result });
+          sealed = { iv, data };
         }
       }
       const tx = await writing();
