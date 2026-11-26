@@ -150,17 +150,32 @@ describe("待機の期限", () => {
 
   it("後の期限だけを書き、暗号化して残し、API の時刻は後の値だけにする", async () => {
     const db = await openDb();
-    await signedIn(db);
+    const { owner } = await signedIn(db);
     const wait = createSendWait({ db });
     await wait.write({ retryUntil: 2_000, backoffMs: 60_000 });
     await wait.write({ retryUntil: 1_000, backoffMs: 0 });
     expect(await wait.read()).toEqual({ retryUntil: 2_000, backoffMs: 60_000 });
-    await wait.writeApiTime(500);
-    await wait.writeApiTime(400);
+    await wait.writeApiTime(owner, 500);
+    await wait.writeApiTime(owner, 400);
     expect(await wait.readApiTime()).toBe(500);
     expect(new TextDecoder().decode((await db.get("wait", "retry"))!.data)).not.toContain("2000");
     await wait.clear();
     expect(await wait.read()).toBeNull();
+    db.close();
+  });
+
+  it("API の時刻は、その応答を受けたセッションが端末のログインの行に合うときだけ書く", async () => {
+    const db = await openDb();
+    const { owner } = await signedIn(db);
+    const wait = createSendWait({ db });
+    // 別のタブで入り直した後に、旧いセッションの応答の時刻が届く
+    await wait.writeApiTime({ ...owner, fingerprint: "fp-other" }, 500);
+    expect(await wait.readApiTime()).toBeNull();
+    // 利用者の切り替えに伴う隔離の間も書かない
+    const keys = (await db.get("keys", "main"))!;
+    await db.put("keys", { ...keys, switching: true });
+    await wait.writeApiTime(owner, 600);
+    expect(await db.get("wait", "api-time")).toBeUndefined();
     db.close();
   });
 

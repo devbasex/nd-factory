@@ -56,11 +56,10 @@ export async function openDummyDevice(connectivity: Connectivity, pending: boole
     ...(await seal(keys.key, {})),
   });
   const clock = createClock();
-  // 前に API の時刻を受けた端末にする。無いと、確定待ちは期限を確かめられず送らない
-  await createSendWait({ db }).writeApiTime(clock.epochMs());
-
   const session = { userId: USER, fingerprint: FINGERPRINT };
   const owner = { ...session, flagged: () => false };
+  // 前に API の時刻を受けた端末にする。無いと、確定待ちは期限を確かめられず送らない
+  await createSendWait({ db }).writeApiTime(owner, clock.epochMs());
   const sent: string[] = [];
   const record = () => void (document.documentElement.dataset["ndSent"] = JSON.stringify(sent));
   record();

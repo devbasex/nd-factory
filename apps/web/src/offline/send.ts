@@ -170,7 +170,7 @@ export function createSender(d: SendDeps): QueueSender {
     const ms = dateOf(date);
     if (ms === null) return;
     round.apiNow = ms;
-    await d.wait.writeApiTime(ms);
+    await d.wait.writeApiTime(round.owner, ms);
   }
 
   async function rateLimit(retryAfter: string | null, date: string | null): Promise<void> {

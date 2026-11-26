@@ -14,7 +14,7 @@ export type Owner = {
   flagged: () => boolean;
 };
 
-const SCOPE = ["keys", "login", "snapshots", "outbox", "held", "authz"] as const;
+const SCOPE = ["keys", "login", "snapshots", "outbox", "held", "authz", "wait"] as const;
 export type GuardedTx = IDBPTransaction<DeviceSchema, (typeof SCOPE)[number][], "readwrite">;
 
 export type Guard = {
@@ -41,7 +41,8 @@ async function readSessionRows(db: DeviceDb, owner: Owner) {
     tx.objectStore("authz").get("authz"),
   ]);
   await tx.done;
-  if (keys === undefined || login === undefined) return null;
+  // 利用者の切り替えに伴う隔離が始まっていれば、旧ログインの行が残っていても合わないとする
+  if (keys === undefined || keys.switching === true || login === undefined) return null;
   const [userTag, fingerprintTag] = await Promise.all([
     tagOf(keys.tagKey, owner.userId),
     tagOf(keys.tagKey, owner.fingerprint),
@@ -55,7 +56,13 @@ export async function sessionMatches(db: DeviceDb, owner: Owner): Promise<boolea
   return (await readSessionRows(db, owner)) !== null;
 }
 
-export async function prepareGuard(db: DeviceDb, owner: Owner): Promise<Guard | null> {
+// readAuthz が偽なら、見られる対象の記録を復号しない（authz は null）。記録を使わない書き込み
+// （保留の件の破棄）が、記録の破損で止まらないようにするため。記録の行の iv の照合は同じく行う
+export async function prepareGuard(
+  db: DeviceDb,
+  owner: Owner,
+  { readAuthz = true }: { readAuthz?: boolean } = {},
+): Promise<Guard | null> {
   const rows = await readSessionRows(db, owner);
   if (rows === null) return null;
   const { keys, login, authz } = rows;
@@ -65,7 +72,7 @@ export async function prepareGuard(db: DeviceDb, owner: Owner): Promise<Guard | 
     keys,
     loginIv: login.iv,
     authzIv: authz?.iv ?? null,
-    authz: authz === undefined ? null : await unseal<AuthzRecord>(keys.key, authz),
+    authz: authz === undefined || !readAuthz ? null : await unseal<AuthzRecord>(keys.key, authz),
   };
 }
 

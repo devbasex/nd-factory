@@ -116,11 +116,14 @@ export function createSync(d: SyncDeps): Sync {
 
   // この回で一覧の読み出しが受けた最後の API の Date。段 2 の初回の送信の sentAt に使う
   let roundDate: number | null = null;
-  async function noteDate<T extends { kind: string; date?: string | null }>(result: T): Promise<T> {
+  // 時刻は回の持ち主の照合と同じトランザクションで書く。応答を待つ間に別のタブでログインが替わって
+  // いれば書かずに回を止める
+  async function noteDate<T extends { kind: string; date?: string | null }>(result: T, owner: Owner): Promise<T> {
     const ms = result.kind === "ok" && typeof result.date === "string" ? Date.parse(result.date) : Number.NaN;
     if (!Number.isNaN(ms)) {
+      await d.wait.writeApiTime(owner, ms);
+      await guardOf(owner);
       roundDate = ms;
-      await d.wait.writeApiTime(ms);
     }
     return result;
   }
@@ -128,11 +131,11 @@ export function createSync(d: SyncDeps): Sync {
   // projects.list と teams.list を読んで、見られる範囲をそろえる。読み切れなければ null
   async function refresh(owner: Owner, deniedTeams: string[] = []): Promise<{ mismatch: Set<string> } | null> {
     const projectsStartSeq = await nextSeq(d.db);
-    const projects = await noteDate(checked(await d.readers.projects(owner), owner));
+    const projects = await noteDate(checked(await d.readers.projects(owner), owner), owner);
     const listedSeq = await nextSeq(d.db);
     if (projects.kind !== "ok") return null;
     const teamsStartSeq = await nextSeq(d.db);
-    const teams = await noteDate(checked(await d.readers.teams(owner), owner));
+    const teams = await noteDate(checked(await d.readers.teams(owner), owner), owner);
     const teamsEndSeq = await nextSeq(d.db);
     const read: ListsRead = {
       projects: projects.items,
@@ -183,7 +186,7 @@ export function createSync(d: SyncDeps): Sync {
     let unverified = false;
     // projects.list を読めない回は、何も移さない
     for (const teamId of new Set(accepts.map((item) => item.transfer!.teamId))) {
-      const result = await noteDate(checked(await d.readers.transfers(owner, teamId), owner));
+      const result = await noteDate(checked(await d.readers.transfers(owner, teamId), owner), owner);
       const mine = accepts.filter((item) => item.transfer!.teamId === teamId);
       if (result.kind === "temporary") unverified = true;
       else if (result.kind === "denied") {

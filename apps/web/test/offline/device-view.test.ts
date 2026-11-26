@@ -16,7 +16,7 @@ const empty: ScreenRead = { kind: "ok", snapshots: [], lists: [], missing: [] };
 async function setup({ apiTime = NOW as number | null, onStale = () => {} } = {}) {
   const t = await sendSetup();
   // 前に受けた API の Date。押したときの期限の下限になる
-  if (apiTime !== null) await t.wait.writeApiTime(apiTime);
+  if (apiTime !== null) await t.wait.writeApiTime(t.owner, apiTime);
   let online = true;
   const listeners = new Set<() => void>();
   const channel = new Set<() => void>();

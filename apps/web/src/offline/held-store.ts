@@ -49,7 +49,8 @@ export function createHeldStore({ db, owner }: { db: DeviceDb; owner: Owner }): 
     async discard(answerTag) {
       // ログインの行は token の取り直しでも書き換わるので、照合からやり直す
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const guard = await prepareGuard(db, owner);
+        // 破棄は記録を使わない。記録を復号できない端末でも、持ち主とセッションの照合だけで消せるようにする
+        const guard = await prepareGuard(db, owner, { readAuthz: false });
         if (guard === null) return "stale";
         let found = false;
         const result = await commitGuarded(guard, async (tx) => {

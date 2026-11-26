@@ -406,7 +406,7 @@ infra/lib/app-stack.ts
 | `nextAuthz` | 同上 | 新設 | `(prev: AuthzRecord \| null, read: ListsRead) => AuthzRecord` | 段 1 の表のとおり記録を作り直す |
 | `addDenied` | 同上 | 新設 | `(prev: AuthzRecord, id: string, deniedSeq: number) => AuthzRecord` | `denied` に足し世代を増やす |
 | `withAuthzLock` | 同上 | 新設 | `<T>(mode: "shared" \| "exclusive", fn: () => Promise<T>) => Promise<T>` | `nd-authz` の錠の中で打つ |
-| `prepareGuard` | `guarded-commit.ts` | 新設 | `(db: DeviceDb, owner: Owner) => Promise<Guard \| null>` | 設計文書の「利用者の境界」の照合と書き込みの手順 1・2（読み取りと持ち主の照合） |
+| `prepareGuard` | `guarded-commit.ts` | 新設 | `(db: DeviceDb, owner: Owner, o?: { readAuthz?: boolean }) => Promise<Guard \| null>` | 設計文書の「利用者の境界」の照合と書き込みの手順 1・2（読み取りと持ち主の照合）。`readAuthz` が偽なら見られる対象の記録を復号しない（記録を使わない保留の件の破棄と API の時刻の書き込みが、記録の破損で止まらないようにする） |
 | `commitGuarded` | 同上 | 新設 | `(guard: Guard, write: (tx: GuardedTx) => void) => Promise<"committed" \| "stale">` | 同じ照合と書き込みの手順 3（確認と書き込み） |
 | `createCacheStore` | `cache-store.ts` | 新設 | `(d: { db: DeviceDb; wallNow: () => number }) => CacheStore` | 写しの保存を組む |
 
@@ -430,7 +430,7 @@ infra/lib/app-stack.ts
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `prepareGuard` | 持ち主の違い・途中のフラグ | 別の利用者・サインアウト | 手順 1・2 | `null`（呼び出し元は捨てる） | 出さない | 起動の照合からやり直す |
+| `prepareGuard` | 持ち主の違い・途中のフラグ・利用者の切り替えに伴う隔離の始まり（キーの行の `switching`） | 別の利用者・サインアウト・別のタブでの利用者の切り替え | 手順 1・2 | `null`（呼び出し元は捨てる） | 出さない | 起動の照合からやり直す |
 | `commitGuarded` | `iv` の違い | 別タブの書き換え | 手順 3 の確認 | `stale` を返す | 出さない | 次の回で読み直す |
 | `commitGuarded` | `QuotaExceededError` | 容量の不足 | トランザクションの abort | 写しは捨てて表示を続ける。送る列の移動は呼び出し元へ返す | 写しは出さない | 次の読み出しで書き直す |
 | `createCacheStore` の `read` | 復号できない | 壊れ・キーの欠け | `unseal` | 全写しを消す | 読み直して描く。オフラインは空の状態 | 読み直し |
@@ -785,7 +785,7 @@ type OperationClass =
 | --- | --- | --- | --- | --- |
 | `createApiSender` | `api-transport.ts` | 新設 | `(d: SenderDeps) => (call: ApiCall) => Promise<ApiReply>` | 「送信の直前の照合と token の固定」の手順で 1 リクエストを送り、結果と HTTP の状態・ヘッダー・持ち主を返す |
 | `retryUntilFrom` | `send-wait.ts` | 新設 | `(retryAfter: string \| null, date: string \| null, nowMs: number, backoffMs: number) => { retryUntil: number; backoffMs: number }` | 429 の待機の期限を作る |
-| `createSendWait` | 同上 | 新設 | `(d: { db: DeviceDb }) => SendWait` | 待機の期限と `api-time` を暗号化して持つ |
+| `createSendWait` | 同上 | 新設 | `(d: { db: DeviceDb }) => SendWait` | 待機の期限と `api-time` を暗号化して持つ。`api-time` は `writeApiTime(owner, ms)` で、その応答を受けたセッションの持ち主の照合と同じトランザクションで書く（`commitGuarded`） |
 | `planRevocation` | `revocation.ts` | 新設 | `(read: ListsRead, local: LocalIndex) => RevocationPlan` | 消す写し・保留に移す件・新しい記録を決める（副作用なし） |
 | `applyRevocation` | 同上 | 新設 | `(guard: Guard, plan: RevocationPlan) => Promise<"committed" \| "stale">` | 1 トランザクションで反映し、全タブへ知らせる |
 | `holdDenied` | 同上 | 新設 | `(guard: Guard, o: { id: string; item?: OutboxItem }) => Promise<void>` | 403・404 の件の扱いと `denied` の記録を 1 トランザクションで行う |

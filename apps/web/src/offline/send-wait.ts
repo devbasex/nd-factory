@@ -1,6 +1,6 @@
 import { type Sealed, seal, unseal } from "./crypto.ts";
 import { type DeviceDb, readOwner } from "./db.ts";
-import { sameBytes } from "./guarded-commit.ts";
+import { commitGuarded, type Owner, prepareGuard, sameBytes } from "./guarded-commit.ts";
 
 // 429 の待機の期限と、最後に受けた API の時刻。タブをまたいで共有するので端末のデータベースに暗号化して置く
 
@@ -28,7 +28,9 @@ export type SendWait = {
   write(wait: RetryWait): Promise<void>;
   clear(): Promise<void>;
   readApiTime(): Promise<number | null>;
-  writeApiTime(ms: number): Promise<void>;
+  // owner はその Date を受けたリクエストのセッション。端末の持ち主とログインの行に合うときだけ、
+  // 照合と同じトランザクションで書く（別のタブで替わった後の新しいセッションへ、旧い応答の時刻を書かない）
+  writeApiTime(owner: Owner, ms: number): Promise<void>;
 };
 
 export function createSendWait({ db }: { db: DeviceDb }): SendWait {
@@ -61,11 +63,28 @@ export function createSendWait({ db }: { db: DeviceDb }): SendWait {
     }
   }
 
+  async function writeApiTime(owner: Owner, ms: number): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const guard = await prepareGuard(db, owner, { readAuthz: false });
+      if (guard === null) return;
+      const current = await load<number>("api-time");
+      if (current !== null && current.value >= ms) return;
+      const sealed: Sealed = await seal(guard.keys.key, ms);
+      const result = await commitGuarded(guard, async (tx) => {
+        const now = await tx.objectStore("wait").get("api-time");
+        if (!sameBytes(now?.iv ?? null, current?.iv ?? null)) return false;
+        await tx.objectStore("wait").put({ id: "api-time", ...sealed });
+        return true;
+      });
+      if (result === "committed") return;
+    }
+  }
+
   return {
     read: async () => (await load<RetryWait>("retry"))?.value ?? null,
     write: (wait) => writeLater("retry", wait, (w) => w.retryUntil),
     clear: () => db.delete("wait", "retry"),
     readApiTime: async () => (await load<number>("api-time"))?.value ?? null,
-    writeApiTime: (ms) => writeLater("api-time", ms, (v) => v),
+    writeApiTime,
   };
 }

@@ -49,6 +49,23 @@ describe("保留の件", () => {
     db.close();
   });
 
+  it("見られる対象の記録を復号できなくても、破棄を確定した件は消える", async () => {
+    const { db, store, answerTag } = await heldOne();
+    await db.put("authz", { id: "authz", iv: new Uint8Array(12), data: new ArrayBuffer(32) });
+    await expect(store.discard(answerTag)).resolves.toBe("deleted");
+    await expect(store.count()).resolves.toBe(0);
+    db.close();
+  });
+
+  it("別のタブで利用者の切り替えに伴う隔離が始まっていれば、破棄せずに stale を返す", async () => {
+    const { db, store, answerTag } = await heldOne();
+    const keys = (await db.get("keys", "main"))!;
+    await db.put("keys", { ...keys, switching: true });
+    await expect(store.discard(answerTag)).resolves.toBe("stale");
+    await expect(store.count()).resolves.toBe(1);
+    db.close();
+  });
+
   it("復号できない件は中身を null にして残す", async () => {
     const { db, store, answerTag } = await heldOne();
     const row = (await db.get("held", answerTag))!;

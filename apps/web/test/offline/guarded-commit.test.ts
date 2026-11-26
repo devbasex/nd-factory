@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it } from "vitest";
 import { seal } from "../../src/offline/crypto.ts";
-import { commitGuarded, prepareGuard } from "../../src/offline/guarded-commit.ts";
+import { commitGuarded, prepareGuard, sessionMatches } from "../../src/offline/guarded-commit.ts";
 import { freshIndexedDb, openDb, OTHER_USER, signedIn } from "./support.ts";
 
 beforeEach(freshIndexedDb);
@@ -29,6 +29,24 @@ describe("利用者の境界の照合と書き込み", () => {
   ])("%s には照合の控えを返さない", async (_, over) => {
     const { db, owner } = await setup();
     await expect(prepareGuard(db, { ...owner, ...over })).resolves.toBeNull();
+    db.close();
+  });
+
+  it("利用者の切り替えに伴う隔離が始まった後は、旧ログインの行が残っていても照合を通さない", async () => {
+    const { db, owner, keys } = await setup();
+    await db.put("keys", { ...keys, switching: true });
+    await expect(sessionMatches(db, owner)).resolves.toBe(false);
+    await expect(prepareGuard(db, owner)).resolves.toBeNull();
+    db.close();
+  });
+
+  it("記録を復号できなくても、記録を読まない控えは返す", async () => {
+    const { db, owner } = await setup();
+    await db.put("authz", { id: "authz", iv: new Uint8Array(12), data: new ArrayBuffer(32) });
+    await expect(prepareGuard(db, owner)).rejects.toThrow();
+    const guard = (await prepareGuard(db, owner, { readAuthz: false }))!;
+    expect(guard.authz).toBeNull();
+    await expect(commitGuarded(guard, (tx) => void tx.objectStore("snapshots").put(row))).resolves.toBe("committed");
     db.close();
   });
 
