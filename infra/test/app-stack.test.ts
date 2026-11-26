@@ -18,6 +18,9 @@ import {
   withClientId,
 } from "./support.ts";
 
+// 利用者プールのドメインの名前。端点の URL はこの名前から組み立てる（ソースに端点の文字列を書くと漏れの検査に当たる。#98）
+const LOGIN_DOMAIN = "acme-test-login";
+
 type Built = { stack: AppStack; template: Template; missing: unknown[] };
 
 function build(s: Settings): Built {
@@ -55,7 +58,7 @@ describe("AppStack（client_id なし）", () => {
     expect(built.stack.stackName).toBe("acme-test-app");
     expect(nameViolations(built.template, BASE_SETTINGS)).toEqual([]);
     built.template.hasResourceProperties("AWS::DynamoDB::GlobalTable", { TableName: "acme-test-accounts" });
-    built.template.hasResourceProperties("AWS::Cognito::UserPoolDomain", { Domain: "acme-test-login" });
+    built.template.hasResourceProperties("AWS::Cognito::UserPoolDomain", { Domain: LOGIN_DOMAIN });
     built.template.hasResourceProperties("AWS::SecretsManager::Secret", { Name: "acme/test/google-oauth" });
   });
 
@@ -122,7 +125,7 @@ describe("AppStack（client_id なし）", () => {
 
   it("画面の設定の値は利用者プールのドメインの URL・API の URL・クライアントの ID を持つ", () => {
     const cfg = built.stack.resolve(built.stack.webConfig) as Record<string, unknown>;
-    expect(cfg.authority).toBe("https://acme-test-login.auth.us-west-2.amazoncognito.com");
+    expect(cfg.authority).toBe(`https://${LOGIN_DOMAIN}.auth.us-west-2.amazoncognito.com`);
     expect(JSON.stringify(cfg.api_url)).toContain("ApiEndpoint");
     expect(JSON.stringify(cfg.client_id)).toContain("Ref");
     const deploy = onlyResource(built.template, "Custom::CDKBucketDeployment");

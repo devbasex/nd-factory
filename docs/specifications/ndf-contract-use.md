@@ -369,7 +369,7 @@ graph LR
 
 | 報告 | 結果 |
 | --- | --- |
-| 材料の欄が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000`・`https://github.com/acme/app/pull/1?token=0000`・`https://user:pass@github.com/acme/app/pull/1`・`https://docs.example.com/share/abcd` | 拒否。順に `host_not_allowed`・`query_present`・`userinfo_present`・`host_not_allowed`（表の上から最初に合わない条件のコードだけ） |
+| 材料の欄が `https://amzn-s3-demo-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000`・`https://github.com/acme/app/pull/1?token=0000`・`https://user:pass@github.com/acme/app/pull/1`・`https://docs.example.com/share/abcd` | 拒否。順に `host_not_allowed`・`query_present`・`userinfo_present`・`host_not_allowed`（表の上から最初に合わない条件のコードだけ） |
 | `材料: 本文` で、節に `[計画](https://acme-bucket…?X-Amz-Signature=0000)`・`<https://docs.example.com/share/abcd>`・`<a href="https://docs.example.com/share/abcd">計画</a>`・`http://github.com/acme/app/pull/1` | 拒否。`http://github.com/…` だけ `scheme_not_https`、ほかは `host_not_allowed` |
 | `材料: 本文` で、節に `[計画](//acme-bucket…?X-Amz-Signature=0000)`・`www.example.com/share?token=0000`・参照の定義 `[計画]: docs.example.com/share/abcd`・裸の `docs.example.com/share/abcd` | 拒否。`www.` の形だけ `scheme_not_https`（`http://` を補った後に当てる）、ほかは `url_not_absolute` |
 | `材料: 本文` で、節のインラインのコードかコードブロックに `https://acme-bucket…?X-Amz-Signature=0000` | 拒否。`host_not_allowed`（コードの中の URL も見つける） |
@@ -459,7 +459,7 @@ graph LR
 | `filePathPattern` で、`<名前>` が `/` を含む文字列に一致せず、`.` が `.` だけに一致し、`path` の特殊文字が任意の文字に一致しない | 同上 |
 | 固定の点の区間の報告のサンプル 16 件で、`result` と `errors` の有無がサンプルと同じ | 同上（フィクスチャ `fixtures/ndf-contract-8d22be7/unattended-report.json`） |
 | 同じ項目の後勝ち。結果の行が 2 つあれば最後を採る。`判断が要る` の `材料: 無し` が誤りで、`完了`・`できなかった` の `材料: 無し` は誤りでない。条件つきで要る項目（`区分: ndf-gate:…` の `承認ゲート`）を確かめる。コードブロック（`` ``` `` と `~~~~`）・HTML のブロック・リストの中の見出し風の行を見出しとみなさず、最後の見出しの節を返し、節が次の ATX か Setext の見出しの前で終わる。URL を空白で区切った並びを受ける | 同上 |
-| 材料の欄が `https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url` のとき、誤りの一覧が `material_form_invalid`・`材料` の 1 件だけで、文字列にしても値を含まない | 同上 |
+| 材料の欄が `https://amzn-s3-demo-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url` のとき、誤りの一覧が `material_form_invalid`・`材料` の 1 件だけで、文字列にしても値を含まない | 同上 |
 | 作り物の契約と使い方で食い違いが 0 件。使わないインタフェースのサンプルの `valid` を逆にしても食い違いが出ない | `tools/test/ndf-contract-check.test.ts`（フィクスチャ `tools/test/fixtures/ndf-contract-8d22be7/`） |
 | 使うインタフェースへのサンプル 1 件の参照先を `no-such-entrypoint` にすると、そのサンプルの id を含む 1 項目目の行が出る。生成の `target`・`path`・`required`・`commit` だけを変えると、それぞれ 6・4・5・6 項目目の食い違いになる | 同上 |
 | 書き出しが無く、取得先が取得できない値でも、`fail: no-contract-use <固定の点>` と終了コード 1 で、`read:` の行を出さない。食い違いが無ければ終了コード 0 で `checked:` の行を出し、`skip:` の行を出さない | 同上 |

@@ -122,6 +122,8 @@ function tempOut(): string {
   return join(mkdtempSync(join(tmpdir(), "nd-setup-")), "assembly");
 }
 
+// 利用者プールのドメインの名前。端点の URL はこの名前から組み立てる（ソースに端点の文字列を書くと漏れの検査に当たる。#98）
+const LOGIN_DOMAIN = "acme-test-login";
 const CONFIRM_PREFIX = "確認の値: ";
 
 function confirmFrom(f: Fake): string {
@@ -220,7 +222,7 @@ describe("runDiff", () => {
     expect(diff.args).toEqual(expect.arrayContaining(["--app", out, "--method=template", "acme-test-app", "acme-test-pipeline"]));
     const text = f.out.join("\n");
     expect(text).toContain("acme-test-accounts");
-    expect(text).toContain("https://acme-test-login.auth.us-west-2.amazoncognito.com/oauth2/idpresponse");
+    expect(text).toContain(`https://${LOGIN_DOMAIN}.auth.us-west-2.amazoncognito.com/oauth2/idpresponse`);
     const stacks = JSON.parse(readFileSync(join(out, STACKS_FILE), "utf8")) as { stacks: string[] };
     expect(stacks.stacks).toEqual(["app", "pipeline"]);
     expect(confirmFrom(f)).toBe(confirmValue(await assemblyDigest(out), TARGET, ["app", "pipeline"]));

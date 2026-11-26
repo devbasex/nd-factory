@@ -256,9 +256,9 @@ describe("readReportWith", () => {
     });
 
     it.each([
-      ["``` のコードブロック", "```\n## 判断の材料\n\nhttps://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf\n```\n\n"],
+      ["``` のコードブロック", "```\n## 判断の材料\n\nhttps://amzn-s3-demo-bucket.s3.us-west-2.amazonaws.com/plan.pdf\n```\n\n"],
       ["~~~~ のコードブロック", "~~~~\n## 判断の材料\n~~~~\n\n"],
-      ["<div> で始まる HTML のブロック", "<div>\n## 判断の材料\nhttps://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf\n</div>\n\n"],
+      ["<div> で始まる HTML のブロック", "<div>\n## 判断の材料\nhttps://amzn-s3-demo-bucket.s3.us-west-2.amazonaws.com/plan.pdf\n</div>\n\n"],
       ["リストの項目", "- 項目\n  ## 判断の材料\n\n"],
       ["引用", "> ## 判断の材料\n\n"],
     ])("%s の中の ## 判断の材料 を見出しとみなさない", (_why, inner) => {
@@ -318,7 +318,7 @@ describe("readReportWith", () => {
     });
 
     it("材料が URL の並びでないと material_form_invalid の 1 件だけで、誤りの一覧に値を入れない", () => {
-      const value = "https://acme-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url";
+      const value = "https://amzn-s3-demo-bucket.s3.us-west-2.amazonaws.com/plan.pdf?X-Amz-Signature=0000 not-a-url";
       const got = read(report("判断が要る", { ...GATE, 材料: value }));
       expect(got.errors).toEqual([{ code: "material_form_invalid", item: "材料" }]);
       const text = JSON.stringify(got.errors);

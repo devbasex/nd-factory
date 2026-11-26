@@ -4,19 +4,19 @@
   "v": 1,
   "at": "2026-11-24T12:13:10Z"
  },
- "title": "nd-factory 画面モック（オーガナイザーを主にする地図）",
+ "title": "nd-factory 画面モック（画面マップの 16 本のルート）",
  "launch": {
   "view": "canvas",
-  "page": "organizer"
+  "page": "foundation"
  },
  "pages": [
   {
-   "id": "organizer",
-   "name": "オーガナイザー（#140）"
+   "id": "foundation",
+   "name": "画面の基盤（#12）"
   },
   {
-   "id": "legacy",
-   "name": "旧い側の画面（作り直す前）"
+   "id": "organizer",
+   "name": "オーガナイザー（#140）"
   }
  ],
  "boards": {
@@ -70,778 +70,581 @@
    "title": "#279 メニュー（スマートフォン）",
    "page": "organizer"
   },
-  "Account.dc.html": {
-   "expand": "fill",
-   "h": 800,
-   "title": "/settings プロフィール（自分の設定）",
-   "w": 1440,
-   "x": 0,
-   "y": 13290,
-   "page": "legacy"
-  },
-  "AccountSettings.dc.html": {
-   "expand": "fill",
-   "h": 1100,
-   "title": "/settings/execution 実行の手段",
-   "w": 1440,
-   "x": 3040,
-   "y": 10750,
-   "page": "legacy"
-  },
-  "ApprovalDetail.dc.html": {
-   "expand": "fill",
-   "h": 1700,
-   "title": "/approvals/:id 承認の詳細（設計承認ゲート）",
-   "w": 1440,
-   "x": 3040,
-   "y": 4020,
-   "page": "legacy"
-  },
-  "ApprovalRelease.dc.html": {
-   "expand": "fill",
-   "h": 1500,
-   "title": "/approvals/:id 承認の詳細（リリース承認ゲート）",
-   "w": 1440,
-   "x": 4560,
-   "y": 4020,
-   "page": "legacy"
-  },
-  "ApprovalReleaseProject.dc.html": {
-   "expand": "fill",
-   "h": 1300,
-   "title": "/approvals/:id リリース承認・2 リポジトリ（予定 #176）",
-   "w": 1440,
-   "x": 6080,
-   "y": 20000,
-   "page": "legacy"
-  },
-  "Approvals.dc.html": {
-   "expand": "fill",
-   "h": 900,
-   "title": "/approvals 承認待ちの一覧",
-   "w": 1440,
-   "x": 1520,
-   "y": 4020,
-   "page": "legacy"
-  },
-  "Components.dc.html": {
-   "expand": "fill",
-   "h": 3500,
-   "title": "部品の一覧（ライト）",
-   "w": 1440,
+  "R01Phone.dc.html": {
    "x": 0,
    "y": 0,
-   "page": "legacy"
+   "w": 390,
+   "h": 844,
+   "title": "R1 /signin（スマートフォン）",
+   "page": "foundation"
   },
-  "ComponentsDark.dc.html": {
-   "expand": "fill",
-   "h": 2600,
-   "title": "部品の一覧（ダーク）",
-   "w": 1440,
-   "x": 1520,
+  "R01Tablet.dc.html": {
+   "x": 470,
    "y": 0,
-   "page": "legacy"
+   "w": 834,
+   "h": 1112,
+   "title": "R1 /signin（タブレット）",
+   "page": "foundation"
   },
-  "EmptyStates.dc.html": {
-   "expand": "fill",
-   "h": 900,
-   "title": "0 件のときの表示（6 画面）",
-   "w": 1440,
-   "x": 10640,
-   "y": 4020,
-   "page": "legacy"
-  },
-  "Home.dc.html": {
-   "expand": "fill",
-   "h": 1000,
-   "title": "/home ホーム",
-   "w": 1440,
-   "x": 0,
-   "y": 4020,
-   "page": "legacy"
-  },
-  "HomeFirstRun.dc.html": {
-   "expand": "fill",
-   "h": 1000,
-   "title": "/home ホーム（はじめの手順・範囲外: 別の課題で要否を決める）",
-   "w": 1440,
-   "x": 9120,
-   "y": 4020,
-   "page": "legacy"
-  },
-  "InstructionDrawer.dc.html": {
-   "expand": "fill",
-   "h": 1480,
-   "title": "オーガナイザーへ指示（どの画面からも開く右の欄・予定 #177）",
-   "w": 1440,
-   "x": 0,
-   "y": 21720,
-   "page": "legacy"
-  },
-  "IssueNew.dc.html": {
-   "expand": "fill",
-   "h": 1420,
-   "title": "/issues/new 課題を起こす（予定 #177）",
-   "w": 1440,
-   "x": 1520,
-   "y": 21720,
-   "page": "legacy"
-  },
-  "Login.dc.html": {
-   "expand": "fill",
-   "h": 800,
-   "title": "/login ログイン",
-   "w": 1440,
-   "x": 7600,
-   "y": 13290,
-   "page": "legacy"
-  },
-  "LoopDetail.dc.html": {
-   "expand": "fill",
-   "h": 1320,
-   "title": "/loops/:id ループの詳細",
-   "w": 1440,
-   "x": 6080,
-   "y": 5840,
-   "page": "legacy"
-  },
-  "Loops.dc.html": {
-   "expand": "fill",
-   "h": 900,
-   "title": "/loops ループ",
-   "w": 1440,
-   "x": 4560,
-   "y": 5840,
-   "page": "legacy"
-  },
-  "Main.dc.html": {
-   "expand": "fill",
-   "h": 1000,
-   "title": "/sprints スプリントの一覧",
-   "w": 1440,
-   "x": 1520,
-   "y": 5840,
-   "page": "legacy"
-  },
-  "MeDelegations.dc.html": {
-   "expand": "fill",
-   "h": 1000,
-   "title": "/settings/delegations エージェントへの委任",
-   "w": 1440,
-   "x": 4560,
-   "y": 13290,
-   "page": "legacy"
-  },
-  "MeKeyboard.dc.html": {
-   "expand": "fill",
-   "h": 800,
-   "title": "/settings/keyboard キーボード",
-   "w": 1440,
-   "x": 6080,
-   "y": 13290,
-   "page": "legacy"
-  },
-  "MeLoginLinks.dc.html": {
-   "expand": "fill",
-   "h": 800,
-   "title": "/settings/login-links ログインの連携",
-   "w": 1440,
-   "x": 1520,
-   "y": 13290,
-   "page": "legacy"
-  },
-  "MeTeams.dc.html": {
-   "expand": "fill",
-   "h": 800,
-   "title": "/settings/teams 所属チーム",
-   "w": 1440,
-   "x": 3040,
-   "y": 13290,
-   "page": "legacy"
-  },
-  "Mobile.dc.html": {
-   "h": 844,
-   "title": "スマホ: スプリントの一覧",
-   "w": 390,
-   "x": 3290,
-   "y": 14710,
-   "page": "legacy"
-  },
-  "MobileAccount.dc.html": {
-   "h": 1000,
-   "title": "スマホ: 自分の設定（プロフィール）",
-   "w": 390,
-   "x": 1410,
-   "y": 18150,
-   "page": "legacy"
-  },
-  "MobileAccountSettings.dc.html": {
-   "h": 1700,
-   "title": "スマホ: 実行の手段",
-   "w": 390,
-   "x": 4700,
-   "y": 16330,
-   "page": "legacy"
-  },
-  "MobileApprovalDetail.dc.html": {
-   "h": 844,
-   "title": "スマホ: 承認の詳細",
-   "w": 390,
-   "x": 1410,
-   "y": 14710,
-   "page": "legacy"
-  },
-  "MobileApprovals.dc.html": {
-   "h": 900,
-   "title": "スマホ: 承認待ちの一覧",
-   "w": 390,
-   "x": 940,
-   "y": 14710,
-   "page": "legacy"
-  },
-  "MobileComponentsPalette.dc.html": {
-   "h": 844,
-   "title": "スマホ: 部品（コマンドパレット）",
-   "w": 390,
-   "x": 4700,
-   "y": 18150,
-   "page": "legacy"
-  },
-  "MobileComponentsSelect.dc.html": {
-   "h": 900,
-   "title": "スマホ: 部品（フォームと選択の欄）",
-   "w": 390,
-   "x": 3760,
-   "y": 18150,
-   "page": "legacy"
-  },
-  "MobileComponentsStates.dc.html": {
-   "h": 1000,
-   "title": "スマホ: 部品（読み込み中・0 件・失敗）",
-   "w": 390,
-   "x": 4230,
-   "y": 18150,
-   "page": "legacy"
-  },
-  "MobileHome.dc.html": {
-   "h": 844,
-   "title": "スマホ: ホーム",
-   "w": 390,
-   "x": 470,
-   "y": 14710,
-   "page": "legacy"
-  },
-  "MobileInstruction.dc.html": {
-   "h": 844,
-   "title": "スマホ: オーガナイザーへ指示（予定 #177）",
-   "w": 390,
-   "x": 3040,
-   "y": 21720,
-   "page": "legacy"
-  },
-  "MobileLogin.dc.html": {
-   "h": 844,
-   "title": "スマホ: ログイン",
-   "w": 390,
-   "x": 0,
-   "y": 14710,
-   "page": "legacy"
-  },
-  "MobileLoopDetail.dc.html": {
-   "h": 1500,
-   "title": "スマホ: ループの詳細",
-   "w": 390,
-   "x": 470,
-   "y": 16330,
-   "page": "legacy"
-  },
-  "MobileLoops.dc.html": {
-   "h": 900,
-   "title": "スマホ: ループ",
-   "w": 390,
-   "x": 3760,
-   "y": 14710,
-   "page": "legacy"
-  },
-  "MobileMeDelegations.dc.html": {
-   "h": 1150,
-   "title": "スマホ: エージェントへの委任",
-   "w": 390,
-   "x": 2820,
-   "y": 18150,
-   "page": "legacy"
-  },
-  "MobileMeKeyboard.dc.html": {
-   "h": 900,
-   "title": "スマホ: キーボード",
-   "w": 390,
-   "x": 3290,
-   "y": 18150,
-   "page": "legacy"
-  },
-  "MobileMeLoginLinks.dc.html": {
-   "h": 844,
-   "title": "スマホ: ログインの連携",
-   "w": 390,
-   "x": 1880,
-   "y": 18150,
-   "page": "legacy"
-  },
-  "MobileMeTeams.dc.html": {
-   "h": 844,
-   "title": "スマホ: 所属チーム",
-   "w": 390,
-   "x": 2350,
-   "y": 18150,
-   "page": "legacy"
-  },
-  "MobileNewSprint.dc.html": {
-   "h": 1150,
-   "title": "スマホ: スプリントを始める",
-   "w": 390,
-   "x": 2350,
-   "y": 16330,
-   "page": "legacy"
-  },
-  "MobilePhysical.dc.html": {
-   "h": 1000,
-   "title": "スマホ: マシンと実行",
-   "w": 390,
-   "x": 4700,
-   "y": 14710,
-   "page": "legacy"
-  },
-  "MobilePlanDetail.dc.html": {
-   "h": 1400,
-   "title": "スマホ: 開発計画の詳細",
-   "w": 390,
-   "x": 2820,
-   "y": 14710,
-   "page": "legacy"
-  },
-  "MobilePlanNew.dc.html": {
-   "h": 1500,
-   "title": "スマホ: 開発計画を作る",
-   "w": 390,
-   "x": 2350,
-   "y": 14710,
-   "page": "legacy"
-  },
-  "MobilePlans.dc.html": {
-   "h": 844,
-   "title": "スマホ: 開発計画",
-   "w": 390,
-   "x": 1880,
-   "y": 14710,
-   "page": "legacy"
-  },
-  "MobileRepositories.dc.html": {
-   "h": 844,
-   "title": "スマホ: リポジトリ",
-   "w": 390,
-   "x": 4230,
-   "y": 14710,
-   "page": "legacy"
-  },
-  "MobileRepositoryBacklog.dc.html": {
-   "h": 1100,
-   "title": "スマホ: バックログ",
-   "w": 390,
-   "x": 1410,
-   "y": 16330,
-   "page": "legacy"
-  },
-  "MobileRepositoryDetail.dc.html": {
-   "h": 900,
-   "title": "スマホ: リポジトリの詳細",
-   "w": 390,
-   "x": 940,
-   "y": 16330,
-   "page": "legacy"
-  },
-  "MobileRepositoryLoops.dc.html": {
-   "h": 1400,
-   "title": "スマホ: ループ（リポジトリ）",
-   "w": 390,
-   "x": 1880,
-   "y": 16330,
-   "page": "legacy"
-  },
-  "MobileRoles.dc.html": {
-   "h": 1100,
-   "title": "スマホ: 役割の流れ",
-   "w": 390,
-   "x": 5170,
-   "y": 14710,
-   "page": "legacy"
-  },
-  "MobileSettingsGeneral.dc.html": {
-   "h": 844,
-   "title": "スマホ: 一般",
-   "w": 390,
-   "x": 3760,
-   "y": 16330,
-   "page": "legacy"
-  },
-  "MobileSettingsMachines.dc.html": {
-   "h": 1250,
-   "title": "スマホ: マシン",
-   "w": 390,
-   "x": 470,
-   "y": 18150,
-   "page": "legacy"
-  },
-  "MobileSettingsMembers.dc.html": {
-   "h": 1000,
-   "title": "スマホ: メンバーと席",
-   "w": 390,
-   "x": 4230,
-   "y": 16330,
-   "page": "legacy"
-  },
-  "MobileSettingsMenu.dc.html": {
-   "h": 844,
-   "title": "スマホ: アカウントの設定",
-   "w": 390,
-   "x": 3290,
-   "y": 16330,
-   "page": "legacy"
-  },
-  "MobileSettingsNotifications.dc.html": {
-   "h": 900,
-   "title": "スマホ: 通知",
-   "w": 390,
-   "x": 940,
-   "y": 18150,
-   "page": "legacy"
-  },
-  "MobileSettingsRepositories.dc.html": {
-   "h": 1400,
-   "title": "スマホ: リポジトリの連携",
-   "w": 390,
-   "x": 5170,
-   "y": 16330,
-   "page": "legacy"
-  },
-  "MobileSettingsWorkflowSteps.dc.html": {
-   "h": 1250,
-   "title": "スマホ: 工程の有効・無効の既定",
-   "w": 390,
-   "x": 0,
-   "y": 18150,
-   "page": "legacy"
-  },
-  "MobileSprintDetail.dc.html": {
-   "h": 844,
-   "title": "スマホ: スプリントの詳細",
-   "w": 390,
-   "x": 0,
-   "y": 16330,
-   "page": "legacy"
-  },
-  "MobileTeamNew.dc.html": {
-   "h": 844,
-   "title": "スマホ: チームを作る",
-   "w": 390,
-   "x": 2820,
-   "y": 16330,
-   "page": "legacy"
-  },
-  "NewSprint.dc.html": {
-   "expand": "fill",
-   "h": 1000,
-   "title": "/repositories/:id/sprints/new スプリントを始める",
-   "w": 1440,
-   "x": 6080,
-   "y": 8060,
-   "page": "legacy"
-  },
-  "PaletteDark.dc.html": {
-   "expand": "fill",
-   "h": 1000,
-   "title": "コマンドパレットを開いた一覧（ダーク）",
-   "w": 1440,
-   "x": 3040,
+  "R01Pc.dc.html": {
+   "x": 1384,
    "y": 0,
-   "page": "legacy"
-  },
-  "Physical.dc.html": {
-   "expand": "fill",
-   "h": 1150,
-   "title": "/factory/machines マシンと実行",
    "w": 1440,
-   "x": 7600,
-   "y": 8060,
-   "page": "legacy"
-  },
-  "PlanDetail.dc.html": {
-   "expand": "fill",
-   "h": 1200,
-   "title": "/plans/:id 開発計画の詳細（対象: リポジトリ）",
-   "w": 1440,
-   "x": 0,
-   "y": 5840,
-   "page": "legacy"
-  },
-  "PlanDetailProject.dc.html": {
-   "expand": "fill",
-   "h": 1050,
-   "title": "/plans/:id 開発計画の詳細（対象: プロジェクト・予定 #176）",
-   "w": 1440,
-   "x": 4560,
-   "y": 20000,
-   "page": "legacy"
-  },
-  "PlanNew.dc.html": {
-   "expand": "fill",
-   "h": 1100,
-   "title": "/plans/new 開発計画を作る（対象: リポジトリ）",
-   "w": 1440,
-   "x": 7600,
-   "y": 4020,
-   "page": "legacy"
-  },
-  "PlanNewProject.dc.html": {
-   "expand": "fill",
-   "h": 1300,
-   "title": "/plans/new 開発計画を作る（対象: プロジェクト・予定 #176）",
-   "w": 1440,
-   "x": 3040,
-   "y": 20000,
-   "page": "legacy"
-  },
-  "Plans.dc.html": {
-   "expand": "fill",
    "h": 900,
-   "title": "/plans 開発計画",
-   "w": 1440,
-   "x": 6080,
-   "y": 4020,
-   "page": "legacy"
+   "title": "R1 /signin（PC）",
+   "page": "foundation"
   },
-  "ProjectDetail.dc.html": {
-   "expand": "fill",
-   "h": 1250,
-   "title": "/projects/:id プロジェクトの詳細（予定 #176）",
-   "w": 1440,
-   "x": 1520,
-   "y": 20000,
-   "page": "legacy"
+  "R02Phone.dc.html": {
+   "x": 0,
+   "y": 1400,
+   "w": 390,
+   "h": 844,
+   "title": "R2 /（スマートフォン）",
+   "page": "foundation"
   },
-  "Projects.dc.html": {
-   "expand": "fill",
+  "R02Tablet.dc.html": {
+   "x": 470,
+   "y": 1400,
+   "w": 834,
+   "h": 1112,
+   "title": "R2 /（タブレット）",
+   "page": "foundation"
+  },
+  "R02Pc.dc.html": {
+   "x": 1384,
+   "y": 1400,
+   "w": 1440,
    "h": 900,
-   "title": "/projects プロジェクト（予定 #176）",
-   "w": 1440,
-   "x": 0,
-   "y": 20000,
-   "page": "legacy"
+   "title": "R2 /（PC）",
+   "page": "foundation"
   },
-  "Repositories.dc.html": {
-   "expand": "fill",
+  "R03Phone.dc.html": {
+   "x": 0,
+   "y": 2800,
+   "w": 390,
+   "h": 844,
+   "title": "R3 /p/:projectId（スマートフォン）",
+   "page": "foundation"
+  },
+  "R03Tablet.dc.html": {
+   "x": 470,
+   "y": 2800,
+   "w": 834,
+   "h": 1112,
+   "title": "R3 /p/:projectId（タブレット）",
+   "page": "foundation"
+  },
+  "R03Pc.dc.html": {
+   "x": 1384,
+   "y": 2800,
+   "w": 1440,
    "h": 900,
-   "title": "/repositories リポジトリ",
-   "w": 1440,
+   "title": "R3 /p/:projectId（PC）",
+   "page": "foundation"
+  },
+  "R04Phone.dc.html": {
    "x": 0,
-   "y": 8060,
-   "page": "legacy"
+   "y": 4200,
+   "w": 390,
+   "h": 844,
+   "title": "R4 /p/:projectId/start（スマートフォン）",
+   "page": "foundation"
   },
-  "RepositoryBacklog.dc.html": {
-   "expand": "fill",
-   "h": 1000,
-   "title": "/repositories/:id/backlog バックログ",
+  "R04Tablet.dc.html": {
+   "x": 470,
+   "y": 4200,
+   "w": 834,
+   "h": 1112,
+   "title": "R4 /p/:projectId/start（タブレット）",
+   "page": "foundation"
+  },
+  "R04Pc.dc.html": {
+   "x": 1384,
+   "y": 4200,
    "w": 1440,
-   "x": 3040,
-   "y": 8060,
-   "page": "legacy"
-  },
-  "RepositoryDetail.dc.html": {
-   "expand": "fill",
-   "h": 1000,
-   "title": "/repositories/:id リポジトリの詳細（概要）",
-   "w": 1440,
-   "x": 1520,
-   "y": 8060,
-   "page": "legacy"
-  },
-  "RepositoryLoops.dc.html": {
-   "expand": "fill",
-   "h": 1100,
-   "title": "/repositories/:id/loops ループ",
-   "w": 1440,
-   "x": 4560,
-   "y": 8060,
-   "page": "legacy"
-  },
-  "Roles.dc.html": {
-   "expand": "fill",
-   "h": 1000,
-   "title": "/factory/roles 役割の流れ",
-   "w": 1440,
-   "x": 0,
-   "y": 9330,
-   "page": "legacy"
-  },
-  "SettingsGeneral.dc.html": {
-   "expand": "fill",
    "h": 900,
-   "title": "/settings 一般",
-   "w": 1440,
+   "title": "R4 /p/:projectId/start（PC）",
+   "page": "foundation"
+  },
+  "R05Phone.dc.html": {
    "x": 0,
-   "y": 10750,
-   "page": "legacy"
+   "y": 5600,
+   "w": 390,
+   "h": 844,
+   "title": "R5 /p/:projectId/sprints/:sprintId（スマートフォン）",
+   "page": "foundation"
   },
-  "SettingsMachines.dc.html": {
-   "expand": "fill",
-   "h": 1000,
-   "title": "/settings/machines マシン",
+  "R05Tablet.dc.html": {
+   "x": 470,
+   "y": 5600,
+   "w": 834,
+   "h": 1112,
+   "title": "R5 /p/:projectId/sprints/:sprintId（タブレット）",
+   "page": "foundation"
+  },
+  "R05Pc.dc.html": {
+   "x": 1384,
+   "y": 5600,
    "w": 1440,
-   "x": 7600,
-   "y": 10750,
-   "page": "legacy"
-  },
-  "SettingsMembers.dc.html": {
-   "expand": "fill",
-   "h": 1000,
-   "title": "/settings/members メンバーと席",
-   "w": 1440,
-   "x": 1520,
-   "y": 10750,
-   "page": "legacy"
-  },
-  "SettingsNotifications.dc.html": {
-   "expand": "fill",
    "h": 900,
-   "title": "/settings/notifications 通知",
-   "w": 1440,
+   "title": "R5 /p/:projectId/sprints/:sprintId（PC）",
+   "page": "foundation"
+  },
+  "R06Phone.dc.html": {
    "x": 0,
-   "y": 11970,
-   "page": "legacy"
+   "y": 7000,
+   "w": 390,
+   "h": 844,
+   "title": "R6 /p/:projectId/approvals/:approvalId（スマートフォン）",
+   "page": "foundation"
   },
-  "SettingsRepositories.dc.html": {
-   "expand": "fill",
-   "h": 1000,
-   "title": "/settings/repositories リポジトリの連携",
-   "w": 1440,
-   "x": 4560,
-   "y": 10750,
-   "page": "legacy"
+  "R06Tablet.dc.html": {
+   "x": 470,
+   "y": 7000,
+   "w": 834,
+   "h": 1112,
+   "title": "R6 /p/:projectId/approvals/:approvalId（タブレット）",
+   "page": "foundation"
   },
-  "SettingsWorkflowSteps.dc.html": {
-   "expand": "fill",
-   "h": 1100,
-   "title": "/settings/workflow-steps モードごとの工程",
+  "R06Pc.dc.html": {
+   "x": 1384,
+   "y": 7000,
    "w": 1440,
-   "x": 6080,
-   "y": 10750,
-   "page": "legacy"
+   "h": 900,
+   "title": "R6 /p/:projectId/approvals/:approvalId（PC）",
+   "page": "foundation"
   },
-  "SprintDetail.dc.html": {
-   "expand": "fill",
-   "h": 1650,
-   "title": "/sprints/:id スプリントの詳細",
-   "w": 1440,
-   "x": 3040,
-   "y": 5840,
-   "page": "legacy"
+  "R07Phone.dc.html": {
+   "x": 0,
+   "y": 8400,
+   "w": 390,
+   "h": 844,
+   "title": "R7 /p/:projectId/questions/:questionId（スマートフォン）",
+   "page": "foundation"
   },
-  "TeamNew.dc.html": {
-   "expand": "fill",
-   "h": 800,
-   "title": "/teams/new チームを作る",
+  "R07Tablet.dc.html": {
+   "x": 470,
+   "y": 8400,
+   "w": 834,
+   "h": 1112,
+   "title": "R7 /p/:projectId/questions/:questionId（タブレット）",
+   "page": "foundation"
+  },
+  "R07Pc.dc.html": {
+   "x": 1384,
+   "y": 8400,
    "w": 1440,
-   "x": 1520,
-   "y": 11970,
-   "page": "legacy"
+   "h": 900,
+   "title": "R7 /p/:projectId/questions/:questionId（PC）",
+   "page": "foundation"
+  },
+  "R08Phone.dc.html": {
+   "x": 0,
+   "y": 9800,
+   "w": 390,
+   "h": 844,
+   "title": "R8 /p/:projectId/settings（スマートフォン）",
+   "page": "foundation"
+  },
+  "R08Tablet.dc.html": {
+   "x": 470,
+   "y": 9800,
+   "w": 834,
+   "h": 1112,
+   "title": "R8 /p/:projectId/settings（タブレット）",
+   "page": "foundation"
+  },
+  "R08Pc.dc.html": {
+   "x": 1384,
+   "y": 9800,
+   "w": 1440,
+   "h": 900,
+   "title": "R8 /p/:projectId/settings（PC）",
+   "page": "foundation"
+  },
+  "R09Phone.dc.html": {
+   "x": 0,
+   "y": 11200,
+   "w": 390,
+   "h": 844,
+   "title": "R9 /t/:teamId（スマートフォン）",
+   "page": "foundation"
+  },
+  "R09Tablet.dc.html": {
+   "x": 470,
+   "y": 11200,
+   "w": 834,
+   "h": 1112,
+   "title": "R9 /t/:teamId（タブレット）",
+   "page": "foundation"
+  },
+  "R09Pc.dc.html": {
+   "x": 1384,
+   "y": 11200,
+   "w": 1440,
+   "h": 900,
+   "title": "R9 /t/:teamId（PC）",
+   "page": "foundation"
+  },
+  "R10Phone.dc.html": {
+   "x": 0,
+   "y": 12600,
+   "w": 390,
+   "h": 844,
+   "title": "R10 /t/:teamId/projects/new（スマートフォン）",
+   "page": "foundation"
+  },
+  "R10Tablet.dc.html": {
+   "x": 470,
+   "y": 12600,
+   "w": 834,
+   "h": 1112,
+   "title": "R10 /t/:teamId/projects/new（タブレット）",
+   "page": "foundation"
+  },
+  "R10Pc.dc.html": {
+   "x": 1384,
+   "y": 12600,
+   "w": 1440,
+   "h": 900,
+   "title": "R10 /t/:teamId/projects/new（PC）",
+   "page": "foundation"
+  },
+  "R11Phone.dc.html": {
+   "x": 0,
+   "y": 14000,
+   "w": 390,
+   "h": 844,
+   "title": "R11 /t/:teamId/execution（スマートフォン）",
+   "page": "foundation"
+  },
+  "R11Tablet.dc.html": {
+   "x": 470,
+   "y": 14000,
+   "w": 834,
+   "h": 1112,
+   "title": "R11 /t/:teamId/execution（タブレット）",
+   "page": "foundation"
+  },
+  "R11Pc.dc.html": {
+   "x": 1384,
+   "y": 14000,
+   "w": 1440,
+   "h": 900,
+   "title": "R11 /t/:teamId/execution（PC）",
+   "page": "foundation"
+  },
+  "R12Phone.dc.html": {
+   "x": 0,
+   "y": 15400,
+   "w": 390,
+   "h": 844,
+   "title": "R12 /t/:teamId/usage（スマートフォン）",
+   "page": "foundation"
+  },
+  "R12Tablet.dc.html": {
+   "x": 470,
+   "y": 15400,
+   "w": 834,
+   "h": 1112,
+   "title": "R12 /t/:teamId/usage（タブレット）",
+   "page": "foundation"
+  },
+  "R12Pc.dc.html": {
+   "x": 1384,
+   "y": 15400,
+   "w": 1440,
+   "h": 900,
+   "title": "R12 /t/:teamId/usage（PC）",
+   "page": "foundation"
+  },
+  "R13Phone.dc.html": {
+   "x": 0,
+   "y": 16800,
+   "w": 390,
+   "h": 844,
+   "title": "R13 /t/:teamId/audit（スマートフォン）",
+   "page": "foundation"
+  },
+  "R13Tablet.dc.html": {
+   "x": 470,
+   "y": 16800,
+   "w": 834,
+   "h": 1112,
+   "title": "R13 /t/:teamId/audit（タブレット）",
+   "page": "foundation"
+  },
+  "R13Pc.dc.html": {
+   "x": 1384,
+   "y": 16800,
+   "w": 1440,
+   "h": 900,
+   "title": "R13 /t/:teamId/audit（PC）",
+   "page": "foundation"
+  },
+  "R14Phone.dc.html": {
+   "x": 0,
+   "y": 18200,
+   "w": 390,
+   "h": 844,
+   "title": "R14 /me（スマートフォン）",
+   "page": "foundation"
+  },
+  "R14Tablet.dc.html": {
+   "x": 470,
+   "y": 18200,
+   "w": 834,
+   "h": 1112,
+   "title": "R14 /me（タブレット）",
+   "page": "foundation"
+  },
+  "R14Pc.dc.html": {
+   "x": 1384,
+   "y": 18200,
+   "w": 1440,
+   "h": 900,
+   "title": "R14 /me（PC）",
+   "page": "foundation"
+  },
+  "R15Phone.dc.html": {
+   "x": 0,
+   "y": 19600,
+   "w": 390,
+   "h": 844,
+   "title": "R15 /p/:projectId/organizers/:organizerId（スマートフォン）",
+   "page": "foundation"
+  },
+  "R15Tablet.dc.html": {
+   "x": 470,
+   "y": 19600,
+   "w": 834,
+   "h": 1112,
+   "title": "R15 /p/:projectId/organizers/:organizerId（タブレット）",
+   "page": "foundation"
+  },
+  "R15Pc.dc.html": {
+   "x": 1384,
+   "y": 19600,
+   "w": 1440,
+   "h": 900,
+   "title": "R15 /p/:projectId/organizers/:organizerId（PC）",
+   "page": "foundation"
+  },
+  "R16Phone.dc.html": {
+   "x": 0,
+   "y": 21000,
+   "w": 390,
+   "h": 844,
+   "title": "R16 /approvals（スマートフォン）",
+   "page": "foundation"
+  },
+  "R16Tablet.dc.html": {
+   "x": 470,
+   "y": 21000,
+   "w": 834,
+   "h": 1112,
+   "title": "R16 /approvals（タブレット）",
+   "page": "foundation"
+  },
+  "R16Pc.dc.html": {
+   "x": 1384,
+   "y": 21000,
+   "w": 1440,
+   "h": 900,
+   "title": "R16 /approvals（PC）",
+   "page": "foundation"
+  },
+  "StateLoadingPhone.dc.html": {
+   "x": 0,
+   "y": 22400,
+   "w": 390,
+   "h": 844,
+   "title": "状態: 読み込み中 R16 /approvals（スマートフォン）",
+   "page": "foundation"
+  },
+  "StateLoadingTablet.dc.html": {
+   "x": 470,
+   "y": 22400,
+   "w": 834,
+   "h": 1112,
+   "title": "状態: 読み込み中 R16 /approvals（タブレット）",
+   "page": "foundation"
+  },
+  "StateLoadingPc.dc.html": {
+   "x": 1384,
+   "y": 22400,
+   "w": 1440,
+   "h": 900,
+   "title": "状態: 読み込み中 R16 /approvals（PC）",
+   "page": "foundation"
+  },
+  "StateEmptyPhone.dc.html": {
+   "x": 0,
+   "y": 23800,
+   "w": 390,
+   "h": 844,
+   "title": "状態: 空 R16 /approvals（スマートフォン）",
+   "page": "foundation"
+  },
+  "StateEmptyTablet.dc.html": {
+   "x": 470,
+   "y": 23800,
+   "w": 834,
+   "h": 1112,
+   "title": "状態: 空 R16 /approvals（タブレット）",
+   "page": "foundation"
+  },
+  "StateEmptyPc.dc.html": {
+   "x": 1384,
+   "y": 23800,
+   "w": 1440,
+   "h": 900,
+   "title": "状態: 空 R16 /approvals（PC）",
+   "page": "foundation"
+  },
+  "StateErrorPhone.dc.html": {
+   "x": 0,
+   "y": 25200,
+   "w": 390,
+   "h": 844,
+   "title": "状態: エラー R16 /approvals（スマートフォン）",
+   "page": "foundation"
+  },
+  "StateErrorTablet.dc.html": {
+   "x": 470,
+   "y": 25200,
+   "w": 834,
+   "h": 1112,
+   "title": "状態: エラー R16 /approvals（タブレット）",
+   "page": "foundation"
+  },
+  "StateErrorPc.dc.html": {
+   "x": 1384,
+   "y": 25200,
+   "w": 1440,
+   "h": 900,
+   "title": "状態: エラー R16 /approvals（PC）",
+   "page": "foundation"
+  },
+  "StateNotFoundPhone.dc.html": {
+   "x": 0,
+   "y": 26600,
+   "w": 390,
+   "h": 844,
+   "title": "状態: 見つからない R16 /approvals → /p/:projectId/approvals/:approvalId（スマートフォン）",
+   "page": "foundation"
+  },
+  "StateNotFoundTablet.dc.html": {
+   "x": 470,
+   "y": 26600,
+   "w": 834,
+   "h": 1112,
+   "title": "状態: 見つからない R16 /approvals → /p/:projectId/approvals/:approvalId（タブレット）",
+   "page": "foundation"
+  },
+  "StateNotFoundPc.dc.html": {
+   "x": 1384,
+   "y": 26600,
+   "w": 1440,
+   "h": 900,
+   "title": "状態: 見つからない R16 /approvals → /p/:projectId/approvals/:approvalId（PC）",
+   "page": "foundation"
+  },
+  "StateOfflinePhone.dc.html": {
+   "x": 0,
+   "y": 28000,
+   "w": 390,
+   "h": 844,
+   "title": "状態: オフライン＋確定待ち R16 /approvals（スマートフォン）",
+   "page": "foundation"
+  },
+  "StateOfflineTablet.dc.html": {
+   "x": 470,
+   "y": 28000,
+   "w": 834,
+   "h": 1112,
+   "title": "状態: オフライン＋確定待ち R16 /approvals（タブレット）",
+   "page": "foundation"
+  },
+  "StateOfflinePc.dc.html": {
+   "x": 1384,
+   "y": 28000,
+   "w": 1440,
+   "h": 900,
+   "title": "状態: オフライン＋確定待ち R16 /approvals（PC）",
+   "page": "foundation"
   }
  },
  "order": [
+  "R01Phone.dc.html",
+  "R01Tablet.dc.html",
+  "R01Pc.dc.html",
+  "R02Phone.dc.html",
+  "R02Tablet.dc.html",
+  "R02Pc.dc.html",
+  "R03Phone.dc.html",
+  "R03Tablet.dc.html",
+  "R03Pc.dc.html",
+  "R04Phone.dc.html",
+  "R04Tablet.dc.html",
+  "R04Pc.dc.html",
+  "R05Phone.dc.html",
+  "R05Tablet.dc.html",
+  "R05Pc.dc.html",
+  "R06Phone.dc.html",
+  "R06Tablet.dc.html",
+  "R06Pc.dc.html",
+  "R07Phone.dc.html",
+  "R07Tablet.dc.html",
+  "R07Pc.dc.html",
+  "R08Phone.dc.html",
+  "R08Tablet.dc.html",
+  "R08Pc.dc.html",
+  "R09Phone.dc.html",
+  "R09Tablet.dc.html",
+  "R09Pc.dc.html",
+  "R10Phone.dc.html",
+  "R10Tablet.dc.html",
+  "R10Pc.dc.html",
+  "R11Phone.dc.html",
+  "R11Tablet.dc.html",
+  "R11Pc.dc.html",
+  "R12Phone.dc.html",
+  "R12Tablet.dc.html",
+  "R12Pc.dc.html",
+  "R13Phone.dc.html",
+  "R13Tablet.dc.html",
+  "R13Pc.dc.html",
+  "R14Phone.dc.html",
+  "R14Tablet.dc.html",
+  "R14Pc.dc.html",
+  "R15Phone.dc.html",
+  "R15Tablet.dc.html",
+  "R15Pc.dc.html",
+  "R16Phone.dc.html",
+  "R16Tablet.dc.html",
+  "R16Pc.dc.html",
+  "StateLoadingPhone.dc.html",
+  "StateLoadingTablet.dc.html",
+  "StateLoadingPc.dc.html",
+  "StateEmptyPhone.dc.html",
+  "StateEmptyTablet.dc.html",
+  "StateEmptyPc.dc.html",
+  "StateErrorPhone.dc.html",
+  "StateErrorTablet.dc.html",
+  "StateErrorPc.dc.html",
+  "StateNotFoundPhone.dc.html",
+  "StateNotFoundTablet.dc.html",
+  "StateNotFoundPc.dc.html",
+  "StateOfflinePhone.dc.html",
+  "StateOfflineTablet.dc.html",
+  "StateOfflinePc.dc.html",
   "Organizers.dc.html",
   "ConvPhoneList.dc.html",
   "ConvPhoneChat.dc.html",
   "NavMap.dc.html",
   "Redirects.dc.html",
-  "NavPhone.dc.html",
-  "Components.dc.html",
-  "ComponentsDark.dc.html",
-  "PaletteDark.dc.html",
-  "Home.dc.html",
-  "Approvals.dc.html",
-  "ApprovalDetail.dc.html",
-  "ApprovalRelease.dc.html",
-  "Plans.dc.html",
-  "PlanNew.dc.html",
-  "PlanDetail.dc.html",
-  "Main.dc.html",
-  "SprintDetail.dc.html",
-  "Loops.dc.html",
-  "LoopDetail.dc.html",
-  "Repositories.dc.html",
-  "RepositoryDetail.dc.html",
-  "RepositoryBacklog.dc.html",
-  "RepositoryLoops.dc.html",
-  "NewSprint.dc.html",
-  "Physical.dc.html",
-  "Roles.dc.html",
-  "SettingsGeneral.dc.html",
-  "SettingsMembers.dc.html",
-  "AccountSettings.dc.html",
-  "SettingsRepositories.dc.html",
-  "SettingsWorkflowSteps.dc.html",
-  "SettingsMachines.dc.html",
-  "SettingsNotifications.dc.html",
-  "TeamNew.dc.html",
-  "Account.dc.html",
-  "MeLoginLinks.dc.html",
-  "MeTeams.dc.html",
-  "MeDelegations.dc.html",
-  "MeKeyboard.dc.html",
-  "Login.dc.html",
-  "MobileLogin.dc.html",
-  "MobileHome.dc.html",
-  "MobileApprovals.dc.html",
-  "MobileApprovalDetail.dc.html",
-  "MobilePlans.dc.html",
-  "MobilePlanNew.dc.html",
-  "MobilePlanDetail.dc.html",
-  "Mobile.dc.html",
-  "MobileLoops.dc.html",
-  "MobileRepositories.dc.html",
-  "MobilePhysical.dc.html",
-  "MobileRoles.dc.html",
-  "MobileSprintDetail.dc.html",
-  "MobileLoopDetail.dc.html",
-  "MobileRepositoryDetail.dc.html",
-  "MobileRepositoryBacklog.dc.html",
-  "MobileRepositoryLoops.dc.html",
-  "MobileNewSprint.dc.html",
-  "MobileTeamNew.dc.html",
-  "MobileSettingsMenu.dc.html",
-  "MobileSettingsGeneral.dc.html",
-  "MobileSettingsMembers.dc.html",
-  "MobileAccountSettings.dc.html",
-  "MobileSettingsRepositories.dc.html",
-  "MobileSettingsWorkflowSteps.dc.html",
-  "MobileSettingsMachines.dc.html",
-  "MobileSettingsNotifications.dc.html",
-  "MobileAccount.dc.html",
-  "MobileMeLoginLinks.dc.html",
-  "MobileMeTeams.dc.html",
-  "MobileMeDelegations.dc.html",
-  "MobileMeKeyboard.dc.html",
-  "MobileComponentsSelect.dc.html",
-  "MobileComponentsStates.dc.html",
-  "MobileComponentsPalette.dc.html",
-  "Projects.dc.html",
-  "ProjectDetail.dc.html",
-  "PlanNewProject.dc.html",
-  "PlanDetailProject.dc.html",
-  "ApprovalReleaseProject.dc.html",
-  "HomeFirstRun.dc.html",
-  "EmptyStates.dc.html",
-  "InstructionDrawer.dc.html",
-  "IssueNew.dc.html",
-  "MobileInstruction.dc.html"
+  "NavPhone.dc.html"
  ],
  "notes": {
   "title-278": {
@@ -855,7 +658,7 @@
   "title-279": {
    "x": 0,
    "y": 1020,
-   "text": "#279 画面の地図と付属の画面",
+   "text": "#279 画面マップと付属の画面",
    "kind": "title1",
    "maxW": 3190,
    "page": "organizer"
@@ -866,86 +669,191 @@
    "w": 520,
    "page": "organizer",
    "fill": "yellow",
-   "text": "統合の見方（2026-11-24）\n・このページ: 旧い側 #278・#279 のオーガナイザーのモック。設計の正本は docs/design/organizer.md と screens.md の画面の地図（#140）\n・「旧い側の画面」のページ: 作り直す前の画面一式。ナビゲーションはまだ旧い形（ホーム・開発計画・ループ）\n・置き換わった枚: Home・HomeFirstRun・MobileHome（→ オーガナイザーの一覧と会話）、InstructionDrawer・MobileInstruction（→ 会話の入力欄）\n・新しい地図（16 本の経路）に合わせた作り直しは #12 の最初の工程で行い、利用者が承認する\n・コードの正本はリポジトリの docs/design/mock/"
+   "text": "統合の見方（2026-11-25）\n・このページ: 旧い側 #278・#279 のオーガナイザーのモック。ナビゲーションは旧い形（付属の 7 項目）のまま\n・新しい画面マップ（16 本のルート）で描き直したものは、ページ「画面の基盤（#12）」にある。重なる画面（R2・R15・R16）はそちらを正とする\n・設計の正本は docs/design/screens.md と organizer.md。コードの正本はリポジトリの docs/design/mock/"
   },
-  "howto": {
-   "text": "見方（#173 の組み直し、2026-11-13・11-14 に設計へ合わせて直した）\n・枠: 左にサイドバー 240px（作業・Factory の構成・設定）。各画面の上の帯にパンくず・見出し・状態を左、主の操作を右（主の操作は 1 画面に 1 つ）\n・本文は最大 1200px、表は幅いっぱい。PC のボタンと入力は高さ 32px、44px はスマホ（768px 未満）と指で操作する端末（pointer: coarse）\n・節はカード、操作はカードの下の行。数のタイルは正しく数えられる画面だけ（スプリントの一覧には置かない）\n・詳細は本文＋右 320px の横の欄（承認ゲート・実行の場所・使用量・答える枠）\n・設定は本文の左に 200px のメニュー。スマホは表の行をカードにし、主の操作を下の帯に固定\n・色: 承認待ち＝緑、終わった＝紫、動いている＝青、注意＝黄、失敗＝赤（#81）\n・どの画面も Tweaks の dark でダーク\n・サイトマップ: https://claude.ai/artifact/K2waoYxnczLdyySUP5Lx5w\n・プロジェクト（予定 #176）: 最後から 2 番目の行の 5 枚だけ。今の画面の枚には予定の印を置かない\n・札の印: 同じ青でも、つながっている（マシン・手段）は鎖、動いている（実行）は的\n・11-14 の直し（#173 の設計の食い違い D1〜D11）: 今の画面の枚から、テーマの切り替え・オーガナイザーへ指示と課題を起こす（予定 #177）・パレットの「スプリントを始める」・スプリントの詳細の「取り消す」・「GitHub で開く」・月の費用と実行のタイル・worker のプロセスのタイル・用語の「?」・予定の印を外した。はじめの手順（HomeFirstRun）は範囲外で、別の課題で要否を決める\n・スマホ: 画面の地図の「あり」の 31 画面と、部品 3 つ（フォームと選択の欄・状態の表示・コマンドパレット）を 390px で並べた（画面の地図の順）\n・11-14 の 2 度目の直し（D12・決定 9）: スプリントの一覧の 4 つのタイルとホームの「動いているループ」を外した。スマホの一般（MobileSettingsGeneral）を足した",
-   "w": 460,
-   "x": -560,
-   "y": -300,
-   "page": "legacy"
-  },
-  "row1": {
-   "kind": "title1",
-   "maxW": 5000,
-   "text": "部品",
-   "w": 240,
+  "fd-row-r01": {
    "x": 0,
-   "y": -300,
-   "page": "legacy"
-  },
-  "row2": {
+   "y": -180,
+   "text": "R1 /signin サインイン",
    "kind": "title1",
-   "maxW": 8000,
-   "text": "作業",
-   "w": 240,
-   "x": 0,
-   "y": 3720,
-   "page": "legacy"
+   "maxW": 2824,
+   "page": "foundation"
   },
-  "row3": {
-   "kind": "title1",
-   "maxW": 5000,
-   "text": "リポジトリと Factory の構成",
-   "w": 240,
+  "fd-row-r02": {
    "x": 0,
-   "y": 7760,
-   "page": "legacy"
+   "y": 1220,
+   "text": "R2 / オーガナイザー（一覧と最後に開いた会話）",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
   },
-  "row4": {
-   "kind": "title1",
-   "maxW": 5000,
-   "text": "アカウントの設定",
-   "w": 240,
+  "fd-row-r03": {
    "x": 0,
-   "y": 10450,
-   "page": "legacy"
+   "y": 2620,
+   "text": "R3 /p/:projectId スプリントの一覧",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
   },
-  "row5": {
-   "kind": "title1",
-   "maxW": 5000,
-   "text": "自分の設定とログイン",
-   "w": 240,
+  "fd-row-r04": {
    "x": 0,
-   "y": 12990,
-   "page": "legacy"
+   "y": 4020,
+   "text": "R4 /p/:projectId/start スプリントを始める",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
   },
-  "row6": {
-   "kind": "title1",
-   "maxW": 5640,
-   "text": "スマートフォン",
-   "w": 240,
+  "fd-row-r05": {
    "x": 0,
-   "y": 14410,
-   "page": "legacy"
+   "y": 5420,
+   "text": "R5 /p/:projectId/sprints/:sprintId スプリントの詳細",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
   },
-  "row7": {
-   "kind": "title1",
-   "maxW": 5000,
-   "text": "プロジェクト（予定 #176）",
-   "w": 240,
+  "fd-row-r06": {
    "x": 0,
-   "y": 19700,
-   "page": "legacy"
+   "y": 6820,
+   "text": "R6 /p/:projectId/approvals/:approvalId 承認の詳細",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
   },
-  "row8": {
-   "kind": "title1",
-   "maxW": 5000,
-   "text": "オーガナイザーへ指示と起票（予定 #177）",
-   "w": 240,
+  "fd-row-r07": {
    "x": 0,
-   "y": 21420,
-   "page": "legacy"
+   "y": 8220,
+   "text": "R7 /p/:projectId/questions/:questionId 問い",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-r08": {
+   "x": 0,
+   "y": 9620,
+   "text": "R8 /p/:projectId/settings プロジェクトの設定",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-r09": {
+   "x": 0,
+   "y": 11020,
+   "text": "R9 /t/:teamId チーム",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-r10": {
+   "x": 0,
+   "y": 12420,
+   "text": "R10 /t/:teamId/projects/new プロジェクトを作る",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-r11": {
+   "x": 0,
+   "y": 13820,
+   "text": "R11 /t/:teamId/execution 実行の場所",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-r12": {
+   "x": 0,
+   "y": 15220,
+   "text": "R12 /t/:teamId/usage 使える量と費用",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-r13": {
+   "x": 0,
+   "y": 16620,
+   "text": "R13 /t/:teamId/audit 操作の記録",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-r14": {
+   "x": 0,
+   "y": 18020,
+   "text": "R14 /me 自分の設定",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-r15": {
+   "x": 0,
+   "y": 19420,
+   "text": "R15 /p/:projectId/organizers/:organizerId オーガナイザーの会話",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-r16": {
+   "x": 0,
+   "y": 20820,
+   "text": "R16 /approvals 承認待ちの一覧",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-state-loading": {
+   "x": 0,
+   "y": 22220,
+   "text": "状態の見本: 読み込み中（R16 /approvals）",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-state-empty": {
+   "x": 0,
+   "y": 23620,
+   "text": "状態の見本: 空（R16 /approvals）",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-state-error": {
+   "x": 0,
+   "y": 25020,
+   "text": "状態の見本: エラー（R16 /approvals）",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-state-notfound": {
+   "x": 0,
+   "y": 26420,
+   "text": "状態の見本: 見つからない（R16 /approvals → /p/:projectId/approvals/:approvalId）",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-row-state-offline": {
+   "x": 0,
+   "y": 27820,
+   "text": "状態の見本: オフライン＋確定待ち（R16 /approvals）",
+   "kind": "title1",
+   "maxW": 2824,
+   "page": "foundation"
+  },
+  "fd-howto": {
+   "x": 2904,
+   "y": 0,
+   "w": 520,
+   "page": "foundation",
+   "fill": "yellow",
+   "text": "見方（#12 の設計の決定 11、2026-11-25）\n・行は HTTP のルート（R1〜R16）、列は幅（スマートフォン 390・タブレット 834・PC 1440）。最後の 5 行は R16 で描いた共通の状態（読み込み中・空・エラー・見つからない・オフライン＋確定待ち）\n・ナビゲーションは 4 つの行き先（オーガナイザー・承認待ち・スプリント・設定）を同じ順で、スマートフォンは下の帯、タブレットは 80 px の細い帯、PC は 240 px の左の帯に出す。今の行き先を強調する\n・場所の切り替え（チーム › プロジェクト）は、スマートフォンは上の帯の題、タブレットと PC は帯の上端\n・PC の R2・R15 は一覧と会話の 2 段、R3・R16 は行を選ぶと右に詳細（R5・R6）を開く 2 段\n・PC の帯では持ち主のとき、設定の下にチームの行き先（R9・R11・R12・R13）を出す。スマートフォンとタブレットは R14 の中から開く\n・押せる要素は 44 px 以上、余白は 4 の倍数、状態のバッジは色・アイコン・文言の組。テーマは OS の設定に従う\n・値はすべて作り物（チーム acme・ops@example.com など）。正本は docs/design/screens.md"
+  },
+  "fd-overlap": {
+   "x": 2904,
+   "y": 900,
+   "w": 520,
+   "page": "foundation",
+   "fill": "yellow",
+   "text": "ページ「オーガナイザー（#140）」との重なり\n・あちらは旧い側 #278・#279 のモックで、R2・R15（一覧と会話）・R16（承認待ち）の中身がこのページと重なる\n・あちらのナビゲーションは旧い形（付属の 7 項目）のままなので、画面マップとナビゲーションはこのページを正とする\n・会話の項目の細かい出し方（キャッシュ中・取り下げ・承認待ちの項目）は、あちらの枚も参考になる"
   }
  },
  "designSystems": []
