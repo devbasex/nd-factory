@@ -27,7 +27,7 @@ packages/core/src/ids.ts
 infra/lib/app-stack.ts
 ```
 
-依存の向き: `main.tsx` → `app/` → `screens/` → `ui/`・`i18n/` の順で、`app/` はさらに `routes/`・`offline/`・`sw/register.ts` を組み立てる。`offline/` の中は `crypto.ts` → `db.ts` → 各保存（`cache-store`・`outbox`・`held-store`・`quarantine`・`login-store`・`pending-store`・`send-wait`）→ `revocation`・`send` → `sync` の順に上の層が下の層を読む。`authz.ts`・`snapshot-kinds.ts`・`operation-classes.ts` は端末の保存を読まない葉で、`guarded-commit.ts` は `db`・`crypto`・`authz` だけを読む。`offline/`・`ui/`・`routes/` は `app/` と `screens/` を読まないので循環しない。画面の部品は写しと送る列を、`app/compose.ts` が渡すインターフェースの型を通して読む。`dummy/` は `app/compose.ts` の動的な import だけが読む。構成要素どうしの関係は設計文書の「構成要素」の図を指す。
+依存の向き: `main.tsx` → `app/` → `screens/` → `ui/`・`i18n/` の順で、`app/` はさらに `routes/`・`offline/`・`sw/register.ts` を組み立てる。`offline/` の中は、次の順に上の層が下の層を読む。`crypto.ts` → `db.ts` → 各保存 → `revocation`・`send` → `sync`。各保存は `cache-store`・`outbox`・`held-store`・`quarantine`・`login-store`・`pending-store`・`send-wait` である。`authz.ts`・`snapshot-kinds.ts`・`operation-classes.ts` は、端末の保存を読まない葉である。`guarded-commit.ts` は `db`・`crypto`・`authz` だけを読む。`offline/`・`ui/`・`routes/` は `app/` と `screens/` を読まないので循環しない。画面の部品は写しと送る列を、`app/compose.ts` が渡すインターフェースの型を通して読む。`dummy/` は `app/compose.ts` の動的な import だけが読む。構成要素どうしの関係は設計文書の「構成要素」の図を指す。
 
 | パス（`apps/web/` から） | 種類 | 役割 1 文 | 依存する先 | モジュール | 最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -102,7 +102,7 @@ infra/lib/app-stack.ts
   - 副作用: IndexedDB の削除（期限切れの行）・`sessionStorage` の `oidc.user:` のキーの削除・Service Worker の登録
 - `BootState` は `config_unavailable`・`login_waiting`・`signin`・`returning`（戻り先の処理）・`ready` の 5 つの和にする
 
-`createAuth` の `stores` には、#4 の「サインインを確定する」呼び出しを有効にするまで、今と同じ `WebStorageStateStore`（`sessionStorage`）を 2 つとも渡す。有効にする Pull Request で `userStore` を `createLoginStore` に替え、`sessionStorage` の骨組みのキャッシュの削除を同時に入れる（設計文書の「#12 と #4 の反映の順」）。切り替える前は持ち主の利用者の ID が分からないため、端末のデータベースを作らず、写し・送る列・そろえ方を動かさない。骨組みの 401 の扱い（`nd.reauth` のフラグ）と `users-client.ts` の呼び出しは、`boot` と `MeScreen` へ移して振る舞いを変えない。
+#4 の「サインインを確定する」呼び出しを有効にするまで、`createAuth` の `stores` の 2 つには、今と同じ `WebStorageStateStore`（`sessionStorage`）を渡す。有効にする Pull Request で `userStore` を `createLoginStore` に替える。`sessionStorage` の骨組みのキャッシュの削除も同時に入れる（設計文書の「#12 と #4 の反映の順」）。切り替える前は持ち主の利用者の ID が分からないため、端末のデータベースを作らず、写し・送る列・そろえ方を動かさない。骨組みの 401 の扱い（`nd.reauth` のフラグ）と `users-client.ts` の呼び出しは、`boot` と `MeScreen` へ移して振る舞いを変えない。
 
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
@@ -153,7 +153,7 @@ infra/lib/app-stack.ts
 - `parseScreensTable`
   - 事前条件: 見出し「## 画面一覧」の直後の最初の表を渡せる文書である
   - 事後条件: 返る `Map` の鍵は `R1`〜`R16` の 16 個
-- `ROUTES` は `{ id, path, group, titleKey, operations, offline, nav }` の読み取り専用の配列で、`operations` は `route-operations.generated.ts` から引く
+- `ROUTES` は `{ id, path, group, titleKey, operations, offline, nav }` の読み取り専用の配列である。`operations` は `route-operations.generated.ts` から引く
 
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
@@ -422,7 +422,7 @@ infra/lib/app-stack.ts
 | `SNAPSHOT_TTL_MS` | 定数 | `cache-store.ts` | 14 日 |
 | `AuthzRecord`・`Guard`・`Owner` | 型 | `authz.ts`・`guarded-commit.ts` | 設計文書の「見られるプロジェクトの記録の中身」「利用者の境界」 |
 
-端末のキャッシュの量の上限は、**件数と期間で決め、バイトの総量の上限は持たない**。件数は画面の文書の [端末に保存するもの](../docs/design/screens.md#端末に保存するもの) の値（会話は最新 200 項目、スプリントの一覧はプロジェクトごとに 50 件、通知は 100 件）を `SNAPSHOT_KINDS` に持ち、超える分は置き換えのときに古い方から落とす。ブラウザーが許す量を超えたら、上の `QuotaExceededError` の扱いにする。`boot` は `navigator.storage.persist()` を求め、拒まれても続ける。実際の使用量は「実機の確認の記録」に残す。
+端末のキャッシュの量の上限は、**件数と期間で決め、バイトの総量の上限は持たない**。件数は画面の文書の [端末に保存するもの](../docs/design/screens.md#端末に保存するもの) の値を `SNAPSHOT_KINDS` に持つ。値は、会話が最新 200 項目、スプリントの一覧がプロジェクトごとに 50 件、通知が 100 件である。超える分は置き換えのときに古い方から落とす。ブラウザーが許す量を超えたら、上の `QuotaExceededError` の扱いにする。`boot` は `navigator.storage.persist()` を求め、拒まれても続ける。実際の使用量は「実機の確認の記録」に残す。
 
 ### 並行と排他
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
@@ -667,7 +667,7 @@ type OperationClass =
 | --- | --- | --- | --- | --- |
 | `createPendingStore` | `pending-store.ts` | 新設 | `(d: { db: DeviceDb }) => PendingStore` | 証と外しのキャッシュを置く・読む・消す |
 
-`PendingStore` は `put(id, value, fingerprint)`・`read(id): { value, fingerprintTag } | "unreadable" | null`・`remove(id)` を持つ。`id` は `signout-proof` か `unlink-item` の型にする。呼ぶのは #4 だけで、錠は #4 が持つ。
+`PendingStore` が持つのは次の 3 つである。`put(id, value, fingerprint)`・`read(id): { value, fingerprintTag } | "unreadable" | null`・`remove(id)`。`id` は `signout-proof` か `unlink-item` の型にする。呼ぶのは #4 だけで、錠は #4 が持つ。
 
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
@@ -787,7 +787,7 @@ type OperationClass =
 | `retry` | 元の区分で残す（429 は `retryUntil` を持つ） | 止める |
 | `auth` | 残して #4 へ渡す | 止める |
 
-`runOnce` は、錠 → 途中のフラグ → 回の持ち主 → `nd-outbox` で対象を読む → 段 1（`planRevocation`・`applyRevocation`・受け入れの扱い）→ 待機の期限の確認 → 段 2（`sendQueue`）→ 段 3 → 段 4 → 段 5、の順に打つ。段 2 が `stopped` でも段 3〜4 は打つ。段 1 が失敗した回は段 2 以降を打たない。
+`runOnce` は次の順に打つ。錠 → 途中のフラグ → 回の持ち主 → `nd-outbox` で対象を読む → 段 1 → 待機の期限の確認 → 段 2（`sendQueue`）→ 段 3 → 段 4 → 段 5。段 1 は `planRevocation`・`applyRevocation`・受け入れの扱いである。段 2 が `stopped` でも段 3〜4 は打つ。段 1 が失敗した回は段 2 以降を打たない。
 
 - 繰り返しの終わる条件: 一覧は `next_cursor` が `null` になるまで。時刻の読み直しは 1 件につき 1 回の段 2 で 1 回まで
 - 計算量の注意: 段 1 の写しの照合は `projectTags` の索引のキーを集めて比べ、全写しを復号しない
@@ -855,7 +855,7 @@ type OperationClass =
   - 事前条件: `vite build` が `.vite/manifest.json` を出した
   - 副作用: ファイルの読み取り
 
-`service-worker.ts` は `install`・`activate`・`fetch`・`message` の 4 つのハンドラーを上の関数で組み、`skipWaiting` と `clients.claim` を呼ばない。`public/manifest.webmanifest` は画面の文書の [端末に保存するもの](../docs/design/screens.md#端末に保存するもの) の項目を持つ。
+`service-worker.ts` は、`install`・`activate`・`fetch`・`message` の 4 つのハンドラーを上の関数で組む。`skipWaiting` と `clients.claim` を呼ばない。`public/manifest.webmanifest` は画面の文書の [端末に保存するもの](../docs/design/screens.md#端末に保存するもの) の項目を持つ。
 
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
