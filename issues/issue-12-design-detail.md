@@ -785,7 +785,7 @@ type OperationClass =
 | --- | --- | --- | --- | --- |
 | `createApiSender` | `api-transport.ts` | 新設 | `(d: SenderDeps) => (call: ApiCall) => Promise<ApiReply>` | 「送信の直前の照合と token の固定」の手順で 1 リクエストを送り、結果と HTTP の状態・ヘッダー・持ち主を返す |
 | `retryUntilFrom` | `send-wait.ts` | 新設 | `(retryAfter: string \| null, date: string \| null, nowMs: number, backoffMs: number) => { retryUntil: number; backoffMs: number }` | 429 の待機の期限を作る |
-| `createSendWait` | 同上 | 新設 | `(d: { db: DeviceDb }) => SendWait` | 待機の期限と `api-time` を暗号化して持つ。`api-time` は `writeApiTime(owner, ms)` で、その応答を受けたセッションの持ち主の照合と同じトランザクションで書く（`commitGuarded`） |
+| `createSendWait` | 同上 | 新設 | `(d: { db: DeviceDb }) => SendWait` | 待機の期限と `api-time` を暗号化して持つ。書き込みはどれも、その応答を受けたセッションの照合と同じトランザクションで行う（`commitGuarded`）。対象は、待機の期限の書き込み `write(owner, wait)` と解除 `clear(owner)`、`api-time` の書き込み `writeApiTime(owner, ms)` である。読み出しの `read`・`readApiTime` は行を変えない |
 | `planRevocation` | `revocation.ts` | 新設 | `(read: ListsRead, local: LocalIndex) => RevocationPlan` | 消す写し・保留に移す件・新しい記録を決める（副作用なし） |
 | `applyRevocation` | 同上 | 新設 | `(guard: Guard, plan: RevocationPlan) => Promise<"committed" \| "stale">` | 1 トランザクションで反映し、全タブへ知らせる |
 | `holdDenied` | 同上 | 新設 | `(guard: Guard, o: { id: string; item?: OutboxItem }) => Promise<void>` | 403・404 の件の扱いと `denied` の記録を 1 トランザクションで行う |
@@ -810,7 +810,8 @@ type OperationClass =
 | --- | --- | --- | --- | --- | --- | --- |
 | `createApiSender` | 照合の外れ・件が無い | サインアウト・別タブ・取り下げ | 錠の中の確認 | `aborted`（理由 `session` か `gone`） | 出さない | `session` は回を止め、`gone` は次の件へ。印を戻す。`gone` のときこの回で印を付けた件が取り下げで保留にあれば、送っていないので `dropWithdrawnUnsent` で消す |
 | `createApiSender` | 通信の失敗・形の違う応答 | ネットワーク・中継 | `fetch` の例外・保持した HTTP の状態 | 一時の失敗か認証の失敗にする（「`Retry-After` と `Date` の受け取り」） | 呼び出し元が出す | 件は消さない |
-| `createSendWait` | 復号できない | 壊れ | `unseal` | 行を消し 60 秒から | 出さない | — |
+| `createSendWait` の `read`・`readApiTime` | 復号できない | 壊れ | `unseal` | 値なし（`null`）として返し、行は消さない。待機の期限が無いので、次に 429 を受けたら 60 秒から待つ | 出さない | 破損した行は、次の `write`・`clear`・`writeApiTime` が置き換えるか消す |
+| `createSendWait` の `write`・`clear`・`writeApiTime` | セッションが合わない | 別タブの利用者の切り替え・入り直し・サインアウト | `commitGuarded` の照合 | 何も書かず消さず、偽を返す | 出さない | 送る処理はその応答を反映せずに回を止める |
 | `applyRevocation`・`holdDenied` | `stale` | 別タブの書き換え | `commitGuarded` | 回を止める | 出さない | 次の回で段 1 から |
 | `sendQueue` | 一時の失敗 | 503・429・通信 | `classifyResult` | その回の段 2 を止める（IW12） | 「読み直せませんでした（時刻）」 | 30 秒後 |
 | `sendQueue` | 401 | token・セッション | 同上 | 止めて #4 の 401 の扱いへ持ち主つきで渡す | #4 の表示 | 件は残る |
@@ -850,7 +851,7 @@ type OperationClass =
 | --- | --- | --- | --- |
 | 複数のタブの `runOnce` | 送る列・写し | `nd-sync` を取れた 1 つだけ | 取れなければ何もしない |
 | 送信の開始とサインアウト・取り下げ | token と件 | サインインの錠の中で照合して `fetch` を呼び、応答を待たずに放す | 送り始めた印 |
-| 待機の期限の書き込み | `wait` の行 | `iv` の確認。後の期限のときだけ書く | タブをまたいで残る |
+| 待機の期限と `api-time` の書き込み・解除・破損した行の置き換え | `wait` の行 | セッションの照合と同じ書き込みのトランザクションの中で、行の `iv` が読んだときと同じことを確かめてから書く（読み出しの側では行を消さない）。`iv` が変わっていれば読み直す（3 回まで）。後の期限・後の時刻のときだけ書く | タブをまたいで残る。遅れて終わった処理が、別のタブが後から保存した行を消さない |
 | 送った直後にタブが閉じる | 送る列 | — | 次の回が `sendStarted` で送り直しか結果未確認を決める |
 
 ### ログと記録の出力
