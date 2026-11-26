@@ -707,6 +707,10 @@ graph LR
 | push で始まった実行の始まり方が、反映のアクションが許す値である | 承認済みの Pull Request を起点のブランチへマージした push で始まった実行の `get-pipeline-execution` の `trigger.triggerType` が `WebhookV2` で、反映の CodeBuild の記録に始まり方の確認が通った行があり、反映が成功している |
 | 起点のブランチ以外への push で実行が始まらない | 起点のブランチ以外のブランチへ push した後に、`list-pipeline-executions` に新しい実行が無い |
 
+## どこを変えるか
+
+ファイル・関数の粒度は、詳細設計 [issue-164-design-detail.md](./issue-164-design-detail.md) にある（新設する関数が 2 つ以上あり、`deployBuildSpec` のシグネチャを変えるため、別ファイルにした）。
+
 ## 設計の結果
 
 設計の正本（`docs/design/`）の変更は、この設計 PR（[#178](https://github.com/devbasex/nd-factory/pull/178)）に入れて設計承認ゲートで承認を受ける。実装 PR は `docs/design/` を変えず、承認された設計を参照する。
@@ -716,7 +720,7 @@ graph LR
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
 | #164 の設計 PR（#178） | 設計を承認する | — | `issues/issue-164-design.md`、`issues/issue-164-requirements.md`、`docs/design/platform.md`（反映の経路・決定 87・決定 89）、`docs/design/overview.md`（姿 5・S14・MVV の対応表）、`docs/design/execution.md`（決定 79）、`docs/design/api.md`（決定 156・人の確定の段階）、`.ndf/mvv.md`・`.ndf/mvv.json`（バージョン 4）、`.ndf/review.json`、`.claude/skills/nd-factory-dev-guidelines/SKILL.md`（承認ゲートの外では持ち主に問わない行と、反映のパイプラインの実行は人の承認を待たない行） |
-| #164 の実装 PR | 実装する | — | `infra/lib/pipeline-stack.ts`（準備の照合・反映時の始まり方と設定の版と段階の検査・トリガー）、`infra/lib/app-stack.ts`（資源を同じスタックに置く理由を「承認する人」で書いたコメントの文言だけを、決定 89 の新しい題に合わせて直す。`ND_CONFIRMATION_STAGE` は入れない）、`infra/bin/app.ts`（設定に `pipeline` がある設置では、アプリのスタックの合成に、設置ごとのアプリ専用の qualifier（`infra/lib/naming.ts` が決める）を明示した `DefaultStackSynthesizer` を使う。`pipeline` が無い設置とパイプラインのスタックは既定のまま）、`infra/test/app.test.ts` など合成のテスト（`pipeline` の有無で qualifier が分かれる）、`infra/lib/naming.ts`、`infra/test/pipeline-stack.test.ts`、`infra/test/naming.test.ts`、アプリ専用の bootstrap のテンプレート（`infra/` の下。反映のロールの制限を持つ）とそのテスト、qualifier の衝突の確認の判定とコマンド（`infra/` の下で `infra/setup/` の外）とそのテスト、`packages/contracts/src/settings.ts`（`pipeline.branch` の形）と `npm run generate` の生成物、`packages/contracts/test/settings.test.ts`、`docs/operations/pipeline-approval.md`、`docs/operations/setup.md`、`docs/operations/settings.md`、`docs/operations/idp-and-apps.md`、`AGENTS.md` |
+| #164 の実装 PR | 実装する | — | `infra/lib/pipeline-stack.ts`（準備の照合・反映時の始まり方と設定の版と段階の検査・トリガー）、`infra/lib/app-stack.ts`（資源を同じスタックに置く理由を「承認する人」で書いたコメントの文言だけを、決定 89 の新しい題に合わせて直す。`ND_CONFIRMATION_STAGE` は入れない）、`infra/bin/app.ts`（設定に `pipeline` がある設置では、アプリのスタックの合成に、設置ごとのアプリ専用の qualifier（`infra/lib/naming.ts` が決める）を明示した `DefaultStackSynthesizer` を使う。`pipeline` が無い設置とパイプラインのスタックは既定のまま）、`infra/test/app.test.ts` など合成のテスト（`pipeline` の有無で qualifier が分かれる）、`infra/lib/naming.ts`、`infra/test/pipeline-stack.test.ts`、`infra/test/naming.test.ts`、アプリ専用の bootstrap のテンプレート（`infra/` の下。反映のロールの制限を持つ）とそのテスト、qualifier の衝突の確認の判定とコマンド（`infra/` の下で `infra/setup/` の外）とそのテスト、`packages/contracts/src/settings.ts`（`pipeline.branch` の形）と `npm run generate` の生成物、`packages/contracts/test/settings.test.ts`、`docs/operations/pipeline-approval.md`、`docs/operations/setup.md`、`docs/operations/settings.md`、`docs/operations/idp-and-apps.md`、`AGENTS.md`、`infra/lib/confirmation-stage.ts`、`infra/lib/assembly-check.ts`、`infra/lib/deploy-guard.ts`、`infra/lib/app-bootstrap-template.ts`、`infra/lib/bootstrap-collision.ts`、`infra/bin/app-bootstrap.ts`、`infra/test/app-bootstrap-template.test.ts`、`infra/test/bootstrap-collision.test.ts`、`packages/contracts/schema/settings.schema.json`、`packages/contracts/test/fixtures/confirmation-stage-cases.json`、`infra/package.json`、`package.json`、`package-lock.json`、`knip.jsonc` |
 | [#181](https://github.com/devbasex/nd-factory/issues/181) | #164 の実装 PR の後に実装する | — | 設定のスキーマへの `launch_declared`・`environment_kind` の追加と生成物、アプリの合成で `ND_CONFIRMATION_STAGE` を入れるコード、API がそれを読んで認可へつなぐコード。3 つを同じ PR に入れる。宣言した本番の設定のときに、パイプラインのスタックが宣言の記録を作るコードも入れる。`pipeline` がある設置で、宣言した本番へのアプリのスタックの直接の反映を設置のコマンドが止める検査と、`docs/operations/setup.md` のその説明も入れる（決定 6）。この版の準備と反映が運用する環境で使えるまで、運用する環境の設定へ 2 つのキーを書かない（決定 6） |
 
 ## 人へ残す判断
