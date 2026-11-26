@@ -2,7 +2,7 @@ import type { Clock } from "@nd-factory/core/clock";
 import { newIdempotencyKey } from "@nd-factory/core/ids";
 import { seal, tagOf, unseal } from "./crypto.ts";
 import { type DeviceDb, type HeldRow, type HoldReason, nextSeq, type OutboxRow, readOwner } from "./db.ts";
-import { commitGuarded, type Owner, prepareGuard, sameBytes } from "./guarded-commit.ts";
+import { commitGuarded, type GuardedTx, type Owner, prepareGuard, sameBytes } from "./guarded-commit.ts";
 import { operationClassOf } from "./operation-classes.ts";
 
 // 送る列（キャッシュして送ると確定待ち）。件は利用者の入力を持つので、端末の判断では消さず保留へ移す（IW13）
@@ -32,7 +32,6 @@ export type OutboxBody = Omit<Draft, "pressedFloor"> & {
   result?: { status: number; reason: string };
 };
 
-/** @internal */
 export type OutboxItem = OutboxBody & Pick<OutboxRow, "answerTag" | "targetTag" | "kind" | "projectTag" | "iv">;
 
 type Outcome =
@@ -41,10 +40,15 @@ type Outcome =
   | { kind: "hold"; reason: HoldReason; result?: OutboxBody["result"] };
 
 export type Outbox = {
-  enqueue(owner: Owner, draft: Draft): Promise<OutboxItem>;
+  // also は、件を足すのと同じトランザクションで書くもの
+  enqueue(owner: Owner, draft: Draft, also?: (tx: GuardedTx) => Promise<boolean>): Promise<OutboxItem>;
+  find(answerTag: string): Promise<{ item: OutboxItem; held: boolean } | null>;
+  // 読んだときから行が変わっていないときだけ、送る列から消すか保留に移す
+  takeBack(item: OutboxItem, outcome: Exclude<Outcome, { kind: "keep" }>): Promise<boolean>;
   readBatch(): Promise<{ items: OutboxItem[]; unreadable: string[] }>;
   markSendStarted(item: OutboxItem, sentAt: number | null): Promise<OutboxItem | null>;
-  unmarkSendStarted(item: OutboxItem): Promise<void>;
+  // 印を戻した件を返す。置き換えられて消えたか、行が変わっていれば null
+  unmarkSendStarted(item: OutboxItem): Promise<OutboxItem | null>;
   settle(item: OutboxItem, outcome: Outcome): Promise<"removed" | "held" | "kept" | "missing">;
   moveToHeld(answerTags: string[], reason: HoldReason): Promise<number>;
   countPending(owner: Owner): Promise<{ confirm: number; queued: number; held: number }>;
@@ -117,7 +121,29 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
   }
 
   return {
-    async enqueue(owner, draft) {
+    async find(answerTag) {
+      const { key } = await ownerKeys();
+      const queued = await db.get("outbox", answerTag);
+      if (queued !== undefined) return { item: await itemOf(key, queued), held: false };
+      const row = await db.get("held", answerTag);
+      if (row === undefined) return null;
+      const { holdReason: _reason, ...rest } = row;
+      return { item: await itemOf(key, rest), held: true };
+    },
+
+    async takeBack(item, outcome) {
+      const tx = await writing();
+      const row = await tx.objectStore("outbox").get(item.answerTag);
+      const unchanged = row !== undefined && sameBytes(row.iv, item.iv);
+      if (unchanged) {
+        if (outcome.kind === "hold") await tx.objectStore("held").put({ ...row, holdReason: outcome.reason });
+        await tx.objectStore("outbox").delete(item.answerTag);
+      }
+      await tx.done;
+      return unchanged;
+    },
+
+    async enqueue(owner, draft, also) {
       const found = operationClassOf(draft.operation);
       if (found.class === "online") throw new Error(`つながってから押す操作は送る列に入れない: ${draft.operation}`);
       return locked(async () => {
@@ -151,6 +177,7 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
               await tx.objectStore("outbox").delete(old.answerTag);
             }
             await tx.objectStore("outbox").add(row);
+            return also === undefined ? true : also(tx);
           });
           if (result === "committed") return itemOf(key, row);
         }
@@ -186,13 +213,11 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
         if (item.kind !== "confirm" || row.answerTag === item.answerTag) continue;
         if ((await unseal<OutboxBody>(key, row)).seq > item.seq) replaced = true;
       }
-      if (!replaced) {
-        await rewrite(item, { sendStarted: false, sentAt: null });
-        return;
-      }
+      if (!replaced) return rewrite(item, { sendStarted: false, sentAt: null });
       const tx = await writing();
       await tx.objectStore("outbox").delete(item.answerTag);
       await tx.done;
+      return null;
     },
 
     // 結果は同じ答えの 1 件にだけ当てる（IW8）
