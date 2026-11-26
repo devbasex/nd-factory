@@ -6,7 +6,7 @@ import type { CacheStore } from "./cache-store.ts";
 import type { DeviceDb, HoldReason } from "./db.ts";
 import { commitGuarded, type GuardedTx, type Owner, prepareGuard } from "./guarded-commit.ts";
 import { missingChecks, type OperationClass, operationClassOf } from "./operation-classes.ts";
-import type { Outbox, OutboxItem } from "./outbox.ts";
+import { type Outbox, type OutboxItem, SessionChangedError } from "./outbox.ts";
 import { holdDenied } from "./revocation.ts";
 import { retryUntilFrom, type SendWait } from "./send-wait.ts";
 import { SIGNIN_LOCK } from "./quarantine.ts";
@@ -221,12 +221,23 @@ export function createSender(d: SendDeps): QueueSender {
       if (found.held) {
         // 保留から先へは移らないので、取り下げを足すのと同じトランザクションで保留の件を消す
         const draft = { operation: WITHDRAW, targetId: itemId, projectId: item.projectId, input: {} };
-        await d.outbox.enqueue(round.owner, draft, async (tx) => {
-          if (!(await writeConversation(tx))) return false;
-          await tx.objectStore("held").delete(item.answerTag);
-          await d.wait.clearIn(tx, waitSeen);
-          return true;
-        });
+        let refused = false;
+        try {
+          await d.outbox.enqueue(round.owner, draft, async (tx) => {
+            if (!(await writeConversation(tx))) {
+              refused = true;
+              return false;
+            }
+            await tx.objectStore("held").delete(item.answerTag);
+            await d.wait.clearIn(tx, waitSeen);
+            return true;
+          });
+        } catch (error) {
+          // セッションが替わったか、会話の写しが読んだ後に変わったときは、何も変えずに回を止める。
+          // それ以外（保存の失敗）はそのまま投げる
+          if (error instanceof SessionChangedError || refused) return false;
+          throw error;
+        }
         return true;
       }
       const guard = await prepareGuard(d.db, round.owner);
@@ -251,11 +262,7 @@ export function createSender(d: SendDeps): QueueSender {
     const guard = await prepareGuard(d.db, round.owner);
     if (guard === null) return false;
     const result = await commitGuarded(guard, async (tx) => {
-      if ((await tx.objectStore("outbox").get(item.answerTag)) !== undefined) {
-        await tx.objectStore("outbox").delete(item.answerTag);
-      } else if ((await tx.objectStore("held").get(item.answerTag)) !== undefined) {
-        await tx.objectStore("held").delete(item.answerTag);
-      }
+      await d.outbox.removeIn(tx, item.answerTag);
       await d.wait.clearIn(tx, waitSeen);
       return true;
     });

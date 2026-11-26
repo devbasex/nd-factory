@@ -1,7 +1,8 @@
 import type { Clock } from "@nd-factory/core/clock";
+import type { IDBPTransaction } from "idb";
 import { newIdempotencyKey } from "@nd-factory/core/ids";
 import { seal, tagOf, unseal } from "./crypto.ts";
-import { type DeviceDb, type HeldRow, type HoldReason, nextSeq, type OutboxRow, readOwner } from "./db.ts";
+import { type DeviceDb, type DeviceSchema, type HeldRow, type HoldReason, nextSeq, type OutboxRow, readOwner } from "./db.ts";
 import { commitGuarded, type GuardedTx, type Owner, prepareGuard, sameBytes } from "./guarded-commit.ts";
 import { MissingCheckError, missingChecks, operationClassOf } from "./operation-classes.ts";
 
@@ -38,9 +39,32 @@ type Outcome =
   | { kind: "keep" }
   | { kind: "hold"; reason: HoldReason; result?: OutboxBody["result"] };
 
+// 件を足す前に、別のタブでセッションが替わったと分かった。保存の失敗（通常の Error）と分けて扱う
+export class SessionChangedError extends Error {
+  constructor() {
+    super("セッションが替わったので、送る列に足さなかった");
+    this.name = "SessionChangedError";
+  }
+}
+
+// 送る列と保留の両方を書けるトランザクション（照合した書き込みと、送る列だけを書く書き込みのどちらでもよい）
+type QueueTx = Pick<IDBPTransaction<DeviceSchema, ("outbox" | "held")[], "readwrite">, "objectStore">;
+
+// 同じ答えの件を送る列から、無ければ保留から消す。どちらかから消したら真
+async function removeRow(tx: QueueTx, answerTag: string): Promise<boolean> {
+  for (const store of ["outbox", "held"] as const) {
+    if ((await tx.objectStore(store).get(answerTag)) === undefined) continue;
+    await tx.objectStore(store).delete(answerTag);
+    return true;
+  }
+  return false;
+}
+
 export type Outbox = {
-  // also は、件を足すのと同じトランザクションで書くもの
+  // also は、件を足すのと同じトランザクションで書くもの。セッションが替わっていれば SessionChangedError を投げる
   enqueue(owner: Owner, draft: Draft, also?: (tx: GuardedTx) => Promise<boolean>): Promise<OutboxItem>;
+  // 呼び出し元の照合したトランザクションの中で、同じ答えの件を送る列から、無ければ保留から消す
+  removeIn(tx: GuardedTx, answerTag: string): Promise<boolean>;
   find(answerTag: string): Promise<{ item: OutboxItem; held: boolean } | null>;
   // 読んだときから行が変わっていないときだけ、送る列から消すか保留に移す
   takeBack(item: OutboxItem, outcome: Exclude<Outcome, { kind: "keep" }>): Promise<boolean>;
@@ -163,7 +187,7 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
         // ログインの行は token の取り直しでも書き換わるので、照合からやり直す
         for (let attempt = 0; attempt < 3; attempt += 1) {
           const guard = await prepareGuard(db, owner);
-          if (guard === null) break;
+          if (guard === null) throw new SessionChangedError();
           const { key, tagKey } = guard.keys;
           const row: OutboxRow = {
             answerTag: await tagOf(tagKey, body.idempotencyKey),
@@ -187,6 +211,8 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
         throw new Error("操作を保存できない");
       });
     },
+
+    removeIn: removeRow,
 
     readBatch: () =>
       locked(async () => {
@@ -239,7 +265,7 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
       const row = queued ?? (await tx.objectStore("held").get(item.answerTag));
       let done: "removed" | "held" | "kept" | "missing" = row === undefined ? "missing" : "kept";
       if (row !== undefined && outcome.kind === "remove") {
-        await tx.objectStore(queued === undefined ? "held" : "outbox").delete(item.answerTag);
+        await removeRow(tx, item.answerTag);
         done = "removed";
       } else if (row !== undefined && outcome.kind === "hold") {
         const held: HeldRow = { ...row, ...sealed, holdReason: outcome.reason };

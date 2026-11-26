@@ -395,6 +395,22 @@ describe("取り下げ", () => {
     t.db.close();
   });
 
+  it("取り下げた会話の成功を反映する直前にセッションが替われば、保存の失敗にせず、取り下げを足さずに止める", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello");
+    t.replies.push(async () => {
+      expect(await t.sender.withdraw(t.owner, item.answerTag)).toBe("held");
+      // 成功の反映が件を読んだ直後に、別のタブでサインアウトが始まる
+      t.hooks.afterFind = async () => void (t.state.flagged = true);
+      return ok("msg-1");
+    });
+    expect(await t.run()).toBe("stopped");
+    t.state.flagged = false;
+    expect(await t.held()).toEqual(["unknown-result"]);
+    expect(await t.db.count("outbox")).toBe(0);
+    t.db.close();
+  });
+
   it("送り始めの印の後、送る前に取り下げた件は、送らなかった件として保留から消す", async () => {
     const t = await setup();
     const item = await t.enqueue("users.update", "first");
