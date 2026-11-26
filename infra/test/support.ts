@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Settings } from "@nd-factory/contracts/settings";
@@ -41,6 +41,17 @@ export function tempWebDist(): string {
   const dir = mkdtempSync(join(tmpdir(), "nd-web-dist-"));
   writeFileSync(join(dir, "index.html"), "<!doctype html><title>test</title>\n");
   return dir;
+}
+
+// IAM の方針の * の照合。ほかの文字はそのまま比べる
+export function matches(pattern: string, value: string): boolean {
+  const source = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${source}$`).test(value);
+}
+
+// 打つ版の CDK の標準の bootstrap のテンプレート
+export function standardBootstrapTemplate(): string {
+  return readFileSync(new URL("../../node_modules/aws-cdk/lib/api/bootstrap/bootstrap-template.yaml", import.meta.url), "utf8");
 }
 
 type Resource = {

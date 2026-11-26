@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { App } from "aws-cdk-lib";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../bin/app.ts";
+import { appQualifier } from "../lib/naming.ts";
 import { tempWebDist } from "./support.ts";
 
 const EXAMPLE = new URL("../settings.example.json", import.meta.url).pathname;
@@ -61,6 +62,45 @@ describe("buildApp", () => {
     buildApp(app, env(EXAMPLE));
     const stack = app.synth().stacks[0]!;
     expect(stack.environment).toMatchObject({ account: "123456789012", region: "us-west-2" });
+  });
+
+  it("pipeline の無い設定のアプリのスタックは、既定の qualifier で合成する", () => {
+    const app = newApp();
+    buildApp(app, env(EXAMPLE));
+    const artifact = app.synth().getStackByName("acme-test-app");
+    expect(artifact.assumeRoleArn).toContain("cdk-hnb659fds-deploy-role-");
+    expect(artifact.cloudFormationExecutionRoleArn).toContain("cdk-hnb659fds-cfn-exec-role-");
+    expect(JSON.stringify(artifact.template)).not.toContain("PermissionsBoundary");
+  });
+
+  describe("pipeline のある設定のアプリのスタック", () => {
+    const QUALIFIER = appQualifier({ prefix: "acme", environment: "test" });
+    const BOUNDARY = ":policy/acme-test-app-boundary";
+
+    it.each([{}, { ND_STACKS: "app" }] as Array<Record<string, string>>)(
+      "アプリ専用の qualifier で合成し、すべてのロールが境界を持つ（%j）",
+      (extra) => {
+        const app = newApp();
+        buildApp(app, env(FIXTURE, extra));
+        const artifact = app.synth().getStackByName("acme-test-app");
+        expect(artifact.assumeRoleArn).toContain(`cdk-${QUALIFIER}-deploy-role-`);
+        expect(artifact.cloudFormationExecutionRoleArn).toContain(`cdk-${QUALIFIER}-cfn-exec-role-`);
+        expect(JSON.stringify(artifact.template)).not.toContain("hnb659fds");
+        const roles = Object.values(artifact.template.Resources as Record<string, { Type: string; Properties?: Record<string, unknown> }>).filter(
+          (r) => r.Type === "AWS::IAM::Role",
+        );
+        expect(roles.length).toBeGreaterThanOrEqual(6);
+        for (const role of roles) expect(JSON.stringify(role.Properties?.PermissionsBoundary)).toContain(BOUNDARY);
+      },
+    );
+
+    it("パイプラインのスタックは既定の qualifier のままで、境界を付けない", () => {
+      const app = newApp();
+      buildApp(app, env(FIXTURE));
+      const artifact = app.synth().getStackByName("acme-test-pipeline");
+      expect(artifact.assumeRoleArn).toContain("cdk-hnb659fds-deploy-role-");
+      expect(JSON.stringify(artifact.template)).not.toContain("PermissionsBoundary");
+    });
   });
 
   it("pipeline の無い設定で ND_STACKS に pipeline があれば止める", () => {

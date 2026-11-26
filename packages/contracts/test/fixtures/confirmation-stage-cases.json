@@ -1,0 +1,22 @@
+[
+  { "name": "宣言した本番", "settings": { "launch_declared": true, "environment_kind": "production" }, "record": "absent", "stage": "human", "refused": true },
+  { "name": "宣言した本番で記録がある", "settings": { "launch_declared": true, "environment_kind": "production" }, "record": "present", "stage": "human", "refused": true },
+  { "name": "宣言していない本番", "settings": { "launch_declared": false, "environment_kind": "production" }, "record": "absent", "stage": "ai", "refused": false },
+  { "name": "宣言していない本番で記録がある", "settings": { "launch_declared": false, "environment_kind": "production" }, "record": "present", "stage": "ai", "refused": true },
+  { "name": "開発", "settings": { "launch_declared": false, "environment_kind": "development" }, "record": "absent", "stage": "ai", "refused": false },
+  { "name": "宣言を真にした開発", "settings": { "launch_declared": true, "environment_kind": "development" }, "record": "absent", "stage": "ai", "refused": false },
+  { "name": "開発で記録がある", "settings": { "launch_declared": false, "environment_kind": "development" }, "record": "present", "stage": "ai", "refused": true },
+  { "name": "2 つのキーが無い", "settings": {}, "record": "absent", "stage": "human", "refused": false },
+  { "name": "2 つのキーが無く記録がある", "settings": {}, "record": "present", "stage": "human", "refused": true },
+  { "name": "2 つのキーの値の形が違う", "settings": { "launch_declared": "true", "environment_kind": "prod" }, "record": "absent", "stage": "human", "refused": false },
+  { "name": "2 つのキーの値の形が違い記録がある", "settings": { "launch_declared": "true", "environment_kind": "prod" }, "record": "present", "stage": "human", "refused": true },
+  { "name": "launch_declared だけが無い", "settings": { "environment_kind": "production" }, "record": "absent", "stage": "human", "refused": false },
+  { "name": "environment_kind だけが無い", "settings": { "launch_declared": true }, "record": "absent", "stage": "human", "refused": false },
+  { "name": "launch_declared だけの値の形が違う", "settings": { "launch_declared": "yes", "environment_kind": "development" }, "record": "absent", "stage": "human", "refused": false },
+  { "name": "environment_kind だけの値の形が違う", "settings": { "launch_declared": false, "environment_kind": 1 }, "record": "absent", "stage": "human", "refused": false },
+  { "name": "設定の値がオブジェクトでない", "settings": [], "record": "absent", "stage": "human", "refused": false },
+  { "name": "記録を読めない", "settings": { "launch_declared": false, "environment_kind": "development" }, "record": "unreadable", "stage": "ai", "refused": true },
+  { "name": "キーが無く記録を読めない", "settings": {}, "record": "unreadable", "stage": "human", "refused": true },
+  { "name": "パラメーターの版の履歴が上限を超えた宣言していない環境（版の番号が 101 以上で記録が無い）", "settings": { "launch_declared": false, "environment_kind": "production" }, "record": "absent", "stage": "ai", "refused": false },
+  { "name": "パラメーターを読めない", "settings": null, "record": "absent", "refused": true }
+]
