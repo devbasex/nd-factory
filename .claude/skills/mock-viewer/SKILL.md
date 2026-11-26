@@ -51,7 +51,7 @@ open -na "Google Chrome" --args --remote-debugging-port=9223 --user-data-dir="$H
 | 止める | `npm run mock:down` |
 
 - **モックを直したら `mock:up` を打ち直す。** ファイルはイメージに焼き込むので、打ち直すまで古いまま見える。打つのは worktree の中でよい（その worktree のファイルを焼く）
-- つながると、別ウィンドウで `viewer.html#foundation`（ページ「画面の基盤（#12）」）を開く。別のページを開くときは `MOCK_START=/project/Organizers.dc.html npm run mock:up`
+- つながると、別ウィンドウで `viewer.html#foundation`（ページ「画面の基盤（#12）」）を開く。キャンバスの別のページは、ウィンドウの上部のボタンで切り替えて見る。特定の画面だけを起動時に開くときは、`MOCK_START` に画面のファイルのパスを指定する（例: `MOCK_START=/project/Organizers.dc.html npm run mock:up`）
 - モックはこのウィンドウの中でだけ開ける。同じ Chrome の別のウィンドウに URL を打っても配信されない
 - 常設しない。コンテナはホストや Docker の再起動の後には戻らないので、見せ終えたら `mock:down` で止める
 - ホストの再起動の後も戻る常設（`--restart unless-stopped`）は、利用者が明示的に選んだときだけにする。そのときは `MOCK_RESTART=unless-stopped npm run mock:up` を打つ。AI は自分の判断でこの指定を付けない
