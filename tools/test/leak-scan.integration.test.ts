@@ -633,17 +633,14 @@ const NAMES_NOTE = "leak-scan: ファイルの名前は伏せた。手元で同�
  * 標準エラーへ `stderrLine` を出し、報告に `report` を書き（`null` なら書かない）、`exitCode` で終える偽の gitleaks を置いた PATH を返す
  */
 function fakeGitleaksReportPath(stderrLine: string, report: string | null, exitCode: number): string {
-  const bin = tempDir("leak-fake-bin-");
-  const body = [
+  return fakePath("gitleaks", [
     "#!/usr/bin/env bash",
     'report=""',
     'while (($# > 0)); do if [[ "$1" == --report-path ]]; then report="$2"; shift 2; else shift; fi; done',
     `printf '%s\\n' '${stderrLine}' >&2`,
     ...(report === null ? [] : [`printf '%s' '${report}' >"$report"`]),
     `exit ${exitCode}`,
-  ].join("\n");
-  writeFileSync(join(bin, "gitleaks"), `${body}\n`, { mode: 0o755 });
-  return `${bin}:${process.env.PATH ?? ""}`;
+  ]);
 }
 
 /** スクリプトを打ち、終了コードと、標準出力・標準エラーそれぞれの `leak-scan:` で始まる行を返す */
