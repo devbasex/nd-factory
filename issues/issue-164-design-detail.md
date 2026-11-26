@@ -410,7 +410,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | --- | --- |
 | `BootstrapVariant` の既定値 | `nd-factory app`（CLI が標準のテンプレートで上書きしないようにする） |
 | `DeploymentActionRole` の信頼ポリシー | 主体はアカウントのまま、引き受けとセッションタグの文の `aws:PrincipalArn` を、反映のプロジェクトのロールと `directRoleArns` に限る |
-| 同ロールの CloudFormation の書き込み | 標準が持つ書き込み（変更セットの操作、作成・更新・ロールバック、`DeleteStack`、`UpdateTerminationProtection`）の対象を、すべて `stack/<prefix>-<environment>-app/*` にする。`CreateStack`・`UpdateStack`・`CreateChangeSet` には `cloudformation:RoleArn` の条件を付ける。標準に無い書き込み（`SetStackPolicy`）は足さない。スタックの再構成（`Refactor` の文）は外す。ほかの主体に拒む一覧には `SetStackPolicy` が入る（設計文書の決定 6 の 2 つの一覧） |
+| 同ロールの CloudFormation の書き込み | 標準が持つ書き込み（変更セットの操作、作成・更新・ロールバック、`DeleteStack`、`UpdateTerminationProtection`）の対象を、すべて `stack/<prefix>-<environment>-app/*` にする。`CreateStack`・`UpdateStack`・`CreateChangeSet` には `cloudformation:RoleArn` の条件を付ける。標準に無い書き込み（`SetStackPolicy`）は足さない。スタックの再構成（`Refactor` の文の `CreateStackRefactor`・`ExecuteStackRefactor`）は外す。ほかの主体に拒む一覧には、`SetStackPolicy` と再構成の 2 つの操作が入る（設計文書の決定 6 の 2 つの一覧） |
 | 同ロールの `iam:PassRole` | 標準のまま（アプリ専用の実行のロールだけ）であることを確かめる |
 | `NdExecutionPolicy`（足す） | 名前が `appBootstrapNames().executionPolicy` の管理ポリシー。中身は `appExecutionPolicy` |
 | `NdAppBoundary`（足す） | 名前が `appBootstrapNames().boundaryPolicy` の管理ポリシー。中身は `appPermissionsBoundary` |
@@ -456,7 +456,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | --- | --- | --- | --- |
 | `appPermissionsBoundary` | 合成したアプリのロールの操作が境界の許可に含まれる | `prefix` が最長 | IAM の書き込みと 2 つのパラメーターの書き込みを許さない |
 | `appExecutionPolicy` | 実際に合成したアプリのスタックの資源の型がすべて `EXECUTION_ALLOW` にある。拒否の文と IAM の条件がそろう | `prefix` が最長 | `Resource: "*"` と `*:*` の許可が無い |
-| `restrictBootstrapTemplate` | 打つ版の標準のテンプレートで、信頼・対象・条件・`PassRole`・`DependsOn`・バケットの方針が上の表のとおり。反映のロールの CloudFormation の書き込みが「反映のロールに許す書き込み」の 9 つと一致し、`SetStackPolicy` が無い | `directRoleArns` が空 | 知らない文を足したテンプレートで例外 |
+| `restrictBootstrapTemplate` | 打つ版の標準のテンプレートで、信頼・対象・条件・`PassRole`・`DependsOn`・バケットの方針が上の表のとおり。反映のロールの CloudFormation の書き込みが「反映のロールに許す書き込み」の 9 つと一致し、`SetStackPolicy` と再構成の 2 つの操作が無い | `directRoleArns` が空 | 知らない文を足したテンプレートで例外 |
 
 ## qualifier の衝突の確認
 
