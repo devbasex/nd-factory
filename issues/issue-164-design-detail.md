@@ -298,7 +298,8 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
       - `ssm:GetParameter`（2 つのパラメーター）
       - `codepipeline:GetPipelineExecution`（このパイプライン）
       - `iam:ListAttachedRolePolicies`・`ListRolePolicies`・`GetRole`・`SimulatePrincipalPolicy`（アプリ専用の実行と反映のロール）
-      - CDK が付ける成果物とログの権限パイプラインの ARN は名前から組み立てる（`pipeline.pipelineArn` を参照すると循環する）
+      - CDK が付ける成果物とログの権限
+    - パイプラインの ARN は名前から組み立てる（`pipeline.pipelineArn` を参照すると循環する）
     - 準備のプロジェクトが引き受けるのは、アプリ専用の lookup のロールにする
     - 反映のプロジェクトの環境変数 `ND_GUARD_CONFIG` は `toJsonString(guardConfig(...))`
     - 反映のアクションの環境変数は、`EXPECTED_DIGEST`・`SETTINGS_VERSION`・`SETTINGS_SHA256`（準備の変数）と `PIPELINE_EXECUTION_ID`（`#{codepipeline.PipelineExecutionId}`）
