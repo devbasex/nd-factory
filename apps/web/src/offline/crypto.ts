@@ -2,6 +2,7 @@
 
 export type Sealed = { iv: Uint8Array<ArrayBuffer>; data: ArrayBuffer };
 
+/** @internal */
 export class UnreadableError extends Error {
   override name = "UnreadableError";
 }

@@ -38,6 +38,11 @@ export function newId<K extends IdKind>(kind: K, clock: Clock): Id<K> {
   return `${kind}_${v7({ msecs: state.msecs, seq: state.seq })}`;
 }
 
+// 冪等キーは種類の頭を持たない UUIDv7（API の文書の冪等キーの条件）
+export function newIdempotencyKey(clock: Clock): string {
+  return v7({ msecs: clock.epochMs() });
+}
+
 const schemas = new Map<IdKind, ReturnType<typeof idOf>>();
 
 // 形が合わなければ null（呼び手は 404 と同じに扱う）

@@ -1,7 +1,7 @@
 import { ID_KINDS } from "@nd-factory/contracts/ids";
 import { describe, expect, it } from "vitest";
 import { createClock } from "../src/clock.ts";
-import { newId, parseId } from "../src/ids.ts";
+import { newId, newIdempotencyKey, parseId } from "../src/ids.ts";
 
 // 単調性の状態はモジュールに 1 つあるため、このファイルの時計は前のテストより先の時刻から始める
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -79,5 +79,14 @@ describe("parseId", () => {
     ["頭だけ", "usr_"],
   ])("%s は null", (_why, value) => {
     expect(parseId("usr", value)).toBeNull();
+  });
+});
+
+describe("冪等キー", () => {
+  it("UUIDv7 の形で、同じミリ秒でも重ならない", () => {
+    const clock = { ...createClock(), epochMs: () => 1_700_000_000_000 };
+    const keys = Array.from({ length: 100 }, () => newIdempotencyKey(clock));
+    expect(keys[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(new Set(keys).size).toBe(100);
   });
 });

@@ -35,7 +35,7 @@ export type KeyRow = {
 
 type SnapshotRow = Sealed & { id: string; kind: string; receivedAt: number; projectTags: string[] };
 export type OutboxRow = Sealed & { answerTag: string; targetTag: string; kind: "queued" | "confirm"; projectTag?: string };
-type HeldRow = OutboxRow & { holdReason: HoldReason };
+export type HeldRow = OutboxRow & { holdReason: HoldReason };
 type LoginRow = Sealed & { id: "login"; userTag: string; fingerprintTag: string };
 type PendingRow = Sealed & { id: "signout-proof" | "unlink-item"; fingerprintTag: string };
 type WaitRow = Sealed & { id: "retry" | "api-time" };
