@@ -266,6 +266,22 @@ function denyStatements(shapes: Shapes): Statement[] {
   ];
 }
 
+// サービスの操作をまとめて許す条件なしの文を 1 つにする。操作はそのサービスの資源の ARN にしか当たらないので、
+// 許可の範囲は変わらず、文ごとの繰り返しの分だけ短くなる
+function mergeWholeService(statements: Statement[]): Statement[] {
+  const whole = (s: Statement) => s.Condition === undefined && (s.Action as string[]).every((a) => a.endsWith(":*"));
+  const merged = statements.filter(whole);
+  if (merged.length === 0) return statements;
+  return [
+    {
+      Effect: "Allow",
+      Action: merged.flatMap((s) => s.Action),
+      Resource: merged.flatMap((s) => s.Resource as string[]),
+    },
+    ...statements.filter((s) => !whole(s)),
+  ];
+}
+
 // 同じ資源の形の操作を 1 つの文にまとめる。管理ポリシーの上限（6,144 文字）に収める
 function allowStatements(
   grants: readonly Grant[],
@@ -278,12 +294,14 @@ function allowStatements(
     for (const a of g.actions) actions.add(a);
     byShape.set(g.on, actions);
   }
-  return [...byShape].map(([on, actions]) => ({
-    Effect: "Allow",
-    Action: [...actions].sort(),
-    Resource: shapes[on],
-    ...(conditions[on] ? { Condition: conditions[on] } : {}),
-  }));
+  return mergeWholeService(
+    [...byShape].map(([on, actions]) => ({
+      Effect: "Allow",
+      Action: [...actions].sort(),
+      Resource: shapes[on],
+      ...(conditions[on] ? { Condition: conditions[on] } : {}),
+    })),
+  );
 }
 
 export function appExecutionPolicy(input: BootstrapInput): PolicyDocument {

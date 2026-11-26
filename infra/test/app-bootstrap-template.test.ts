@@ -39,6 +39,12 @@ const LONGEST: BootstrapInput = {
   region: "ap-southeast-2",
   settings: { prefix: "a".repeat(20), environment: "b".repeat(10) },
 };
+// ARN はパーティションとリージョンの名前が長いほど長くなる
+const LONGEST_INPUTS = [
+  LONGEST,
+  { ...LONGEST, partition: "aws-cn", region: "cn-northwest-1" },
+  { ...LONGEST, partition: "aws-us-gov", region: "us-gov-west-1" },
+];
 
 type Statement = {
   Sid?: string;
@@ -255,7 +261,9 @@ describe("appExecutionPolicy", () => {
   it.each(["sns:Unsubscribe", "sns:GetSubscriptionAttributes", "sns:SetSubscriptionAttributes"])(
     "%s は、この設置の運用トピックだけ",
     (action) => {
-      expect(statements(doc, "Allow", action).flatMap((s) => list(s.Resource))).toEqual([
+      // 同じ文にほかのサービスの ARN が並ぶ。SNS の操作が当たるのは SNS の ARN だけ
+      const resources = statements(doc, "Allow", action).flatMap((s) => list(s.Resource));
+      expect(resources.filter((r) => r === "*" || r.split(":")[2] === "sns")).toEqual([
         `arn:aws:sns:us-west-2:${FAKE_ACCOUNT}:acme-test-ops`,
       ]);
     },
@@ -265,8 +273,8 @@ describe("appExecutionPolicy", () => {
     expect(statements(doc, "Allow", action)).toEqual([]);
   });
 
-  it("prefix と environment が最長でも、管理ポリシーの上限の 6144 文字に収まる", () => {
-    expect(JSON.stringify(appExecutionPolicy(LONGEST)).length).toBeLessThanOrEqual(6144);
+  it.each(LONGEST_INPUTS)("$region で prefix と environment が最長でも、管理ポリシーの上限の 6144 文字に収まる", (input) => {
+    expect(JSON.stringify(appExecutionPolicy(input)).length).toBeLessThanOrEqual(6144);
   });
 });
 
@@ -317,8 +325,8 @@ describe("appPermissionsBoundary", () => {
     },
   );
 
-  it("prefix と environment が最長でも 6144 文字に収まる", () => {
-    expect(JSON.stringify(appPermissionsBoundary(LONGEST)).length).toBeLessThanOrEqual(6144);
+  it.each(LONGEST_INPUTS)("$region で prefix と environment が最長でも 6144 文字に収まる", (input) => {
+    expect(JSON.stringify(appPermissionsBoundary(input)).length).toBeLessThanOrEqual(6144);
   });
 });
 
