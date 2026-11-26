@@ -136,6 +136,17 @@ def _add_history_targets(ctx: Context, entries: list[Entry], allowlisted: list[E
     def add(target: Target, data: bytes) -> bool:
         return add_or_fail(repo, target, data, fail)
 
+    def read(sha: str) -> bytes | None:
+        """読めなければ失敗の印を付け、Blobs を作り直して None を返す。"""
+        nonlocal blobs
+        try:
+            return blobs.read(sha)
+        except GitError:
+            fail()
+            blobs.close()
+            blobs = history.Blobs(ctx.root)
+            return None
+
     try:
         numstat: set[Key] = set()
         unset: set[tuple[str, str]] = set()
@@ -146,12 +157,8 @@ def _add_history_targets(ctx: Context, entries: list[Entry], allowlisted: list[E
             fail()
         wanted = {entry.key for entry in allowlisted}
         for entry in entries:
-            try:
-                blob = blobs.read(entry.blob)
-            except GitError:
-                fail()
-                blobs.close()
-                blobs = history.Blobs(ctx.root)
+            blob = read(entry.blob)
+            if blob is None:
                 continue
             if entry.needs_marker and blob and (entry.key in wanted or history.is_binary(entry, blob, numstat, unset)):
                 try:
@@ -162,13 +169,7 @@ def _add_history_targets(ctx: Context, entries: list[Entry], allowlisted: list[E
                 if add(Target(entry.commit, entry.parent, entry.path, entry.path, entry.path, added=added), blob):
                     old: bytes | None = b""
                     if entry.old_blob:
-                        try:
-                            old = blobs.read(entry.old_blob)
-                        except GitError:
-                            fail()
-                            blobs.close()
-                            blobs = history.Blobs(ctx.root)
-                            old = None
+                        old = read(entry.old_blob)
                     if old and not add(
                         Target(entry.commit, entry.parent, entry.path, entry.path, entry.path, before=True), old
                     ):
