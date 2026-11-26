@@ -200,13 +200,14 @@ export function createSender(d: SendDeps): QueueSender {
     if (why === "unknown" && item.kind === "queued") await round.revert(item);
   }
 
-  // 会話の写しの先映しした項目に、成功の項目の ID を書く
+  // 会話の写しの先映しした項目に、成功の項目の ID を書く。写しか先映しした項目が無ければ書くものは無い（null）
   async function sentIdWrite(owner: Owner, item: OutboxItem, itemId: string) {
     const guard = await prepareGuard(d.db, owner);
     const found = await d.cache.read("organizer-messages", item.targetId);
     if (guard === null || found === null) return null;
     const value = found.value as Conversing;
-    const items = value.items?.map((i) => (i.answer_tag === item.answerTag ? { ...i, id: itemId } : i));
+    if (!value.items?.some((i) => i.answer_tag === item.answerTag)) return null;
+    const items = value.items.map((i) => (i.answer_tag === item.answerTag ? { ...i, id: itemId } : i));
     return d.cache.prepareReplace(guard, "organizer-messages", item.targetId, { ...value, items }, found.fetchSeq);
   }
 
@@ -216,10 +217,12 @@ export function createSender(d: SendDeps): QueueSender {
     // 所属と写しは書き込みの中で確かめ、変わっていれば件と写しを読み直す
     const attempts = 3;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const last = attempt === attempts - 1;
       const found = await d.outbox.find(item.answerTag);
       if (found === null) return d.wait.clear(round.owner, waitSeen);
-      // 最後の回は写しへの ID の書き込みを諦め、件の反映（取り下げの登録）を優先する。写しは次の読み直しで直る
-      const conversation = attempt < attempts - 1 ? await sentIdWrite(round.owner, item, itemId) : null;
+      // 保留の件は取り下げを ID で足すので、最後の回は写しへの ID の書き込みを諦めて取り下げの登録を優先する。
+      // 送る列の件は、写しに先映しした項目が残る限り、最後の回も ID の書き込みと同じトランザクションでだけ消す
+      const conversation = found.held && last ? null : await sentIdWrite(round.owner, item, itemId);
       const writeConversation = async (tx: GuardedTx) => conversation === null || (await conversation(tx));
       if (found.held) {
         // 保留から先へは移らないので、取り下げを足すのと同じトランザクションで保留の件を消す
@@ -259,6 +262,8 @@ export function createSender(d: SendDeps): QueueSender {
       if (result === "committed") return true;
       if (!moved && !stale) return false;
     }
+    // 写しの照合が外れ続けたら、ID を失わないよう件を送り始めの印つきのまま残して回を止める。
+    // 次の回が同じ冪等キーで送り直し、返った同じ項目の ID で反映し直す
     return false;
   }
 
