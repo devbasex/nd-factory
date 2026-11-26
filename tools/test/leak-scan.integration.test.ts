@@ -1798,6 +1798,46 @@ describe("今の木の探し直し（#98 の 3・4）", () => {
     expect(allowed.output).not.toContain(UNSEARCHED_MESSAGE);
   }, TIMEOUT);
 
+  /** 2 回目の報告の当たりのうち、目印でないものを change で変えた写しを後ろに足す偽の gitleaks を置いた環境 */
+  const repeatSecondFindings = (change: string) => ({
+    ...process.env,
+    PATH: wrappedGitleaksPath([
+      `[[ "$tag" == 2 ]] && jq '. + [.[] | select(.RuleID != "leak-scan-marker") | ${change}]' "$report" >"$report.t" && mv "$report.t" "$report"`,
+    ]),
+  });
+  const pathRules = ["a", "b"]
+    .map((id) => `[[rules]]\nid = "nd-test-${id}"\ndescription = "${id}"\npath = '''\\.p12'''\n`)
+    .join("\n");
+
+  it("2 回目の行 0 の当たりは対象と規則の組ごとに 1 件にし、行のある当たりは重なっても残す", () => {
+    const root = treeOf({ "keys/a.p12": elf(tokenLine()), "keys/b.p12.gz": "text\n" });
+    const result = scan(root, ["dir", defaultWith(pathRules)], { env: repeatSecondFindings(".") });
+    expect(places(result)).toEqual([
+      ["github-pat", "keys/a.p12", 2],
+      ["github-pat", "keys/a.p12", 2],
+      ["nd-test-a", "keys/a.p12", 0],
+      ["nd-test-a", "keys/b.p12.gz", 0],
+      ["nd-test-b", "keys/a.p12", 0],
+      ["nd-test-b", "keys/b.p12.gz", 0],
+      ["pkcs12-file", "keys/a.p12", 0],
+    ]);
+    expect(result.output).not.toContain(UNSEARCHED_MESSAGE);
+  }, TIMEOUT);
+
+  it.each([
+    ["パスが違う", '.File = "other"'],
+    ["コミットが違う", `.Commit = "${"0".repeat(40)}"`],
+  ])("2 回目の行 0 の当たりは、%sだけの重なりも、規則とメールが同じなら先の 1 件にする", (_label, change) => {
+    const config = extendConfig(ND_CONFIG, pathRules);
+    const result = scan(treeOf({ "keys/a.p12": elf("x\n") }), ["dir", config], { env: repeatSecondFindings(change) });
+    expect(result.status).toBe(1);
+    expect(hits(result)).toEqual([
+      ["nd-test-a", "keys/a.p12", ""],
+      ["nd-test-b", "keys/a.p12", ""],
+    ]);
+    expect(result.output).toContain(UNSEARCHED_MESSAGE);
+  }, TIMEOUT);
+
   it("コミットを条件にする許可は今の木には効かず、Commit は空になる", () => {
     const token = fakeToken();
     const config = defaultWith(
