@@ -25,10 +25,15 @@ flowchart LR
 
 利用者の PC で、モックだけに使う `--user-data-dir` と、9223 の口を付けて起動する。このプロファイルではどのサービスにもサインインしない。起動は利用者に頼む。
 
+Windows ではコマンドプロンプト（`cmd.exe`）で打つ。`%LOCALAPPDATA%` は PowerShell では展開されない。
+
+```bat
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9223 --user-data-dir="%LOCALAPPDATA%\chrome-mock"
 ```
-# Windows
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9223 --user-data-dir=%LOCALAPPDATA%\chrome-mock
-# macOS
+
+macOS ではターミナルで打つ。
+
+```bash
 open -na "Google Chrome" --args --remote-debugging-port=9223 --user-data-dir="$HOME/.chrome-mock"
 ```
 
@@ -67,7 +72,9 @@ open -na "Google Chrome" --args --remote-debugging-port=9223 --user-data-dir="$H
 | 直したのに古い | `mock:up` を打ち直していない |
 | 利用者がウィンドウやタブを閉じた | `mock:up` を打ち直すと開き直す（経路 A では `CDP_URL` を付ける） |
 
-Chrome を使えない場合は、リポジトリを取得した利用者の PC で `python3 -m http.server -d docs/design/mock 8000` を打ち、同じ PC のブラウザーで http://localhost:8000/viewer.html#foundation を開く。リモートのホストやコンテナで打った場合、利用者の PC の `localhost` はそこに届かないため、ポート 8000 を転送して、転送先の URL を開く。
+Chrome を使えない場合は、リポジトリを取得した利用者の PC で `python3 -m http.server --bind 127.0.0.1 -d docs/design/mock 8000` を打ち、同じ PC のブラウザーで http://localhost:8000/viewer.html#foundation を開く。`--bind 127.0.0.1` は外さない。外すと、同じネットワークの第三者にも承認前のモックが配られる。
+
+リモートのホストやコンテナでも同じコマンドを打つ。利用者の PC の `localhost` はそこに届かないため、SSH のポート転送（`ssh -L 8000:127.0.0.1:8000 <接続先>`）かエディタのポート転送でポート 8000 を転送し、利用者の PC で同じ URL を開く。
 
 ### 経路 B の接続の確かめ方
 
