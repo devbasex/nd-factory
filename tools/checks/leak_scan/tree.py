@@ -10,7 +10,7 @@ from pathlib import Path
 import archive
 import gitleaks
 from copyrepo import CopyRepo, add_leaves, add_or_fail
-from model import Budget, Context, CopyError, Mark, Run, SkipKind, Target
+from model import Budget, Context, CopyError, LogLine, Mark, Run, SkipKind, Target
 
 DEPENDENCY_DIRS = ("node_modules", "bower_components")
 
@@ -112,32 +112,36 @@ class _Collector:
         except OSError:
             self.fail()
 
+    def add_skipped(self, line: LogLine) -> None:
+        """飛ばした行 1 件が指すファイルかディレクトリの下のファイルを写しに足す。"""
+        kind = gitleaks.classify_skip(line)
+        if kind is SkipKind.IGNORE:
+            return
+        path = line.fields.get("path", "").removeprefix("./")
+        if kind is SkipKind.UNKNOWN or not path:
+            self.fail()
+            return
+        mode = self._mode(path)
+        if kind is SkipKind.ALLOWLIST_DIR:
+            if ".git" in path.split("/"):
+                return
+            if mode is None or not stat.S_ISDIR(mode):
+                self.fail()
+                return
+            for found in self.walk(path):
+                self.add_file(found)
+        elif not self.excluded(path):
+            if mode is None or not stat.S_ISREG(mode):
+                self.fail()
+                return
+            self.add_file(path)
+
 
 def collect_tree_targets(ctx: Context, run: Run, repo: CopyRepo, budget: Budget) -> set[Mark]:
     """飛ばした行のファイル・外れたディレクトリの下のファイル・アーカイブの中のファイルを写しに足す。"""
     collector = _Collector(ctx, repo, budget)
     for line in gitleaks.skip_lines(run):
-        kind = gitleaks.classify_skip(line)
-        if kind is SkipKind.IGNORE:
-            continue
-        path = line.fields.get("path", "").removeprefix("./")
-        if kind is SkipKind.UNKNOWN or not path:
-            collector.fail()
-            continue
-        mode = collector._mode(path)
-        if kind is SkipKind.ALLOWLIST_DIR:
-            if ".git" in path.split("/"):
-                continue
-            if mode is None or not stat.S_ISDIR(mode):
-                collector.fail()
-                continue
-            for found in collector.walk(path):
-                collector.add_file(found)
-        elif not collector.excluded(path):
-            if mode is None or not stat.S_ISREG(mode):
-                collector.fail()
-                continue
-            collector.add_file(path)
+        collector.add_skipped(line)
     for path in collector.walk(""):
         collector.expand(path)
     return collector.marks
