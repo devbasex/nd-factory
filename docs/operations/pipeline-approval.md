@@ -342,7 +342,27 @@ aws cloudformation list-stack-resources --profile <profile> --stack-name <prefix
 
 ### 別の設置の資源への拒否の確認
 
-指定した資源の ARN とタグを与えたときに、アプリ専用の実行のロールの権限が操作を許可しないことを、`aws iam simulate-principal-policy` で確かめる。対象の操作は `cognito-idp:DeleteUserPool`・`cloudfront:DeleteDistribution`・`ec2:DeleteVpc`・`apigateway:DELETE` である。別の設置の資源の ARN と、その `aws:ResourceTag/app-prefix`・`aws:ResourceTag/app-env` の値を `--context-entries` で渡し、結果が許可（`allowed`）でないことを見る。
+指定した資源の ARN とタグを与えたときに、アプリ専用の実行のロールの権限が操作を許可しないことを、`aws iam simulate-principal-policy` で確かめる。対象の操作は `cognito-idp:DeleteUserPool`・`cloudfront:DeleteDistribution`・`ec2:DeleteVpc`・`apigateway:DELETE` である。別の設置の資源の ARN と、その `aws:ResourceTag/app-prefix`・`aws:ResourceTag/app-env` の値を入力し、結果が許可（`allowed`）でないことを見る。
+
+同じアカウントに別の設置がある場合は、その資源の ARN とタグを渡す。ない場合は、操作ごとに別の設置を表す架空の ARN とタグを入力し、シミュレーション結果を記録する。架空の ARN でも、`<account>` と `<region>` にはこの設置のアカウント ID とリージョンを入れる。変えるのは資源の ID の部分だけである。
+
+| 操作（`--action-names`） | 架空の ARN の例（`--resource-arns`） |
+| --- | --- |
+| `cognito-idp:DeleteUserPool` | `arn:aws:cognito-idp:<region>:<account>:userpool/<region>_EXAMPLE` |
+| `cloudfront:DeleteDistribution` | `arn:aws:cloudfront::<account>:distribution/EXAMPLE` |
+| `ec2:DeleteVpc` | `arn:aws:ec2:<region>:<account>:vpc/vpc-EXAMPLE` |
+| `apigateway:DELETE` | `arn:aws:apigateway:<region>::/apis/EXAMPLE` |
+
+架空のタグは、`app-prefix` を `acme-other`、`app-env` を `test` にする。この設置の `prefix` が `acme-other` の場合は、別の値にする。コマンドは次の形で、4 つの操作を 1 つずつ打つ。別の設置がある場合は、`--resource-arns` とタグの値をその設置のものに替える。`<実行のロールの ARN>` は、アプリ専用の bootstrap が作った実行のロール（`cdk-<qualifier>-cfn-exec-role-<account>-<region>`）の ARN である。
+
+```bash
+aws iam simulate-principal-policy --profile <profile> --policy-source-arn <実行のロールの ARN> \
+  --action-names <操作> --resource-arns <資源の ARN> \
+  --context-entries \
+    ContextKeyName=aws:ResourceTag/app-prefix,ContextKeyValues=acme-other,ContextKeyType=string \
+    ContextKeyName=aws:ResourceTag/app-env,ContextKeyValues=test,ContextKeyType=string \
+  --query "EvaluationResults[].[EvalActionName,EvalResourceName,EvalDecision]"
+```
 
 この確認が通っても、AWS の上で設置どうしが分離できていると確かめたことにはならない。シミュレーターは手で渡したタグで判定するだけである（[IAM ポリシーシミュレーター](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_testing-policies.html)）。次の 2 つは、この確認では分からないまま残るリスクである。
 
