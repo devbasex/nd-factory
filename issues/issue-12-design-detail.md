@@ -569,7 +569,7 @@ type OperationClass =
 | `quarantinePending` | `quarantine.ts` | 新設 | `(db: DeviceDb, o: { drop: ReadonlySet<string> }) => Promise<void>` | `switching` を書き、`drop` に無い件とキーを隔離へ移す |
 | `restoreQuarantined` | 同上 | 新設 | `(db: DeviceDb, userId: string) => Promise<void>` | 持ち主の件を今のキーで戻す（戻し先は設計文書の「戻した件の戻し先」） |
 | `rollbackQuarantine` | 同上 | 新設 | `(db: DeviceDb) => Promise<void>` | 中断した隔離の複製を消して `switching` を外す |
-| `unreadableQuarantine` | 同上 | 新設 | `(userId: string) => Promise<{ count: number; discard: (answerTag: string) => Promise<void> }>` | 持ち主の復号できない件の数と破棄 |
+| `unreadableQuarantine` | 同上 | 新設 | `(userId: string) => Promise<{ items: ReadonlyArray<{ answerTag: string; kind: Exclude<OperationClass["class"], "online"> }>; discard: (answerTag: string) => Promise<void> }>` | 持ち主の復号できない件の一覧と破棄 |
 
 - `quarantinePending`
   - 事前条件: サインインの錠を持つ
@@ -578,6 +578,13 @@ type OperationClass =
 - `restoreQuarantined`
   - 事後条件: 今のデータベースへ書き終えた件だけを隔離から消す
   - 副作用: 同上
+- `unreadableQuarantine`
+  - 事後条件: `items` は、持ち主が `userId` の利用者である復号できない件を、1 件ずつ返す。持ち主の行は、設計文書の「隔離」と同じ HMAC の照合で選ぶ。件数は `items` の数である
+  - `answerTag` は隔離の件の主キーで、HMAC の値のため元の ID は読めない。呼び出し元は破棄する件の指定にだけ使う。`kind` は一覧に出す区分である
+- `unreadableQuarantine` の `discard`
+  - 事前条件: 利用者が確認のダイアログで確定した
+  - 事後条件: 持ち主の行を `userId` で選び直し、`answerTag` の件の `ownerTag` がその行と同じときだけ消す。ほかの持ち主の件と、無い件には何もしない
+  - 副作用: 件の削除と、件が無くなった持ち主の行の削除を、1 つの `readwrite` のトランザクションで行う
 
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
@@ -596,7 +603,7 @@ type OperationClass =
 | `quarantinePending` | 暗号文のまま移る | 件が 0 | 書き込みの失敗で元が残る |
 | `restoreQuarantined` | キャッシュして送るは送る列へ、確定待ちは保留へ | 版の古い隔離 | 壊れた 1 件が残る・2 回打って増えない |
 | `rollbackQuarantine` | 複製が消える | 元に無い件は残る | 削除の失敗 |
-| `unreadableQuarantine` | 持ち主だけに数が出る | 0 件で持ち主の行が消える | 別の利用者は 0 件 |
+| `unreadableQuarantine` | 持ち主だけに件が出る・指定した 1 件だけを破棄する | 0 件で持ち主の行が消える | 別の利用者は 0 件・別の利用者の `answerTag` を渡しても消えない |
 
 ## 保留の一覧
 満たす決定: 決定 12、受け入れ条件 14
@@ -605,11 +612,13 @@ type OperationClass =
 | --- | --- | --- | --- | --- |
 | `createHeldStore` | `held-store.ts` | 新設 | `(d: { db: DeviceDb }) => HeldStore`（`count()`・`list()`・`discard(answerTag)`） | 保留の件の読み出しと、確認の後の破棄 |
 | `visibleFieldsOf` | 同上 | 新設 | `(item: HeldItem, record: AuthzRecord \| null) => HeldView` | 設計文書の「件の表示で出すもの」の条件で項目を落とす |
-| `HeldListDialog` | `screens/held-list.tsx` | 新設 | `(props: { store: HeldStore; open: boolean }) => ReactElement` | 一覧と「破棄すると元に戻せません」の確認 |
+| `HeldListDialog` | `screens/held-list.tsx` | 新設 | `(props: { store: HeldStore; quarantined: Awaited<ReturnType<typeof unreadableQuarantine>>; open: boolean }) => ReactElement` | 一覧と「破棄すると元に戻せません」の確認 |
 
 - `createHeldStore` の `discard`
   - 事前条件: 利用者が確認のダイアログで確定した
   - 副作用: IndexedDB の削除
+
+`HeldListDialog` は、`store` の件の後に `quarantined.items` を「内容を読めません」と区分で並べる。隔離の件の破棄は `quarantined.discard` に `answerTag` を渡し、終えたら `unreadableQuarantine` を呼び直す。画面に出す件数は、`store.count()` と `quarantined.items` の数の合計である。
 
 「結果未確認」と食い違いの表示も `visibleFieldsOf` を通す（出し分けを 1 か所にする）。
 
