@@ -82,7 +82,13 @@ export async function commitGuarded(
     sameBytes(authz?.iv ?? null, guard.authzIv) &&
     !guard.owner.flagged();
   if (!unchanged) return abort();
-  if ((await write(tx)) === false) return abort();
+  try {
+    if ((await write(tx)) === false) return abort();
+  } catch (error) {
+    // 要求の失敗で終わったトランザクションは、もう取り消せない
+    await abort().catch(() => {});
+    throw error;
+  }
   await tx.done;
   return "committed";
 }

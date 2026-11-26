@@ -67,3 +67,17 @@ describe("利用者の境界の照合と書き込み", () => {
     db.close();
   });
 });
+
+describe("書き込みの失敗", () => {
+  it("書く側が例外を投げると、何も残さず呼び出し元へ返す", async () => {
+    const { db, owner } = await setup();
+    const guard = (await prepareGuard(db, owner))!;
+    const failed = commitGuarded(guard, async (tx) => {
+      await tx.objectStore("snapshots").put(row);
+      throw new DOMException("example", "QuotaExceededError");
+    });
+    await expect(failed).rejects.toThrow("example");
+    await expect(db.count("snapshots")).resolves.toBe(0);
+    db.close();
+  });
+});
