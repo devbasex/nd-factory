@@ -1,0 +1,362 @@
+/* 部品の共通の見た目。値は tokens.generated.css の変数だけを使う。幅の区切り（640px・1024px）はこのファイルだけに置く */
+@import "./tokens.generated.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--color-ground);
+  color: var(--color-text);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-body);
+  overflow-wrap: anywhere;
+}
+h1 {
+  font-size: var(--font-size-title);
+}
+h2 {
+  font-size: var(--font-size-section);
+}
+code,
+pre {
+  font-family: var(--font-family-mono);
+}
+ul {
+  padding-inline-start: var(--space-6);
+}
+
+/* 押せる要素の最小の大きさは、ここの 1 か所で当てる（文中のリンクを除く） */
+button,
+input,
+select,
+textarea,
+summary,
+a:not(.nd-inline),
+[role="button"] {
+  min-inline-size: var(--size-target-min);
+  min-block-size: var(--size-target-min);
+}
+a:not(.nd-inline) {
+  display: inline-flex;
+  align-items: center;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button,
+input,
+select,
+textarea {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  padding-inline: var(--space-3);
+}
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.nd-button {
+  transition: background-color var(--motion-color);
+}
+.nd-button[data-variant="primary"] {
+  background: var(--color-primary-bg);
+  color: var(--color-primary-text);
+}
+.nd-button[data-variant="approve"] {
+  background: var(--color-tone-approve-bg);
+  color: var(--color-tone-approve-text);
+}
+.nd-button:disabled {
+  background: var(--color-tone-neutral-bg);
+  color: var(--color-muted);
+}
+.nd-button-box {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.nd-note {
+  font-size: var(--font-size-note);
+  color: var(--color-muted);
+}
+.nd-visually-hidden,
+.nd-skip:not(:focus) {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.nd-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+}
+.nd-badge {
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-base);
+  font-size: var(--font-size-note);
+}
+.nd-badge[data-tone="waiting"] {
+  background: var(--color-tone-waiting-bg);
+  color: var(--color-tone-waiting-text);
+}
+.nd-badge[data-tone="running"] {
+  background: var(--color-tone-running-bg);
+  color: var(--color-tone-running-text);
+}
+.nd-badge[data-tone="done"] {
+  background: var(--color-tone-done-bg);
+  color: var(--color-tone-done-text);
+}
+.nd-badge[data-tone="stopped"] {
+  background: var(--color-tone-stopped-bg);
+  color: var(--color-tone-stopped-text);
+}
+.nd-badge[data-tone="failed"] {
+  background: var(--color-tone-failed-bg);
+  color: var(--color-tone-failed-text);
+}
+.nd-badge[data-tone="neutral"] {
+  background: var(--color-tone-neutral-bg);
+  color: var(--color-tone-neutral-text);
+}
+.nd-badge[data-tone="pending"] {
+  background: var(--color-tone-pending-bg);
+  color: var(--color-tone-pending-text);
+  border: 1px dashed currentColor;
+}
+.nd-pending {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.nd-error {
+  color: var(--color-tone-failed-text);
+  background: var(--color-tone-failed-bg);
+  border-radius: var(--radius-base);
+  padding: var(--space-2) var(--space-3);
+}
+.nd-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-tone-stopped-bg);
+  color: var(--color-tone-stopped-text);
+}
+.nd-spinner {
+  display: inline-block;
+  inline-size: var(--space-6);
+  block-size: var(--space-6);
+  border: 2px solid var(--color-border);
+  border-block-start-color: var(--color-primary-bg);
+  border-radius: 50%;
+  animation: nd-spin 1s linear infinite;
+}
+@keyframes nd-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nd-spinner {
+    animation: none;
+  }
+  * {
+    transition: none !important;
+  }
+}
+
+.nd-list ul {
+  list-style: none;
+  padding: 0;
+}
+.nd-list li a {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+  inline-size: 100%;
+  padding: var(--space-3);
+  margin-block-end: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  color: inherit;
+  text-decoration: none;
+}
+.nd-list-head {
+  display: none;
+}
+.nd-detail dt {
+  color: var(--color-muted);
+  font-size: var(--font-size-note);
+}
+.nd-detail dd {
+  margin: 0 0 var(--space-3);
+}
+.nd-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.nd-dialog {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  background: var(--color-surface);
+  color: inherit;
+}
+.nd-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.nd-scroll {
+  overflow-x: auto;
+  max-inline-size: 100%;
+}
+.nd-scroll td,
+.nd-scroll th {
+  border: 1px solid var(--color-border);
+  padding: var(--space-1) var(--space-2);
+}
+
+/* スマートフォン: 行き先は画面の下の帯 */
+.nd-body > main {
+  padding: var(--space-4);
+  padding-block-end: calc(var(--size-target-min) + var(--space-8));
+}
+.nd-place {
+  padding: var(--space-2) var(--space-4);
+}
+.nd-nav {
+  position: fixed;
+  inset-block-end: 0;
+  inset-inline: 0;
+  background: var(--color-surface);
+  border-block-start: 1px solid var(--color-border);
+  padding-block-end: env(safe-area-inset-bottom);
+}
+.nd-nav ul {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.nd-nav-item {
+  position: relative;
+  display: flex !important;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  inline-size: 100%;
+  border: none !important;
+  color: inherit;
+  text-decoration: none;
+  font-size: var(--font-size-note);
+}
+.nd-nav-item[aria-current="page"] {
+  font-weight: 700;
+  background: var(--color-tone-running-bg);
+  color: var(--color-tone-running-text);
+}
+.nd-count {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: var(--space-2);
+  border-radius: var(--radius-base);
+  padding-inline: var(--space-1);
+  background: var(--color-tone-failed-bg);
+  color: var(--color-tone-failed-text);
+}
+
+/* タブレット: 左の細い帯 */
+@media (min-width: 640px) {
+  .nd-frame {
+    display: grid;
+    grid-template-columns: var(--size-nav-rail) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    min-block-size: 100vh;
+  }
+  .nd-place {
+    grid-column: 1;
+    grid-row: 1;
+    padding: var(--space-2) var(--space-1);
+    font-size: var(--font-size-note);
+  }
+  .nd-place ul {
+    list-style: none;
+    padding: 0;
+  }
+  .nd-place button {
+    inline-size: 100%;
+    padding-inline: var(--space-1);
+  }
+  .nd-nav {
+    position: static;
+    grid-column: 1;
+    grid-row: 2;
+    border-block-start: none;
+    border-inline-end: 1px solid var(--color-border);
+  }
+  .nd-nav ul {
+    grid-template-columns: 1fr;
+  }
+  .nd-body {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+  .nd-body > main {
+    padding: var(--space-6);
+  }
+  .nd-list-head,
+  .nd-list li a {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    align-items: center;
+  }
+  .nd-list-head {
+    padding-inline: var(--space-3);
+    font-size: var(--font-size-note);
+    color: var(--color-muted);
+  }
+}
+
+/* PC: 左の横の帯（アイコンと名前） */
+@media (min-width: 1024px) {
+  .nd-frame {
+    grid-template-columns: var(--size-nav-side) minmax(0, 1fr);
+  }
+  .nd-nav-item {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: var(--space-3);
+    padding-inline: var(--space-4);
+    font-size: var(--font-size-body);
+  }
+  .nd-body > main {
+    max-inline-size: var(--size-content-max);
+    padding: var(--space-8);
+  }
+}
