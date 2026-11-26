@@ -418,6 +418,19 @@ graph LR
      | bootstrap の版の検査 | 設置のコマンドが、今のまま既定の qualifier の版を読む | 設置のコマンドで反映するときは、`cdk deploy` 自身がアプリ専用の qualifier の版を確かめる。パイプラインの反映では、反映の手順も確かめる（下の「反映の直前の確認」）。bootstrap の版の検査のために、設置のコマンドのコード（`infra/setup/`）は変えない |
      - 設置ごとの分け方: アプリ専用の bootstrap は、設置（`prefix` と `environment` の組）ごとに 1 つ作り、同じアカウントとリージョンの設置どうしでも共有しない。共有すると、一つの設置の反映のプロジェクトが、別の設置のアプリのスタックを、その設置の反映の経路を通さずに更新できるためである
        - qualifier は、設定の項目を足さずに `prefix` と `environment` から決める。`nd` の後に、`<prefix>/<environment>` の SHA-256 の先頭 8 桁（16 進）を付けた 10 文字にする。`infra/lib/naming.ts` が計算し、合成と bootstrap の両方が同じ値を使う
+       - qualifier の衝突の確認: 8 桁に縮めるので、違う設置が同じ qualifier になることがある。たとえば作り物の値の `acme-58885/dev` と `acme-91474/dev` は、どちらも `nd09bda190` になる。同じ名前のロールやアセットの置き場を使うと、後の設置の bootstrap が失敗するか、先の設置の反映の権限を書き換える
+         - 運用担当者（自分で設置する人は本人）は、アプリ専用の bootstrap を作る前と更新する前（版を上げる場合を含む）に、毎回、確認のコマンドを打つ。bootstrap と同じ profile とリージョンで打ち、成功したときだけ `cdk bootstrap` に進む
+         - どの設置の bootstrap かは、bootstrap のスタックのタグで記録する。`cdk bootstrap --tags` で、ほかの資源と同じ `app-prefix` と `app-env` を付ける
+         - 確認のコマンドが成功するのは、次の表の 2 つの場合だけである。ほかの場合と、読み取りに失敗した場合は、非 0 で終わる
+
+           | 場合 | バージョンのパラメーター `/cdk-bootstrap/<qualifier>/version` | この設置の名前の bootstrap のスタック |
+           | --- | --- | --- |
+           | 新しく作る | 無い（`ParameterNotFound`） | 無い |
+           | この設置のものを更新する | 有無を問わない | 作成か更新が終わった状態であり、qualifier が同じで、2 つのタグがこの設置の値 |
+
+         - 止まったときは、先の設置の bootstrap を変えずに人へ戻す。まだ設置していなければ、`prefix` か `environment` を変えて避けられる
+         - 判定は `infra/lib/` に置き、AWS の読み取りは差し替えられるようにする。コマンドは `infra/setup/` の外に置く（受け入れ条件 11）
+         - 採らなかった案: qualifier を長くする案は、CDK の qualifier が 10 文字までなので採れない。名前の重なりによる CloudFormation の失敗に任せる案は、bootstrap に進んだ後でしか分からないので採らない
        - これで、反映のロール・公開のロール・lookup のロール・実行のロールと、実行のロールの管理ポリシーが設置ごとに分かれる
        - 反映のロールの信頼ポリシーは、その設置の反映のプロジェクトのロールと、直接の反映を行う人のロール（開始前だけ。下の「人がアプリのスタックを直接反映してよい条件」）の引き受けだけを許す。アカウント全体を信頼する標準の形は残さない。引き受けを許す ARN は、`aws:PrincipalArn` の条件にし、bootstrap を打つときに与える。nd-factory のプロジェクトが運用する環境では、直接の反映を行う人のロールを与えない
        - そのため、反映のプロジェクトのロールには、CDK が作る名前ではなく、`prefix`・`environment`・リージョンから決まる固定の名前を付ける。bootstrap をパイプラインのスタックより先に作っても、信頼ポリシーに名前を書ける
@@ -457,7 +470,7 @@ graph LR
      - アプリ専用の bootstrap の作成と、2 つの bootstrap の版を上げる操作は、P1 に当たる。アプリ専用の bootstrap の作成は、権限を持つロールを作るので C2 にも当たる。どれもリリース承認ゲートで承認を受けてから打つ（A1）
      - 既設環境の切り替えの順序: 運用担当者は、最初に反映の段への遷移を止め（「承認を受ける操作」の A4 の「bootstrap の切り替え」の行）、次の順に進める。
        0. 実装 PR は 1 つのままにする。手順 2 で合成・反映するコミットは、リリース承認ゲートで承認した、実装 PR のブランチの先端のコミットである（マージの前）。そのブランチには、起点のブランチの先端を取り込んでおく。このコミットを運用の記録に残す
-       1. アプリ専用の bootstrap を、承認を受けて作る
+       1. アプリ専用の bootstrap を、承認を受けて作る。打つ前に、上の「qualifier の衝突の確認」を通す
        2. 初めに、切り替える前の構成（既定の qualifier）の反映がすべて終わったことと、その結果を確かめる。入口の遷移を止めても、既に `Deploy` に入った実行は、切り替える前のロールで最後まで進むためである（決定 5）
          - `get-pipeline-state` で、`Deploy` に実行中の実行が無くなるまで待つ。実行は `--abandon` で打ち切らない
          - アプリのスタックの状態が、実行中を表す `*_IN_PROGRESS` でなくなるまで待つ。反映の CodeBuild が時間切れなどで終わっても、CloudFormation の更新は続くことがあるためである
@@ -601,6 +614,7 @@ graph LR
 | 決定 6（段階の判定の契約） | `packages/contracts/test/fixtures/confirmation-stage-cases.json` の全行（入力は設定の値と宣言の記録）で、反映側の判定が期待する段階と拒否の有無を返す。パラメーターの取得に失敗する行は期待する段階を持たず、反映の拒否だけを確かめる。#181 の合成側のテストは、合成の設定の入力と期待する段階がある行を打ち、段階だけを検査する。表に、キーが無い（宣言の記録が無い・ある）・2 つのキーの片方だけが欠ける、または不正（キーごと）・記録を読めない・保持の上限に達した宣言していない環境（版の番号が 101 以上で記録が無い。拒まない）の行がある | 表を使わず判定を別に書く・片方だけ規則を変えると落ちる |
 | 決定 6（宣言の記録。#181） | 宣言した本番の設定でパイプラインのスタックを合成すると、宣言の記録のパラメーターが `DeletionPolicy: RetainExceptOnCreate` で入る。ほかの設定では入らない | 削除の方針を外す・条件を `environment_kind` だけにすると落ちる |
 | 決定 6（反映のロールの制限） | qualifier が `prefix` と `environment` の組ごとに違う値になる（`infra/test/naming.test.ts`）。アプリ専用の bootstrap のテンプレートで、反映のロールの信頼ポリシーが、与えた ARN の引き受けだけを許す。反映のロールの CloudFormation の書き込みの対象がその設置のアプリのスタックの ARN だけで、作成・更新・変更セットの作成に `cloudformation:RoleArn` の条件があり、`iam:PassRole` の対象がアプリ専用の実行のロールだけである。反映の手順の CloudFormation の書き込みのシミュレーションは、`cloudformation:RoleArn` にアプリ専用の実行のロールの ARN を渡す。同じ条件の値で、対象のアプリのスタックが許可、パイプラインのスタックと別の設置のアプリのスタックが拒否のときだけ進む。偽の応答で、対象のアプリが拒否・パイプラインが許可・別の設置が許可・既定の実行のロールの `PassRole` が許可の 4 ケースを別々に打ち、どれも `exit 1` する（`infra/test/pipeline-stack.test.ts`） | qualifier を固定の値にする・対象を `*` に広げる・信頼ポリシーをアカウント全体にする・条件を外す・`ContextEntries` を渡さない・許可の確認か別の設置の確認を消す・シミュレーションの行を消すと落ちる |
+| 決定 6（qualifier の衝突） | 固定の衝突ケースを使う。`acme-58885/dev` と `acme-91474/dev` の qualifier がどちらも `nd09bda190` になる（`infra/test/naming.test.ts`）。AWS の読み取りを差し替え、先の設置が `nd09bda190` を使っている状態で、後の設置の確認が非 0 で終わる。新しく作る場合と、この設置のものを更新する場合は成功する。同じ名前のスタックのタグか qualifier が違う場合、作成か更新が終わっていない場合、読み取りに失敗した場合は非 0 で終わる。併設する人の移行の手順で、確認のコマンドが `cdk bootstrap` より前にある（読んで確認） | バージョンのパラメーターを見ない・タグを比べない・読み取りの失敗を成功にする・手順から確認を消すと落ちる |
 | 決定 6（直接反映の拒否。#181） | 設置のコマンドのアプリのスタックを含む `diff` と `deploy` が、決定 6 の「人がアプリのスタックを直接反映してよい条件」の 4 つの条件のどれかに当たれば反映せずに止まる（`infra/test/nd-setup.test.ts`）。`pipeline` が無い設定でも、反映先に宣言の記録があるか、宣言した本番を示す設定のパラメーターがあれば止まる。宣言の前に保存した合成の結果の `deploy` と、判定に使う内容を持たない保存結果の `deploy` も止まる。`--stack pipeline` だけ・設定のパラメーターも記録も無い `pipeline` の無い設定・宣言していなくて記録が無い環境・`pipeline` の無い設定で 2 つの読み取りが `AccessDenied` の場合では止まらない。`pipeline` がある設定の `AccessDenied` と、`pipeline` の無い設定の `AccessDenied` 以外の読み取りの失敗では止まる | 検査を消す・`diff` だけに置く・渡した設定のファイルだけで判定する・渡した設定に `pipeline` が無ければ記録を読まない・`pipeline` の無い設定の `AccessDenied` で止める・`pipeline` がある設定の `AccessDenied` を通すと落ちる |
 | 決定 6（宣言した本番での反映の拒否） | 反映の手順（`infra/test/pipeline-stack.test.ts`）で、`cdk deploy` より前に、設定の値が `launch_declared` 真かつ `environment_kind` が `production` なら `exit 1` する。キーが無い・値の形が違う（期待する段階が `human` になる）・宣言していない本番・開発の設定では、この行で止まらない | 拒否の行を消す・`cdk deploy` の後へ動かす・`environment_kind` だけで判定すると落ちる |
 | 5 | 手順書に「承認する人が読むもの」「承認を拒む方針を AI の主体へ付ける」の見出しが無く、順序のまとめに承認の行が無い | 見出しを戻すと検索に当たる |
@@ -693,7 +707,7 @@ graph LR
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
 | #164 の設計 PR（#178） | 設計を承認する | — | `issues/issue-164-design.md`、`issues/issue-164-requirements.md`、`docs/design/platform.md`（反映の経路・決定 87・決定 89）、`docs/design/overview.md`（姿 5・S14・MVV の対応表）、`docs/design/execution.md`（決定 79）、`docs/design/api.md`（決定 156・人の確定の段階）、`.ndf/mvv.md`・`.ndf/mvv.json`（バージョン 4）、`.ndf/review.json`、`.claude/skills/nd-factory-dev-guidelines/SKILL.md`（承認ゲートの外では持ち主に問わない行と、反映のパイプラインの実行は人の承認を待たない行） |
-| #164 の実装 PR | 実装する | — | `infra/lib/pipeline-stack.ts`（準備の照合・反映時の始まり方と設定の版と段階の検査・トリガー）、`infra/lib/app-stack.ts`（資源を同じスタックに置く理由を「承認する人」で書いたコメントの文言だけを、決定 89 の新しい題に合わせて直す。`ND_CONFIRMATION_STAGE` は入れない）、`infra/bin/app.ts`（設定に `pipeline` がある設置では、アプリのスタックの合成に、設置ごとのアプリ専用の qualifier（`infra/lib/naming.ts` が決める）を明示した `DefaultStackSynthesizer` を使う。`pipeline` が無い設置とパイプラインのスタックは既定のまま）、`infra/test/app.test.ts` など合成のテスト（`pipeline` の有無で qualifier が分かれる）、`infra/lib/naming.ts`、`infra/test/pipeline-stack.test.ts`、`infra/test/naming.test.ts`、アプリ専用の bootstrap のテンプレート（`infra/` の下。反映のロールの制限を持つ）とそのテスト、`packages/contracts/src/settings.ts`（`pipeline.branch` の形）と `npm run generate` の生成物、`packages/contracts/test/settings.test.ts`、`docs/operations/pipeline-approval.md`、`docs/operations/setup.md`、`docs/operations/settings.md`、`docs/operations/idp-and-apps.md`、`AGENTS.md` |
+| #164 の実装 PR | 実装する | — | `infra/lib/pipeline-stack.ts`（準備の照合・反映時の始まり方と設定の版と段階の検査・トリガー）、`infra/lib/app-stack.ts`（資源を同じスタックに置く理由を「承認する人」で書いたコメントの文言だけを、決定 89 の新しい題に合わせて直す。`ND_CONFIRMATION_STAGE` は入れない）、`infra/bin/app.ts`（設定に `pipeline` がある設置では、アプリのスタックの合成に、設置ごとのアプリ専用の qualifier（`infra/lib/naming.ts` が決める）を明示した `DefaultStackSynthesizer` を使う。`pipeline` が無い設置とパイプラインのスタックは既定のまま）、`infra/test/app.test.ts` など合成のテスト（`pipeline` の有無で qualifier が分かれる）、`infra/lib/naming.ts`、`infra/test/pipeline-stack.test.ts`、`infra/test/naming.test.ts`、アプリ専用の bootstrap のテンプレート（`infra/` の下。反映のロールの制限を持つ）とそのテスト、qualifier の衝突の確認の判定とコマンド（`infra/` の下で `infra/setup/` の外）とそのテスト、`packages/contracts/src/settings.ts`（`pipeline.branch` の形）と `npm run generate` の生成物、`packages/contracts/test/settings.test.ts`、`docs/operations/pipeline-approval.md`、`docs/operations/setup.md`、`docs/operations/settings.md`、`docs/operations/idp-and-apps.md`、`AGENTS.md` |
 | [#181](https://github.com/devbasex/nd-factory/issues/181) | #164 の実装 PR の後に実装する | — | 設定のスキーマへの `launch_declared`・`environment_kind` の追加と生成物、アプリの合成で `ND_CONFIRMATION_STAGE` を入れるコード、API がそれを読んで認可へつなぐコード。3 つを同じ PR に入れる。宣言した本番の設定のときに、パイプラインのスタックが宣言の記録を作るコードも入れる。`pipeline` がある設置で、宣言した本番へのアプリのスタックの直接の反映を設置のコマンドが止める検査と、`docs/operations/setup.md` のその説明も入れる（決定 6）。この版の準備と反映が運用する環境で使えるまで、運用する環境の設定へ 2 つのキーを書かない（決定 6） |
 
 ## 人へ残す判断
