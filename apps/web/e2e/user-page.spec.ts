@@ -32,10 +32,22 @@ function fakeJwt(claims: Record<string, unknown>): string {
 
 type Recorder = { authorize: URL[]; token: Request[]; api: Request[]; other: string[] };
 
-async function stubNetwork(page: Page, opts: { loginReady: boolean; finishLogin: boolean }): Promise<Recorder> {
+type StubOptions = {
+  loginReady: boolean;
+  finishLogin: boolean;
+  // API が順に返す状態コード。尽きた後は 200
+  apiStatus?: number[];
+  configStatus?: number;
+  tokenStatus?: number;
+};
+
+async function stubNetwork(page: Page, opts: StubOptions): Promise<Recorder> {
+  const apiStatus = [...(opts.apiStatus ?? [])];
   const rec: Recorder = { authorize: [], token: [], api: [], other: [] };
 
-  await page.route("**/config.json", (route) => route.fulfill({ json: config(opts.loginReady) }));
+  await page.route("**/config.json", (route) =>
+    route.fulfill({ status: opts.configStatus ?? 200, json: config(opts.loginReady) }),
+  );
 
   await page.route(`${AUTH}/**`, async (route: Route) => {
     const req = route.request();
@@ -61,6 +73,9 @@ async function stubNetwork(page: Page, opts: { loginReady: boolean; finishLogin:
 
     if (url.pathname === "/oauth2/token") {
       rec.token.push(req);
+      if (opts.tokenStatus !== undefined) {
+        return route.fulfill({ status: opts.tokenStatus, headers: cors(origin), json: { error: "invalid_grant" } });
+      }
       const authorizeUrl = rec.authorize.at(-1);
       const nonce = authorizeUrl?.searchParams.get("nonce");
       const now = Math.floor(Date.now() / 1000);
@@ -86,6 +101,8 @@ async function stubNetwork(page: Page, opts: { loginReady: boolean; finishLogin:
     const origin = req.headers()["origin"] ?? "*";
     if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors(origin) });
     rec.api.push(req);
+    const status = apiStatus.shift() ?? 200;
+    if (status !== 200) return route.fulfill({ status, headers: cors(origin) });
     return route.fulfill({
       status: 200,
       headers: cors(origin),
@@ -145,4 +162,46 @@ test("ログインの戻りの後に経路を 1 回だけ呼び、利用者の�
   // 認可コードを URL に残さない
   expect(page.url()).toBe(`${baseURL}/`);
   expect(rec.other).toHaveLength(0);
+});
+
+test("API が 401 なら 1 回だけログインへ送り直し、取り直した token で表示する", async ({ page }) => {
+  const rec = await stubNetwork(page, { loginReady: true, finishLogin: true, apiStatus: [401] });
+  await page.goto("/");
+
+  await expect(page.getByText(SUB)).toBeVisible();
+  expect(rec.authorize).toHaveLength(2);
+  expect(rec.api).toHaveLength(2);
+});
+
+test("送り直した後にまた 401 ならエラーを出し、送り直しを繰り返さない", async ({ page }) => {
+  const rec = await stubNetwork(page, { loginReady: true, finishLogin: true, apiStatus: [401, 401] });
+  await page.goto("/");
+
+  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.getByRole("button", { name: /もう一度/ })).toBeVisible();
+  expect(rec.authorize).toHaveLength(2);
+  expect(rec.api).toHaveLength(2);
+});
+
+test("画面の設定の値が読めなければエラーと「もう一度」を出し、押すと読み直す", async ({ page }) => {
+  const rec = await stubNetwork(page, { loginReady: true, finishLogin: false, configStatus: 404 });
+  await page.goto("/");
+  const retry = page.getByRole("button", { name: /もう一度/ });
+  await expect(page.getByRole("alert")).toBeVisible();
+
+  const reread = page.waitForRequest("**/config.json");
+  await retry.click();
+  await reread;
+  expect(rec.authorize).toHaveLength(0);
+});
+
+test("ログインの戻りが失敗するとエラーを出し、「もう一度」でログインへ送り直す", async ({ page }) => {
+  const rec = await stubNetwork(page, { loginReady: true, finishLogin: true, tokenStatus: 400 });
+  await page.goto("/");
+
+  await expect(page.getByRole("alert")).toBeVisible();
+  expect(rec.api).toHaveLength(0);
+  expect(new URL(page.url()).search).toBe("");
+  await page.getByRole("button", { name: /もう一度/ }).click();
+  await expect.poll(() => rec.authorize.length).toBe(2);
 });
