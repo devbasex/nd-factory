@@ -1,6 +1,6 @@
 # #164 の詳細設計: push から人を待たずに反映するパイプラインと、反映の直前の検査
 
-設計文書 [issue-164-design.md](./issue-164-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。決定の番号と受け入れ条件の番号は、設計文書と要求仕様（[issue-164-requirements.md](./issue-164-requirements.md)）のものである。受け入れ条件 11・12 は、設計文書の決定 4 にある再改訂後の文を指す。段階（`ai`・`human`）と宣言の記録の意味は、設計文書の[この文書で使う言葉と役割](./issue-164-design.md#この文書で使う言葉と役割)にある。#181 で実装するもの（2 つのキーのスキーマ、`ND_CONFIRMATION_STAGE` の設定、宣言の記録の作成、設置のコマンドの検査）は含めない。
+設計文書 [issue-164-design.md](./issue-164-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。決定の番号と受け入れ条件の番号は、設計文書と要求仕様（[issue-164-requirements.md](./issue-164-requirements.md)）のものである。受け入れ条件 11・12 は、設計文書の決定 4 にある再改訂後の文（要求仕様のコピーに載っている文と同じ）を指す。段階（`ai`・`human`）と宣言の記録の意味は、設計文書の[この文書で使う言葉と役割](./issue-164-design.md#この文書で使う言葉と役割)にある。#181 で実装するもの（2 つのキーのスキーマ、`ND_CONFIRMATION_STAGE` の設定、宣言の記録の作成、設置のコマンドの検査）は含めない。
 
 ## 地図
 
@@ -33,7 +33,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 
 依存の向きは次のとおりである。循環は無い。
 
-- `infra/bin` が `infra/lib` を import し、`infra/lib` は `packages/contracts` だけを import する
+- `infra/bin` が `infra/lib` を import する。リポジトリ内のパッケージのうち `infra/lib` が import するのは `packages/contracts` だけである（外部ライブラリと `node:` の依存は下の表）
 - 反映の直前の検査は `deploy-guard.ts` → `assembly-check.ts`・`confirmation-stage.ts` の一方向である
   - この 3 つは `node:` の組み込みだけを読む。`naming.ts`（`aws-cdk-lib` を読む）を import しない
   - 名前と ARN は `pipeline-stack.ts` が作って値（`GuardConfig`。型は `assembly-check.ts` に置く）で渡す
@@ -212,7 +212,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 段階の値の対象（`checkTemplateStage`）:
 
 - 対象の関数は、`AWS::ApiGatewayV2::Integration` の `IntegrationUri` と、`AuthorizerType` が `REQUEST` の `AWS::ApiGatewayV2::Authorizer` の `AuthorizerUri` が指す `AWS::Lambda::Function` である。URI の中の `Ref`・`Fn::GetAtt` を辿り、別名とバージョンは `FunctionName` の先の関数にする
-- テンプレートのどこにあっても、キー `ND_CONFIRMATION_STAGE` の値が `expected` と違えば違反にする
+- テンプレートのどこにあっても、キー `ND_CONFIRMATION_STAGE` の値が `expected` と違えば違反にする。対象の関数にキーが無い場合の扱いは、決定 6 の「合成の結果に入った段階を、反映の側で設定と照らす」の 3 による
 
 実効の権限の期待の表（`checkSimulations`）:
 
@@ -369,7 +369,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | --- | --- | --- | --- | --- |
 | `buildApp` | `infra/bin/app.ts` | 変更 | `(app: App, env: NodeJS.ProcessEnv) => void`（変えない） | `settings.pipeline` があるときだけ、`AppStack` に `new DefaultStackSynthesizer({ qualifier: appQualifier(settings) })` を渡す |
 
-`pipeline` が無い設置と `PipelineStack` は既定のままにする。`infra/lib/app-stack.ts` は、先頭のコメントの「承認する人が」の理由を、決定 89 の新しい題に合わせた文に直すだけである。
+`pipeline` が無い設置と `PipelineStack` は既定のままにする。`infra/lib/app-stack.ts` は、先頭のコメントの「承認する人が」の理由を、決定 89（`docs/design/platform.md`）の新しい題に合わせた文に直すだけである。
 
 ### 単体テストの観点
 
