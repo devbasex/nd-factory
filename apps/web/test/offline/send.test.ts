@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { nextSeq } from "../../src/offline/db.ts";
 import { prepareGuard } from "../../src/offline/guarded-commit.ts";
 import { operationClassOf } from "../../src/offline/operation-classes.ts";
-import type { OutboxItem } from "../../src/offline/outbox.ts";
+import type { Outbox, OutboxItem } from "../../src/offline/outbox.ts";
 import { checkDeadline, classifyResult, createSender, type Round, type SendEvent } from "../../src/offline/send.ts";
 import { denied, json, NOW, OPS, ok, sendSetup } from "./send-support.ts";
 import { freshIndexedDb } from "./support.ts";
@@ -103,9 +103,28 @@ async function setup() {
     onAuth: () => void (counts.auth += 1),
     report: (event) => void events.push(event),
   };
+  // 送る側の読み書きの直後に、ほかの処理（取り下げなど）を割り込ませる
+  const hooks: { afterFind?: () => Promise<void>; afterMark?: (item: OutboxItem) => Promise<void> } = {};
+  const outbox: Outbox = {
+    ...t.outbox,
+    find: async (answerTag) => {
+      const found = await t.outbox.find(answerTag);
+      const hook = hooks.afterFind;
+      hooks.afterFind = undefined;
+      await hook?.();
+      return found;
+    },
+    markSendStarted: async (item, sentAt) => {
+      const marked = await t.outbox.markSendStarted(item, sentAt);
+      const hook = hooks.afterMark;
+      hooks.afterMark = undefined;
+      if (marked !== null) await hook?.(marked);
+      return marked;
+    },
+  };
   const sender = createSender({
     db: t.db,
-    outbox: t.outbox,
+    outbox,
     wait: t.wait,
     cache: t.cache,
     send: t.sender,
@@ -118,7 +137,7 @@ async function setup() {
   const run = async () => sender.sendQueue(round, (await t.outbox.readBatch()).items);
   const held = async () => (await t.db.getAll("held")).map((r) => r.holdReason);
   const sent = () => t.writes().map((r) => (r.items[0] as { text: string }).text);
-  return { ...t, round, sender, events, reverted, counts, run, held, sent };
+  return { ...t, round, sender, events, reverted, counts, run, held, sent, hooks };
 }
 
 describe("送る列を送る", () => {
@@ -299,6 +318,44 @@ describe("取り下げ", () => {
     await t.run();
     expect(await t.db.count("held")).toBe(0);
     expect((await t.outbox.readBatch()).items).toMatchObject([{ operation: "organizer_messages.withdraw", targetId: "msg-1" }]);
+    t.db.close();
+  });
+
+  it("成功を反映する直前に取り下げが保留へ移しても、同じ処理で返った項目の取り下げを足す", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello");
+    t.replies.push(() => {
+      // 成功の反映が送る列を読んだ直後に、取り下げが件を保留へ移す
+      t.hooks.afterFind = async () => void (await t.sender.withdraw(t.owner, item.answerTag));
+      return ok("msg-1");
+    });
+    expect(await t.run()).toBe("done");
+    expect(await t.db.count("held")).toBe(0);
+    expect((await t.outbox.readBatch()).items).toMatchObject([{ operation: "organizer_messages.withdraw", targetId: "msg-1" }]);
+    t.db.close();
+  });
+
+  it("送り始めの印の後、送る前に取り下げた件は、送らなかった件として保留から消す", async () => {
+    const t = await setup();
+    const item = await t.enqueue("users.update", "first");
+    t.hooks.afterMark = async () => {
+      expect(await t.sender.withdraw(t.owner, item.answerTag)).toBe("held");
+    };
+    expect(await t.run()).toBe("done");
+    expect(t.writes()).toEqual([]);
+    expect(await t.db.count("held")).toBe(0);
+    expect(await t.db.count("outbox")).toBe(0);
+    t.db.close();
+  });
+
+  it("前の回で送った件が取り下げで保留へ移っていれば、送らずに結果未確認のまま残す", async () => {
+    const t = await setup();
+    const item = await t.enqueue("users.update", "first");
+    const marked = (await t.outbox.markSendStarted(item, NOW))!;
+    expect(await t.outbox.dropWithdrawnUnsent(marked)).toBe(false);
+    expect(await t.sender.withdraw(t.owner, item.answerTag)).toBe("held");
+    expect(await t.outbox.dropWithdrawnUnsent({ ...marked, iv: new Uint8Array(12) })).toBe(false);
+    expect(await t.held()).toEqual(["unknown-result"]);
     t.db.close();
   });
 

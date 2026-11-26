@@ -518,6 +518,7 @@ type OperationClass =
 | `unmarkSendStarted(item)` | `void` | 設計文書の「会話の項目の取り下げ」の手順 4（送り始めた印を戻す）。同じ対象の確定待ちが後ろに足されていれば、印を戻さずに元の件を消す |
 | `settle(item, outcome)` | `"removed" \| "held" \| "kept" \| "missing"` | 送る列と保留の件を `answerTag` で引き、1 トランザクションで消すか移す |
 | `moveToHeld(tags, reason)` | `number` | 暗号文のまま保留へ移す |
+| `dropWithdrawnUnsent(item)` | `boolean` | 送り始めの印を付けた後、リクエストを始める前に取り下げで保留へ移った同じ件（暗号文の `iv` が同じ `unknown-result`）を、送らなかった件として消す |
 | `countPending(owner)` | `{ confirm: number; queued: number; held: number }` | 帯と、#4 のサインアウトの確認の数 |
 
 - `newIdempotencyKey`
@@ -806,7 +807,7 @@ type OperationClass =
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `createApiSender` | 照合の外れ・件が無い | サインアウト・別タブ・取り下げ | 錠の中の確認 | `aborted`（理由 `session` か `gone`） | 出さない | `session` は回を止め、`gone` は次の件へ。印を戻す |
+| `createApiSender` | 照合の外れ・件が無い | サインアウト・別タブ・取り下げ | 錠の中の確認 | `aborted`（理由 `session` か `gone`） | 出さない | `session` は回を止め、`gone` は次の件へ。印を戻す。`gone` のときこの回で印を付けた件が取り下げで保留にあれば、送っていないので `dropWithdrawnUnsent` で消す |
 | `createApiSender` | 通信の失敗・形の違う応答 | ネットワーク・中継 | `fetch` の例外・保持した HTTP の状態 | 一時の失敗か認証の失敗にする（「`Retry-After` と `Date` の受け取り」） | 呼び出し元が出す | 件は消さない |
 | `createSendWait` | 復号できない | 壊れ | `unseal` | 行を消し 60 秒から | 出さない | — |
 | `applyRevocation`・`holdDenied` | `stale` | 別タブの書き換え | `commitGuarded` | 回を止める | 出さない | 次の回で段 1 から |

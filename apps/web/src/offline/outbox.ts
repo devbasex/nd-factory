@@ -50,6 +50,8 @@ export type Outbox = {
   unmarkSendStarted(item: OutboxItem): Promise<OutboxItem | null>;
   settle(item: OutboxItem, outcome: Outcome): Promise<"removed" | "held" | "kept" | "missing">;
   moveToHeld(answerTags: string[], reason: HoldReason): Promise<number>;
+  // 送り始めの印を付けた後、リクエストを始める前に取り下げで保留へ移った同じ件を、送らなかった件として消す
+  dropWithdrawnUnsent(item: OutboxItem): Promise<boolean>;
   countPending(owner: Owner): Promise<{ confirm: number; queued: number; held: number }>;
 };
 
@@ -248,6 +250,16 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
     },
 
     moveToHeld,
+
+    async dropWithdrawnUnsent(item) {
+      const tx = await writing();
+      const row = await tx.objectStore("held").get(item.answerTag);
+      // 取り下げは行をそのまま移すので、印を付けた後の暗号文と同じなら同じ件である
+      const same = row !== undefined && row.holdReason === "unknown-result" && sameBytes(row.iv, item.iv);
+      if (same) await tx.objectStore("held").delete(item.answerTag);
+      await tx.done;
+      return same;
+    },
 
     async countPending(owner) {
       const none = { confirm: 0, queued: 0, held: 0 };

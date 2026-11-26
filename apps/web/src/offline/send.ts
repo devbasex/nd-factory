@@ -209,21 +209,35 @@ export function createSender(d: SendDeps): QueueSender {
 
   // 件を消すのと会話の写しを 1 度に書く。取り下げた後の成功なら、返った項目の取り下げを足す
   async function created(round: Round, item: OutboxItem, itemId: string): Promise<boolean> {
-    const found = await d.outbox.find(item.answerTag);
-    if (found === null) return true;
-    const conversation = await sentIdWrite(round.owner, item, itemId);
-    const finish = async (tx: GuardedTx) => {
-      if (conversation !== null && !(await conversation(tx))) return false;
-      await tx.objectStore(found.held ? "held" : "outbox").delete(item.answerTag);
-      return true;
-    };
-    if (found.held) {
-      const draft = { operation: WITHDRAW, targetId: itemId, projectId: item.projectId, input: {} };
-      await d.outbox.enqueue(round.owner, draft, finish);
-      return true;
+    // 読んだ後に取り下げが保留へ移すことがあるので、所属は書き込みの中で確かめ、変わっていれば読み直す
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const found = await d.outbox.find(item.answerTag);
+      if (found === null) return true;
+      const conversation = await sentIdWrite(round.owner, item, itemId);
+      const writeConversation = async (tx: GuardedTx) => conversation === null || (await conversation(tx));
+      if (found.held) {
+        // 保留から先へは移らないので、取り下げを足すのと同じトランザクションで保留の件を消す
+        const draft = { operation: WITHDRAW, targetId: itemId, projectId: item.projectId, input: {} };
+        await d.outbox.enqueue(round.owner, draft, async (tx) => {
+          if (!(await writeConversation(tx))) return false;
+          await tx.objectStore("held").delete(item.answerTag);
+          return true;
+        });
+        return true;
+      }
+      const guard = await prepareGuard(d.db, round.owner);
+      if (guard === null) return false;
+      let moved = false;
+      const result = await commitGuarded(guard, async (tx) => {
+        moved = (await tx.objectStore("outbox").get(item.answerTag)) === undefined;
+        if (moved || !(await writeConversation(tx))) return false;
+        await tx.objectStore("outbox").delete(item.answerTag);
+        return true;
+      });
+      if (result === "committed") return true;
+      if (!moved) return false;
     }
-    const guard = await prepareGuard(d.db, round.owner);
-    return guard !== null && (await commitGuarded(guard, finish)) === "committed";
+    return false;
   }
 
   async function apply(round: Round, item: OutboxItem, decision: SendDecision, reply: Answered): Promise<Next> {
@@ -309,7 +323,11 @@ export function createSender(d: SendDeps): QueueSender {
       });
 
       if (reply.kind === "aborted") {
-        if (reply.reason === "gone") return "next";
+        if (reply.reason === "gone") {
+          // 照合は送信の開始の前に行うので、送っていない。この回で印を付けた件が取り下げで保留へ移っていれば消す
+          if (markedNow && (await d.outbox.dropWithdrawnUnsent(item))) d.notify();
+          return "next";
+        }
         const restored = markedNow ? await d.outbox.unmarkSendStarted(item) : item;
         if (restored === null) return "next";
         item = restored;
