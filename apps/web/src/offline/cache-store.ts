@@ -26,6 +26,8 @@ export type CacheStore = {
   prepareReplace(guard: Guard, kind: SnapshotKind, targetId: string, value: unknown, fetchSeq: number): Promise<Write | null>;
   applyOptimistic(guard: Guard, kind: SnapshotKind, targetId: string, change: (value: unknown) => unknown): Promise<void>;
   markGone(guard: Guard, kind: SnapshotKind, targetId: string, goneSeq: number): Promise<void>;
+  // 削除の印を、ほかの書き込みと同じトランザクションで書くとき
+  prepareGone(guard: Guard, kind: SnapshotKind, targetId: string, goneSeq: number): Promise<Write | null>;
   recordList(guard: Guard, scope: ListScope, ids: string[], fetchSeq: number): Promise<void>;
   dropProjects(tx: GuardedTx, projectTags: string[]): Promise<void>;
   purgeExpired(): Promise<number>;
@@ -156,6 +158,11 @@ export function createCacheStore({ db, wallNow, log, notify }: CacheDeps): Cache
       if (kindDefOf(kind) === null) return;
       const write = await goneWrite(guard, kind, await tagOf(guard.keys.tagKey, kind, targetId), goneSeq);
       if (write !== null) await commitAndNotify(guard, [write]);
+    },
+
+    async prepareGone(guard, kind, targetId, goneSeq) {
+      if (kindDefOf(kind) === null) return null;
+      return goneWrite(guard, kind, await tagOf(guard.keys.tagKey, kind, targetId), goneSeq);
     },
 
     async recordList(guard, scope, ids, fetchSeq) {
