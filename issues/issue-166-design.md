@@ -152,7 +152,7 @@ sequenceDiagram
 | `AGENTS.md` の「反映の経路」 | 運用する環境の行に、マージの前にリリース承認ゲートを通ることと、マージの前の確認の手順へのリンクを足す |
 | 全体の設計の「解決の方針」と「2 つの反映の道筋」の運用する環境のアプリの行 | 個別の実行は承認せず、承認はマージの前に取ることを足し、決定 142 を指す |
 | `.ndf/pace.json` の `boundary_paths` | `**` を足す（決定 9） |
-| CI の検査の手順書の「規則を変える Pull Request をマージの直前に確かめる」 | 手でのマージ（M1〜M6）を、変更後の規則での履歴の探し（M2）を済ませた HEAD で承認を求め、承認した HEAD とマージ先を渡した `ndf ci merge` でマージする手順に書き換える（決定 142） |
+| CI の検査の手順書の「規則を変える Pull Request をマージの直前に確かめる」 | 手でのマージの手順（手順書の M1〜M6。漏れの検査の規則を変える Pull Request を、人が手元で確かめてからマージする 6 つの手順）を書き換える。変更後の規則で過去のコミットを探し直す手順（M2）を済ませた HEAD で承認を求め、承認した HEAD とマージ先を渡した `ndf ci merge` でマージする手順に書き換える（決定 142） |
 | 反映のパイプラインの手順書の冒頭と「順序のまとめ」、設置の手順の「運用する環境」、反映のパイプラインの仕様の「承認を受ける操作」 | 「承認を待たない」がマージの後の実行を指すことと、マージの前の承認を 1 文で足す |
 
 - 採らなかった案: 指針の行だけを直し、決定の記録を足さない（理由と事故の経緯が残らず、受け入れ条件 8 を満たさない）
@@ -584,7 +584,7 @@ NDF_PYTHON="${XDG_CACHE_HOME:-$HOME/.cache}/ndf/venv/11.0.43/bin/python"
 
 | 課題 | 扱い | 統合先 | 設計 PR で触るファイル | 後続の Pull Request で触るファイル |
 | --- | --- | --- | --- | --- |
-| #166 | 実装する | — | `docs/design/platform.md` | `.ndf/project.json`、`.ndf/pace.json`、`AGENTS.md`、`.claude/skills/nd-factory-dev-guidelines/SKILL.md`、`docs/operations/pipeline-approval.md`、`docs/operations/setup.md`、`docs/operations/ci-checks.md`、`docs/specifications/deploy-pipeline.md` |
+| #166 | 実装する | — | `docs/design/platform.md`、`docs/operations/ci-checks.md`（手でのマージを使わなくなる時点の 1 段落だけ） | `.ndf/project.json`、`.ndf/pace.json`、`AGENTS.md`、`.claude/skills/nd-factory-dev-guidelines/SKILL.md`、`docs/operations/pipeline-approval.md`、`docs/operations/setup.md`、`docs/operations/ci-checks.md`、`docs/specifications/deploy-pipeline.md` |
 
 ## 人へ残す判断
 
