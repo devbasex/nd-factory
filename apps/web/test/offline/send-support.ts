@@ -3,6 +3,7 @@ import { createClock } from "@nd-factory/core/clock";
 import { z } from "zod";
 import { createApiSender } from "../../src/offline/api-transport.ts";
 import { createCacheStore } from "../../src/offline/cache-store.ts";
+import { operationClassOf } from "../../src/offline/operation-classes.ts";
 import { createOutbox, type Draft } from "../../src/offline/outbox.ts";
 import { createSendWait } from "../../src/offline/send-wait.ts";
 import { openDb, signedIn, USER } from "./support.ts";
@@ -86,6 +87,14 @@ export async function sendSetup() {
   const outbox = createOutbox({ db, clock });
   const wait = createSendWait({ db });
   const cache = createCacheStore({ db, wallNow: () => state.wall, log: { warn: () => {} }, notify: () => {} });
+  // 確定待ちには、読んだときの照合の値を付ける
+  const checkOf = (operation: string): Pick<Draft, "check"> => {
+    const cls = operationClassOf(operation);
+    if (cls.class !== "confirm") return {};
+    const check: Record<string, string | number> = { version: 1 };
+    if (cls.check.includes("material_digest")) check["material_digest"] = "sha256:example";
+    return { check };
+  };
   const enqueue = (operation: string, targetId = "target-example", over: Partial<Draft> = {}) =>
     outbox.enqueue({ ...owner, flagged }, {
       operation,
@@ -93,6 +102,7 @@ export async function sendSetup() {
       projectId: "p-example",
       input: { text: targetId },
       pressedFloor: NOW,
+      ...checkOf(operation),
       ...over,
     });
   return {

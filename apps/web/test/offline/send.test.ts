@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it } from "vitest";
+import { seal, unseal } from "../../src/offline/crypto.ts";
 import { nextSeq } from "../../src/offline/db.ts";
 import { prepareGuard } from "../../src/offline/guarded-commit.ts";
 import { operationClassOf } from "../../src/offline/operation-classes.ts";
@@ -151,6 +152,19 @@ describe("送る列を送る", () => {
     expect(t.writes()[1]!.items[0]).toHaveProperty("idempotency_key");
     expect(await t.db.count("outbox")).toBe(0);
     expect(t.events.map((e) => e.kind)).toEqual(["confirmed"]);
+    t.db.close();
+  });
+
+  it("照合の値の無い確定待ちは送らず、保留へ移す", async () => {
+    const t = await setup();
+    const item = await t.enqueue("questions.answer", "bare");
+    // 照合の値を持たずに保存された件
+    const row = (await t.db.get("outbox", item.answerTag))!;
+    const { check: _check, ...body } = await unseal<Record<string, unknown>>(t.keys.key, row);
+    await t.db.put("outbox", { ...row, ...(await seal(t.keys.key, body)) });
+    expect(await t.run()).toBe("done");
+    expect(t.writes()).toEqual([]);
+    expect(await t.held()).toEqual(["unmigrated"]);
     t.db.close();
   });
 

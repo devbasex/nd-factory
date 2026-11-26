@@ -2,6 +2,7 @@
 import { createClock } from "@nd-factory/core/clock";
 import { beforeEach, describe, expect, it } from "vitest";
 import { unseal } from "../../src/offline/crypto.ts";
+import { MissingCheckError } from "../../src/offline/operation-classes.ts";
 import { createOutbox, type Draft, type OutboxItem } from "../../src/offline/outbox.ts";
 import { freshIndexedDb, openDb, OTHER_USER, signedIn } from "./support.ts";
 
@@ -64,6 +65,18 @@ describe("送る列", () => {
     const { db, owner, outbox } = await setup();
     await expect(outbox.enqueue(owner, { ...message("x"), operation: "sprints.create" })).rejects.toThrow();
     await expect(outbox.enqueue({ ...owner, userId: OTHER_USER }, message("x"))).rejects.toThrow();
+    await expect(db.count("outbox")).resolves.toBe(0);
+    db.close();
+  });
+
+  it("照合の値がそろわない確定待ちは、保存せずに照合の値が無いことを知らせる", async () => {
+    const { db, owner, outbox } = await setup();
+    const { check: _check, ...bare } = answer("a");
+    await expect(outbox.enqueue(owner, bare)).rejects.toBeInstanceOf(MissingCheckError);
+    await expect(outbox.enqueue(owner, { ...bare, check: { version: 3 } })).rejects.toMatchObject({ missing: ["material_digest"] });
+    await expect(outbox.enqueue(owner, { ...bare, check: { version: "3", material_digest: "sha256:example" } })).rejects.toMatchObject({
+      missing: ["version"],
+    });
     await expect(db.count("outbox")).resolves.toBe(0);
     db.close();
   });

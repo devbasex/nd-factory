@@ -34,7 +34,7 @@ async function setup() {
     await tx.done;
   };
   const enqueue = (projectId: string, targetId: string) =>
-    outbox.enqueue(owner, { operation: "questions.answer", targetId, projectId, input: { text: "example" } });
+    outbox.enqueue(owner, { operation: "questions.answer", targetId, projectId, input: { text: "example" }, check: { version: 1 } });
   const record = async () => unseal<AuthzRecord>(keys.key, (await db.get("authz", "authz"))!);
   const apply = async (lists: ListsRead) => {
     const guard = (await prepareGuard(db, owner))!;
@@ -96,6 +96,7 @@ describe("失効の反映", () => {
       targetId: "tr",
       projectId: "p-new",
       input: {},
+      check: { version: 1 },
       transfer: { teamId: "t-a", transferId: "tr" },
     });
     await apply(read([]));

@@ -5,7 +5,7 @@ import { type ApiReply, type ApiSender, DEADLINE_MS, type SessionOwner } from ".
 import type { CacheStore } from "./cache-store.ts";
 import type { DeviceDb, HoldReason } from "./db.ts";
 import { commitGuarded, type GuardedTx, type Owner, prepareGuard } from "./guarded-commit.ts";
-import { type OperationClass, operationClassOf } from "./operation-classes.ts";
+import { missingChecks, type OperationClass, operationClassOf } from "./operation-classes.ts";
 import type { Outbox, OutboxItem } from "./outbox.ts";
 import { holdDenied } from "./revocation.ts";
 import { retryUntilFrom, type SendWait } from "./send-wait.ts";
@@ -287,6 +287,13 @@ export function createSender(d: SendDeps): QueueSender {
     const idempotent = idempotentOf(original.operation);
     const resent = original.sendStarted;
     let item = original;
+    // 照合の値がそろわない確定待ちは送らない。読んだときの値が無ければ、サーバーは古い判断を拒めない
+    if (missingChecks(item.operation, item.check).length > 0) {
+      await d.outbox.settle(item, { kind: "hold", reason: resent ? "unknown-result" : "unmigrated" });
+      d.log.warn("照合の値の無い確定待ちを送らなかった", { operation: item.operation });
+      d.notify();
+      return "next";
+    }
     if (resent && !idempotent && !(cls.class === "queued" && cls.resendableWithoutKey)) {
       await giveUp(round, item, "unknown");
       return "next";

@@ -19,7 +19,7 @@ const confirm = (targetId: string): Draft => ({
   targetId,
   projectId: "p-example",
   input: { reason: targetId },
-  check: { version: 1 },
+  check: { version: 1, material_digest: "sha256:example" },
 });
 const queued = (text: string): Draft => ({
   operation: "organizer_messages.create",

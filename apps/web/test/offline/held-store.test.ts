@@ -13,7 +13,7 @@ const draft: Draft = {
   targetId: "apr-example",
   projectId: "p-example",
   input: { reason: "example-reason" },
-  check: { version: 1 },
+  check: { version: 1, material_digest: "sha256:example" },
 };
 
 async function heldOne(over: Partial<Draft> = {}) {

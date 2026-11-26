@@ -175,6 +175,7 @@
     "rejected": "Not confirmed because the state differs",
     "unknown": "The result could not be confirmed",
     "expired": "Not sent because it expired",
-    "saveFailed": "Could not save"
+    "saveFailed": "Could not save",
+    "checkMissing": "Not saved because the details read with the item are incomplete. Reopen the item and try again"
   }
 }

@@ -157,6 +157,16 @@ describe("画面と端末のデータ", () => {
     t.db.close();
   });
 
+  it("照合の値がそろわない確定待ちは保存せず、対象の読み直しを求める", async () => {
+    const t = await setup();
+    const { check: _check, ...bare } = t.draft("q-1");
+    await t.view.press(bare);
+    expect(t.view.snapshot().results).toMatchObject([{ kind: "check-missing", targetId: "q-1" }]);
+    expect(t.view.snapshot().pending).toEqual([]);
+    expect(t.writes()).toEqual([]);
+    t.db.close();
+  });
+
   it("保存できなければ保存の失敗を出し、先に進まない", async () => {
     const t = await setup();
     await t.view.press(t.draft("x", "teams.create"));

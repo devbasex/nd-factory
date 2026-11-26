@@ -69,3 +69,25 @@ export const OPERATION_CLASSES: Record<string, OperationClass> = {
 export function operationClassOf(operation: string): OperationClass {
   return Object.hasOwn(OPERATION_CLASSES, operation) ? OPERATION_CLASSES[operation]! : ONLINE;
 }
+
+// 確定待ちの照合の値のうち、無いか形の違う項目。version は整数、material_digest は空でない文字列
+export function missingChecks(operation: string, check: Readonly<Record<string, unknown>> | undefined): string[] {
+  const cls = operationClassOf(operation);
+  if (cls.class !== "confirm") return [];
+  return cls.check.filter((name) => {
+    const value = check?.[name];
+    return name === "version" ? !Number.isInteger(value) : typeof value !== "string" || value === "";
+  });
+}
+
+// 照合の値がそろわない確定待ちは保存しない。画面は対象を読み直すよう求める
+export class MissingCheckError extends Error {
+  override name = "MissingCheckError";
+  readonly operation: string;
+  readonly missing: readonly string[];
+  constructor(operation: string, missing: readonly string[]) {
+    super(`照合の値が無い: ${operation}`);
+    this.operation = operation;
+    this.missing = missing;
+  }
+}

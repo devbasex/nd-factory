@@ -3,7 +3,7 @@ import { newIdempotencyKey } from "@nd-factory/core/ids";
 import { seal, tagOf, unseal } from "./crypto.ts";
 import { type DeviceDb, type HeldRow, type HoldReason, nextSeq, type OutboxRow, readOwner } from "./db.ts";
 import { commitGuarded, type GuardedTx, type Owner, prepareGuard, sameBytes } from "./guarded-commit.ts";
-import { operationClassOf } from "./operation-classes.ts";
+import { MissingCheckError, missingChecks, operationClassOf } from "./operation-classes.ts";
 
 // 送る列（キャッシュして送ると確定待ち）。件は利用者の入力を持つので、端末の判断では消さず保留へ移す（IW13）
 
@@ -147,6 +147,8 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
     async enqueue(owner, draft, also) {
       const found = operationClassOf(draft.operation);
       if (found.class === "online") throw new Error(`つながってから押す操作は送る列に入れない: ${draft.operation}`);
+      const missing = missingChecks(draft.operation, draft.check);
+      if (missing.length > 0) throw new MissingCheckError(draft.operation, missing);
       return locked(async () => {
         const seq = await nextSeq(db);
         const body: OutboxBody = {

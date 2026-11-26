@@ -10,6 +10,7 @@ import { unseal } from "../offline/crypto.ts";
 import { type DeviceDb, readOwner } from "../offline/db.ts";
 import { type Owner, sameBytes, sessionMatches } from "../offline/guarded-commit.ts";
 import { createHeldStore, type HeldStore, type HeldView, visibleFieldsOf } from "../offline/held-store.ts";
+import { MissingCheckError } from "../offline/operation-classes.ts";
 import { createOutbox, type Draft } from "../offline/outbox.ts";
 import { unreadableQuarantine } from "../offline/quarantine.ts";
 import { createSender, type SendEvent } from "../offline/send.ts";
@@ -25,7 +26,7 @@ type PendingEntry = { answerTag: string; operation: string; targetId: string; de
 type ResultEntry = {
   // 画面の並びの鍵
   key: number;
-  kind: SendEvent["kind"] | "save-failed";
+  kind: SendEvent["kind"] | "save-failed" | "check-missing";
   operation: string;
   targetId: string;
   reason?: string;
@@ -235,7 +236,8 @@ export function createDeviceView(d: DeviceViewDeps): DeviceView {
         targets.set(item.answerTag, item.targetId);
       } catch (error) {
         log.warn("操作を保存できない", { operation: draft.operation, error: error instanceof Error ? error.name : "unknown" });
-        addResult({ kind: "save-failed", operation: draft.operation, targetId: draft.targetId });
+        const kind = error instanceof MissingCheckError ? "check-missing" : "save-failed";
+        addResult({ kind, operation: draft.operation, targetId: draft.targetId });
         return;
       }
       await refresh();

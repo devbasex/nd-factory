@@ -42,6 +42,7 @@ const RESULT_KEYS = {
   unknown: "result.unknown",
   expired: "result.expired",
   "save-failed": "result.saveFailed",
+  "check-missing": "result.checkMissing",
 } as const;
 
 // 操作は、区分の表で押せるかと送る列に入れるかを決める

@@ -478,6 +478,7 @@ infra/lib/app-stack.ts
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `operationClassOf` | `operation-classes.ts` | 新設 | `(operation: string) => OperationClass` | 区分・照合の値・送り直してよいかを返す |
+| `missingChecks` | 同上 | 新設 | `(operation: string, check: Record<string, unknown> \| undefined) => string[]` | 確定待ちの照合の値のうち、無いか形の違う項目を返す（`version` は整数、`material_digest` は空でない文字列） |
 
 ```ts
 type OperationClass =
@@ -512,7 +513,7 @@ type OperationClass =
 
 | `Outbox` のメソッド | 返り | 中身 |
 | --- | --- | --- |
-| `enqueue(owner, draft)` | `OutboxItem` | `nd-outbox` の錠の中で番号を取り、同じ対象の未送信の確定待ちは置き換える。`online` の操作は受けない（IW4） |
+| `enqueue(owner, draft)` | `OutboxItem` | `nd-outbox` の錠の中で番号を取り、同じ対象の未送信の確定待ちは置き換える。`online` の操作は受けない（IW4）。照合の値がそろわない確定待ちは保存せず `MissingCheckError` を投げ、画面は「対象を開き直してから、もう一度操作してください」と出す。送る側も、照合の値がそろわない確定待ちは送らず、保留へ移す（一度も送っていなければ `unmigrated`、送り始めていれば `unknown-result`） |
 | `readBatch()` | `{ items: OutboxItem[]; unreadable: string[] }` | 錠の中で全件読み、`seq` の順に返す |
 | `markSendStarted(item, sentAt)` | `OutboxItem \| null` | `iv` を確かめて印を真にする |
 | `unmarkSendStarted(item)` | `void` | 設計文書の「会話の項目の取り下げ」の手順 4（送り始めた印を戻す）。同じ対象の確定待ちが後ろに足されていれば、印を戻さずに元の件を消す |
