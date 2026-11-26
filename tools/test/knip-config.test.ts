@@ -101,8 +101,11 @@ function buildTree({ config, manifest = (_d, m) => m, files = {} }: Tree): strin
     write(root, join(ws.dir, "package.json"), JSON.stringify(manifest(ws.dir, withIgnored)));
     // 生成した画面の呼び出しの入口は、木の生成したファイルが当たる
     for (const entry of (wsConfig.entry ?? []).filter((e) => !(ws.dir === "apps/web" && e === GENERATED_ENTRY))) {
-      if (/[*?{}[\]!]/.test(entry)) throw new Error(`入口の glob はこのテストの木に置けない: ${ws.dir} の ${entry}`);
-      write(root, join(ws.dir, entry), 'import { schema } from "@nd-factory/contracts/schema";\nexport const entry = schema;\n');
+      // 末尾の ! は knip の production の印で、パスの一部ではない
+      const path = entry.replace(/!$/, "");
+      if (/[*?{}[\]!]/.test(path)) throw new Error(`入口の glob はこのテストの木に置けない: ${ws.dir} の ${entry}`);
+      // 入口は起点で、書き出しを持たない（includeEntryExports で入口の書き出しも照らすため、書き出すと当たる）
+      write(root, join(ws.dir, path), 'import { schema } from "@nd-factory/contracts/schema";\nconsole.log(schema);\n');
     }
   }
   for (const [path, content] of Object.entries({ ...BASE_FILES, ...files })) write(root, path, content);
@@ -308,7 +311,7 @@ describe("受け入れ条件 1・5・12: knip.jsonc の使っていないもの�
         write(tree, "knip.jsonc", JSON.stringify({ ...config, workspaces: { ...config.workspaces, [dir]: rest } }));
         const run = runKnip(tree);
         expect(run.status, dir).toBe(1);
-        expect([...run.files].sort(), dir).toEqual((ws.entry ?? []).map((e) => join(dir, e)).sort());
+        expect([...run.files].sort(), dir).toEqual((ws.entry ?? []).map((e) => join(dir, e.replace(/!$/, ""))).sort());
       }
     },
     KNIP_TIMEOUT,
