@@ -176,6 +176,22 @@ describe("appExecutionPolicy", () => {
     expect(statements(doc, "Allow", "dynamodb:CreateTable", `arn:aws:dynamodb:us-west-2:${FAKE_ACCOUNT}:table/other`)).toEqual([]);
   });
 
+  it.each([
+    ["rds:DeleteDBSnapshot", "snapshot"],
+    ["rds:DeleteDBClusterSnapshot", "cluster-snapshot"],
+  ])("%s は、この設置の名前のスナップショットにも許さない", (action, kind) => {
+    expect(statements(doc, "Allow", action, `arn:aws:rds:us-west-2:${FAKE_ACCOUNT}:${kind}:acme-test-backup`)).toEqual([]);
+  });
+
+  it.each([
+    ["rds:DeleteDBCluster", "cluster"],
+    ["rds:DeleteDBInstance", "db"],
+    ["rds:DeleteDBClusterParameterGroup", "cluster-pg"],
+    ["rds:DeleteDBSubnetGroup", "subgrp"],
+  ])("%s は、この設置の名前の資源に許す", (action, kind) => {
+    expect(statements(doc, "Allow", action, `arn:aws:rds:us-west-2:${FAKE_ACCOUNT}:${kind}:acme-test-example`)).not.toEqual([]);
+  });
+
   it("パイプラインの失敗の知らせのトピックを変えられない", () => {
     expect(statements(doc, "Allow", "sns:DeleteTopic", `arn:aws:sns:us-west-2:${FAKE_ACCOUNT}:acme-test-notify`)).toEqual([]);
     expect(statements(doc, "Allow", "sns:DeleteTopic", `arn:aws:sns:us-west-2:${FAKE_ACCOUNT}:acme-test-ops`)).not.toEqual([]);

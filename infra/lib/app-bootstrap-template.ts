@@ -67,8 +67,8 @@ function arnShapes(input: BootstrapInput) {
     // タグを持てないので、この設置に限れない
     originAccessControl: [arn("cloudfront", "origin-access-control/*", "")],
     ec2: [arn("ec2", "*")],
-    // 種類（cluster・db・cluster-pg・subgrp など）を分けて並べると、管理ポリシーの上限に収まらない
-    rds: [arn("rds", `*:${prefix}-*`)],
+    // 種類を * にしない。スナップショットはタグの拒否が当たらず、同じ接頭辞のバックアップを消せてしまう
+    rds: ["cluster", "db", "cluster-pg", "subgrp"].map((kind) => arn("rds", `${kind}:${prefix}-*`)),
     secret: [arn("secretsmanager", `secret:${secretPrefix}/*`)],
     ecsCluster: [arn("ecs", `cluster/${prefix}-*`)],
     // パイプラインの失敗の知らせのトピックも同じ接頭辞を持つので、アプリのトピックは名前で指す
