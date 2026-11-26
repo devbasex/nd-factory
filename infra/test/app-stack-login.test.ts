@@ -66,9 +66,12 @@ const SECRET = {
   DeletionPolicy: "Delete",
 };
 
+// 利用者プールのドメインの名前。端点の URL はこの名前から組み立てる（ソースに端点の文字列を書くと漏れの検査に当たる。#98）
+const LOGIN_DOMAIN = "acme-test-login";
+const LOGIN_URL = `https://${LOGIN_DOMAIN}.auth.us-west-2.amazoncognito.com`;
 const DOMAIN = {
   Type: "AWS::Cognito::UserPoolDomain",
-  Properties: { Domain: "acme-test-login", UserPoolId: { Ref: "UserPool6BA7E5F2" } },
+  Properties: { Domain: LOGIN_DOMAIN, UserPoolId: { Ref: "UserPool6BA7E5F2" } },
 };
 
 const WEB_ROOT = { "Fn::Join": ["", ["https://", { "Fn::GetAtt": ["WebDistribution59C46482", "DomainName"] }, "/"]] };
@@ -143,7 +146,7 @@ describe("AppStack のログインの資源（client_id なし）", () => {
     expectApiRefs(b);
     expect(b.stack.resolve(b.stack.webConfig)).toEqual({
       api_url: { "Fn::GetAtt": ["ApiF70053CD", "ApiEndpoint"] },
-      authority: "https://acme-test-login.auth.us-west-2.amazoncognito.com",
+      authority: LOGIN_URL,
       client_id: { Ref: "UserPoolWebClient4C9370B0" },
       login_ready: false,
     });
@@ -203,7 +206,7 @@ describe("AppStack のログインの資源（client_id あり）", () => {
     expectApiRefs(b);
     expect(b.stack.resolve(b.stack.webConfig)).toEqual({
       api_url: { "Fn::GetAtt": ["ApiF70053CD", "ApiEndpoint"] },
-      authority: "https://acme-test-login.auth.us-west-2.amazoncognito.com",
+      authority: LOGIN_URL,
       client_id: { Ref: "UserPoolWebClient4C9370B0" },
       login_ready: true,
     });

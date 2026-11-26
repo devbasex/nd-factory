@@ -43,6 +43,7 @@
 - 秘密の値（client secret・token・鍵）をリポジトリ・合成の出力・CI の記録・課題に置かない。秘密は秘密の器（Secrets Manager）に置き、スタックは動的な参照で読む
 - インフラの実際の値（アカウント ID・資源の ID・ARN・端点）・実在の profile の名前・運用する環境の名前をリポジトリに置かない。AWS のアカウントとリージョンは profile から、ほかの環境の値はリポジトリの外の設定のファイルから受ける（[docs/operations/settings.md](docs/operations/settings.md)）
 - 例・テスト・見本には作り物の値だけを使う（アカウント `123456789012`・リージョン `us-west-2`・接頭辞 `acme`・メール `ops@example.com`）
+- S3 の置き場の名前と端点の例には `acme` を使わず（実在の名前になり得る）、`amzn-s3-demo-bucket` の形か置き換え記号（`<名前>`・`${名前}`）を使う。ARN の例は、資源の欄を置き換え記号にするか、`.gitleaks.toml` の一覧にあるものを使う。理由と許す形は [漏れの検査の仕様](docs/specifications/leak-check.md) にある
 - CI は AWS の資格情報を持たない。ワークフローに資格情報を足さない（`tools/test/ci-definition.test.ts` が落とす）
 - 照合の語（参照の検査が探す旧い側の名前）はリポジトリに書かない。CI の秘密 `REF_CHECK_TERMS` から受ける
 - 実際の値（アカウント・profile・環境の名前）を探す正規表現はリポジトリに書かない。秘密 `LEAK_CHECK_PATTERN` から受け、Pull Request は NDF のマージの直前に検査用の非公開リポジトリで、main への push は環境 `leak-scan` を持つ `leak-check-push` で、`.gitleaks.toml` に重ねて探す（[docs/operations/ci-checks.md](docs/operations/ci-checks.md)）。gitleaks の当たりは値の行の `gitleaks:allow` と `.gitleaksignore` では外せない。正当な当たりは当てた規則の `[[rules.allowlists]]`（`.gitleaks.toml` か `tools/checks/gitleaks-default.toml`）に理由を添えて足す。許可は、対象を含む Pull Request より先に、許可の変更だけの Pull Request で main へ入れる（[docs/operations/ci-checks.md](docs/operations/ci-checks.md) の「正当な当たりを規則単位で外す」）

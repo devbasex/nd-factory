@@ -22,9 +22,11 @@ set -euo pipefail
 
 RULE_ID="nd-real-value"
 FAILED_LINE="leak-scan-secret: ${RULE_ID} の探しが失敗した。読めずに飛ばした対象があり得るので、件数は探せた範囲だけのものである"
-# leak-scan.sh が、当たりのほかに失敗を知らせる固定の文言（読み飛ばし・報告を読めない）
+# leak-scan.sh が、当たりのほかに失敗を知らせる固定の文言（警告か誤り・報告を読めない・飛ばしたファイルを探せない・履歴を確かめられない）
 SKIP_TEXT="leak-scan: gitleaks が警告か誤りを出した"
 UNREADABLE_TEXT="leak-scan: gitleaks の報告を読めない"
+UNSEARCHED_TEXT="leak-scan: gitleaks が中身を読まずに飛ばしたファイルを探せなかった"
+HISTORY_TEXT="leak-scan: 履歴を最後まで探し終えたことを確かめられなかった"
 EMPTY_LINE="leak-scan-secret: 秘密 LEAK_CHECK_PATTERN が空なので .gitleaks.toml だけで探す"
 
 # 秘密は読んだら環境から消す（子のプロセスに渡さない）
@@ -126,7 +128,7 @@ count_failed() {
   local status="$1" report="$2" log="$3"
   ((status != 0)) || return 1
   ((status == 1)) || return 0
-  if grep -F -e "$SKIP_TEXT" -e "$UNREADABLE_TEXT" "$log" >/dev/null; then
+  if grep -F -e "$SKIP_TEXT" -e "$UNREADABLE_TEXT" -e "$UNSEARCHED_TEXT" -e "$HISTORY_TEXT" "$log" >/dev/null; then
     return 0
   fi
   [[ -s "$report" ]] && jq -e 'type == "array" and length > 0' "$report" >/dev/null 2>&1 && return 1
