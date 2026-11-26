@@ -91,6 +91,21 @@ export type Outbox = {
   countPending(owner: Owner): Promise<{ confirm: number; queued: number; held: number }>;
 };
 
+/** 送る列の行。答えの ID・対象・プロジェクトをタグにし、中身を暗号化する（enqueue と隔離からの戻しで共有する） */
+export async function outboxRowOf(
+  keys: { key: CryptoKey; tagKey: CryptoKey },
+  body: OutboxBody,
+  kind: OutboxRow["kind"],
+): Promise<OutboxRow> {
+  return {
+    answerTag: await tagOf(keys.tagKey, body.idempotencyKey),
+    targetTag: await tagOf(keys.tagKey, body.operation, body.targetId),
+    kind,
+    ...(body.projectId === null ? {} : { projectTag: await tagOf(keys.tagKey, body.projectId) }),
+    ...(await seal(keys.key, body)),
+  };
+}
+
 // 後から押した件の番号が、先に押した件の保存より先に取られないようにする錠。持つ間はネットワークを待たない
 const locked = async <T>(fn: () => Promise<T>): Promise<T> => await navigator.locks.request("nd-outbox", fn);
 
@@ -201,13 +216,7 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
           const guard = await prepareGuard(db, owner);
           if (guard === null) throw new SessionChangedError();
           const { key, tagKey } = guard.keys;
-          const row: OutboxRow = {
-            answerTag: await tagOf(tagKey, body.idempotencyKey),
-            targetTag: await tagOf(tagKey, draft.operation, draft.targetId),
-            kind: found.class,
-            ...(draft.projectId === null ? {} : { projectTag: await tagOf(tagKey, draft.projectId) }),
-            ...(await seal(key, body)),
-          };
+          const row = await outboxRowOf({ key, tagKey }, body, found.class);
           const replaced = found.class === "confirm" ? await unsentConfirms(key, row.targetTag) : [];
           const result = await commitGuarded(guard, async (tx) => {
             for (const old of replaced) {

@@ -1,7 +1,7 @@
 import { type DBSchema, openDB } from "idb";
-import { seal, tagOf, unseal } from "./crypto.ts";
+import { tagOf, unseal } from "./crypto.ts";
 import { type DeviceDb, type HeldRow, type HoldReason, nextSeq, type OutboxRow, readOwner } from "./db.ts";
-import type { OutboxBody } from "./outbox.ts";
+import { type OutboxBody, outboxRowOf } from "./outbox.ts";
 
 // データベースを消す必要があるのに、持ち主が破棄を確認していない件を、別の IndexedDB に暗号文のまま残す（IW7・IW13）
 
@@ -104,13 +104,7 @@ export async function restoreQuarantined(db: DeviceDb, userId: string): Promise<
       for (const { item, body } of readable.sort((a, b) => a.body.seq - b.body.seq)) {
         const next: OutboxBody = { ...body, seq: await nextSeq(db) };
         // 答えの ID から作り直すので、やり直しても 2 件にならない
-        const row: OutboxRow = {
-          answerTag: await tagOf(current.tagKey, body.idempotencyKey),
-          targetTag: await tagOf(current.tagKey, body.operation, body.targetId),
-          kind: item.kind,
-          ...(body.projectId === null ? {} : { projectTag: await tagOf(current.tagKey, body.projectId) }),
-          ...(await seal(current.key, next)),
-        };
+        const row = await outboxRowOf(current, next, item.kind);
         const destination = destinationOf(item, body);
         if (destination === "outbox") await db.put("outbox", row);
         else await db.put("held", { ...row, holdReason: destination });
