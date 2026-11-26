@@ -1,10 +1,11 @@
 // @vitest-environment node
+import { createClock } from "@nd-factory/core/clock";
 import { beforeEach, describe, expect, it } from "vitest";
 import { seal, unseal } from "../../src/offline/crypto.ts";
 import { nextSeq } from "../../src/offline/db.ts";
 import { prepareGuard } from "../../src/offline/guarded-commit.ts";
 import { operationClassOf } from "../../src/offline/operation-classes.ts";
-import type { Outbox, OutboxItem } from "../../src/offline/outbox.ts";
+import { createOutbox, type Outbox, type OutboxItem } from "../../src/offline/outbox.ts";
 import { checkDeadline, classifyResult, createSender, type Round, type SendEvent } from "../../src/offline/send.ts";
 import { denied, json, NOW, OPS, ok, sendSetup } from "./send-support.ts";
 import { freshIndexedDb } from "./support.ts";
@@ -117,7 +118,28 @@ async function setup() {
     authzChanges?: number;
     // 会話の写しを読んだ回数
     conversationReads: number;
+    // noteSentItem が送る列の件を読んだ直後（書き込みのトランザクションの前）に、ほかの処理を割り込ませる
+    afterNoteRead?: () => Promise<void>;
   } = { conversationReads: 0 };
+  // noteSentItem だけは、送る列の行を読んだ直後に割り込めるデータベースで組む
+  const watched = new Proxy(t.db, {
+    get(target, prop) {
+      if (prop === "get") {
+        return async (...args: Parameters<typeof target.get>) => {
+          const row = await target.get(...args);
+          const hook = hooks.afterNoteRead;
+          if (args[0] === "outbox" && hook !== undefined) {
+            hooks.afterNoteRead = undefined;
+            await hook();
+          }
+          return row;
+        };
+      }
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+  const noting = createOutbox({ db: watched, clock: { ...createClock(), epochMs: () => t.state.wall } });
   // 応答の時刻を書いた直後（件の反映の前）に、ほかのタブの処理を割り込ませる
   const wait = {
     ...t.wait,
@@ -145,6 +167,7 @@ async function setup() {
       if (marked !== null) await hook?.(marked);
       return marked;
     },
+    noteSentItem: noting.noteSentItem,
   };
   const cache: typeof t.cache = {
     ...t.cache,
@@ -543,6 +566,106 @@ describe("取り下げ", () => {
     expect(await t.sender.withdraw(t.owner, item.answerTag)).toBe("enqueued");
     expect(await t.db.count("held")).toBe(0);
     expect((await t.outbox.readBatch()).items).toMatchObject([{ operation: "organizer_messages.withdraw", targetId: "msg-1" }]);
+    t.db.close();
+  });
+
+  // 送る列の件を、同じ中身のまま暗号化し直す（別のタブのそろえ方が送り始めた印を書き直したとき）
+  async function rewriteQueued(t: Awaited<ReturnType<typeof setup>>, answerTag: string) {
+    const found = await t.outbox.find(answerTag);
+    expect(found?.held).toBe(false);
+    expect(await t.outbox.markSendStarted(found!.item, NOW)).not.toBeNull();
+  }
+
+  // 保留の件を、同じ中身のまま暗号化し直す（送ったときに読んだ件とは iv が違う件になる）
+  async function resealHeld(t: Awaited<ReturnType<typeof setup>>, answerTag: string) {
+    const row = (await t.db.get("held", answerTag))!;
+    await t.db.put("held", { ...row, ...(await seal(t.keys.key, await unseal(t.keys.key, row))) });
+  }
+
+  it("返った ID を件に書く途中で送る列の件が書き換わったら、読み直した件に ID を書いて後続の件を送る", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello", { targetId: "org-1" });
+    await t.enqueue("users.update", "after");
+    await project(t, item.answerTag);
+    t.hooks.conversationConflicts = 3;
+    t.replies.push(() => {
+      t.hooks.afterNoteRead = () => rewriteQueued(t, item.answerTag);
+      return ok("msg-1");
+    });
+    expect(await t.run()).toBe("done");
+    expect(t.sent()).toEqual(["hello", "after"]);
+    expect((await t.outbox.readBatch()).items).toMatchObject([{ answerTag: item.answerTag, sentItemId: "msg-1" }]);
+    t.db.close();
+  });
+
+  it("返った ID を件に書くやり直しでも送る列の件が書き換わったら、件に ID を書かずに止め、後続の件を送らない", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello", { targetId: "org-1" });
+    await t.enqueue("users.update", "after");
+    await project(t, item.answerTag);
+    t.hooks.conversationConflicts = 3;
+    t.replies.push(() => {
+      t.hooks.afterNoteRead = async () => {
+        await rewriteQueued(t, item.answerTag);
+        t.hooks.afterNoteRead = () => rewriteQueued(t, item.answerTag);
+      };
+      return ok("msg-1");
+    });
+    expect(await t.run()).toBe("stopped");
+    expect(t.sent()).toEqual(["hello"]);
+    const [left, after] = (await t.outbox.readBatch()).items;
+    expect(left).toMatchObject({ answerTag: item.answerTag, sendStarted: true });
+    expect(left!.sentItemId).toBeUndefined();
+    expect(after).toMatchObject({ operation: "users.update", sendStarted: false });
+    t.db.close();
+  });
+
+  it("返った ID を件に書く途中で取り下げが件を保留へ移したら、保留の件を消して返った項目の取り下げを足す", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello", { targetId: "org-1" });
+    await project(t, item.answerTag);
+    t.hooks.conversationConflicts = 3;
+    t.replies.push(() => {
+      t.hooks.afterNoteRead = async () => {
+        expect(await t.sender.withdraw(t.owner, item.answerTag)).toBe("held");
+      };
+      return ok("msg-1");
+    });
+    expect(await t.run()).toBe("done");
+    expect(await t.db.count("held")).toBe(0);
+    expect((await t.outbox.readBatch()).items).toMatchObject([{ operation: "organizer_messages.withdraw", targetId: "msg-1" }]);
+    t.db.close();
+  });
+
+  it("返った ID を件に書く途中で保留へ移った件の iv が送ったときと違えば、保留の件を残し、取り下げを足さない", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello", { targetId: "org-1" });
+    await project(t, item.answerTag);
+    t.hooks.conversationConflicts = 3;
+    t.replies.push(() => {
+      t.hooks.afterNoteRead = async () => {
+        expect(await t.sender.withdraw(t.owner, item.answerTag)).toBe("held");
+        await resealHeld(t, item.answerTag);
+      };
+      return ok("msg-1");
+    });
+    expect(await t.run()).toBe("done");
+    expect(await t.held()).toEqual(["unknown-result"]);
+    expect(await t.db.count("outbox")).toBe(0);
+    t.db.close();
+  });
+
+  it("成功を反映する前に保留へ移った件の iv が送ったときと違えば、保留の件を残し、取り下げを足さない", async () => {
+    const t = await setup();
+    const item = await t.enqueue("organizer_messages.create", "hello");
+    t.replies.push(async () => {
+      expect(await t.sender.withdraw(t.owner, item.answerTag)).toBe("held");
+      await resealHeld(t, item.answerTag);
+      return ok("msg-1");
+    });
+    expect(await t.run()).toBe("done");
+    expect(await t.held()).toEqual(["unknown-result"]);
+    expect(await t.db.count("outbox")).toBe(0);
     t.db.close();
   });
 
