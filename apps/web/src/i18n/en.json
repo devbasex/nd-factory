@@ -1,0 +1,98 @@
+{
+  "app": { "name": "nd-factory", "skipToMain": "Skip to content" },
+  "common": {
+    "retry": "Try again",
+    "cancel": "Cancel",
+    "back": "Back",
+    "loading": "Loading",
+    "needsConnection": "Available when you are online",
+    "close": "Close"
+  },
+  "nav": {
+    "label": "Navigation",
+    "organizers": "Organizers",
+    "approvals": "Approvals",
+    "sprints": "Sprints",
+    "settings": "Settings",
+    "place": "Switch team or project",
+    "noPlaces": "Nothing to switch to",
+    "waiting_one": "{{count}} item waiting",
+    "waiting_other": "{{count}} items waiting"
+  },
+  "boot": {
+    "configUnavailable": "Could not load the app configuration",
+    "loginWaiting": "Waiting for sign-in to be configured",
+    "redirecting": "Taking you to the sign-in page",
+    "returning": "Completing the redirect",
+    "failed": "Could not start the app"
+  },
+  "signin": {
+    "title": "Sign in",
+    "action": "Sign in",
+    "description": "Sign in to open organizers and approvals"
+  },
+  "me": {
+    "userId": "User ID",
+    "since": "Member since"
+  },
+  "routes": {
+    "signin": { "title": "Sign in" },
+    "organizers": { "title": "Organizers" },
+    "sprints": { "title": "Sprints" },
+    "sprintStart": { "title": "Start a sprint" },
+    "sprintDetail": { "title": "Sprint" },
+    "approvalDetail": { "title": "Approval" },
+    "question": { "title": "Question" },
+    "projectSettings": { "title": "Project settings" },
+    "team": { "title": "Team" },
+    "projectNew": { "title": "Create a project" },
+    "execution": { "title": "Execution" },
+    "usage": { "title": "Usage and cost" },
+    "audit": { "title": "Audit log" },
+    "me": { "title": "My settings" },
+    "organizerChat": { "title": "Organizer conversation" },
+    "approvals": { "title": "Waiting for approval" }
+  },
+  "state": {
+    "empty": "Nothing here yet",
+    "emptyNext": "Go to organizers",
+    "notFound": "Not found, or you do not have access",
+    "notFoundNext": "Go to organizers",
+    "offlineNotCached": "Available when you are online",
+    "offlineNotCachedNext": "Go to organizers"
+  },
+  "offline": {
+    "banner": "You are offline",
+    "lastReceived": "Last received {{time}}",
+    "pending_one": "{{count}} operation waiting to be confirmed",
+    "pending_other": "{{count}} operations waiting to be confirmed",
+    "held_one": "{{count}} item on hold",
+    "held_other": "{{count}} items on hold",
+    "reloadFailed": "Could not refresh ({{time}})"
+  },
+  "pending": {
+    "waiting": "Confirms when online",
+    "unknown": "Result unconfirmed",
+    "deadline": "Due {{time}}",
+    "withdraw": "Withdraw"
+  },
+  "money": { "noCurrency": "Cannot show an amount without a currency" },
+  "errors": {
+    "reason": {
+      "unknown": "Something went wrong",
+      "config_unavailable": "The app configuration is unavailable",
+      "login_failed": "Sign-in failed",
+      "unauthorized": "Could not verify your sign-in",
+      "network_error": "Could not reach the server",
+      "unexpected_response": "Could not read the response",
+      "response_invalid": "Could not read the response",
+      "store_unavailable": "Storage is unavailable",
+      "unavailable": "Temporarily unavailable",
+      "too_many_requests": "Please wait a moment and try again",
+      "not_found": "Not found, or you do not have access",
+      "role_insufficient": "Your role does not allow this",
+      "version_mismatch": "This was changed elsewhere",
+      "state_mismatch": "The state has changed"
+    }
+  }
+}

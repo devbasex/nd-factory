@@ -1,0 +1,98 @@
+{
+  "app": { "name": "nd-factory", "skipToMain": "本文へ移る" },
+  "common": {
+    "retry": "もう一度",
+    "cancel": "やめる",
+    "back": "戻る",
+    "loading": "読み込んでいます",
+    "needsConnection": "つながると使えます",
+    "close": "閉じる"
+  },
+  "nav": {
+    "label": "ナビゲーション",
+    "organizers": "オーガナイザー",
+    "approvals": "承認待ち",
+    "sprints": "スプリント",
+    "settings": "設定",
+    "place": "チームとプロジェクトの切り替え",
+    "noPlaces": "切り替える先がありません",
+    "waiting_one": "待っているもの {{count}} 件",
+    "waiting_other": "待っているもの {{count}} 件"
+  },
+  "boot": {
+    "configUnavailable": "画面の設定を読み込めませんでした",
+    "loginWaiting": "ログインの設定を待っています",
+    "redirecting": "ログインの頁へ移ります",
+    "returning": "戻り先を処理しています",
+    "failed": "画面を始められませんでした"
+  },
+  "signin": {
+    "title": "サインイン",
+    "action": "サインインする",
+    "description": "サインインすると、オーガナイザーと承認待ちを開けます"
+  },
+  "me": {
+    "userId": "利用者の ID",
+    "since": "利用を始めた日時"
+  },
+  "routes": {
+    "signin": { "title": "サインイン" },
+    "organizers": { "title": "オーガナイザー" },
+    "sprints": { "title": "スプリントの一覧" },
+    "sprintStart": { "title": "スプリントを始める" },
+    "sprintDetail": { "title": "スプリントの詳細" },
+    "approvalDetail": { "title": "承認の詳細" },
+    "question": { "title": "問い" },
+    "projectSettings": { "title": "プロジェクトの設定" },
+    "team": { "title": "チーム" },
+    "projectNew": { "title": "プロジェクトを作る" },
+    "execution": { "title": "実行の場所" },
+    "usage": { "title": "使える量と費用" },
+    "audit": { "title": "操作の記録" },
+    "me": { "title": "自分の設定" },
+    "organizerChat": { "title": "オーガナイザーの会話" },
+    "approvals": { "title": "承認待ちの一覧" }
+  },
+  "state": {
+    "empty": "まだ何もありません",
+    "emptyNext": "オーガナイザーの一覧へ移る",
+    "notFound": "見つからないか、見る権限がありません",
+    "notFoundNext": "オーガナイザーの一覧へ移る",
+    "offlineNotCached": "つながると読めます",
+    "offlineNotCachedNext": "オーガナイザーの一覧へ移る"
+  },
+  "offline": {
+    "banner": "つながっていません",
+    "lastReceived": "最後に受け取った時刻 {{time}}",
+    "pending_one": "確定待ち {{count}} 件",
+    "pending_other": "確定待ち {{count}} 件",
+    "held_one": "保留 {{count}} 件",
+    "held_other": "保留 {{count}} 件",
+    "reloadFailed": "読み直せませんでした（{{time}}）"
+  },
+  "pending": {
+    "waiting": "つながってから確定",
+    "unknown": "結果未確認",
+    "deadline": "期限 {{time}}",
+    "withdraw": "取り下げる"
+  },
+  "money": { "noCurrency": "通貨の無い金額は表示できません" },
+  "errors": {
+    "reason": {
+      "unknown": "処理できませんでした",
+      "config_unavailable": "画面の設定を読み込めません",
+      "login_failed": "ログインできませんでした",
+      "unauthorized": "サインインを確認できませんでした",
+      "network_error": "通信できませんでした",
+      "unexpected_response": "応答を読めませんでした",
+      "response_invalid": "応答を読めませんでした",
+      "store_unavailable": "保存先を利用できません",
+      "unavailable": "今は利用できません",
+      "too_many_requests": "しばらく待ってからやり直してください",
+      "not_found": "見つからないか、見る権限がありません",
+      "role_insufficient": "この操作をする役割がありません",
+      "version_mismatch": "ほかで先に変わりました",
+      "state_mismatch": "状態が変わりました"
+    }
+  }
+}
