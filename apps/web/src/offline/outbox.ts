@@ -62,6 +62,13 @@ async function removeRow(tx: QueueTx, answerTag: string): Promise<boolean> {
   return false;
 }
 
+// 件の行を保留へ書いてから、送る列から消す（送る列から保留へ移す）
+async function toHeld(tx: QueueTx, row: OutboxRow, reason: HoldReason): Promise<void> {
+  const held: HeldRow = { ...row, holdReason: reason };
+  await tx.objectStore("held").put(held);
+  await tx.objectStore("outbox").delete(row.answerTag);
+}
+
 export type Outbox = {
   // also は、件を足すのと同じトランザクションで書くもの。セッションが替わっていれば SessionChangedError を投げる
   enqueue(owner: Owner, draft: Draft, also?: (tx: GuardedTx) => Promise<boolean>): Promise<OutboxItem>;
@@ -154,8 +161,7 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
     for (const answerTag of answerTags) {
       const row = await tx.objectStore("outbox").get(answerTag);
       if (row === undefined) continue;
-      await tx.objectStore("held").put({ ...row, holdReason: reason });
-      await tx.objectStore("outbox").delete(answerTag);
+      await toHeld(tx, row, reason);
       moved += 1;
     }
     await tx.done;
@@ -188,8 +194,8 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
       const row = await tx.objectStore("outbox").get(item.answerTag);
       const unchanged = row !== undefined && sameBytes(row.iv, item.iv);
       if (unchanged) {
-        if (outcome.kind === "hold") await tx.objectStore("held").put({ ...row, holdReason: outcome.reason });
-        await tx.objectStore("outbox").delete(item.answerTag);
+        if (outcome.kind === "hold") await toHeld(tx, row, outcome.reason);
+        else await tx.objectStore("outbox").delete(item.answerTag);
       }
       await tx.done;
       return unchanged;
@@ -313,9 +319,7 @@ export function createOutbox({ db, clock }: { db: DeviceDb; clock: Clock }): Out
         await removeRow(tx, item.answerTag);
         done = "removed";
       } else if (row !== undefined && outcome.kind === "hold") {
-        const held: HeldRow = { ...row, ...sealed, holdReason: outcome.reason };
-        await tx.objectStore("held").put(held);
-        await tx.objectStore("outbox").delete(item.answerTag);
+        await toHeld(tx, { ...row, ...sealed }, outcome.reason);
         done = "held";
       }
       await tx.done;
