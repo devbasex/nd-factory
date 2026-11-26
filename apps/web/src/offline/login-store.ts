@@ -94,8 +94,13 @@ export function createLoginStore({ openDb, flagged, log }: LoginDeps): LoginStor
     if (row === undefined || keys === null) return null;
     const body = await unseal<LoginBody>(keys.key, row).catch(() => null);
     if (body === null || (await tagOf(keys.tagKey, body.userId)) !== row.userTag) {
-      log.warn("ログインのキャッシュを読めないため消した");
-      await db.delete("login", "login");
+      // 別のタブが行を書き直していれば、その新しい行は消さない
+      const tx = db.transaction("login", "readwrite");
+      const current = await tx.store.get("login");
+      const same = current !== undefined && sameBytes(current.iv, row.iv);
+      if (same) await tx.store.delete("login");
+      await tx.done;
+      if (same) log.warn("ログインのキャッシュを読めないため消した");
       return null;
     }
     return { row, keys, body };

@@ -146,6 +146,35 @@ describe("ログインのキャッシュ", () => {
     db.close();
   });
 
+  it("復号に失敗した行を、別のタブが読んだ後に書き直していれば消さない", async () => {
+    await (async () => {
+      const { store } = setup();
+      await store.set(KEY, exchange());
+      await store.confirmSignin(USER);
+    })();
+    const { login } = await row();
+    // 読み出しには壊れた古い行が見え、書き込みの時点では別のタブが書いた正しい行がある
+    const stale = { ...login!, iv: new Uint8Array(12), data: new ArrayBuffer(32) };
+    const log = { info: vi.fn(), warn: vi.fn() };
+    const store = createLoginStore({
+      openDb: async () => {
+        const db = await openDb();
+        return new Proxy(db, {
+          get(target, prop) {
+            const value: unknown = Reflect.get(target, prop, target);
+            if (prop !== "get" || typeof value !== "function") return typeof value === "function" ? value.bind(target) : value;
+            return (name: string, key: string) => (name === "login" ? Promise.resolve(stale) : value.call(target, name, key));
+          },
+        });
+      },
+      flagged: () => false,
+      log,
+    });
+    await expect(store.readSession()).resolves.toBeNull();
+    expect((await row()).body).toMatchObject({ refresh_token: "refresh-example", userId: USER });
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
   it("別の利用者の確定は、前の利用者の件を隔離してから作り直し、戻ると件が返る", async () => {
     const { store } = setup();
     await store.set(KEY, exchange());
