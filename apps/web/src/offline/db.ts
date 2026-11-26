@@ -41,7 +41,7 @@ type PendingRow = Sealed & { id: "signout-proof" | "unlink-item"; fingerprintTag
 type WaitRow = Sealed & { id: "retry" | "api-time" };
 type AuthzRow = Sealed & { id: "authz" };
 
-interface DeviceSchema extends DBSchema {
+export interface DeviceSchema extends DBSchema {
   keys: { key: string; value: KeyRow };
   snapshots: { key: string; value: SnapshotRow; indexes: { kind: string; receivedAt: number; projectTags: string } };
   outbox: { key: string; value: OutboxRow; indexes: { targetTag: string; projectTag: string } };

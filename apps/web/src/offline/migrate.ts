@@ -1,5 +1,6 @@
 import { seal, unseal } from "./crypto.ts";
 import { type DeviceDb, type HoldReason, type KeyRow, type OutboxRow, readOwner, type StoreName } from "./db.ts";
+import { sameBytes } from "./guarded-commit.ts";
 
 // データベースの版の上げで、中身を保存先ごとに移す。順と扱いは #12 の設計書の「版の上げの表」。
 // 復号と暗号化はトランザクションの外で済ませ、書くトランザクションで移行の記録・主キー・iv が変わっていないことを確かめる
@@ -19,7 +20,6 @@ type Row = { id?: string; answerTag?: string; iv: Uint8Array<ArrayBuffer>; data:
 type Change = { key: string; iv: Uint8Array; next: Row | null; hold?: HoldReason };
 
 const keyOf = (row: Row): string => row.answerTag ?? row.id ?? "";
-const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((byte, i) => byte === b[i]);
 
 async function changeOf(owner: KeyRow, store: StoreName, row: Row, convert: (value: unknown) => unknown): Promise<Change> {
   const base = { key: keyOf(row), iv: row.iv };
@@ -65,7 +65,7 @@ async function migrateStore(db: DeviceDb, store: StoreName, plan: MigrationPlan)
   if (convert !== undefined) {
     const now = (await tx.objectStore(store).getAll()) as Row[];
     const ivs = new Map(now.map((row) => [keyOf(row), row.iv]));
-    const unchanged = now.length === changes.length && changes.every((c) => sameBytes(ivs.get(c.key) ?? new Uint8Array(), c.iv));
+    const unchanged = now.length === changes.length && changes.every((c) => sameBytes(ivs.get(c.key) ?? null, c.iv));
     if (!unchanged) {
       await tx.done;
       return false;
