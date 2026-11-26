@@ -569,7 +569,7 @@ type OperationClass =
 | `quarantinePending` | `quarantine.ts` | 新設 | `(db: DeviceDb, o: { drop: ReadonlySet<string> }) => Promise<void>` | `switching` を書き、`drop` に無い件とキーを隔離へ移す |
 | `restoreQuarantined` | 同上 | 新設 | `(db: DeviceDb, userId: string) => Promise<void>` | 持ち主の件を今のキーで戻す（戻し先は設計文書の「戻した件の戻し先」） |
 | `rollbackQuarantine` | 同上 | 新設 | `(db: DeviceDb) => Promise<void>` | 中断した隔離の複製を消して `switching` を外す |
-| `unreadableQuarantine` | 同上 | 新設 | `(userId: string) => Promise<{ items: ReadonlyArray<{ answerTag: string; kind: Exclude<OperationClass["class"], "online"> }>; discard: (answerTag: string) => Promise<void> }>` | 持ち主の復号できない件の一覧と破棄 |
+| `unreadableQuarantine` | 同上 | 新設 | `(db: DeviceDb, userId: string) => Promise<{ items: ReadonlyArray<{ answerTag: string; kind: Exclude<OperationClass["class"], "online"> }>; discard: (answerTag: string) => Promise<"deleted" \| "kept" \| "stale"> }>` | 持ち主の復号できない件の一覧と破棄 |
 
 - `quarantinePending`
   - 事前条件: サインインの錠を持つ
@@ -583,14 +583,17 @@ type OperationClass =
   - `answerTag` は隔離の件の主キーで、HMAC の値のため元の ID は読めない。呼び出し元は破棄する件の指定にだけ使う。`kind` は一覧に出す区分である
 - `unreadableQuarantine` の `discard`
   - 事前条件: 利用者が確認のダイアログで確定した
-  - 事後条件: 持ち主の行を `userId` で選び直し、`answerTag` の件の `ownerTag` がその行と同じときだけ消す。ほかの持ち主の件と、無い件には何もしない
+  - 排他: `discard` がサインインの錠を自分で取り、セッションの照合から削除のトランザクションの完了まで持ち続ける
+  - 照合: 手順と条件は設計文書の「隔離」の破棄の手順にある。`unreadableQuarantine` は一覧を読む前にログインキャッシュ行の `fingerprintTag` を覚え、`discard` は削除の直前に現在のセッションが同じことを確かめる。持ち主の行は、選んだ件の `ownerTag` で引き、その行の `tagKey` で `userId` を照合する
+  - 事後条件: 消したら `deleted`。現在のセッションが一覧を読んだセッションと違えば、何も消さず `stale`。件が無いか、件の持ち主が `userId` の利用者でなければ、何も消さず `kept`
   - 副作用: 件の削除と、件が無くなった持ち主の行の削除を、1 つの `readwrite` のトランザクションで行う
 
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `quarantinePending` | 隔離の書き込みの失敗 | 容量 | トランザクションの abort | 呼び出し元へ返す | 持ち主の交代は「この端末の保存の領域が足りないため、サインインを終えられませんでした」 | 元を消さない。再実行は同じ主キーの上書き |
-| `restoreQuarantined` | 復号できない件 | 壊れ | `unseal` | 隔離に残す | 件数と「内容を読めません」 | 次のサインインの確定で再試行 |
+| `restoreQuarantined` | 復号できない件 | 壊れ | `unseal` | 隔離に残す | 件数と「内容を読めません」と区分 | 次のサインインの確定で再試行 |
+| `unreadableQuarantine` の `discard` | `stale` | 別タブの利用者の切り替え・入り直し・サインアウト | 錠の中のセッションの照合 | 何も消さない | ダイアログを閉じる | 起動の照合からやり直す |
 | `rollbackQuarantine` | 削除の失敗 | 容量・ブラウザー | トランザクションの abort | `switching` を残す | 保留の件数は出す | 完了まで送らず破棄も受けない |
 
 ### 既存の部品の再利用
@@ -603,7 +606,7 @@ type OperationClass =
 | `quarantinePending` | 暗号文のまま移る | 件が 0 | 書き込みの失敗で元が残る |
 | `restoreQuarantined` | キャッシュして送るは送る列へ、確定待ちは保留へ | 版の古い隔離 | 壊れた 1 件が残る・2 回打って増えない |
 | `rollbackQuarantine` | 複製が消える | 元に無い件は残る | 削除の失敗 |
-| `unreadableQuarantine` | 持ち主だけに件が出る・指定した 1 件だけを破棄する | 0 件で持ち主の行が消える | 別の利用者は 0 件・別の利用者の `answerTag` を渡しても消えない |
+| `unreadableQuarantine` | 持ち主だけに件が出る・指定した 1 件だけを破棄する | 0 件で持ち主の行が消える・同じ利用者の 2 つ目の持ち主の行の件も破棄できる | 別の利用者は 0 件・別の利用者の `answerTag` を渡しても消えない・一覧の後に利用者かセッションが替わると `stale` で消えない |
 
 ## 保留の一覧
 満たす決定: 決定 12、受け入れ条件 14
@@ -618,7 +621,7 @@ type OperationClass =
   - 事前条件: 利用者が確認のダイアログで確定した
   - 副作用: IndexedDB の削除
 
-`HeldListDialog` は、`store` の件の後に `quarantined.items` を「内容を読めません」と区分で並べる。隔離の件の破棄は `quarantined.discard` に `answerTag` を渡し、終えたら `unreadableQuarantine` を呼び直す。画面に出す件数は、`store.count()` と `quarantined.items` の数の合計である。
+`HeldListDialog` は、`store` の件の後に `quarantined.items` を「内容を読めません」と区分で並べる。隔離の件の破棄は `quarantined.discard` に `answerTag` を渡す。`deleted` か `kept` が返ったら `unreadableQuarantine` を呼び直し、`stale` が返ったらダイアログを閉じて起動の照合からやり直す。画面に出す件数は、`store.count()` と `quarantined.items` の数の合計である。
 
 「結果未確認」と食い違いの表示も `visibleFieldsOf` を通す（出し分けを 1 か所にする）。
 
