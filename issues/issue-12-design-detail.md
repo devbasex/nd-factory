@@ -2,6 +2,21 @@
 
 設計文書 [issue-12-design.md](./issue-12-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。振る舞いの決まり（保存先の列・そろえ方の段・保留の理由・照合の条件など）は設計文書が持ち、ここには写さず節の名前で指す。要求の受け入れ条件は [issue-12-requirements.md](./issue-12-requirements.md) にある。
 
+この文書で使う語と番号の意味は、設計文書の次の場所にある。
+
+| 語・番号 | 意味 | 設計文書の場所 |
+| --- | --- | --- |
+| そろえ方・段 1〜5 | 端末とサーバーの状態を合わせる処理と、その 5 つの段階 | 「解き方の全体像」「処理の流れ」 |
+| 錠 | Web Locks API で取るロック | 「用語」 |
+| `IW<番号>` | 設計文書が定める不変条件の番号 | 「ドメインモデル」の「不変条件」 |
+| `LIB<番号>` | 調べたライブラリの番号 | 「外部の調査」の「ライブラリとサービス」 |
+| サインアウトの証 | サインアウトで `sessions.delete` に送る access token と、そのセッションの指紋 | 「文脈と制約」 |
+| 外しのキャッシュ | 今のセッションを発行した連携ログインを解除するときに送る `logins.delete` のアイテム | 「文脈と制約」 |
+| セッションの指紋・`fingerprintTag` | `sub` と `origin_jti` をつないだ SHA-256 と、それをさらに HMAC にした値 | 「端末のデータベースの保存先と列」 |
+| `switching` | 持ち主の交代のために件を隔離している間だけ真になる、キーの行の値 | 「保留の件と隔離」 |
+| 受け入れ | 割り当ての受け入れ（`project_transfers.accept`） | 「段 1 の受け入れの扱い」 |
+| 先映し | キャッシュして送る操作を、サーバーの結果を待たずに写しへ反映すること | 「用語」 |
+
 ## 地図
 
 パッケージ・モジュール構成（触るファイルだけ。`*` は新設）:
@@ -27,7 +42,7 @@ packages/core/src/ids.ts
 infra/lib/app-stack.ts
 ```
 
-依存の向き: `main.tsx` → `app/` → `screens/` → `ui/`・`i18n/` の順で、`app/` はさらに `routes/`・`offline/`・`sw/register.ts` を組み立てる。`offline/` の中は、次の順に上の層が下の層を読む。`crypto.ts` → `db.ts` → 各保存 → `revocation`・`send` → `sync`。各保存は `cache-store`・`outbox`・`held-store`・`quarantine`・`login-store`・`pending-store`・`send-wait` である。`authz.ts`・`snapshot-kinds.ts`・`operation-classes.ts` は、端末の保存を読まない葉である。`guarded-commit.ts` は `db`・`crypto`・`authz` だけを読む。`offline/`・`ui/`・`routes/` は `app/` と `screens/` を読まないので循環しない。画面の部品は写しと送る列を、`app/compose.ts` が渡すインターフェースの型を通して読む。`dummy/` は `app/compose.ts` の動的な import だけが読む。構成要素どうしの関係は設計文書の「構成要素」の図を指す。
+依存の向き: `main.tsx` → `app/` → `screens/` → `ui/`・`i18n/` の順で、`app/` はさらに `routes/`・`offline/`・`sw/register.ts` を組み立てる。`offline/` の中は、下の層から順に `crypto.ts`、`db.ts`、各保存、`revocation`・`send`、`sync` と並び、上の層が下の層を読む。各保存は `cache-store`・`outbox`・`held-store`・`quarantine`・`login-store`・`pending-store`・`send-wait` である。`authz.ts`・`snapshot-kinds.ts`・`operation-classes.ts` は、端末の保存を読まない葉である。`guarded-commit.ts` は `db`・`crypto`・`authz` だけを読む。`offline/`・`ui/`・`routes/` は `app/` と `screens/` を読まないので循環しない。画面の部品は写しと送る列を、`app/compose.ts` が渡すインターフェースの型を通して読む。`dummy/` は `app/compose.ts` の動的な import だけが読む。構成要素どうしの関係は設計文書の「構成要素」の図を指す。
 
 | パス（`apps/web/` から） | 種類 | 役割 1 文 | 依存する先 | モジュール | 最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -102,7 +117,7 @@ infra/lib/app-stack.ts
   - 副作用: IndexedDB の削除（期限切れの行）・`sessionStorage` の `oidc.user:` のキーの削除・Service Worker の登録
 - `BootState` は `config_unavailable`・`login_waiting`・`signin`・`returning`（戻り先の処理）・`ready` の 5 つの和にする
 
-#4 の「サインインを確定する」呼び出しを有効にするまで、`createAuth` の `stores` の 2 つには、今と同じ `WebStorageStateStore`（`sessionStorage`）を渡す。有効にする Pull Request で `userStore` を `createLoginStore` に替える。`sessionStorage` の骨組みのキャッシュの削除も同時に入れる（設計文書の「#12 と #4 の反映の順」）。切り替える前は持ち主の利用者の ID が分からないため、端末のデータベースを作らず、写し・送る列・そろえ方を動かさない。骨組みの 401 の扱い（`nd.reauth` のフラグ）と `users-client.ts` の呼び出しは、`boot` と `MeScreen` へ移して振る舞いを変えない。
+#4 の「サインインを確定する」呼び出しを有効にするまで、`createAuth` の `stores` の 2 つには、今と同じ `WebStorageStateStore`（`sessionStorage`）を渡す。有効にする Pull Request（#4 の呼び出しと同じ Pull Request か、同じリリース）で `userStore` を `createLoginStore` に替える。`sessionStorage` の骨組みのキャッシュの削除も同時に入れる（設計文書の「#12 と #4 の反映の順」）。切り替える前は持ち主の利用者の ID が分からないため、端末のデータベースを作らず、写し・送る列・そろえ方を動かさない。骨組みの 401 の扱い（`nd.reauth` のフラグ）と `users-client.ts` の呼び出しは、`boot` と `MeScreen` へ移して振る舞いを変えない。
 
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
@@ -386,8 +401,8 @@ infra/lib/app-stack.ts
 | `nextAuthz` | 同上 | 新設 | `(prev: AuthzRecord \| null, read: ListsRead) => AuthzRecord` | 段 1 の表のとおり記録を作り直す |
 | `addDenied` | 同上 | 新設 | `(prev: AuthzRecord, id: string, deniedSeq: number) => AuthzRecord` | `denied` に足し世代を増やす |
 | `withAuthzLock` | 同上 | 新設 | `<T>(mode: "shared" \| "exclusive", fn: () => Promise<T>) => Promise<T>` | `nd-authz` の錠の中で打つ |
-| `prepareGuard` | `guarded-commit.ts` | 新設 | `(db: DeviceDb, owner: Owner) => Promise<Guard \| null>` | 手順 1・2 の読み取りと持ち主の照合 |
-| `commitGuarded` | 同上 | 新設 | `(guard: Guard, write: (tx: GuardedTx) => void) => Promise<"committed" \| "stale">` | 手順 3 の確認と書き込み |
+| `prepareGuard` | `guarded-commit.ts` | 新設 | `(db: DeviceDb, owner: Owner) => Promise<Guard \| null>` | 設計文書の「利用者の境界」の照合と書き込みの手順 1・2（読み取りと持ち主の照合） |
+| `commitGuarded` | 同上 | 新設 | `(guard: Guard, write: (tx: GuardedTx) => void) => Promise<"committed" \| "stale">` | 同じ照合と書き込みの手順 3（確認と書き込み） |
 | `createCacheStore` | `cache-store.ts` | 新設 | `(d: { db: DeviceDb; wallNow: () => number }) => CacheStore` | 写しの保存を組む |
 
 `CacheStore` のメソッドは次のとおりで、書くメソッドはすべて `Guard` を引数に取る。
@@ -495,7 +510,7 @@ type OperationClass =
 | `enqueue(owner, draft)` | `OutboxItem` | `nd-outbox` の錠の中で番号を取り、同じ対象の未送信の確定待ちは置き換える。`online` の操作は受けない（IW4） |
 | `readBatch()` | `{ items: OutboxItem[]; unreadable: string[] }` | 錠の中で全件読み、`seq` の順に返す |
 | `markSendStarted(item, sentAt)` | `OutboxItem \| null` | `iv` を確かめて印を真にする |
-| `unmarkSendStarted(item)` | `void` | 会話の項目の取り下げの手順 4。後ろに同じ対象の確定待ちがあれば元の件を消す |
+| `unmarkSendStarted(item)` | `void` | 設計文書の「会話の項目の取り下げ」の手順 4（送り始めた印を戻す）。同じ対象の確定待ちが後ろに足されていれば、印を戻さずに元の件を消す |
 | `settle(item, outcome)` | `"removed" \| "held" \| "kept" \| "missing"` | 送る列と保留の件を `answerTag` で引き、1 トランザクションで消すか移す |
 | `moveToHeld(tags, reason)` | `number` | 暗号文のまま保留へ移す |
 | `countPending(owner)` | `{ confirm: number; queued: number; held: number }` | 帯と、#4 のサインアウトの確認の数 |
@@ -787,7 +802,7 @@ type OperationClass =
 | `retry` | 元の区分で残す（429 は `retryUntil` を持つ） | 止める |
 | `auth` | 残して #4 へ渡す | 止める |
 
-`runOnce` は次の順に打つ。錠 → 途中のフラグ → 回の持ち主 → `nd-outbox` で対象を読む → 段 1 → 待機の期限の確認 → 段 2（`sendQueue`）→ 段 3 → 段 4 → 段 5。段 1 は `planRevocation`・`applyRevocation`・受け入れの扱いである。段 2 が `stopped` でも段 3〜4 は打つ。段 1 が失敗した回は段 2 以降を打たない。
+`runOnce` は次の順に打つ。錠 → 途中のフラグ → 回の持ち主 → `nd-outbox` で対象を読む → 段 1 → 待機の期限の確認 → 段 2（`sendQueue`）→ 段 3 → 段 4 → 段 5。段 1 は `planRevocation`・`applyRevocation`・割り当ての受け入れの扱いである。各段の中身と、錠・途中のフラグ・回の持ち主の決まりは、設計文書の「処理の流れ」と「利用者の境界」にある。段 2 が `stopped` でも段 3〜4 は打つ。段 1 が失敗した回は段 2 以降を打たない。
 
 - 繰り返しの終わる条件: 一覧は `next_cursor` が `null` になるまで。時刻の読み直しは 1 件につき 1 回の段 2 で 1 回まで
 - 計算量の注意: 段 1 の写しの照合は `projectTags` の索引のキーを集めて比べ、全写しを復号しない
@@ -864,7 +879,7 @@ type OperationClass =
 | `registerServiceWorker` | 登録・応答の失敗 | 非対応・`ready` が来ない | reject | 呼び出し元へ返す | 出さない（`boot` がログに残す） | 次の起動 |
 | `precacheList` | 参照するファイルが無い | ビルドの欠け | 存在の確認 | 止める | 欠けたパス。終了コード 1 | 直してビルドし直す |
 
-`install` が失敗するのは、設計文書の決定 2 の「更新の訪問」の 1 つの場合と、一覧のファイルを取れない場合だけである。
+`install` が失敗するのは、次の 2 つの場合だけである。1 つは、設計文書の決定 2 の「更新の訪問」の場合である（`/config.json` を読めず、旧いバージョンの保存先の設定の値が、どれも新しい `webConfigSchema` に合わない）。もう 1 つは、一覧のファイルを取れない場合である。
 
 ### 内部のデータと定数
 | 名前 | 種類 | 保存先 | 既定値 |
