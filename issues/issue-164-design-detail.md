@@ -1,6 +1,6 @@
 # #164 の詳細設計: push から人を待たずに反映するパイプラインと、反映の直前の検査
 
-設計文書 [issue-164-design.md](./issue-164-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。決定の番号と受け入れ条件の番号は、設計文書と要求仕様（[issue-164-requirements.md](./issue-164-requirements.md)）のものである。条件 11・12 は決定 4 の再改訂後の文を指す。#181 で実装するもの（2 つのキーのスキーマ、`ND_CONFIRMATION_STAGE` の設定、宣言の記録の作成、設置のコマンドの検査）は含めない。
+設計文書 [issue-164-design.md](./issue-164-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。決定の番号と受け入れ条件の番号は、設計文書と要求仕様（[issue-164-requirements.md](./issue-164-requirements.md)）のものである。受け入れ条件 11・12 は、設計文書の決定 4 にある再改訂後の文を指す。段階（`ai`・`human`）と宣言の記録の意味は、設計文書の[この文書で使う言葉と役割](./issue-164-design.md#この文書で使う言葉と役割)にある。#181 で実装するもの（2 つのキーのスキーマ、`ND_CONFIRMATION_STAGE` の設定、宣言の記録の作成、設置のコマンドの検査）は含めない。
 
 ## 地図
 
@@ -61,7 +61,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | `infra/test/app-bootstrap-template.test.ts`・`infra/test/bootstrap-collision.test.ts` | 新設 | テンプレートの制約と衝突の判定のテスト | — | — | — |
 | `package.json` | 変更 | スクリプト `app-bootstrap` を足す | — | — | — |
 | `infra/package.json`・`package-lock.json` | 変更 | `yaml`（`tools` と同じ 2.9.1）と `@aws-sdk/client-cloudformation`（ほかの SDK と同じ 3.1170.0）を足す | — | — | — |
-| `knip.jsonc` | 変更 | `esbuild` を import するので `infra` の `ignoreDependencies` を外し、使われないと数えられるファイルがあれば `entry` に足す | — | — | — |
+| `knip.jsonc` | 変更 | `esbuild` を import するので `infra` の `ignoreDependencies` を外し、使われないと判定されるファイルがあれば `entry` に足す | — | — | — |
 | `docs/operations/pipeline-approval.md`・`setup.md`・`settings.md`・`idp-and-apps.md`、`AGENTS.md` | 変更 | 承認の段の無い流れに書き直す | — | — | — |
 
 ## 準備のアクション
@@ -91,7 +91,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `prepareBuildSpec` | 設定を読めない | パラメーターが無い・権限が無い・版が消えた | 手順 1〜3 の終了コード | 止める | CodeBuild の記録に AWS CLI のエラー。非 0 | 準備の段が失敗し、通知が届く。段をやり直せる |
-| `prepareBuildSpec` | 契約の照合が失敗 | 固定の点との食い違い（1）・取得や書き出しのエラー（2） | 手順 6 の終了コード | 止める | 照合の出力。1 か 2 | 後の命令は打たれない。扱いは決定 1 の表 |
+| `prepareBuildSpec` | 契約の照合が失敗 | 固定の点（`ndf-pin.json` で固定した NDF のコミット）との食い違い（終了コード 1）・取得や書き出しのエラー（終了コード 2） | 手順 6 の終了コード | 止める | 照合の出力。1 か 2 | 後の命令は打たれない。扱いは決定 1 の表 |
 
 ### ログと記録の出力
 
@@ -132,7 +132,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
     4. `cdk deploy --app cdk.out --require-approval never <appStack>`（今のまま）
   - 決定 5・6 は検査を「要約値を比べる前」に置くので、2 は 3 より前にする。検査は `cdk.out` へ書かない
 - `bundleDeployGuard`
-  - 事後条件: 束ねの起点は、`deploy-guard.ts` の `main` を import して呼ぶだけの文字列である。束ねた結果の `import` は `node:` の組み込みだけである。同じ入力からは同じ文字列になる（スタックの差分が毎回出ない）
+  - 事後条件: 束ねるときのエントリーは、`deploy-guard.ts` の `main` を import して呼ぶだけの文字列である。束ねた結果の `import` は `node:` の組み込みだけである。同じ入力からは同じ文字列になる（スタックの差分が毎回出ない）
   - 副作用: `infra/lib/` のファイルを読む
 - `runDeployGuard`
   - 事前条件: `env` に `ND_GUARD_CONFIG`（JSON）・`PIPELINE_EXECUTION_ID`・`SETTINGS_VERSION`・`SETTINGS_SHA256` がある
@@ -145,7 +145,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 - `checkSimulations`
   - 副作用: `iam:SimulatePrincipalPolicy`
 - `checkBootstrapVersion`
-  - 事後条件: 版は、反映のロールを引き受けた資格情報で `/cdk-bootstrap/<qualifier>/version` を読む。決定 6 の反映のプロジェクトのロールの一覧にはこのパラメーターの読み取りが無く、反映のロールは標準のテンプレートで読めるためである
+  - 事後条件: 版は `/cdk-bootstrap/<qualifier>/version` から読む。反映のプロジェクト（CodeBuild）のロールの権限の一覧（決定 6）には、このパラメーターの読み取りが無い。反映のロール（`cdk deploy` が引き受けるロール）は標準のテンプレートで読める。そのため、反映のロールを引き受けた資格情報で読む
   - 副作用: `sts:AssumeRole`、SSM の読み取り。引き受けた資格情報は子プロセスの環境変数にだけ渡す
 - `checkAssembly`・`awsCli`
   - 副作用: `checkAssembly` はファイルの読み取り、`awsCli` は外部コマンド
@@ -160,7 +160,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | --- | --- | --- | --- |
 | `runDeployGuard` | 環境変数の欠落、`ND_GUARD_CONFIG` を解析できない、反映を拒む条件に当たる | アクションの変数のつなぎの誤り、宣言した本番、記録がある・読めない | 先頭と `refusalReason` の戻り |
 | `main` | 想定外の例外 | 上のどれにも当たらないエラー | 最上位の `catch` |
-| `awsCli` | 起動できない・非 0 | CLI が無い・権限が無い・通信の失敗 | `status` を呼んだ側が見る |
+| `awsCli` | 起動できない・非 0 | CLI が無い・権限が無い・通信の失敗 | 呼んだ側が `status` を見る |
 | `checkTrigger` | `triggerType` が `WebhookV2` でないか取れない | 手動の開始・最初の実行・ロールバック | 応答の値 |
 | `checkSettings` | 取得の失敗、版か SHA-256 の違い、値を JSON として解析できない | 反映の前の書き換え・消して作り直し | 応答と比較 |
 | `checkAssembly` | 下の「合成の結果の検査の条件」のどれかに反する。`manifest.json` などを読めない | 起点のブランチの合成のコードの変更 | 各条件 |
@@ -195,7 +195,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | 上の 2 行 | `present`・`unreadable` | 上と同じ | 理由を返す |
 | `undefined`（読めない） | どれでも | 呼ばない | 理由を返す |
 
-`confirmation-stage-cases.json` は `{ name, settings, record, stage?, refused }` の配列である。`settings` は 2 つのキーを持つオブジェクトで、読めない行は `null` にして `stage` を置かない。行の一覧は決定 6 の「段階の判定規則の正本と契約テスト」に従う。
+`confirmation-stage-cases.json` は `{ name, settings, record, stage?, refused }` の配列である。`settings` は設定の値のオブジェクトで、2 つのキーが欠落や不正の行もある。パラメーターを読めない行は `null` にして `stage` を置かない。行の一覧は決定 6 の「段階の判定規則の正本と契約テスト」に従う。
 
 合成の結果の検査の条件（`checkAssembly`）:
 
@@ -266,7 +266,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | --- | --- | --- | --- |
 | `deployBuildSpec` | 検査 → 要約値 → 反映の順 | — | 手順に合成が無い。長さが 25,600 文字未満 |
 | `bundleDeployGuard` | 解いた結果の `import` が `node:` だけ | 2 回の結果が同じ | — |
-| `confirmationStage`・`refusalReason` | 表の全行 | 片方のキーだけの欠落・不正、版の履歴に依らない | 記録の `unreadable` |
+| `confirmationStage`・`refusalReason` | 表の全行 | 片方のキーだけの欠落・不正、設定のパラメーターの版の履歴に判定が依らない | 記録の `unreadable` |
 | `checkAssembly` | `NodejsFunction` を含む実際のアプリのスタックの合成を受け入れる | ほかのアセットが `.zip` | `executable`・`dockerImages`・別のスタック・許可外の種類・別の実行のロール・URL の差し替え・キーと中身の不一致・`..` のパス |
 | `checkTemplateStage` | 全関数が `ai` | `human` を期待して未設定 | 一部だけ未設定・違う値・オーソライザーだけ違う・関数を特定できない・対象外の資源の違う値 |
 | `runDeployGuard` | 全部通る | — | 環境変数の欠落、各検査の失敗で後の検査を打たない |
@@ -290,7 +290,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 
 - `constructor`
   - 事後条件:
-    - 管理の方針（`DenyApprovalPolicy`）を作らない
+    - 承認を拒む管理の方針（`DenyApprovalPolicy`）を作らない
     - ソースのアクションは `triggerOnPush: false`。`Pipeline` の `triggers` は、プロバイダーが `CodeStarSourceConnection`、`sourceAction` がこのアクション、`pushFilter` の `branchesIncludes` が `[p.branch]` の 1 件
     - 反映のプロジェクトのロールは、名前が `deployRoleName` の `Role` にする
     - 反映のプロジェクトのロールの文は、次の権限だけ
@@ -322,7 +322,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `constructor` | トリガー・ロールの文・アクションの変数・段の名前・失敗の通知 | — | 管理の方針が無い（今のテストを置き換える）。反映のロールに一覧の外の操作が無い。`DetectChanges` が偽 |
+| `constructor` | トリガー・ロールの文・アクションの変数・段の名前・失敗の通知 | — | 承認を拒む管理の方針が無い（今のテストを置き換える）。反映のロールに一覧の外の操作が無い。`DetectChanges` が偽 |
 | `guardConfig` | 作り物の設定の値 | — | — |
 
 ## 資源の名前
@@ -381,7 +381,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 
 満たす決定: 決定 6、受け入れ条件 11・12
 
-CDK の CLI には、独自のテンプレートの値を渡す引数を使わない。リポジトリにはテンプレートのコピーも実際の値も置かない。打つ時点の CDK の標準のテンプレート（`node_modules/aws-cdk/lib/api/bootstrap/bootstrap-template.yaml`）に制約と値を当てて、リポジトリの外のファイルへ書き出す。版を上げるときも同じコマンドで当て直す。
+独自のテンプレートに当てる値は、CDK の CLI の引数では渡さない。リポジトリにはテンプレートのコピーも実際の値も置かない。打つ時点の CDK の標準のテンプレート（`node_modules/aws-cdk/lib/api/bootstrap/bootstrap-template.yaml`）に制約と値を当てて、リポジトリの外のファイルへ書き出す。版を上げるときも同じコマンドで当て直す。
 
 ### 関数の仕様
 
@@ -529,7 +529,7 @@ CDK の CLI には、独自のテンプレートの値を渡す引数を使わ�
 
 満たす決定: 決定 4、受け入れ条件 5〜11
 
-`docs/design/`・MVV・開発の指針の Skill は、設計 PR で書き直してある。実装 PR で直すのは次の 4 つだけである。
+`docs/design/`・MVV・開発の指針の Skill は、設計 PR で書き直してある。実装 PR では、前の節の `docs/operations/pipeline-approval.md` のほかに直すのは次の 4 つだけである。
 
 | ファイル | 直す所 |
 | --- | --- |
