@@ -159,8 +159,24 @@ describe("待機の期限", () => {
     await wait.writeApiTime(owner, 400);
     expect(await wait.readApiTime()).toBe(500);
     expect(new TextDecoder().decode((await db.get("wait", "retry"))!.data)).not.toContain("2000");
-    await wait.clear(owner);
+    await wait.clear(owner, await wait.seen());
     expect(await wait.read()).toBeNull();
+    db.close();
+  });
+
+  it("解除は控えた行だけを消し、後から書かれた期限は読み直さずに残す", async () => {
+    const db = await openDb();
+    const { owner } = await signedIn(db);
+    const wait = createSendWait({ db });
+    await wait.write(owner, { retryUntil: 2_000, backoffMs: 60_000 });
+    const seen = await wait.seen();
+    // 送っている間に、別のタブが後の期限を書く
+    await wait.write(owner, { retryUntil: 9_000, backoffMs: 120_000 });
+    await expect(wait.clear(owner, seen)).resolves.toBe(true);
+    expect(await wait.read()).toEqual({ retryUntil: 9_000, backoffMs: 120_000 });
+    // 送る前に行が無ければ、解除しない
+    await wait.clear(owner, null);
+    expect(await wait.read()).toEqual({ retryUntil: 9_000, backoffMs: 120_000 });
     db.close();
   });
 
@@ -173,7 +189,7 @@ describe("待機の期限", () => {
     expect(await wait.readApiTime()).toBeNull();
     // 待機の期限の書き込みと解除も、旧いセッションでは行わない
     await wait.write(owner, { retryUntil: 2_000, backoffMs: 0 });
-    await expect(wait.clear({ ...owner, fingerprint: "fp-other" })).resolves.toBe(false);
+    await expect(wait.clear({ ...owner, fingerprint: "fp-other" }, await wait.seen())).resolves.toBe(false);
     await expect(wait.write({ ...owner, fingerprint: "fp-other" }, { retryUntil: 9_000, backoffMs: 0 })).resolves.toBe(false);
     expect(await wait.read()).toEqual({ retryUntil: 2_000, backoffMs: 0 });
     // 利用者の切り替えに伴う隔離の間も書かない

@@ -210,12 +210,12 @@ export function createSender(d: SendDeps): QueueSender {
     return d.cache.prepareReplace(guard, "organizer-messages", item.targetId, { ...value, items }, found.fetchSeq);
   }
 
-  // 件を消すのと会話の写しを 1 度に書く。取り下げた後の成功なら、返った項目の取り下げを足す
-  async function created(round: Round, item: OutboxItem, itemId: string): Promise<boolean> {
+  // 件を消すのと会話の写しと待機の解除を 1 度に書く。取り下げた後の成功なら、返った項目の取り下げを足す
+  async function created(round: Round, item: OutboxItem, itemId: string, waitSeen: Uint8Array | null): Promise<boolean> {
     // 読んだ後に取り下げが保留へ移すことがあるので、所属は書き込みの中で確かめ、変わっていれば読み直す
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const found = await d.outbox.find(item.answerTag);
-      if (found === null) return true;
+      if (found === null) return d.wait.clear(round.owner, waitSeen);
       const conversation = await sentIdWrite(round.owner, item, itemId);
       const writeConversation = async (tx: GuardedTx) => conversation === null || (await conversation(tx));
       if (found.held) {
@@ -224,6 +224,7 @@ export function createSender(d: SendDeps): QueueSender {
         await d.outbox.enqueue(round.owner, draft, async (tx) => {
           if (!(await writeConversation(tx))) return false;
           await tx.objectStore("held").delete(item.answerTag);
+          await d.wait.clearIn(tx, waitSeen);
           return true;
         });
         return true;
@@ -235,6 +236,7 @@ export function createSender(d: SendDeps): QueueSender {
         moved = (await tx.objectStore("outbox").get(item.answerTag)) === undefined;
         if (moved || !(await writeConversation(tx))) return false;
         await tx.objectStore("outbox").delete(item.answerTag);
+        await d.wait.clearIn(tx, waitSeen);
         return true;
       });
       if (result === "committed") return true;
@@ -243,7 +245,30 @@ export function createSender(d: SendDeps): QueueSender {
     return false;
   }
 
-  async function apply(round: Round, item: OutboxItem, decision: SendDecision, reply: Answered): Promise<Next> {
+  // 成功した件を送る列（取り下げで移っていれば保留）から消すのと待機の解除を、セッションの照合と同じトランザクションで行う。
+  // 偽なら照合が外れたので、件も待機の行も変えていない
+  async function removeSent(round: Round, item: OutboxItem, waitSeen: Uint8Array | null): Promise<boolean> {
+    const guard = await prepareGuard(d.db, round.owner);
+    if (guard === null) return false;
+    const result = await commitGuarded(guard, async (tx) => {
+      if ((await tx.objectStore("outbox").get(item.answerTag)) !== undefined) {
+        await tx.objectStore("outbox").delete(item.answerTag);
+      } else if ((await tx.objectStore("held").get(item.answerTag)) !== undefined) {
+        await tx.objectStore("held").delete(item.answerTag);
+      }
+      await d.wait.clearIn(tx, waitSeen);
+      return true;
+    });
+    return result === "committed";
+  }
+
+  async function apply(
+    round: Round,
+    item: OutboxItem,
+    decision: SendDecision,
+    reply: Answered,
+    waitSeen: Uint8Array | null,
+  ): Promise<Next> {
     if (decision.kind === "auth" || decision.kind === "retry") {
       // 処理の前の拒否は実行していないと分かるので、キーの無い操作は印を戻す
       const refused = decision.kind === "auth" || decision.unsent;
@@ -258,11 +283,13 @@ export function createSender(d: SendDeps): QueueSender {
     if (decision.kind === "done") {
       const result = reply.kind === "response" && reply.result.ok ? reply.result.results[0] : undefined;
       const itemId = (result as { item?: { id?: string } } | undefined)?.item?.id;
-      if (item.operation === CREATE && itemId !== undefined) {
-        if (!(await created(round, item, itemId))) return "stop";
-      } else await d.outbox.settle(item, { kind: "remove" });
-      // 待機の解除も、この応答を受けたセッションの照合と同じトランザクションで行う
-      if (!(await d.wait.clear(round.owner))) return "stop";
+      // 件の反映と待機の解除は、この応答を受けたセッションの照合と同じトランザクションで行う。
+      // 照合が外れたら、どちらも変えずに回を止める
+      const settled =
+        item.operation === CREATE && itemId !== undefined
+          ? await created(round, item, itemId, waitSeen)
+          : await removeSent(round, item, waitSeen);
+      if (!settled) return "stop";
       if (item.kind === "confirm") report(round, item, "confirmed");
       return "next";
     }
@@ -324,6 +351,8 @@ export function createSender(d: SendDeps): QueueSender {
         item = marked;
         markedNow = true;
       }
+      // 解除してよいのは、送る前に見た待機の行だけ。応答を待つ間に別のタブが書いた期限は残す
+      const waitSeen = await d.wait.seen();
       const reply = await d.send({
         name: item.operation,
         items: [bodyOf(item, idempotent)],
@@ -361,7 +390,7 @@ export function createSender(d: SendDeps): QueueSender {
         reply,
       });
       // 印を戻す判断は、送る前の印で行う
-      return apply(round, { ...item, sendStarted: resent }, decision, reply);
+      return apply(round, { ...item, sendStarted: resent }, decision, reply, waitSeen);
     }
     return "stop";
   }

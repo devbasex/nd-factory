@@ -105,7 +105,22 @@ async function setup() {
     report: (event) => void events.push(event),
   };
   // 送る側の読み書きの直後に、ほかの処理（取り下げなど）を割り込ませる
-  const hooks: { afterFind?: () => Promise<void>; afterMark?: (item: OutboxItem) => Promise<void> } = {};
+  const hooks: {
+    afterFind?: () => Promise<void>;
+    afterMark?: (item: OutboxItem) => Promise<void>;
+    afterApiTime?: () => Promise<void>;
+  } = {};
+  // 応答の時刻を書いた直後（件の反映の前）に、ほかのタブの処理を割り込ませる
+  const wait = {
+    ...t.wait,
+    writeApiTime: async (owner: Round["owner"], ms: number) => {
+      const written = await t.wait.writeApiTime(owner, ms);
+      const hook = hooks.afterApiTime;
+      hooks.afterApiTime = undefined;
+      await hook?.();
+      return written;
+    },
+  };
   const outbox: Outbox = {
     ...t.outbox,
     find: async (answerTag) => {
@@ -126,7 +141,7 @@ async function setup() {
   const sender = createSender({
     db: t.db,
     outbox,
-    wait: t.wait,
+    wait,
     cache: t.cache,
     send: t.sender,
     ops: OPS,
@@ -204,6 +219,37 @@ describe("送る列を送る", () => {
     expect(await t.run()).toBe("stopped");
     expect(await t.wait.read()).toEqual({ retryUntil: NOW + 30_000, backoffMs: 0 });
     expect((await t.outbox.readBatch()).items[0]).toMatchObject({ sendStarted: false });
+    t.db.close();
+  });
+
+  it("成功の応答は、送る前に見た待機の期限だけを解き、応答を待つ間に別のタブが書いた期限は残す", async () => {
+    const t = await setup();
+    await t.wait.write(t.owner, { retryUntil: NOW - 1_000, backoffMs: 60_000 });
+    await t.enqueue("users.update", "first");
+    expect(await t.run()).toBe("done");
+    expect(await t.wait.read()).toBeNull();
+    await t.enqueue("users.update", "second");
+    const later = { retryUntil: NOW + 90_000, backoffMs: 60_000 };
+    t.replies.push(async () => {
+      await t.wait.write(t.owner, later);
+      return ok();
+    });
+    expect(await t.run()).toBe("done");
+    expect(await t.db.count("outbox")).toBe(0);
+    expect(await t.wait.read()).toEqual(later);
+    t.db.close();
+  });
+
+  it("成功を反映する前にセッションが替われば、件も待機の期限も変えずに止める", async () => {
+    const t = await setup();
+    const waiting = { retryUntil: NOW - 1_000, backoffMs: 60_000 };
+    await t.wait.write(t.owner, waiting);
+    await t.enqueue("users.update", "first");
+    t.hooks.afterApiTime = async () => void (t.state.flagged = true);
+    expect(await t.run()).toBe("stopped");
+    t.state.flagged = false;
+    expect(await t.db.count("outbox")).toBe(1);
+    expect(await t.wait.read()).toEqual(waiting);
     t.db.close();
   });
 
