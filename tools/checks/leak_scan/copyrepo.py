@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
 import gitleaks
-from model import MARKER_RULE, ArchiveError, Context, CopyError, Finding, Leaf, Mark, SkipKind, Target
+from model import MARKER_RULE, ArchiveError, Context, CopyError, Finding, Leaf, Mark, Run, SkipKind, Target
 
 AUTHOR_NAME = "leak-scan"
 AUTHOR_DATE = "2000-01-01T00:00:00Z"
@@ -43,6 +43,17 @@ def isolated_env() -> dict[str, str]:
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_NOSYSTEM"] = "1"
     return env
+
+
+def _is_complete_run(run: Run) -> bool:
+    """決定 4 の条件のうち、実行の終了の値・報告・記録で確かめるもの。"""
+    return (
+        run.status in (0, 1)
+        and run.findings is not None
+        and not gitleaks.has_warning(run)
+        and not gitleaks.has_abort(run)
+        and all(gitleaks.classify_skip(line) is SkipKind.IGNORE for line in gitleaks.skip_lines(run))
+    )
 
 
 class CopyRepo:
@@ -116,16 +127,21 @@ class CopyRepo:
         run = gitleaks.run_gitleaks(
             ctx, "git", self.root, config, "2", "-m --all --text --no-textconv --no-ext-diff --no-renames", env
         )
-        ok = (
-            run.status in (0, 1)
-            and run.findings is not None
-            and not gitleaks.has_warning(run)
-            and not gitleaks.has_abort(run)
-            and all(gitleaks.classify_skip(line) is SkipKind.IGNORE for line in gitleaks.skip_lines(run))
-        )
+        found, matched = self._match_findings(run.findings or [], rewrite)
+        ok = _is_complete_run(run) and matched
+        return found, set() if ok else {mark}
+
+    def _match_findings(
+        self, findings: Iterable[Finding], rewrite: Mapping[str, str]
+    ) -> tuple[list[tuple[Target | None, Finding]], bool]:
+        """当たりを写しの対象に照らす。
+
+        返す真偽値は、すべての当たりが対象と一致し、すべての対象に目印の当たりがあるときだけ真。
+        """
+        ok = True
         found: list[tuple[Target | None, Finding]] = []
         marked: set[int] = set()
-        for finding in run.findings or []:
+        for finding in findings:
             email = _EMAIL.match(finding.email)
             number = int(email.group(1)) if email else 0
             entry = self.targets.get(number)
@@ -145,7 +161,7 @@ class CopyRepo:
             found.append((entry[0], replace(finding, file=entry[0].report_path, commit=entry[0].commit)))
         if marked != set(self.targets):
             ok = False
-        return found, set() if ok else {mark}
+        return found, ok
 
 
 def add_or_fail(repo: CopyRepo, target: Target, data: bytes, fail: Callable[[], None]) -> bool:
