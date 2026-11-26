@@ -246,6 +246,26 @@ def run_git(ctx: Context) -> Outcome:
     return outcome
 
 
+def _warn(line: str) -> None:
+    print(line, file=sys.stderr)
+
+
+def _warn_failures(ctx: Context, outcome: Outcome) -> None:
+    """失敗の印と読めなかった報告に応じた固定の行を出す。"""
+    if outcome.unreadable_status is not None:
+        _warn(UNREADABLE_LINE.format(outcome.unreadable_status))
+        if not ctx.paths:
+            _warn(HIDDEN_NOTE)
+    if Mark.WARNING in outcome.marks:
+        _warn(WARNING_LINE)
+        if not ctx.paths:
+            _warn(HIDDEN_NOTE)
+    if Mark.SKIPPED in outcome.marks:
+        _warn(SKIPPED_LINE)
+    if Mark.HISTORY in outcome.marks:
+        _warn(HISTORY_LINE)
+
+
 def conclude(ctx: Context, outcome: Outcome) -> int:
     """目印を除いた当たりと失敗の印を出し、その 2 つだけから終了コードを決める。当たった値・Email・Match は出さない。"""
     findings = [
@@ -267,25 +287,11 @@ def conclude(ctx: Context, outcome: Outcome) -> int:
         print(f"leak-scan: 当たり {item['RuleID']} {item['File']}:{item['StartLine']}{commit}")
     sys.stdout.flush()
 
-    def warn(line: str) -> None:
-        print(line, file=sys.stderr)
-
-    if outcome.unreadable_status is not None:
-        warn(UNREADABLE_LINE.format(outcome.unreadable_status))
-        if not ctx.paths:
-            warn(HIDDEN_NOTE)
-    if Mark.WARNING in outcome.marks:
-        warn(WARNING_LINE)
-        if not ctx.paths:
-            warn(HIDDEN_NOTE)
-    if Mark.SKIPPED in outcome.marks:
-        warn(SKIPPED_LINE)
-    if Mark.HISTORY in outcome.marks:
-        warn(HISTORY_LINE)
+    _warn_failures(ctx, outcome)
     if findings:
-        warn(f"leak-scan: 当たり {len(findings)} 件")
+        _warn(f"leak-scan: 当たり {len(findings)} 件")
     if not ctx.paths and (findings or outcome.marks & {Mark.SKIPPED, Mark.HISTORY}):
-        warn(NAMES_NOTE)
+        _warn(NAMES_NOTE)
     if ctx.report and (outcome.report_read or findings):
         with open(ctx.report, "w", encoding="utf-8", errors="surrogateescape") as stream:
             json.dump(findings, stream, ensure_ascii=False, indent=2)
