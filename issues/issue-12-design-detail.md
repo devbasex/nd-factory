@@ -1007,12 +1007,13 @@ e2e は 2 組のサーバーで打つ。ダミーの mode のビルド（`vite b
 ## 反映の定義（インフラ）
 満たす決定: 決定 2、受け入れ条件 13（テスト設計の「`Retry-After` と `Date` の公開」「決定 2 配信の切り替え」）
 
-関数は足さず、`infra/lib/app-stack.ts` の 2 つの値を変える。
+関数は足さず、`infra/lib/app-stack.ts` の 2 つの値を変える。`Retry-After` の公開は設計の変更を待つため、#12 では `Date` だけを公開する。
 
 | 変える所 | 値 | 条件 |
 | --- | --- | --- |
 | `BucketDeployment`（`WebDeployment`） | `prune: false` | Service Worker を入れる変更と同じ反映 |
-| HTTP API の `corsPreflight` | `exposeHeaders: ["date", "retry-after"]` | プラットフォームの文書を直す設計の Pull Request のマージの後 |
+| HTTP API の `corsPreflight` | `exposeHeaders: ["date"]` | 無し。承認済みのプラットフォームの文書が `Date` の公開を決めている |
+| HTTP API の `corsPreflight`（#196） | `exposeHeaders` に `"retry-after"` を足す | プラットフォームの文書を直す設計の Pull Request のマージの後。[#196](https://github.com/devbasex/nd-factory/issues/196) で行う |
 
 `infra/test/app-stack.test.ts` に 2 つの値の確認を足す。
 

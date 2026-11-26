@@ -8,7 +8,7 @@
 
 この文書の「ログインの切り替え」は、`oidc-client-ts` の保存先（`userStore`）をタブの `sessionStorage` から端末のデータベースへ替える変更である。切り替える条件は、設計書の「文脈と制約」の「#12 と #4 の反映の順」にある。#4 は、サインインの処理を持つ別の課題（[利用者とチーム](https://github.com/devbasex/nd-factory/issues/4)）である。
 
-ログインの切り替え（Task 22）と `Retry-After` の公開（Task 20）は、#12 では行わない。どちらも外の条件（#4 の呼び出しと、先に出す設計の Pull Request）を待つため、続きの課題（[画面の基盤の続き](https://github.com/devbasex/nd-factory/issues/196)）へ移した。受け入れ条件 6・7 は、#12 の本文で #12 が満たす部分に絞ってある（6 はダミーで測る待ち時間の記録、7 はログインのキャッシュを暗号化して置く層）。下の Task 20・22 の節は、#196 が使う手順として残す。
+ログインの切り替え（Task 22）と `Retry-After` の公開（Task 20 の一部）は、#12 では行わない。どちらも外の条件（#4 の呼び出しと、先に出す設計の Pull Request）を待つため、続きの課題（[画面の基盤の続き](https://github.com/devbasex/nd-factory/issues/196)）へ移した。`Date` の公開は承認済みのプラットフォームの文書が既に決めているため、#12 で行う。受け入れ条件 6・7 は、#12 の本文で #12 が満たす部分に絞ってある（6 はダミーで測る待ち時間の記録、7 はログインのキャッシュを暗号化して置く層）。下の Task 22 の節と、Task 20 の `Retry-After` の行は、#196 が使う手順として残す。
 
 ## 修正対象
 
@@ -22,7 +22,7 @@
 | `apps/web/src/main.ts`・`view.ts` | 削除。`app/` と `screens/` へ移す |
 | `apps/web/src/auth.ts` | 保存先を引数で受ける |
 | `packages/core/src/ids.ts` | 冪等キーを作る関数を足す |
-| `infra/lib/app-stack.ts` | `prune: false`。`exposeHeaders` は #196 の Task 20 で足す |
+| `infra/lib/app-stack.ts` | `prune: false`。`exposeHeaders` に `date` を足す（`retry-after` は #196 の Task 20 で足す） |
 | `package.json`・`apps/web/package.json`・`package-lock.json`・`vite.config.ts`・`tsconfig.json`・`index.html`・`playwright.config.ts`・`vitest.config.ts`・`knip.jsonc` | 依存・生成・ビルド・テストの設定 |
 | `apps/web/test/`・`apps/web/e2e/`・`packages/core/test/`・`infra/test/` | テスト（設計書の「テスト設計」と、詳細設計の節ごとの「単体テストの観点」） |
 | `docs/design/platform.md` | 「地図」に無い。`Retry-After` を公開するヘッダーに足す設計の Pull Request（#196 の Task 20）で直し、#12 では変えない。設計書の「`Retry-After` と `Date` の受け取り」が、実装より先に出すと決めている |
@@ -174,13 +174,19 @@ Task 16 と 17 は 1 つのレビューの単位にする。
 - **満たす受け入れ条件:** 無し（13 は Task 18 で満たす）
 - **進め方:** 行の「どう壊したら落ちるべきか」で壊して落ちることを確かめてから戻す
 
-### Task 20: `Retry-After` と `Date` を画面から読めるようにする（#196 へ移した）
+### Task 20: `Date` と `Retry-After` を画面から読めるようにする（`Retry-After` は #196 へ移した）
 
-- **対象ファイル:** `docs/design/platform.md`（先に出す設計の Pull Request）、`infra/lib/app-stack.ts`・`infra/test/app-stack.test.ts`
-- **変更内容:** 公開するヘッダーに `Retry-After` を足す設計の Pull Request を main へ出し、承認とマージの後に `exposeHeaders` を足す
-- **満たす受け入れ条件:** 無し（テスト設計の「`Retry-After` と `Date` の公開」の行）
+画面と API はオリジンが違うため、CORS で公開しないヘッダーは画面から読めない。`Date` は #12 で公開し、設計の変更が要る `Retry-After` は #196 で公開する。
+
+| 公開するヘッダー | 行う課題 | 変更内容 | 待つもの |
+| --- | --- | --- | --- |
+| `Date` | #12 | `infra/lib/app-stack.ts` の HTTP API の `corsPreflight` に `exposeHeaders: ["date"]` を足す。承認済みのプラットフォームの文書（`docs/design/platform.md` の HTTP API の行）が既に決めている | 無し |
+| `Retry-After` | [#196](https://github.com/devbasex/nd-factory/issues/196) | 公開するヘッダーに `Retry-After` を足す設計の Pull Request を main へ出し、承認とマージの後に `exposeHeaders` に `retry-after` を足す | 設計の Pull Request のマージ |
+
+- **対象ファイル:** `infra/lib/app-stack.ts`・`infra/test/app-stack.test.ts`。#196 では、先に出す設計の Pull Request で `docs/design/platform.md` も直す
+- **満たす受け入れ条件:** 無し（テスト設計の「`Retry-After` と `Date` の公開」の行。#12 は `Date` の部分、#196 は `Retry-After` の部分を確かめる）
 - **進め方:** スタックのテストを先に直す → 値を足す
-- **行う課題:** [#196](https://github.com/devbasex/nd-factory/issues/196)。#12 の間は、画面は `Retry-After` が無いものとして扱う
+- **#12 の間の扱い:** 画面は `Retry-After` が無いものとして扱い、既定の待ちを使う
 
 ### Task 21: 実装の大きさと量の値を詳細設計に記録する
 
@@ -222,11 +228,11 @@ git diff --shortstat <ベース>...HEAD -- . ':(exclude)issues/issue-*' ':(exclu
 | #12 の 13: 送る列を送る | Task 14 | 無し | 約 850 | |
 | #12 の 14: そろえ方 | Task 15 | 無し | 約 600 | |
 | #12 の 15: 画面と端末のデータ | Task 16・17 | 12:2・12:15・12:17 | 約 900 | |
-| #12 の 16: Service Worker | Task 18・21 | 12:6・12:13 | 約 900 | |
+| #12 の 16: Service Worker | Task 18・21、Task 20 の `Date` | 12:6・12:13 | 約 900 | |
 | #12 の 17: 版の入れ替えの e2e | Task 19 | 無し | 約 500 | |
 
 - 単位は表の順に依存する。見込みを超えて 1,000 行を超えそうな単位は、実装の途中で分け直す
-- 設計の Pull Request のマージを待つヘッダーの公開（Task 20）と、#4 の呼び出しを待つログインの切り替え（Task 22）は、#196 の単位にする。#12 の単位はこの 2 つを待たない
+- 設計の Pull Request のマージを待つ `Retry-After` の公開（Task 20 の `Retry-After` の行）と、#4 の呼び出しを待つログインの切り替え（Task 22）は、#196 の単位にする。#12 の単位はこの 2 つを待たない
 - 受け入れ条件 1・9 は設計の段で作った成果物が対象で、8・10 は配信した環境で確認する。どの単位にも載せない
 - 受け入れ条件 7（ログインのキャッシュを暗号化して置く層）は、Task 12 の #12 の 11 で満たす
 

@@ -120,6 +120,9 @@ export class AppStack extends Stack {
         allowOrigins: [webOrigin],
         allowMethods: [CorsHttpMethod.PUT],
         allowHeaders: ["authorization", "content-type"],
+        // 画面が API の時刻を読めるよう Date を公開する（プラットフォームの文書の HTTP API の行）。
+        // Retry-After の公開は設計の変更を待つ（#196）
+        exposeHeaders: ["date"],
         maxAge: Duration.hours(1),
       },
     });

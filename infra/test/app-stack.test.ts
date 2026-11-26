@@ -150,10 +150,12 @@ describe("AppStack（client_id なし）", () => {
 
   it("CORS は配信の頁の元だけ", () => {
     const api = onlyResource(built.template, "AWS::ApiGatewayV2::Api");
-    const cors = api.props.CorsConfiguration as { AllowOrigins: unknown[]; AllowMethods: string[] };
+    const cors = api.props.CorsConfiguration as { AllowOrigins: unknown[]; AllowMethods: string[]; ExposeHeaders: string[] };
     expect(cors.AllowOrigins).toHaveLength(1);
     expect(JSON.stringify(cors.AllowOrigins)).toContain("DomainName");
     expect(cors.AllowMethods).toEqual(["PUT"]);
+    // 画面が API の時刻を読めるよう Date を公開する。Retry-After は #196 で足す
+    expect(cors.ExposeHeaders).toEqual(["date"]);
   });
 
   it("画面の置き場は公開せず、配信は OAC で読む", () => {
