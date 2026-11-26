@@ -13,7 +13,7 @@ beforeEach(freshIndexedDb);
 const found = <T>(items: T[]): ListResult<T> => ({ kind: "ok", items });
 const empty: ScreenRead = { kind: "ok", snapshots: [], lists: [], missing: [] };
 
-async function setup({ apiTime = NOW as number | null } = {}) {
+async function setup({ apiTime = NOW as number | null, onStale = () => {} } = {}) {
   const t = await sendSetup();
   // 前に受けた API の Date。押したときの期限の下限になる
   if (apiTime !== null) await t.wait.writeApiTime(apiTime);
@@ -48,7 +48,7 @@ async function setup({ apiTime = NOW as number | null } = {}) {
     },
     log: { info: () => {}, warn: () => {} },
     onAuth: () => {},
-    onStale: () => {},
+    onStale,
   };
   const view = createDeviceView(deps);
   const draft = (targetId: string, operation = "questions.answer") => ({
@@ -105,7 +105,7 @@ describe("画面と端末のデータ", () => {
     expect(t.view.snapshot().results).toMatchObject([{ kind: "rejected", targetId: "q-1", reason: "state_mismatch" }]);
     expect(t.view.snapshot().held).toBe(1);
     expect((await t.view.heldStore.list())[0]?.body?.input).toEqual({ text: "q-1" });
-    expect(await t.view.readRecord()).toMatchObject({ allowedProjectIds: ["p-example"] });
+    expect(await t.view.readHeld()).toMatchObject([{ content: { input: { text: "q-1" } } }]);
     stop();
     t.db.close();
   });
@@ -179,6 +179,29 @@ describe("画面と端末のデータ", () => {
     expect(heard).toHaveBeenCalled();
     stop();
     expect(t.channel.size).toBe(0);
+    t.db.close();
+  });
+
+  it("別のタブでログインが替わった後の読み直しは、送る列を読まずに件と件数を消し、起動の照合へ戻す", async () => {
+    const onStale = vi.fn();
+    const t = await setup({ onStale });
+    const stop = t.view.start();
+    await t.connect(false);
+    await t.view.press(t.draft("q-1"));
+    expect(t.view.snapshot().pending).toHaveLength(1);
+    // 別のタブが別のセッションでログインの行を書き直した
+    const login = (await t.db.get("login", "login"))!;
+    await t.db.put("login", { ...login, fingerprintTag: "other-session" });
+    // 読めない行があっても、照合が外れたタブは保留へ移さない
+    const row = (await t.db.getAll("outbox"))[0]!;
+    await t.db.put("outbox", { ...row, data: new ArrayBuffer(32) });
+    for (const fn of t.channel) fn();
+    await t.view.idle();
+    expect(t.view.snapshot()).toMatchObject({ pending: [], queued: 0, held: 0, quarantined: null });
+    expect(onStale).toHaveBeenCalled();
+    await expect(t.db.count("held")).resolves.toBe(0);
+    await expect(t.view.readHeld()).resolves.toBe("stale");
+    stop();
     t.db.close();
   });
 });

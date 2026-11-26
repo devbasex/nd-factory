@@ -8,8 +8,8 @@ import { createCacheStore } from "../offline/cache-store.ts";
 import type { Connectivity } from "../offline/connectivity.ts";
 import { unseal } from "../offline/crypto.ts";
 import { type DeviceDb, readOwner } from "../offline/db.ts";
-import type { Owner } from "../offline/guarded-commit.ts";
-import { createHeldStore, type HeldStore } from "../offline/held-store.ts";
+import { type Owner, sameBytes, sessionMatches } from "../offline/guarded-commit.ts";
+import { createHeldStore, type HeldStore, type HeldView, visibleFieldsOf } from "../offline/held-store.ts";
 import { createOutbox, type Draft } from "../offline/outbox.ts";
 import { unreadableQuarantine } from "../offline/quarantine.ts";
 import { createSender, type SendEvent } from "../offline/send.ts";
@@ -39,9 +39,11 @@ export type DeviceSnapshot = {
   held: number;
   quarantined: Quarantined | null;
   results: readonly ResultEntry[];
+  // 見られる対象の記録が書き換わるたびに増える。保留の一覧は、増えたら表示済みの中身を先に隠す
+  authzMark: number;
 };
 
-export const EMPTY_DEVICE: DeviceSnapshot = { pending: [], queued: 0, held: 0, quarantined: null, results: [] };
+export const EMPTY_DEVICE: DeviceSnapshot = { pending: [], queued: 0, held: 0, quarantined: null, results: [], authzMark: 0 };
 
 export type DeviceViewDeps = {
   db: DeviceDb;
@@ -71,7 +73,8 @@ export type DeviceView = {
   press(draft: Draft): Promise<void>;
   withdraw(answerTag: string): Promise<void>;
   heldStore: HeldStore;
-  readRecord(): Promise<AuthzRecord | null>;
+  // 保留の一覧に出す項目。読む前と後にセッションを照合し、外れたら stale
+  readHeld(): Promise<HeldView[] | "stale">;
   stale(): void;
   /** @internal 起こした回と読み直しが終わるのを待つ */
   idle(): Promise<void>;
@@ -98,7 +101,7 @@ export function createDeviceView(d: DeviceViewDeps): DeviceView {
   const outbox = createOutbox({ db, clock: d.clock });
   const wait = createSendWait({ db });
   const cache = createCacheStore({ db, wallNow, log, notify: () => d.channel.post() });
-  const heldStore = createHeldStore({ db });
+  const heldStore = createHeldStore({ db, owner });
 
   // このタブが最後に受けた API の Date と、受けた時点
   let lastDate: { ms: number; since: number } | null = null;
@@ -117,14 +120,29 @@ export function createDeviceView(d: DeviceViewDeps): DeviceView {
     return known.length === 0 ? null : Math.floor(Math.max(...known));
   }
 
+  // 別のタブで利用者かセッションが替わっていた。表示済みの件と件数を消してから、起動の照合へ戻す
+  const dropStale = () => {
+    targets.clear();
+    publish({ ...EMPTY_DEVICE, authzMark: state.authzMark + 1 });
+    d.onStale();
+  };
+
+  let authzIv: Uint8Array | null = null;
   async function reread(): Promise<void> {
+    // 復号と、読めない行を保留へ移す処理は、このタブのセッションが端末の持ち主に合うときだけ行う
+    if (!(await sessionMatches(db, owner))) return dropStale();
     const { items } = await outbox.readBatch();
-    for (const item of items) targets.set(item.answerTag, item.targetId);
     const found = await unreadableQuarantine(db, owner.userId, () => owner.fingerprint, owner.flagged);
-    if (found === "stale") d.onStale();
     const quarantined = typeof found === "string" ? null : found;
     const held = (await heldStore.count()) + (quarantined?.items.length ?? 0);
+    const iv = (await db.get("authz", "authz"))?.iv ?? null;
+    // 読んでいる間に替わっていれば、読んだ件を出さない
+    if (found === "stale" || !(await sessionMatches(db, owner))) return dropStale();
+    for (const item of items) targets.set(item.answerTag, item.targetId);
+    const authzChanged = !sameBytes(iv, authzIv);
+    authzIv = iv;
     publish({
+      authzMark: authzChanged ? state.authzMark + 1 : state.authzMark,
       pending: items
         .filter((item) => item.kind === "confirm")
         .map(({ answerTag, operation, targetId, pressedAt }) => ({
@@ -230,13 +248,17 @@ export function createDeviceView(d: DeviceViewDeps): DeviceView {
       d.channel.post();
     },
     heldStore,
-    // 画面へ反映する側は shared の錠で読む
-    readRecord: () =>
+    // 画面へ反映する側は shared の錠で読む。記録はこの錠の間は書き換わらない
+    readHeld: () =>
       withAuthzLock("shared", async () => {
+        if (!(await sessionMatches(db, owner))) return "stale";
         const keys = await readOwner(db);
         const row = await db.get("authz", "authz");
-        if (keys === null || row === undefined) return null;
-        return unseal<AuthzRecord>(keys.key, row).catch(() => null);
+        // 記録を復号できなければ、見られないとして扱う
+        const record = keys === null || row === undefined ? null : await unseal<AuthzRecord>(keys.key, row).catch(() => null);
+        const items = await heldStore.list();
+        if (!(await sessionMatches(db, owner))) return "stale";
+        return items.map((item) => visibleFieldsOf(item, record));
       }),
     stale: () => d.onStale(),
     async idle() {

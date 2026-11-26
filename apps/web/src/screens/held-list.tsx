@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/context.ts";
 import { operationKey } from "../i18n/translate.ts";
-import type { AuthzRecord } from "../offline/authz.ts";
-import { type HeldStore, type HeldView, visibleFieldsOf } from "../offline/held-store.ts";
+import type { HeldStore, HeldView } from "../offline/held-store.ts";
 import type { unreadableQuarantine } from "../offline/quarantine.ts";
 import { Button } from "../ui/button.tsx";
 import { ConfirmDialog } from "../ui/confirm-dialog.tsx";
@@ -15,8 +14,10 @@ export type HeldListProps = {
   // 持ち主の読めない隔離の件。access token を取り直すまでは null
   quarantined: Extract<Awaited<ReturnType<typeof unreadableQuarantine>>, object> | null;
   open: boolean;
-  // 見られる対象の記録。出す項目はこれで絞る
-  record: () => Promise<AuthzRecord | null>;
+  // 出す項目。見られる対象の記録で絞り、セッションの照合が外れたら stale
+  read: () => Promise<HeldView[] | "stale">;
+  // 見られる対象の記録が書き換わるたびに増える
+  authzMark: number;
   onClose: () => void;
   onChanged: () => void;
   // このタブの利用者かセッションが替わっていた
@@ -54,32 +55,42 @@ function Held({ view, onDiscard }: { view: HeldView; onDiscard: () => void }) {
   );
 }
 
-function OpenList({ store, quarantined, record, onClose, onChanged, onStale }: HeldListProps) {
+const hidden = (view: HeldView): HeldView => ({ ...view, content: null });
+
+function OpenList({ store, quarantined, read, authzMark, onClose, onChanged, onStale }: HeldListProps) {
   const { t } = useI18n();
   const [views, setViews] = useState<HeldView[]>([]);
   const [target, setTarget] = useState<Target | null>(null);
   const [failed, setFailed] = useState(false);
+  // 後に始めた読み出しの結果だけを出す
+  const latest = useRef(0);
 
-  const read = useCallback(async () => {
-    const items = await store.list();
-    // 記録を読んでから反映するまでの間に、ほかの処理を挟まない
-    const current = await record();
-    setViews(items.map((item) => visibleFieldsOf(item, current)));
-  }, [store, record]);
+  const stale = useCallback(() => {
+    setViews([]);
+    onClose();
+    onStale();
+  }, [onClose, onStale]);
+
+  const reload = useCallback(async () => {
+    const run = ++latest.current;
+    const next = await read().catch(() => null);
+    if (run !== latest.current) return;
+    if (next === "stale") return stale();
+    // 読めなければ、中身を出さない
+    setViews((prev) => (next === null ? prev.map(hidden) : next));
+  }, [read, stale]);
+  // 記録が書き換わったら、照合した結果を待たずに表示済みの中身を隠す
+  useEffect(() => setViews((prev) => prev.map(hidden)), [authzMark]);
   // 件数が変わるたびに quarantined が新しくなるので、そのたびに読み直す
-  useEffect(() => void read(), [read, quarantined, onChanged]);
+  useEffect(() => void reload(), [reload, quarantined, authzMark, onChanged]);
 
   async function discard({ answerTag, quarantined: isolated }: Target) {
     setTarget(null);
     setFailed(false);
     try {
-      if (!isolated) await store.discard(answerTag);
-      else if ((await quarantined!.discard(answerTag)) === "stale") {
-        onClose();
-        onStale();
-        return;
-      }
-      await read();
+      const done = isolated ? await quarantined!.discard(answerTag) : await store.discard(answerTag);
+      if (done === "stale") return stale();
+      await reload();
       onChanged();
     } catch {
       setFailed(true);

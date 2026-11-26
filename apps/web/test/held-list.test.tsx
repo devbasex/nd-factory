@@ -1,7 +1,7 @@
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthzRecord } from "../src/offline/authz.ts";
-import type { HeldItem, HeldStore } from "../src/offline/held-store.ts";
+import { type HeldItem, type HeldStore, type HeldView, visibleFieldsOf } from "../src/offline/held-store.ts";
 import { HeldListDialog, type HeldListProps } from "../src/screens/held-list.tsx";
 import { buttonNamed, click, render, unmountAll } from "./support/render.tsx";
 
@@ -39,22 +39,27 @@ const ALLOWED: AuthzRecord = {
   denied: [],
 };
 
-function setup(items: HeldItem[], over: Partial<HeldListProps> = {}) {
+function setup(items: HeldItem[], over: Partial<HeldListProps> & { record?: AuthzRecord | null } = {}) {
   let rows = items;
   const store: HeldStore = {
     count: async () => rows.length,
     list: async () => rows,
-    discard: vi.fn(async (tag: string) => void (rows = rows.filter((r) => r.answerTag !== tag))),
+    discard: vi.fn(async (tag: string) => {
+      rows = rows.filter((r) => r.answerTag !== tag);
+      return "deleted" as const;
+    }),
   };
-  const props = {
+  const { record = ALLOWED, ...rest } = over;
+  const props: HeldListProps = {
     store,
     quarantined: null,
     open: true,
-    record: async () => ALLOWED,
+    read: async () => rows.map((row) => visibleFieldsOf(row, record)),
+    authzMark: 0,
     onClose: vi.fn(),
     onChanged: vi.fn(),
     onStale: vi.fn(),
-    ...over,
+    ...rest,
   };
   const view = render(<HeldListDialog {...props} />);
   return { ...view, props, store };
@@ -73,7 +78,7 @@ describe("HeldListDialog", () => {
   });
 
   it("見る権限を確かめられない件は、入力した文を出さずに理由を出す", async () => {
-    const { host } = setup([item()], { record: async () => null });
+    const { host } = setup([item()], { record: null });
     await settle();
     expect(host.textContent).not.toContain("作り物のコメント");
     expect(host.textContent).not.toContain("apr_example");
@@ -126,6 +131,41 @@ describe("HeldListDialog", () => {
     expect(discard).toHaveBeenCalledWith("q-1");
     expect(props.onClose).toHaveBeenCalled();
     expect(props.onStale).toHaveBeenCalled();
+  });
+
+  it("通常の件の破棄がセッションの照合で stale なら、閉じて起動の照合からやり直す", async () => {
+    const { host, props, store } = setup([item()]);
+    await settle();
+    vi.mocked(store.discard).mockResolvedValueOnce("stale");
+    click(buttonNamed(host, "破棄する"));
+    click(buttonNamed(dialog(host)!, "破棄する"));
+    await settle();
+    expect(props.onClose).toHaveBeenCalled();
+    expect(props.onStale).toHaveBeenCalled();
+    expect(host.textContent).not.toContain("作り物のコメント");
+  });
+
+  it("読み出しが stale なら中身を出さず、閉じて起動の照合からやり直す", async () => {
+    const { host, props } = setup([item()], { read: async () => "stale" });
+    await settle();
+    expect(host.textContent).not.toContain("作り物のコメント");
+    expect(props.onClose).toHaveBeenCalled();
+    expect(props.onStale).toHaveBeenCalled();
+  });
+
+  it("記録が書き換わったら、読み直しの結果を待たずに表示済みの中身を隠す", async () => {
+    const shown = [visibleFieldsOf(item(), ALLOWED)];
+    let answer: (views: HeldView[]) => void = () => {};
+    const read = vi.fn(async (): Promise<HeldView[] | "stale"> => shown);
+    const { host, props, rerender } = setup([item()], { read });
+    await settle();
+    expect(host.textContent).toContain("作り物のコメント");
+    read.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    rerender(<HeldListDialog {...props} authzMark={1} />);
+    expect(host.textContent).not.toContain("作り物のコメント");
+    expect(host.textContent).toContain("内容は表示しません");
+    await act(async () => answer([visibleFieldsOf(item(), null)]));
+    expect(host.textContent).not.toContain("作り物のコメント");
   });
 
   it("閉じていれば何も出さず、閉じるボタンで onClose を呼ぶ", async () => {

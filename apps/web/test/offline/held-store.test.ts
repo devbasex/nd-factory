@@ -23,7 +23,7 @@ async function heldOne(over: Partial<Draft> = {}) {
   await outbox.enqueue(owner, { ...draft, ...over });
   const [item] = (await outbox.readBatch()).items;
   await outbox.moveToHeld([item!.answerTag], "revoked");
-  return { db, store: createHeldStore({ db }), answerTag: item!.answerTag };
+  return { db, store: createHeldStore({ db, owner }), answerTag: item!.answerTag };
 }
 
 describe("保留の件", () => {
@@ -33,10 +33,19 @@ describe("保留の件", () => {
     await expect(store.list()).resolves.toMatchObject([
       { answerTag, holdReason: "revoked", kind: "confirm", body: { operation: "approvals.answer" } },
     ]);
-    await store.discard("none");
+    await expect(store.discard("none")).resolves.toBe("kept");
     await expect(store.count()).resolves.toBe(1);
-    await store.discard(answerTag);
+    await expect(store.discard(answerTag)).resolves.toBe("deleted");
     await expect(store.count()).resolves.toBe(0);
+    db.close();
+  });
+
+  it("別のタブでセッションが替わっていれば、破棄せずに stale を返す", async () => {
+    const { db, store, answerTag } = await heldOne();
+    const login = (await db.get("login", "login"))!;
+    await db.put("login", { ...login, fingerprintTag: "other-session" });
+    await expect(store.discard(answerTag)).resolves.toBe("stale");
+    await expect(store.count()).resolves.toBe(1);
     db.close();
   });
 

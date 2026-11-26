@@ -617,17 +617,21 @@ type OperationClass =
 ### 関数の仕様
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `createHeldStore` | `held-store.ts` | 新設 | `(d: { db: DeviceDb }) => HeldStore`（`count()`・`list()`・`discard(answerTag)`） | 保留の件の読み出しと、確認の後の破棄 |
+| `createHeldStore` | `held-store.ts` | 新設 | `(d: { db: DeviceDb; owner: Owner }) => HeldStore`（`count()`・`list()`・`discard(answerTag): Promise<"deleted" \| "kept" \| "stale">`） | 保留の件の読み出しと、確認の後の破棄 |
 | `visibleFieldsOf` | 同上 | 新設 | `(item: HeldItem, record: AuthzRecord \| null) => HeldView` | 設計文書の「件の表示で出すもの」の条件で項目を落とす |
-| `HeldListDialog` | `screens/held-list.tsx` | 新設 | `(props: { store: HeldStore; quarantined: Extract<Awaited<ReturnType<typeof unreadableQuarantine>>, object> \| null; open: boolean }) => ReactElement` | 一覧と「破棄すると元に戻せません」の確認 |
+| `HeldListDialog` | `screens/held-list.tsx` | 新設 | `(props: { store: HeldStore; quarantined: Extract<Awaited<ReturnType<typeof unreadableQuarantine>>, object> \| null; open: boolean; read: () => Promise<HeldView[] \| "stale">; authzMark: number }) => ReactElement` | 一覧と「破棄すると元に戻せません」の確認 |
 
 - `createHeldStore` の `discard`
-  - 事前条件: 利用者が確認のダイアログで確定した
-  - 副作用: IndexedDB の削除
+  - 事前条件: 利用者が確認のダイアログで確定した。このタブの利用者とセッションの指紋が、端末の持ち主とログインの行に合う。合わなければ消さずに `stale` を返す
+  - 副作用: IndexedDB の削除。照合と削除は `prepareGuard`・`commitGuarded` の手順で 1 つのトランザクションにする
 
 `HeldListDialog` は、`store` の件の後に `quarantined.items` を「内容を読めません」と区分で並べる。隔離の件の破棄は `quarantined.discard` に `answerTag` を渡す。`deleted` か `kept` が返ったら `unreadableQuarantine` を呼び直し、`stale` が返ったらダイアログを閉じて起動の照合からやり直す。画面に出す件数は、`store.count()` と `quarantined.items` の数の合計である。`unreadableQuarantine` が `no-token` を返した間は `quarantined` を `null` にして `store` の件だけを出し、access token を取り直した後に呼び直す。`stale` を返したら、起動の照合からやり直す。
 
 「結果未確認」と食い違いの表示も `visibleFieldsOf` を通す（出し分けを 1 か所にする）。
+
+一覧に出す項目は、端末のデータにつないだ画面（`createDeviceView`）の `readHeld` が返す。`readHeld` は見られる対象の記録の錠（shared）を持ったまま、セッションの照合 → 記録と保留の件の読み出し → もう一度の照合の順に行い、照合が外れたら `stale` を返す。`HeldListDialog` は `stale` を受けたら表示を消し、ダイアログを閉じて起動の照合からやり直す。後に始めた読み出しの結果だけを出す。記録が書き換わると `authzMark` が増えるので、`HeldListDialog` は読み直しの結果を待たずに、表示済みの件の中身を隠す。通常の件の破棄が `stale` を返したときも、隔離の件と同じく閉じてやり直す。
+
+端末のデータにつないだ画面の読み直しも、送る列の復号と読めない行の移動の前と、表示を更新する前に、同じ照合を行う。照合が外れたら読み出しを止め、表示中の確定待ち・件数・結果を消してから、起動の照合へ戻す。
 
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
@@ -636,7 +640,7 @@ type OperationClass =
 ### 単体テストの観点
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `createHeldStore`・`HeldListDialog` | 件数と一覧・確定で消える | ダイアログを閉じただけでは残る | 復号できない件の「内容を読めません」 |
+| `createHeldStore`・`HeldListDialog` | 件数と一覧・確定で消える | ダイアログを閉じただけでは残る・記録が書き換わると読み直しを待たずに中身を隠す | 復号できない件の「内容を読めません」・セッションが替わった後の破棄と読み出しは `stale` で消さず出さない |
 | `visibleFieldsOf` | 見られる対象は入力を出す | 自分の設定は常に出る | 記録が無い・`denied`・権限の外は理由と操作の種類と時刻だけ |
 
 ### 既存の部品の再利用

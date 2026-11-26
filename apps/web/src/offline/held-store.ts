@@ -1,6 +1,7 @@
 import { type AuthzRecord, judgeVisibility, type Target } from "./authz.ts";
 import { unseal } from "./crypto.ts";
 import { type DeviceDb, type HoldReason, type OutboxRow, readOwner } from "./db.ts";
+import { commitGuarded, type Owner, prepareGuard } from "./guarded-commit.ts";
 import type { OutboxBody } from "./outbox.ts";
 
 // 保留の件の読み出しと、確認の後の破棄。利用者が破棄を確認するまで残す
@@ -26,10 +27,11 @@ export type HeldView = {
 export type HeldStore = {
   count(): Promise<number>;
   list(): Promise<HeldItem[]>;
-  discard(answerTag: string): Promise<void>;
+  // このタブの利用者とセッションが端末の持ち主とログインの行に合うときだけ消す。合わなければ stale
+  discard(answerTag: string): Promise<"deleted" | "kept" | "stale">;
 };
 
-export function createHeldStore({ db }: { db: DeviceDb }): HeldStore {
+export function createHeldStore({ db, owner }: { db: DeviceDb; owner: Owner }): HeldStore {
   return {
     count: () => db.count("held"),
     async list() {
@@ -44,7 +46,21 @@ export function createHeldStore({ db }: { db: DeviceDb }): HeldStore {
         })),
       );
     },
-    discard: (answerTag) => db.delete("held", answerTag),
+    async discard(answerTag) {
+      // ログインの行は token の取り直しでも書き換わるので、照合からやり直す
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const guard = await prepareGuard(db, owner);
+        if (guard === null) return "stale";
+        let found = false;
+        const result = await commitGuarded(guard, async (tx) => {
+          found = (await tx.objectStore("held").get(answerTag)) !== undefined;
+          if (found) await tx.objectStore("held").delete(answerTag);
+          return true;
+        });
+        if (result === "committed") return found ? "deleted" : "kept";
+      }
+      return "stale";
+    },
   };
 }
 

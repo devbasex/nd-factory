@@ -32,8 +32,8 @@ function fakeView(initial: Partial<DeviceSnapshot> = {}) {
     refresh: vi.fn(async () => {}),
     press: vi.fn(async () => {}),
     withdraw: vi.fn(async () => {}),
-    heldStore: { count: async () => 0, list: async () => [], discard: async () => {} },
-    readRecord: async () => null,
+    heldStore: { count: async () => 0, list: async () => [], discard: async () => "kept" },
+    readHeld: async () => [],
     stale: vi.fn(),
     idle: async () => {},
   };

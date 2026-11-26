@@ -78,7 +78,8 @@ function Banner({ online, frame }: { online: boolean; frame: FrameData }) {
           store={view.heldStore}
           quarantined={state.quarantined}
           open={open}
-          record={view.readRecord}
+          read={view.readHeld}
+          authzMark={state.authzMark}
           onClose={() => setOpen(false)}
           onChanged={changed}
           onStale={view.stale}

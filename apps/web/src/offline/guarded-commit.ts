@@ -31,7 +31,8 @@ export function sameBytes(a: Uint8Array | null, b: Uint8Array | null): boolean {
   return a.length === b.length && a.every((byte, i) => byte === b[i]);
 }
 
-export async function prepareGuard(db: DeviceDb, owner: Owner): Promise<Guard | null> {
+// このタブの利用者とセッションが、端末の持ち主とログインの行に合うときだけ、読んだ行を返す
+async function readSessionRows(db: DeviceDb, owner: Owner) {
   if (owner.flagged()) return null;
   const tx = db.transaction(["keys", "login", "authz"], "readonly");
   const [keys, login, authz] = await Promise.all([
@@ -46,6 +47,18 @@ export async function prepareGuard(db: DeviceDb, owner: Owner): Promise<Guard | 
     tagOf(keys.tagKey, owner.fingerprint),
   ]);
   if (userTag !== keys.ownerTag || userTag !== login.userTag || fingerprintTag !== login.fingerprintTag) return null;
+  return { keys, login, authz };
+}
+
+// 読み出しや表示の前後に、別のタブで利用者かセッションが替わっていないかを確かめる
+export async function sessionMatches(db: DeviceDb, owner: Owner): Promise<boolean> {
+  return (await readSessionRows(db, owner)) !== null;
+}
+
+export async function prepareGuard(db: DeviceDb, owner: Owner): Promise<Guard | null> {
+  const rows = await readSessionRows(db, owner);
+  if (rows === null) return null;
+  const { keys, login, authz } = rows;
   return {
     db,
     owner,
