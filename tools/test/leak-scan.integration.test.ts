@@ -1868,6 +1868,45 @@ describe("今の木の探し直し（#98 の 3・4）", () => {
     expect(result.output).toContain(UNSEARCHED_MESSAGE);
   }, TIMEOUT);
 
+  /** 2 回目の報告を jq の式で加工する偽の gitleaks の行 */
+  const editSecondReport = (filter: string) =>
+    `[[ "$tag" == 2 ]] && jq '${filter}' "$report" >"$report.t" && mv "$report.t" "$report"`;
+
+  it.each([
+    ["番号を引けないメール", '.Email = "ops@example.com"', "e", /^[0-9a-f]{40}$/],
+    ["写しと違うパス", '.File = "other"', "other", /^[0-9a-f]{40}$/],
+    ["写しと違うコミット", `.Commit = "${"0".repeat(40)}"`, "e", /^0{40}$/],
+  ])("2 回目の当たりが%sなら、目印がそろっていても、報告の値を戻さずに出して固定の行で 1", (_label, change, file, commit) => {
+    const env = {
+      ...process.env,
+      PATH: wrappedGitleaksPath([editSecondReport(`map(if .RuleID == "github-pat" then ${change} else . end)`)]),
+    };
+    const result = scan(treeOf({ e: elf(tokenLine()) }), ["dir", DEFAULT_CONFIG], { env });
+    expect(result.status).toBe(1);
+    expect(places(result)).toEqual([["github-pat", file, 2]]);
+    expect(result.findings[0]?.Commit).toMatch(commit);
+    expect(result.output).toContain(UNSEARCHED_MESSAGE);
+  }, TIMEOUT);
+
+  it("2 回目に対象と一致しない目印が余分にあると、その目印は当たりにせず、固定の行で 1", () => {
+    const add = editSecondReport('. + [(.[] | select(.RuleID == "leak-scan-marker") | .Email = "ops@example.com")]');
+    const result = scan(treeOf({ e: elf(tokenLine()) }), ["dir", DEFAULT_CONFIG], {
+      env: { ...process.env, PATH: wrappedGitleaksPath([add]) },
+    });
+    expect(result.status).toBe(1);
+    expect(hits(result)).toEqual([["github-pat", "e", ""]]);
+    expect(result.output).toContain(UNSEARCHED_MESSAGE);
+  }, TIMEOUT);
+
+  it("2 回目が警告を出すと、当たりは元のパスに戻して出し、警告の行でなく探し直しの固定の行で 1", () => {
+    const env = { ...process.env, PATH: wrappedGitleaksPath([`[[ "$tag" == 2 ]] && echo "4:08PM WRN something" >&2`]) };
+    const result = scan(treeOf({ e: elf(tokenLine()) }), ["dir", DEFAULT_CONFIG], { env });
+    expect(result.status).toBe(1);
+    expect(hits(result)).toEqual([["github-pat", "e", ""]]);
+    expect(result.output).toContain(UNSEARCHED_MESSAGE);
+    expect(result.output).not.toContain(SKIP_MESSAGE);
+  }, TIMEOUT);
+
   it("対象外の行（ディレクトリの許可・設定のファイル・規則の許可・空のファイル・シンボリックリンク・skipping finding）だけなら 0", () => {
     const root = treeOf({ empty: "", "a.md": "中身\n", "keys/e": elf("x\n") });
     symlinkSync("a.md", join(root, "link"));
