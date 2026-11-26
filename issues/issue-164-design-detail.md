@@ -1,6 +1,6 @@
 # #164 の詳細設計: push から人を待たずに反映するパイプラインと、反映の直前の検査
 
-設計文書 [issue-164-design.md](./issue-164-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。決定の番号と受け入れ条件の番号は、設計文書と要求仕様（[issue-164-requirements.md](./issue-164-requirements.md)。条件 11・12 は決定 4 の再改訂後の文）のものである。#181 で実装するもの（2 つのキーのスキーマ、`ND_CONFIRMATION_STAGE` の設定、宣言の記録の作成、設置のコマンドの検査）は含めない。
+設計文書 [issue-164-design.md](./issue-164-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。決定の番号と受け入れ条件の番号は、設計文書と要求仕様（[issue-164-requirements.md](./issue-164-requirements.md)）のものである。条件 11・12 は決定 4 の再改訂後の文を指す。#181 で実装するもの（2 つのキーのスキーマ、`ND_CONFIRMATION_STAGE` の設定、宣言の記録の作成、設置のコマンドの検査）は含めない。
 
 ## 地図
 
@@ -31,7 +31,14 @@ packages/contracts/
 docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 ```
 
-依存の向き: `infra/bin` が `infra/lib` を import し、`infra/lib` は `packages/contracts` だけを import する。反映の直前の検査は `deploy-guard.ts` → `assembly-check.ts`・`confirmation-stage.ts` の一方向で、この 3 つは `node:` の組み込みだけを読む。`naming.ts`（`aws-cdk-lib` を読む）を import しない。名前と ARN は `pipeline-stack.ts` が作って値（`GuardConfig`。型は `assembly-check.ts` に置く）で渡す。`pipeline-stack.ts` は `deploy-guard.ts` を import せず、パスで esbuild に渡して束ねる（検査へ渡す値の型 `GuardConfig` は `assembly-check.ts` から `import type` する）。`bin/app-bootstrap.ts` は `infra/setup/aws-reader.ts` の `resolveProfile` を読むだけで、`infra/setup/` は変えない。循環は無い。
+依存の向きは次のとおりである。循環は無い。
+
+- `infra/bin` が `infra/lib` を import し、`infra/lib` は `packages/contracts` だけを import する
+- 反映の直前の検査は `deploy-guard.ts` → `assembly-check.ts`・`confirmation-stage.ts` の一方向である
+  - この 3 つは `node:` の組み込みだけを読む。`naming.ts`（`aws-cdk-lib` を読む）を import しない
+  - 名前と ARN は `pipeline-stack.ts` が作って値（`GuardConfig`。型は `assembly-check.ts` に置く）で渡す
+- `pipeline-stack.ts` は `deploy-guard.ts` を import せず、パスで esbuild に渡して束ねる（検査へ渡す値の型 `GuardConfig` は `assembly-check.ts` から `import type` する）
+- `bin/app-bootstrap.ts` は `infra/setup/aws-reader.ts` の `resolveProfile` を読むだけで、`infra/setup/` は変えない
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -200,7 +207,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 | アセット | `dockerImages` が空。`files` の `source` のキーは `path` と `packaging` だけ（`executable` を拒む）。`path` は合成の結果の中の相対パスで、`..` とリンクを含まない。置き先のバケットはアプリ専用の qualifier のもの |
 | テンプレートの実体 | `stackTemplateAssetObjectUrl` があり、`templateFile` のアセットの置き先と同じで、キーが `<templateFile の中身の SHA-256>.json` である。ほかのアセットのキーは `.json` で終わらない |
 
-最後の行は、検査したファイルと反映されるテンプレートを同じにするためにある。`cdk deploy`（2.1148.1）は `stackTemplateAssetObjectUrl` があると手元のテンプレートではなくその S3 の URL を CloudFormation に渡し、同じキーのオブジェクトがあればアップロードを省く。成果物の種類の一覧とキーの形が実際の合成の結果と合うことは、アプリのスタックを合成して受け入れるテストで確かめる。合わなければ条件を緩めず、設計へ戻す。
+最後の行は、検査したファイルと反映されるテンプレートを同じにするためにある。`cdk deploy`（2.1148.1）は、`stackTemplateAssetObjectUrl` があると、手元のテンプレートではなくその S3 の URL を CloudFormation に渡す。同じキーのオブジェクトがあればアップロードを省く。成果物の種類の一覧とキーの形が実際の合成の結果と合うことは、アプリのスタックを合成して受け入れるテストで確かめる。合わなければ条件を緩めず、設計へ戻す。
 
 段階の値の対象（`checkTemplateStage`）:
 
@@ -286,7 +293,12 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
     - 管理の方針（`DenyApprovalPolicy`）を作らない
     - ソースのアクションは `triggerOnPush: false`。`Pipeline` の `triggers` は、プロバイダーが `CodeStarSourceConnection`、`sourceAction` がこのアクション、`pushFilter` の `branchesIncludes` が `[p.branch]` の 1 件
     - 反映のプロジェクトのロールは、名前が `deployRoleName` の `Role` にする
-    - 反映のプロジェクトのロールの文は、`sts:AssumeRole`（アプリ専用の反映・ファイルの公開・イメージの公開・実行のロール）、`ssm:GetParameter`（2 つのパラメーター）、`codepipeline:GetPipelineExecution`（このパイプライン）、`iam:ListAttachedRolePolicies`・`ListRolePolicies`・`GetRole`・`SimulatePrincipalPolicy`（アプリ専用の実行と反映のロール）と、CDK が付ける成果物とログの権限だけ。パイプラインの ARN は名前から組み立てる（`pipeline.pipelineArn` を参照すると循環する）
+    - 反映のプロジェクトのロールの文は、次の権限だけ
+      - `sts:AssumeRole`（アプリ専用の反映・ファイルの公開・イメージの公開・実行のロール）
+      - `ssm:GetParameter`（2 つのパラメーター）
+      - `codepipeline:GetPipelineExecution`（このパイプライン）
+      - `iam:ListAttachedRolePolicies`・`ListRolePolicies`・`GetRole`・`SimulatePrincipalPolicy`（アプリ専用の実行と反映のロール）
+      - CDK が付ける成果物とログの権限パイプラインの ARN は名前から組み立てる（`pipeline.pipelineArn` を参照すると循環する）
     - 準備のプロジェクトが引き受けるのは、アプリ専用の lookup のロールにする
     - 反映のプロジェクトの環境変数 `ND_GUARD_CONFIG` は `toJsonString(guardConfig(...))`
     - 反映のアクションの環境変数は、`EXPECTED_DIGEST`・`SETTINGS_VERSION`・`SETTINGS_SHA256`（準備の変数）と `PIPELINE_EXECUTION_ID`（`#{codepipeline.PipelineExecutionId}`）
@@ -368,7 +380,7 @@ docs/operations/*.md、AGENTS.md、package.json、package-lock.json、knip.jsonc
 
 満たす決定: 決定 6、受け入れ条件 11・12
 
-CDK の CLI には、独自のテンプレートの値を渡す引数を使わない。リポジトリにはテンプレートのコピーも実際の値も置かず、打つ時点の CDK の標準のテンプレート（`node_modules/aws-cdk/lib/api/bootstrap/bootstrap-template.yaml`）に制約と値を当てて、リポジトリの外のファイルへ書き出す。版を上げるときも同じコマンドで当て直す。
+CDK の CLI には、独自のテンプレートの値を渡す引数を使わない。リポジトリにはテンプレートのコピーも実際の値も置かない。打つ時点の CDK の標準のテンプレート（`node_modules/aws-cdk/lib/api/bootstrap/bootstrap-template.yaml`）に制約と値を当てて、リポジトリの外のファイルへ書き出す。版を上げるときも同じコマンドで当て直す。
 
 ### 関数の仕様
 
@@ -439,7 +451,10 @@ CDK の CLI には、独自のテンプレートの値を渡す引数を使わ�
 | `bootstrapReader` | `infra/bin/app-bootstrap.ts` | 新設 | `(target: Target) => BootstrapReader` | SSM と CloudFormation の読み取りを返す |
 | `mainAppBootstrap` | `infra/bin/app-bootstrap.ts` | 新設 | `(argv: string[], deps: BootstrapDeps) => Promise<number>` | `check` と `template` を打つ |
 
-`BootstrapReader` は `versionExists(qualifier): Promise<boolean>`（`ParameterNotFound` だけを偽にし、ほかの失敗は投げる）と、`describeStack(name): Promise<{ status; qualifier; tags } | null>`（存在しないときだけ `null`）である。
+`BootstrapReader` は次の 2 つを持つ。
+
+- `versionExists(qualifier): Promise<boolean>`（`ParameterNotFound` だけを偽にし、ほかの失敗は投げる）
+- `describeStack(name): Promise<{ status; qualifier; tags } | null>`（存在しないときだけ `null`）
 
 コマンドは次の 2 つである。
 
@@ -448,7 +463,7 @@ CDK の CLI には、独自のテンプレートの値を渡す引数を使わ�
 | `npm run app-bootstrap -- check --profile <P> --settings <F>` | 衝突の確認 |
 | `npm run app-bootstrap -- template --profile <P> --settings <F> --out <ファイル> [--direct-role <ARN>]...` | 衝突の確認を通してから、テンプレートを書き、打つ `cdk bootstrap` のコマンドを表示する。bootstrap は打たない |
 
-表示するコマンドは、環境 `aws://<account>/<region>`・`--profile`・`--template`・`--qualifier`・`--toolkit-stack-name`・`--cloudformation-execution-policies`・`--tags app-prefix=…`・`--tags app-env=…` を持つ。運用する環境では `--direct-role` を渡さない。手順書は、表示の直後でない後日に打つときも `check` を打ち直すと書く。
+表示するコマンドは次を持つ。環境 `aws://<account>/<region>`・`--profile`・`--template`・`--qualifier`・`--toolkit-stack-name`・`--cloudformation-execution-policies`・`--tags app-prefix=…`・`--tags app-env=…` である。運用する環境では `--direct-role` を渡さない。手順書は、表示の直後でない後日に打つときも `check` を打ち直すと書く。
 
 - `checkQualifier`
   - 事後条件: `create` は版のパラメーターもこの名前のスタックも無い。`update` はスタックが `CREATE_COMPLETE` か `UPDATE_COMPLETE` で、qualifier と 2 つのタグがこの設置の値
@@ -487,7 +502,9 @@ CDK の CLI には、独自のテンプレートの値を渡す引数を使わ�
 
 満たす決定: 決定 5、受け入れ条件 12
 
-`pipeline.branch` を `z.string().regex(BRANCH_SHAPE, "英数字と . _ - / だけにする")` にする。`BRANCH_SHAPE` は `/^[A-Za-z0-9._/-]+$/` で、`min(1)` はこの式に含まれる。`npm run generate` で `settings.schema.json` を作り直す。テストは、`main`・`release/v1`・`feature_x-1.2` を受け、`*`・`?`・`[`・`]`・`{`・`}`・`!`・`\`・空白・空文字を拒むことを見る。
+`pipeline.branch` を `z.string().regex(BRANCH_SHAPE, "英数字と . _ - / だけにする")` にする。
+
+`BRANCH_SHAPE` は `/^[A-Za-z0-9._/-]+$/` で、`min(1)` はこの式に含まれる。`npm run generate` で `settings.schema.json` を作り直す。テストは、`main`・`release/v1`・`feature_x-1.2` を受け、`*`・`?`・`[`・`]`・`{`・`}`・`!`・`\`・空白・空文字を拒むことを見る。
 
 ## 手順書
 
