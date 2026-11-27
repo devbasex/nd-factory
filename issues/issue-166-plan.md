@@ -81,7 +81,7 @@
 
 | リスク | 対処 |
 | --- | --- |
-| 後続の Pull Request をマージする時点では、`main` の設定がまだ「手で反映」なので、NDF のマージの判定が承認を求めずにマージする（要求仕様の前提 2） | Pull Request の本文に、未チェックの `- [ ] マージの前に決める: …` の行を置いて作る。工程「Pull Request」は流さずに終え、持ち主のリリースの承認を受けた HEAD だけを `ndf ci merge --approved-head … --approved-base main` でマージする（設計書の決定 5） |
+| 後続の Pull Request をマージする時点では、`main` の設定がまだ「手で反映」なので、NDF のマージの判定が承認を求めずにマージする（要求仕様の前提 2） | Pull Request の本文に、未チェックの `- [ ] マージの前に決める: …` の行を置いて作る。工程「Pull Request」は流さず、`ndf progress finish`（出力に `pr`）で終える。仕様の変更はこの Pull Request に含め、工程「確定仕様化」は `ndf progress disable` で無効にする。確定仕様化は同じ head と base の Pull Request を新しく作ろうとして失敗し、デプロイの工程へ進めなくなるためである。そのうえで、設計書の決定 5 の「[承認からマージまで](./issue-166-design.md#承認からマージまで)」の後続の Pull Request の手順で、デプロイの工程のリリース承認ゲートで承認を受けてマージする |
 | Pull Request の本文を作り直すと、確認の行が消え、承認なしでマージされる | 本文を直す人・AI が行を引き継ぎ、作った後と直した後に、本文を `premerge_risks` へ渡して行が返ることを確かめる（設計書の決定 4） |
 | `AGENTS.md`・開発の指針・手順書は、並行して進むほかの作業も触る | 実装の前と Pull Request の前に `main` を取り込む |
 | `.ndf/project.json` を手で書き換えると、形の検査に通らない値が入る | `ndf project branch-strategy write` で書き、形の検査で `[]` が返ることを確かめる |
