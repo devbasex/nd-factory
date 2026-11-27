@@ -1,0 +1,9 @@
+{
+  "name": "nd-factory",
+  "short_name": "nd-factory",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "lang": "ja",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

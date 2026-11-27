@@ -1,0 +1,181 @@
+{
+  "app": {
+    "name": "nd-factory",
+    "skipToMain": "Skip to content"
+  },
+  "common": {
+    "retry": "Try again",
+    "cancel": "Cancel",
+    "back": "Back",
+    "loading": "Loading",
+    "needsConnection": "Available when you are online",
+    "close": "Close"
+  },
+  "nav": {
+    "label": "Navigation",
+    "organizers": "Organizers",
+    "approvals": "Approvals",
+    "sprints": "Sprints",
+    "settings": "Settings",
+    "place": "Switch team or project",
+    "noPlaces": "Nothing to switch to",
+    "waiting_one": "{{count}} item waiting",
+    "waiting_other": "{{count}} items waiting"
+  },
+  "boot": {
+    "configUnavailable": "Could not load the app configuration",
+    "loginWaiting": "Waiting for sign-in to be configured",
+    "redirecting": "Taking you to the sign-in page",
+    "returning": "Completing the redirect",
+    "failed": "Could not start the app"
+  },
+  "signin": {
+    "title": "Sign in",
+    "action": "Sign in",
+    "description": "Sign in to open organizers and approvals"
+  },
+  "me": {
+    "userId": "User ID",
+    "since": "Member since"
+  },
+  "routes": {
+    "signin": {
+      "title": "Sign in"
+    },
+    "organizers": {
+      "title": "Organizers"
+    },
+    "sprints": {
+      "title": "Sprints"
+    },
+    "sprintStart": {
+      "title": "Start a sprint"
+    },
+    "sprintDetail": {
+      "title": "Sprint"
+    },
+    "approvalDetail": {
+      "title": "Approval"
+    },
+    "question": {
+      "title": "Question"
+    },
+    "projectSettings": {
+      "title": "Project settings"
+    },
+    "team": {
+      "title": "Team"
+    },
+    "projectNew": {
+      "title": "Create a project"
+    },
+    "execution": {
+      "title": "Execution"
+    },
+    "usage": {
+      "title": "Usage and cost"
+    },
+    "audit": {
+      "title": "Audit log"
+    },
+    "me": {
+      "title": "My settings"
+    },
+    "organizerChat": {
+      "title": "Organizer conversation"
+    },
+    "approvals": {
+      "title": "Waiting for approval"
+    }
+  },
+  "state": {
+    "empty": "Nothing here yet",
+    "emptyNext": "Go to organizers",
+    "notFound": "Not found, or you do not have access",
+    "notFoundNext": "Go to organizers",
+    "offlineNotCached": "Available when you are online",
+    "offlineNotCachedNext": "Go to organizers"
+  },
+  "offline": {
+    "banner": "You are offline",
+    "lastReceived": "Last received {{time}}",
+    "pending_one": "{{count}} operation waiting to be confirmed",
+    "pending_other": "{{count}} operations waiting to be confirmed",
+    "held_one": "{{count}} operation could not be sent",
+    "held_other": "{{count}} operations could not be sent",
+    "reloadFailed": "Could not refresh ({{time}})",
+    "showHeld": "Review"
+  },
+  "pending": {
+    "waiting": "Confirms when online",
+    "unknown": "Result unconfirmed",
+    "deadline": "Due {{time}}",
+    "withdraw": "Withdraw"
+  },
+  "money": {
+    "noCurrency": "Cannot show an amount without a currency"
+  },
+  "errors": {
+    "reason": {
+      "unknown": "Something went wrong",
+      "config_unavailable": "The app configuration is unavailable",
+      "login_failed": "Sign-in failed",
+      "unauthorized": "Could not verify your sign-in",
+      "network_error": "Could not reach the server",
+      "unexpected_response": "Could not read the response",
+      "response_invalid": "Could not read the response",
+      "store_unavailable": "Storage is unavailable",
+      "unavailable": "Temporarily unavailable",
+      "too_many_requests": "Please wait a moment and try again",
+      "not_found": "Not found, or you do not have access",
+      "role_insufficient": "Your role does not allow this",
+      "version_mismatch": "This was changed elsewhere",
+      "state_mismatch": "The state has changed"
+    }
+  },
+  "held": {
+    "title": "Operations that were not sent",
+    "discard": "Discard",
+    "discardTitle": "Discard this operation?",
+    "discardBody": "Discarding cannot be undone",
+    "unreadable": "The content cannot be read",
+    "hidden": "The content is hidden because your access to the target cannot be confirmed",
+    "discardFailed": "Could not discard",
+    "kind": {
+      "queued": "Saved to send",
+      "confirm": "Waiting for confirmation"
+    },
+    "reason": {
+      "unmigrated": "The app was updated and this can no longer be sent. Check the content and try again if needed",
+      "unreadable": "The content cannot be read, so it cannot be sent",
+      "revoked": "Not sent because you no longer have access",
+      "transfer-unavailable": "Not sent because it can no longer be accepted",
+      "expired": "Not sent because it expired or could not be confirmed to be within the time limit. Please try again",
+      "restored": "Operations made before signing out or switching accounts were not sent. Check the current state and try again if needed",
+      "unknown-result": "The result could not be confirmed. Check the current state and try again if needed",
+      "rejected": "The server did not accept it. Check the content and try again if needed"
+    }
+  },
+  "operations": {
+    "users_update": "Change your settings",
+    "notices_mark_read": "Mark a notice as read",
+    "organizer_messages_create": "Send to the organizer chat",
+    "organizer_messages_withdraw": "Withdraw a chat item",
+    "approvals_answer": "Answer an approval request",
+    "questions_answer": "Answer a question",
+    "sprints_cancel": "Cancel a sprint",
+    "project_transfers_create": "Move an assignment",
+    "project_transfers_accept": "Accept an assignment",
+    "project_transfers_delete": "Withdraw a move",
+    "projects_close": "Close a project",
+    "unknown": "Operation"
+  },
+  "result": {
+    "confirmed": "Confirmed",
+    "rejected": "Not confirmed because the state differs",
+    "unknown": "The result could not be confirmed",
+    "expired": "Not sent because it expired",
+    "saveFailed": "Could not save",
+    "checkMissing": "Not saved because the details read with the item are incomplete. Reopen the item and try again"
+  }
+}

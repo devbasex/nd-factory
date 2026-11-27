@@ -1,0 +1,120 @@
+{
+  "color": {
+    "ground": {
+      "$value": "#14161c",
+      "$type": "color"
+    },
+    "surface": {
+      "$value": "#1d2029",
+      "$type": "color"
+    },
+    "text": {
+      "$value": "#eceef4",
+      "$type": "color"
+    },
+    "muted": {
+      "$value": "#a9afbf",
+      "$type": "color"
+    },
+    "border": {
+      "$value": "#363a48",
+      "$type": "color"
+    },
+    "primary": {
+      "bg": {
+        "$value": "#a5b4fc",
+        "$type": "color"
+      },
+      "text": {
+        "$value": "#14161c",
+        "$type": "color"
+      }
+    },
+    "focus": {
+      "$value": "#93c5fd",
+      "$type": "color"
+    },
+    "tone": {
+      "waiting": {
+        "bg": {
+          "$value": "#14532d",
+          "$type": "color"
+        },
+        "text": {
+          "$value": "#dcfce7",
+          "$type": "color"
+        }
+      },
+      "running": {
+        "bg": {
+          "$value": "#1e3a8a",
+          "$type": "color"
+        },
+        "text": {
+          "$value": "#dbeafe",
+          "$type": "color"
+        }
+      },
+      "done": {
+        "bg": {
+          "$value": "#581c87",
+          "$type": "color"
+        },
+        "text": {
+          "$value": "#f3e8ff",
+          "$type": "color"
+        }
+      },
+      "stopped": {
+        "bg": {
+          "$value": "#713f12",
+          "$type": "color"
+        },
+        "text": {
+          "$value": "#fef9c3",
+          "$type": "color"
+        }
+      },
+      "failed": {
+        "bg": {
+          "$value": "#7f1d1d",
+          "$type": "color"
+        },
+        "text": {
+          "$value": "#fee2e2",
+          "$type": "color"
+        }
+      },
+      "neutral": {
+        "bg": {
+          "$value": "#30343f",
+          "$type": "color"
+        },
+        "text": {
+          "$value": "#eceef2",
+          "$type": "color"
+        }
+      },
+      "pending": {
+        "bg": {
+          "$value": "#30343f",
+          "$type": "color"
+        },
+        "text": {
+          "$value": "#eceef2",
+          "$type": "color"
+        }
+      },
+      "approve": {
+        "bg": {
+          "$value": "#86efac",
+          "$type": "color"
+        },
+        "text": {
+          "$value": "#14161c",
+          "$type": "color"
+        }
+      }
+    }
+  }
+}
