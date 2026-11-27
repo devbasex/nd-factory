@@ -129,7 +129,7 @@ sequenceDiagram
 - **質問**: 「パイプラインの実行は承認不要」と、マージの承認の関係をどこに、どう書くか
 - **選んだ案**: 持ち主の言う「実行は承認不要」はマージの後の個々の実行を指し、マージの前の承認と両立すると定める。[全体の設計](../docs/design/platform.md#決定の記録)の決定の記録に決定 142 を足し、ほかの文書は 1〜2 文とリンクにする。決定 142 と全体の設計の書き換えは、承認済みの設計を変えるので、この設計書と同じ設計 PR に含めて承認を受ける。指針・`AGENTS.md`・手順書・仕様は、承認された決定 142 に沿って後続の Pull Request で直す
 
-決定 142 に書くことは次のとおりである。
+全体の設計の決定 142（この決定 3 の中身を置く先）に書くことは次のとおりである。
 
 | 項目 | 中身 |
 | --- | --- |
@@ -490,7 +490,7 @@ ndf ci merge --pr 195 --approved-head <承認した HEAD> --approved-base main -
 
 4 の出力のファイルは `{"outputs": {"design_pr": 195, "mvv_gate": {…}}}` の形である。`mvv_gate` の値は、設計工程の中の判定のステップ `design-mvv`（承認ゲートを省けるかの MVV 判定）が記録している。写す元の記録は、`ndf progress show <ID>` の `metrics.history` にある。その中で、`row_key` が `設計`、`kind` が `step_recorded`、`payload.step` が `design-mvv` の記録のうち、最も新しいものである。その `payload.report.outputs.mvv_gate` を書き換えずに写す。
 
-後続の Pull Request:
+後続の Pull Request（反映先の一覧を切り替える実装の Pull Request）の手順:
 
 工程「Pull Request」は流さない。流すと、その中のマージが未チェックの行で拒まれて工程が止まり、リリース承認ゲートがあるデプロイの工程へ進めないためである。
 
