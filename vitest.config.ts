@@ -8,7 +8,7 @@ export default defineConfig({
       { test: { name: "contracts", include: ["packages/contracts/test/**/*.test.ts"], environment: "node" } },
       { test: { name: "core", include: ["packages/core/test/**/*.test.ts"], environment: "node" } },
       { test: { name: "api", include: ["apps/api/test/**/*.test.ts"], environment: "node" } },
-      { test: { name: "web", include: ["apps/web/test/**/*.test.ts"], environment: "jsdom" } },
+      { test: { name: "web", include: ["apps/web/test/**/*.test.ts", "apps/web/test/**/*.test.tsx"], environment: "jsdom" } },
       {
         test: {
           name: "infra",

@@ -406,7 +406,7 @@ infra/lib/app-stack.ts
 | `nextAuthz` | 同上 | 新設 | `(prev: AuthzRecord \| null, read: ListsRead) => AuthzRecord` | 段 1 の表のとおり記録を作り直す |
 | `addDenied` | 同上 | 新設 | `(prev: AuthzRecord, id: string, deniedSeq: number) => AuthzRecord` | `denied` に足し世代を増やす |
 | `withAuthzLock` | 同上 | 新設 | `<T>(mode: "shared" \| "exclusive", fn: () => Promise<T>) => Promise<T>` | `nd-authz` の錠の中で打つ |
-| `prepareGuard` | `guarded-commit.ts` | 新設 | `(db: DeviceDb, owner: Owner) => Promise<Guard \| null>` | 設計文書の「利用者の境界」の照合と書き込みの手順 1・2（読み取りと持ち主の照合） |
+| `prepareGuard` | `guarded-commit.ts` | 新設 | `(db: DeviceDb, owner: Owner, o?: { readAuthz?: boolean }) => Promise<Guard \| null>` | 設計文書の「利用者の境界」の照合と書き込みの手順 1・2（読み取りと持ち主の照合）。`readAuthz` が偽なら見られる対象の記録を復号しない（記録を使わない保留の件の破棄と API の時刻の書き込みが、記録の破損で止まらないようにする） |
 | `commitGuarded` | 同上 | 新設 | `(guard: Guard, write: (tx: GuardedTx) => void) => Promise<"committed" \| "stale">` | 同じ照合と書き込みの手順 3（確認と書き込み） |
 | `createCacheStore` | `cache-store.ts` | 新設 | `(d: { db: DeviceDb; wallNow: () => number }) => CacheStore` | 写しの保存を組む |
 
@@ -415,6 +415,8 @@ infra/lib/app-stack.ts
 | メソッド | 返り | 中身 |
 | --- | --- | --- |
 | `read(kind, targetId)` | `{ value, receivedAt, fetchSeq } \| null` | 14 日を過ぎた行・削除の印は `null`。復号できなければ全写しを消して `null` |
+| `readGuarded(guard, kind, targetId)` | `{ found, unreadable, unchanged }` | 次の順に判定する。行が無ければ、`found` を `null`、`unreadable` を偽にする（キャッシュミス）。行があれば先に復号を試み、失敗したら `found` を `null`、`unreadable` を真にし、行も写しも消さずに返す。復号できた行が 14 日を過ぎているか削除の印なら、`found` を `null`、`unreadable` を偽にする（キャッシュミス）。それ以外は `found` に `{ value, fetchSeq }` を返す。`unreadable` が真なら、呼び出し元は `unchanged` を渡して `dropAll` を呼ぶ。`dropAll` が `committed`（全消去した）か `changed`（消さなかった）を返したら、行を読み直す。`stale` を返したら読み取り結果を破棄し、再試行する場合はセッションと認可の状態を `prepareGuard` で取り直す。`unchanged` は、書き込みのトランザクションの中で、読んだ行の `iv` が変わっていないこと（行が無かったときは、今も無いこと）を確かめる |
+| `dropAll(guard, seen)` | `"committed" \| "changed" \| "stale"` | `readGuarded` が復号できない行を見つけたときに呼び出し元が呼び、`commitGuarded` の中で写しをすべて消す。消す前に、同じトランザクションで `seen`（`readGuarded` の `unchanged`）を確かめる。復号できなかった行が別のタブで置き換わるか消えていれば、全消去の根拠が無いので何も消さずに `changed` を返す。呼び出し元は行を読み直す。セッションか見られる対象の記録の `iv` が替わっていれば、`stale` で何も消さない |
 | `prepareReplace(guard, kind, targetId, value, fetchSeq)` | 書き込みの 1 件か `null` | 表に無い種類・番号の古いレスポンス・印と一覧の記録に合わないものは `null` |
 | `applyOptimistic(guard, kind, targetId, change)` | `void` | 先映し（`fetchSeq` を変えない） |
 | `markGone(guard, kind, targetId, goneSeq)` | `void` | 削除の印 |
@@ -430,10 +432,11 @@ infra/lib/app-stack.ts
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `prepareGuard` | 持ち主の違い・途中のフラグ | 別の利用者・サインアウト | 手順 1・2 | `null`（呼び出し元は捨てる） | 出さない | 起動の照合からやり直す |
+| `prepareGuard` | 持ち主の違い・途中のフラグ・利用者の切り替えに伴う隔離の始まり（キーの行の `switching`） | 別の利用者・サインアウト・別のタブでの利用者の切り替え | 手順 1・2 | `null`（呼び出し元は捨てる） | 出さない | 起動の照合からやり直す |
 | `commitGuarded` | `iv` の違い | 別タブの書き換え | 手順 3 の確認 | `stale` を返す | 出さない | 次の回で読み直す |
 | `commitGuarded` | `QuotaExceededError` | 容量の不足 | トランザクションの abort | 写しは捨てて表示を続ける。送る列の移動は呼び出し元へ返す | 写しは出さない | 次の読み出しで書き直す |
 | `createCacheStore` の `read` | 復号できない | 壊れ・キーの欠け | `unseal` | 全写しを消す | 読み直して描く。オフラインは空の状態 | 読み直し |
+| `createCacheStore` の `readGuarded` | 復号できない | 壊れ・キーの欠け | `unseal` | `unreadable` を真で返す。呼び出し元は `dropAll`（セッションと、復号できなかった行の `iv` を照合する）を呼ぶ。`committed` なら全写しが消えているので、行を読み直す。`changed` なら何も消さずに、置き換わった行を読み直す。`stale` ならキャッシュを削除せず、読み取り結果を破棄する。<br>送信の成功を会話のキャッシュに反映する処理（`send.ts` の `created`）がこの失敗に当たったときも、送る列の件は消さずに `dropAll` を呼ぶ。`committed` または `changed` なら、同じ試行の中でキャッシュを読み直す。読み直した行も復号できなければ、その試行では送信結果を書き込まず、送る列の件を残して次の試行に進む。読み直した行を復号できた場合と、行が無い場合は、その読み取り結果を使って送信結果の反映を続ける。`stale` なら、その試行の読み取り結果を捨て、次の試行で元のセッションを照合し直す。再試行の回数、セッションの照合、反映できなかったときの結果の書き込み先は、下の「そろえ方」の「異常系の処理」にある `sendQueue` の「会話への送信の成功の反映」の行だけが決める | 全消去した（`committed`）場合は、オンラインなら読み直して描き、オフラインなら空の状態を出す。`changed` か `stale` の場合はキャッシュが残っているので、この結果だけで空の状態に切り替えず、今のセッションで表示できるキャッシュを確かめてから描く | 読み直し |
 
 ### 内部のデータと定数
 | 名前 | 種類 | 保存先 | 既定値 |
@@ -455,7 +458,7 @@ infra/lib/app-stack.ts
 ### ログと記録の出力
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `commitGuarded`・`read` | 中止と復号の失敗の種類、写しの `kind` | `createLogger` の `warn` | レスポンスの中身・対象とプロジェクトと利用者の ID・タグ |
+| `commitGuarded`・`read`・`dropAll` | 中止と復号の失敗の種類、写しの `kind` | `createLogger` の `warn` | レスポンスの中身・対象とプロジェクトと利用者の ID・タグ |
 
 ### 既存の部品の再利用
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
@@ -478,6 +481,7 @@ infra/lib/app-stack.ts
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `operationClassOf` | `operation-classes.ts` | 新設 | `(operation: string) => OperationClass` | 区分・照合の値・送り直してよいかを返す |
+| `missingChecks` | 同上 | 新設 | `(operation: string, check: Record<string, unknown> \| undefined) => string[]` | 確定待ちの照合の値のうち、無いか形の違う項目を返す（`version` は整数、`material_digest` は空でない文字列） |
 
 ```ts
 type OperationClass =
@@ -512,12 +516,14 @@ type OperationClass =
 
 | `Outbox` のメソッド | 返り | 中身 |
 | --- | --- | --- |
-| `enqueue(owner, draft)` | `OutboxItem` | `nd-outbox` の錠の中で番号を取り、同じ対象の未送信の確定待ちは置き換える。`online` の操作は受けない（IW4） |
+| `enqueue(owner, draft)` | `OutboxItem` | `nd-outbox` の錠の中で番号を取り、同じ対象の未送信の確定待ちは置き換える。`online` の操作は受けない（IW4）。照合の値がそろわない確定待ちは保存せず `MissingCheckError` を投げ、画面は「対象を開き直してから、もう一度操作してください」と出す。送る側も、照合の値がそろわない確定待ちは送らず、保留へ移す（一度も送っていなければ `unmigrated`、送り始めていれば `unknown-result`） |
 | `readBatch()` | `{ items: OutboxItem[]; unreadable: string[] }` | 錠の中で全件読み、`seq` の順に返す |
 | `markSendStarted(item, sentAt)` | `OutboxItem \| null` | `iv` を確かめて印を真にする |
+| `noteSentItem(owner, answerTag, seenIv, itemId, also?)` | `"noted" \| "missing" \| "changed" \| "stale"` | 会話への送信の成功が返した項目の ID を、送る列の件の `sentItemId` に書く。`seenIv` は、呼び出し元が件の行を読んだときの `iv` である。書き込むトランザクションの中で、元の送信と同じセッションかと、送る列の件の行が `seenIv` のまま残っているかを確かめる。結果は次の 4 つで、`noted` のとき以外は何も書かない（`also` も書かない）。再試行はしない。<br>`noted`: セッションが合い、行が `seenIv` のまま残っていた。ID と `also` を同じトランザクションで書いた。<br>`stale`: セッションが合わない。<br>`missing`: 送る列に件の行が無い。保留の件に移っている場合があるので、呼び出し元は処理を終えずに保留の件を引き直す。<br>`changed`: 送る列に件の行はあるが、`iv` が `seenIv` と違う（別のタブが同じ件を書き換えた）。呼び出し元は同じ `answerTag` で読み直して分け直す。<br>`missing` と `changed` の後の扱いは、下の「そろえ方」の「異常系の処理」にある `sendQueue` の「会話への送信の成功の反映」の行が決める |
 | `unmarkSendStarted(item)` | `void` | 設計文書の「会話の項目の取り下げ」の手順 4（送り始めた印を戻す）。同じ対象の確定待ちが後ろに足されていれば、印を戻さずに元の件を消す |
 | `settle(item, outcome)` | `"removed" \| "held" \| "kept" \| "missing"` | 送る列と保留の件を `answerTag` で引き、1 トランザクションで消すか移す |
 | `moveToHeld(tags, reason)` | `number` | 暗号文のまま保留へ移す |
+| `dropWithdrawnUnsent(item)` | `boolean` | 送り始めの印を付けた後、リクエストを始める前に取り下げで保留へ移った同じ件（暗号文の `iv` が同じ `unknown-result`）を、送らなかった件として消す |
 | `countPending(owner)` | `{ confirm: number; queued: number; held: number }` | 帯と、#4 のサインアウトの確認の数 |
 
 - `newIdempotencyKey`
@@ -617,17 +623,21 @@ type OperationClass =
 ### 関数の仕様
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `createHeldStore` | `held-store.ts` | 新設 | `(d: { db: DeviceDb }) => HeldStore`（`count()`・`list()`・`discard(answerTag)`） | 保留の件の読み出しと、確認の後の破棄 |
+| `createHeldStore` | `held-store.ts` | 新設 | `(d: { db: DeviceDb; owner: Owner }) => HeldStore`（`count()`・`list()`・`discard(answerTag): Promise<"deleted" \| "kept" \| "stale">`） | 保留の件の読み出しと、確認の後の破棄 |
 | `visibleFieldsOf` | 同上 | 新設 | `(item: HeldItem, record: AuthzRecord \| null) => HeldView` | 設計文書の「件の表示で出すもの」の条件で項目を落とす |
-| `HeldListDialog` | `screens/held-list.tsx` | 新設 | `(props: { store: HeldStore; quarantined: Extract<Awaited<ReturnType<typeof unreadableQuarantine>>, object> \| null; open: boolean }) => ReactElement` | 一覧と「破棄すると元に戻せません」の確認 |
+| `HeldListDialog` | `screens/held-list.tsx` | 新設 | `(props: { store: HeldStore; quarantined: Extract<Awaited<ReturnType<typeof unreadableQuarantine>>, object> \| null; open: boolean; read: () => Promise<HeldView[] \| "stale">; authzMark: number }) => ReactElement` | 一覧と「破棄すると元に戻せません」の確認 |
 
 - `createHeldStore` の `discard`
-  - 事前条件: 利用者が確認のダイアログで確定した
-  - 副作用: IndexedDB の削除
+  - 事前条件: 利用者が確認のダイアログで確定した。このタブの利用者とセッションの指紋が、端末の持ち主とログインの行に合う。合わなければ消さずに `stale` を返す
+  - 副作用: IndexedDB の削除。照合と削除は `prepareGuard`・`commitGuarded` の手順で 1 つのトランザクションにする
 
 `HeldListDialog` は、`store` の件の後に `quarantined.items` を「内容を読めません」と区分で並べる。隔離の件の破棄は `quarantined.discard` に `answerTag` を渡す。`deleted` か `kept` が返ったら `unreadableQuarantine` を呼び直し、`stale` が返ったらダイアログを閉じて起動の照合からやり直す。画面に出す件数は、`store.count()` と `quarantined.items` の数の合計である。`unreadableQuarantine` が `no-token` を返した間は `quarantined` を `null` にして `store` の件だけを出し、access token を取り直した後に呼び直す。`stale` を返したら、起動の照合からやり直す。
 
 「結果未確認」と食い違いの表示も `visibleFieldsOf` を通す（出し分けを 1 か所にする）。
+
+一覧に出す項目は、端末のデータにつないだ画面（`createDeviceView`）の `readHeld` が返す。`readHeld` は見られる対象の記録の錠（shared）を持ったまま、セッションの照合 → 記録と保留の件の読み出し → もう一度の照合の順に行い、照合が外れたら `stale` を返す。`HeldListDialog` は `stale` を受けたら表示を消し、ダイアログを閉じて起動の照合からやり直す。後に始めた読み出しの結果だけを出す。記録が書き換わると `authzMark` が増えるので、`HeldListDialog` は読み直しの結果を待たずに、表示済みの件の中身を隠す。通常の件の破棄が `stale` を返したときも、隔離の件と同じく閉じてやり直す。
+
+端末のデータにつないだ画面の読み直しも、送る列の復号と読めない行の移動の前と、表示を更新する前に、同じ照合を行う。照合が外れたら読み出しを止め、表示中の確定待ち・件数・結果を消してから、起動の照合へ戻す。
 
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
@@ -636,7 +646,7 @@ type OperationClass =
 ### 単体テストの観点
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `createHeldStore`・`HeldListDialog` | 件数と一覧・確定で消える | ダイアログを閉じただけでは残る | 復号できない件の「内容を読めません」 |
+| `createHeldStore`・`HeldListDialog` | 件数と一覧・確定で消える | ダイアログを閉じただけでは残る・記録が書き換わると読み直しを待たずに中身を隠す | 復号できない件の「内容を読めません」・セッションが替わった後の破棄と読み出しは `stale` で消さず出さない |
 | `visibleFieldsOf` | 見られる対象は入力を出す | 自分の設定は常に出る | 記録が無い・`denied`・権限の外は理由と操作の種類と時刻だけ |
 
 ### 既存の部品の再利用
@@ -779,7 +789,7 @@ type OperationClass =
 | --- | --- | --- | --- | --- |
 | `createApiSender` | `api-transport.ts` | 新設 | `(d: SenderDeps) => (call: ApiCall) => Promise<ApiReply>` | 「送信の直前の照合と token の固定」の手順で 1 リクエストを送り、結果と HTTP の状態・ヘッダー・持ち主を返す |
 | `retryUntilFrom` | `send-wait.ts` | 新設 | `(retryAfter: string \| null, date: string \| null, nowMs: number, backoffMs: number) => { retryUntil: number; backoffMs: number }` | 429 の待機の期限を作る |
-| `createSendWait` | 同上 | 新設 | `(d: { db: DeviceDb }) => SendWait` | 待機の期限と `api-time` を暗号化して持つ |
+| `createSendWait` | 同上 | 新設 | `(d: { db: DeviceDb }) => SendWait` | 待機の期限と `api-time` を暗号化して持つ。書き込みはどれも、その応答を受けたセッションの照合と同じトランザクションで行う（`commitGuarded`）。対象は、待機の期限の書き込み `write(owner, wait)`、`api-time` の書き込み `writeApiTime(owner, ms)`、待機の解除である。解除は、送信前に `seen()` で控えた `retry` 行の `iv` を受け取り、照合したトランザクションの中で行う `clearIn(tx, seen)` と、単独で照合して行う `clear(owner, seen)` がある。読み出しの `read`・`readApiTime`・`seen` は行を変えない |
 | `planRevocation` | `revocation.ts` | 新設 | `(read: ListsRead, local: LocalIndex) => RevocationPlan` | 消す写し・保留に移す件・新しい記録を決める（副作用なし） |
 | `applyRevocation` | 同上 | 新設 | `(guard: Guard, plan: RevocationPlan) => Promise<"committed" \| "stale">` | 1 トランザクションで反映し、全タブへ知らせる |
 | `holdDenied` | 同上 | 新設 | `(guard: Guard, o: { id: string; item?: OutboxItem }) => Promise<void>` | 403・404 の件の扱いと `denied` の記録を 1 トランザクションで行う |
@@ -802,9 +812,13 @@ type OperationClass =
 ### 異常系の処理
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `createApiSender` | 照合の外れ・件が無い | サインアウト・別タブ・取り下げ | 錠の中の確認 | `aborted`（理由 `session` か `gone`） | 出さない | `session` は回を止め、`gone` は次の件へ。印を戻す |
+| `createApiSender` | 照合の外れ・件が無い | サインアウト・別タブ・取り下げ | 錠の中の確認 | `aborted`（理由 `session` か `gone`） | 出さない | `session` は回を止め、`gone` は次の件へ。印を戻す。`gone` のときこの回で印を付けた件が取り下げで保留にあれば、送っていないので `dropWithdrawnUnsent` で消す |
 | `createApiSender` | 通信の失敗・形の違う応答 | ネットワーク・中継 | `fetch` の例外・保持した HTTP の状態 | 一時の失敗か認証の失敗にする（「`Retry-After` と `Date` の受け取り」） | 呼び出し元が出す | 件は消さない |
-| `createSendWait` | 復号できない | 壊れ | `unseal` | 行を消し 60 秒から | 出さない | — |
+| `createSendWait` の `read` | 復号できない | 壊れ | `unseal` | 値なし（`null`）として返し、行は消さない。待機の期限とバックオフを未設定として扱う。次の 429 で有効な `Retry-After` が得られなければ、既定の 60 秒から待つ | 出さない | 破損した行は、次の `write` が置き換えるか、成功した応答の解除が消す |
+| `createSendWait` の `readApiTime` | 復号できない | 壊れ | `unseal` | 値なし（`null`）として返し、行は消さない。保存済みの API 時刻を取得できなかったものとして扱う。待機の期限（`retry` 行）は別の行なので、この失敗では変えない | 出さない | 破損した行は、次の `writeApiTime` が置き換える |
+| `createSendWait` の `write`・`writeApiTime`・`clear` | セッションが合わない | 別タブの利用者の切り替え・入り直し・サインアウト | `commitGuarded` の照合 | 何も書かず消さず、偽を返す | 出さない | 送る処理はその応答を反映せずに回を止める |
+| `sendQueue` の成功した件の反映 | セッションが合わない | 応答を待つ間の、別タブの利用者の切り替え・入り直し・サインアウト | `commitGuarded` の照合 | 成功した件の反映（送る列か保留からの削除、作成した項目の ID の書き込み）と待機の解除（`clearIn`）を、同じセッション照合を通した 1 つのトランザクションで行う。照合が外れたら、件と待機の行をどちらも変えない | 出さない | `sendQueue` は `stopped` を返す。`runOnce` が段 3〜4 へ進めるかは、下の「処理の手順」にある回の持ち主の照合に従う。件は送り始めの印つきで残り、次の回が送り直しか結果未確認を決める |
+| `sendQueue` の会話への送信の成功の反映 | 会話の写しの照合が外れ続ける | 別タブの読み直しが写しを書き続ける | 写しの行の `iv` の照合 | 送る列の件を消さずに、写しの行を読み直して反映を 3 回まで試す。3 回で諦めたら、次の 1.〜2. の順に結果を書き込む。<br>どのトランザクションも、元の送信と同じセッションかを照合する。合わなければ、件も待機の行も変えず、`sendQueue` は `stopped` を返す。<br>1. `noteSentItem` に、送ったときに読んだ件の `iv` を `seenIv` として渡す。`noted` なら、返った項目の ID を `sentItemId` に書き、待機の解除も同じトランザクションで書き終えている。<br>2. `missing` か `changed` なら、まだ何も書いておらず、待機も解いていない。同じ `answerTag` で送る列と保留の件を読み直し、件のある場所で分け直す。<br>・保留の件にある: 1 つのトランザクションで、保留の件の `iv` が、送ったときに読んだ件の `iv` と同じかを確かめる（取り下げは暗号文のまま移すので、取り下げただけなら同じになる）。同じなら、保留の件を消し、返った ID の取り下げの件を送る列に足し、待機を解く（設計文書の「取り下げた後に届いた結果」）。違うか、その間に保留の件が無くなっていれば、送った件ではないので、送る列にも保留の件にも無いときと同じに扱う。<br>・送る列にある: 直前の結果が `changed` で、まだやり直していなければ、読み直した行の `iv` を `seenIv` にして 1. を 1 回だけやり直す。やり直した後も書き換わっていたときと、`missing` の後に送る列で見つかったときは、件も待機の行も変えず、`sendQueue` は `stopped` を返す。<br>・どちらにも無い: 件は変えずに、待機だけを解く（設計文書の「取り下げた後に届いた結果」）。<br>3 回の試しの途中で件が保留の件に移っていたときも、上の「保留の件にある」と同じ `iv` の照合をしてから書く | 出さない | セッションの照合が外れたとき、やり直した後も送る列の行が変わったとき、または `missing` の後に送る列で件が見つかったときは、`stopped` を返す。どれも件と待機の行は変えておらず、件に `sentItemId` も書いていない。`runOnce` が段 3〜4 へ進めるかは、下の「処理の手順」にある回の持ち主の照合に従う。それ以外は後続の件へ進む。<br>`sentItemId` を書いた件は、次の回で送り直さずに、その ID で写しへ書き直す。利用者がこの件を取り下げたら、その ID で取り下げの件を足す。<br>保留の件から足した取り下げの件は、次の回で送る。`stopped` で残った件は送り始めの印つきで残り、次の回が送り直しか結果未確認を決める |
 | `applyRevocation`・`holdDenied` | `stale` | 別タブの書き換え | `commitGuarded` | 回を止める | 出さない | 次の回で段 1 から |
 | `sendQueue` | 一時の失敗 | 503・429・通信 | `classifyResult` | その回の段 2 を止める（IW12） | 「読み直せませんでした（時刻）」 | 30 秒後 |
 | `sendQueue` | 401 | token・セッション | 同上 | 止めて #4 の 401 の扱いへ持ち主つきで渡す | #4 の表示 | 件は残る |
@@ -823,7 +837,7 @@ type OperationClass =
 | `retry` | 元の区分で残す（429 は `retryUntil` を持つ） | 止める |
 | `auth` | 残して #4 へ渡す | 止める |
 
-`runOnce` は次の順に打つ。錠 → 途中のフラグ → 回の持ち主 → `nd-outbox` で対象を読む → 段 1 → 待機の期限の確認 → 段 2（`sendQueue`）→ 段 3 → 段 4 → 段 5。段 1 は `planRevocation`・`applyRevocation`・割り当ての受け入れの扱いである。各段の中身と、錠・途中のフラグ・回の持ち主の決まりは、設計文書の「処理の流れ」と「利用者の境界」にある。段 2 が `stopped` でも段 3〜4 は打つ。段 1 が失敗した回は段 2 以降を打たない。
+`runOnce` は次の順に打つ。錠 → 途中のフラグ → 回の持ち主 → `nd-outbox` で対象を読む → 段 1 → 待機の期限の確認 → 段 2（`sendQueue`）→ 段 3 → 段 4 → 段 5。段 1 は `planRevocation`・`applyRevocation`・割り当ての受け入れの扱いである。各段の中身と、錠・途中のフラグ・回の持ち主の決まりは、設計文書の「処理の流れ」と「利用者の境界」にある。段 2 が `stopped` でも段 3〜4 は打つ。段 1 が失敗した回は段 2 以降を打たない。段 1 の中では、送り始めたまま結果の無い、同じキーで引けない件を保留へ移すのも、`projects.list` を全ページ読み終えて失効を反映した後に行う（IW5）。一覧の読み出し（`readers` の `ListResult`）が最後のページの応答の `Date`（`date`）を返したら、そろえ方はその値を API の時刻として書き、段 2 の `Round.apiNow` の初めの値にする。段 2 で 1 回目に送る件の `sentAt` には、この値か、段 2 でその後に受けた応答の `Date` が入る。
 
 - 繰り返しの終わる条件: 一覧は `next_cursor` が `null` になるまで。時刻の読み直しは 1 件につき 1 回の段 2 で 1 回まで
 - 計算量の注意: 段 1 の写しの照合は `projectTags` の索引のキーを集めて比べ、全写しを復号しない
@@ -844,7 +858,8 @@ type OperationClass =
 | --- | --- | --- | --- |
 | 複数のタブの `runOnce` | 送る列・写し | `nd-sync` を取れた 1 つだけ | 取れなければ何もしない |
 | 送信の開始とサインアウト・取り下げ | token と件 | サインインの錠の中で照合して `fetch` を呼び、応答を待たずに放す | 送り始めた印 |
-| 待機の期限の書き込み | `wait` の行 | `iv` の確認。後の期限のときだけ書く | タブをまたいで残る |
+| 待機の期限と `api-time` の書き込み・破損した行の置き換え | `wait` の行 | セッションの照合と同じ書き込みのトランザクションの中で、行の `iv` が読んだときと同じことを確かめてから書く（読み出しの側では行を消さない）。行が変わっていれば読み直し、値を比べ直す（3 回まで）。後の期限・後の時刻のときだけ書く | タブをまたいで残る。値を比べ直すので、別のタブが後から保存した、より後の期限・時刻を古い値で上書きしない |
+| 待機の解除 | `retry` 行 | 送信前に `seen()` で `retry` 行の `iv` を控える。成功の応答を受けたら、件の反映と同じトランザクションの中で、`retry` 行の `iv` が控えた値と一致するときだけ削除する。行が変わっていれば（別のタブが応答を待つ間に新しい期限を書いた）、読み直さずに解除を見送る。送信前に行が無ければ解除しない | 遅れて終わった成功の応答が、別のタブが後から保存した待機の期限を消さない |
 | 送った直後にタブが閉じる | 送る列 | — | 次の回が `sendStarted` で送り直しか結果未確認を決める |
 
 ### ログと記録の出力
@@ -862,11 +877,11 @@ type OperationClass =
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `createApiSender` | 照合した token がそのまま送られる | 時刻の読み出しから 60 秒の直前・直後、時計の戻り | フラグ・指紋の違いで `fetch` を呼ばない。本文が違う 401・429・503 |
-| `retryUntilFrom`・`createSendWait` | 秒数と日付の `Retry-After` | 2 倍の上限 15 分 | ヘッダー無し・`Date` 無し |
+| `retryUntilFrom`・`createSendWait` | 秒数と日付の `Retry-After` | 2 倍の上限 15 分 | ヘッダー無し・`Date` 無し・解除の前に別のタブが書いた期限は残る |
 | `planRevocation`・`applyRevocation`・`holdDenied` | 失効の写しと件 | 食い違いのプロジェクトは件を残す | 一覧の途中の失敗で何も消さない・`stale` |
 | `classifyResult` | 判定表の各行 | 再送の 403・404 は `unknown` | `in_progress`・422 |
 | `checkDeadline` | 期限内は `send` | 23 時間 58 分・24 時間・23 時間 | `Date` が無い・`pressedFloor` が空 |
-| `sendQueue` | 押した順・冪等キーは受ける操作だけ | 一時の失敗で後続を止める | 401 |
+| `sendQueue` | 押した順・冪等キーは受ける操作だけ | 一時の失敗で後続を止める | 401・成功の反映の前にセッションが替わると件も待機の期限も変えない |
 | `withdraw` | 未送信は消える | 送り始めた件は保留 | 成功の反映が先 |
 | `createSync` | 段の順・30 秒 | 錠を取れない回 | 段 1 の失敗・受け入れの一覧の 403・404 |
 
@@ -1001,12 +1016,13 @@ e2e は 2 組のサーバーで打つ。ダミーの mode のビルド（`vite b
 ## 反映の定義（インフラ）
 満たす決定: 決定 2、受け入れ条件 13（テスト設計の「`Retry-After` と `Date` の公開」「決定 2 配信の切り替え」）
 
-関数は足さず、`infra/lib/app-stack.ts` の 2 つの値を変える。
+関数は足さず、`infra/lib/app-stack.ts` の 2 つの値を変える。`Retry-After` の公開は設計の変更を待つため、#12 では `Date` だけを公開する。
 
 | 変える所 | 値 | 条件 |
 | --- | --- | --- |
 | `BucketDeployment`（`WebDeployment`） | `prune: false` | Service Worker を入れる変更と同じ反映 |
-| HTTP API の `corsPreflight` | `exposeHeaders: ["date", "retry-after"]` | プラットフォームの文書を直す設計の Pull Request のマージの後 |
+| HTTP API の `corsPreflight` | `exposeHeaders: ["date"]` | 無し。承認済みのプラットフォームの文書が `Date` の公開を決めている |
+| HTTP API の `corsPreflight`（#196） | `exposeHeaders` に `"retry-after"` を足す | プラットフォームの文書を直す設計の Pull Request のマージの後。[#196](https://github.com/devbasex/nd-factory/issues/196) で行う |
 
 `infra/test/app-stack.test.ts` に 2 つの値の確認を足す。
 
@@ -1019,10 +1035,10 @@ e2e は 2 組のサーバーで打つ。ダミーの mode のビルド（`vite b
 | iOS の Safari での Web Push | ホーム画面に加えた Web アプリで購読できるか（送り手は #8） | 未確認（実装の後） |
 | 端末のデータの暗号化の鍵の置き場と強さ | 主なブラウザーで `extractable` が偽の `CryptoKey` を IndexedDB から読み直せるか | 未確認（実装の後） |
 | Badging と Background Sync | 主なブラウザーでの有無 | 未確認（実装の後） |
-| 手数の目標の待ち時間 | ダミーで回線を絞って測り、実 API を接続した検証用の配信環境で同じ操作を測り直す | 未確認（実装の後） |
+| 手数の目標の待ち時間 | ダミーで回線を絞って測り、実 API を接続した検証用の配信環境で同じ操作を測り直す | ダミー（2026-11-26。ヘッドレスの Chromium、Playwright 1.65.1、3 つの幅、`NETWORK_4G`）: S2「Web アプリを開く」の仮の画面の初回の読み込み（Service Worker の保存なし）が 2,192〜2,211 ミリ秒。端末のキャッシュからの表示と、配信環境の測り直しは未確認 |
 | 30 日に近いログインのキャッシュから通知を開く | 実機 | 未確認（#8 の通知がそろった後） |
 | ホーム画面に加えた場合と加えない場合の Safari のキャッシュ | 7 日の経過の前後 | 未確認（実装の後） |
 | access token を 15 分にしたときの取り直し | 検証用の配信環境 | 未確認（実装の後） |
 | Web Push の本文の暗号化（RFC 8291）の細部 | 実機 | 未確認（#8 の送り手がそろった後） |
 | 端末のキャッシュの使用量 | `navigator.storage.estimate()` | 未確認（実装の後） |
-| 画面の殻の初回の大きさ | ビルドの成果物の合計（圧縮後） | 未確認（実装の後） |
+| 画面の殻の初回の大きさ | ビルドの成果物の合計（圧縮後） | 約 206 KB（gzip。圧縮前は約 686 KB）。事前に保存する 6 ファイルの合計で、そのうち JS の主なチャンクが約 203 KB（2026-11-26 の手元のビルド） |
