@@ -232,67 +232,67 @@
       "term": "ログインのキャッシュ",
       "context": "platform",
       "meaning": "サインインで受けた refresh token を含む利用者の値を、端末の IndexedDB に暗号化して置いたもの。タブを閉じても残り、サインアウトで消す",
-      "source": "issues/issue-12-design.md"
+      "source": "docs/specifications/screen-offline-data.md"
     },
     {
       "term": "送る列",
       "context": "platform",
       "meaning": "未送信、または送信したが結果を確認できていない操作（キャッシュして送る・確定待ち）を、押した順に端末の IndexedDB へ暗号化して保持するキュー",
-      "source": "issues/issue-12-design.md"
+      "source": "docs/specifications/screen-offline-data.md"
     },
     {
       "term": "連携ログイン",
       "context": "identity",
       "meaning": "アカウントに登録した IdP のサインイン手段。解除には `logins.delete` を使う。端末のログインのキャッシュを消すこととは別の操作",
-      "source": "issues/issue-12-design.md"
+      "source": "docs/specifications/screen-offline-data.md"
     },
     {
       "term": "ログインキャッシュ行",
       "context": "platform",
       "meaning": "ログインのキャッシュを置く、端末の IndexedDB の保存レコード（1 件）。消しても連携ログインは解除されない",
-      "source": "issues/issue-12-design.md"
+      "source": "docs/specifications/screen-offline-data.md"
     },
     {
       "term": "写し",
       "context": "platform",
       "meaning": "端末のキャッシュに置いた API のレスポンス（または画面の状態）1 件分",
-      "source": "issues/issue-12-design.md"
+      "source": "docs/specifications/screen-offline-data.md"
     },
     {
       "term": "保留の件",
       "context": "platform",
       "meaning": "送らないと決まり、サーバーから結果を受けていない操作。利用者が破棄を確認するまで端末に暗号化して残す",
-      "source": "issues/issue-12-design.md"
+      "source": "docs/specifications/screen-offline-data.md"
     },
     {
       "term": "隔離",
       "context": "platform",
       "meaning": "端末のデータベースを消すときに、持ち主が破棄を確認していない操作とそのキーを別の IndexedDB へ移して残すこと。同じ利用者がサインインしたら戻す",
-      "source": "issues/issue-12-design.md"
+      "source": "docs/specifications/screen-offline-data.md"
     },
     {
       "term": "そろえ方の回",
       "context": "platform",
       "meaning": "そろえ方（つながったときに端末とサーバーを合わせる処理）1 回分の実行",
-      "source": "issues/issue-12-design.md"
+      "source": "docs/specifications/screen-offline-data.md"
     },
     {
       "term": "錠",
       "context": "platform",
       "meaning": "Web Locks API で取るロック。同じ端末のタブの間で、処理を同時に 1 つに限る",
-      "source": "issues/issue-12-design.md"
+      "source": "docs/specifications/screen-offline-data.md"
     },
     {
       "term": "つながってから押す",
       "context": "platform",
       "meaning": "外部のサービスとのその場でのやり取りが要る操作や、その場でしか結果を受け取れない操作を、オフラインでは押せなくする扱い。取り消せない操作でも、サーバーが後から照合できるもの（承認・差し戻しなど）は確定待ちに入れ、この扱いにしない",
-      "source": "issues/issue-12-design.md"
+      "source": "docs/specifications/screen-offline-data.md"
     },
     {
       "term": "画面の殻",
       "context": "platform",
       "meaning": "画面の HTML・JS・CSS・アイコン・翻訳のファイルの 1 揃い。Service Worker が保存する",
-      "source": "issues/issue-12-design.md"
+      "source": "docs/specifications/screen-foundation.md"
     }
   ]
 }

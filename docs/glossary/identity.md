@@ -9,4 +9,4 @@
 | チーム | — | プロジェクトを割り当てる単位で、席を持つ人の集まり。個人で使う人は 1 人のチーム | — | — | `docs/design/overview.md` |
 | 席 | — | 利用者がチームに属すること。役割（持ち主・メンバー）を持つ | — | — | `docs/design/overview.md` |
 | 委任 | — | 利用者が AI のエージェントか連携するシステムへ、範囲と期限を決めて自分の操作を任せること。承認の確定は含まない | — | — | `docs/design/overview.md` |
-| 連携ログイン | — | アカウントに登録した IdP のサインイン手段。解除には `logins.delete` を使う。端末のログインのキャッシュを消すこととは別の操作 | — | — | `issues/issue-12-design.md` |
+| 連携ログイン | — | アカウントに登録した IdP のサインイン手段。解除には `logins.delete` を使う。端末のログインのキャッシュを消すこととは別の操作 | — | — | `docs/specifications/screen-offline-data.md` |
