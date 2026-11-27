@@ -286,7 +286,14 @@ NDF と同じく、起動した 1 回の実行の初回の試行だけを確か�
 
 ### 規則を変える Pull Request をマージの直前に確かめる
 
-反映先の一覧を切り替えた時点で、この節の M5 のマージの API の呼び出しは使わなくなる。手でのマージはリリース承認ゲートを通らないためである。その後の規則を変える Pull Request も、この節の手順 1〜7 と M1〜M4・M6 はそのまま行う。M1 の必須の CI の待ちと、手順 3・M4・手順 6 の候補の照合も省かない。M5 だけを、承認の後の `ndf ci merge --pr <番号> --approved-head <探した head> --approved-base main --method squash --budget <待つ秒数> --required=<必須のチェック>` に置き換える。`--required` は `.ndf/project.json` の `ci.required_checks` の数だけ並べる。`ndf ci merge` は `--required` が空ならチェックの結果を読まないためである。承認を求めるのは、探したマージコミットの木と全履歴の探し（「main のコミットを手元で探し直す」）、M2、M3 がすべて成功した後である。応答が分からないときは M6 で扱う。`ndf ci merge` は秘密の世代を照合せず、NDF の未解決の記録にも要求を登録しない。詳しい順序は[全体の設計の決定 142](../design/platform.md#決定の記録)にある。この節は、切り替えの後の Pull Request で、その手順に書き換える。
+反映先の一覧を切り替えた時点で、この節でマージの API を直接打つ手順（M5 と、M6-3 の打ち直し）は使わなくなる。マージの API を直接打つと、リリース承認ゲートを通らないためである。切り替えの後の規則を変える Pull Request は、この節の手順 1〜7 と M1〜M6 を、次の 4 点だけ変えて行う。
+
+- 手順 5 の「`ndf ci merge` は使わない」を解除する。M5 の代わりに、承認の後に `ndf ci merge --pr <番号> --approved-head <探した head> --approved-base main --method squash --budget <待つ秒数> --required=<必須のチェック>` を打つ。`--required` は `.ndf/project.json` の `ci.required_checks` の数だけ並べる。`ndf ci merge` は `--required` が空ならチェックの結果を読まないためである
+- M6-3 で打ち直すときも、M4 の 2 つの確認がそろった後に、同じ `ndf ci merge` を打つ。マージの API は、初回も打ち直しも直接打たない
+- 承認を求めるのは、探したマージコミットの木と全履歴の探し（「main のコミットを手元で探し直す」）、M2、M3 がすべて成功した後である。承認資料には、最後に成功した反映のソースのコミットから今回の候補までの反映の範囲を書く。M4 では、最後に成功した反映も読み直す。承認資料と違えば、マージせずに承認を取り直す
+- M6 の応答の表、M6-4、手順 6 の「要求に渡した `sha`」は、`ndf ci merge` の結果の JSON で読む。要求に渡した `sha` に当たるのは、`--approved-head` に渡した head である。`ndf ci merge` は秘密の世代を照合せず、NDF の未解決の記録にも要求を登録しないので、M6-1 の記録は手で残す
+
+ほかの手順と禁止は、そのまま行う。M1 の必須の CI の待ちと、手順 3・M4・手順 6 の候補の照合も省かない。`main` は、手順 4 の探しを始める前から手順 6 の確認を終えるまで止める。その間は、ほかの Pull Request のマージ、`main` への直接の push、この Pull Request のマージ先の変更をしない。詳しい順序と結果の JSON の読み方は、[全体の設計の決定 142](../design/platform.md#決定の記録)にある。この節は、切り替えの後の Pull Request で、その手順に書き換える。
 
 マージの参照（`refs/pull/<番号>/merge`）を読むだけでは、GitHub がマージの候補を作り直す前の古いコミットでも一致してしまう。そのため、Pull Request の取得の API で候補を作り直させ、作り直した候補が探したマージコミットと同じことを確かめる（[マージできるかの確かめ方](https://docs.github.com/en/enterprise-server%403.21/rest/guides/using-the-rest-api-to-interact-with-your-git-database#checking-mergeability-of-pull-requests)）。
 
