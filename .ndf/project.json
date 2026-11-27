@@ -182,10 +182,26 @@
       "cd": null,
       "deliveries": [
         {
-          "target": "AWS（設置のコマンド npm run nd-setup と反映のパイプライン）",
-          "kind": "manual",
-          "trigger": "npm run nd-setup -- diff で差分と確認の値を示し、承認の後に npm run nd-setup -- deploy --confirm <確認の値>。運用する環境のアプリのスタックは反映のパイプラインの承認の後に反映される",
+          "target": "運用する環境のアプリのスタック（反映のパイプライン）",
+          "kind": "auto",
+          "trigger": "main への push で反映のパイプラインが準備から反映まで進む。パイプラインの個々の実行は承認を待たないので、main へのマージの前にリリース承認ゲートを通す",
+          "channel": "production",
           "versioned": false
+        },
+        {
+          "target": "運用する環境の反映のパイプラインのスタック（設置のコマンド --stack pipeline）",
+          "kind": "manual",
+          "trigger": "npm run nd-setup -- diff --stack pipeline の差分と確認の値をリリース承認ゲートで承認した後に、npm run nd-setup -- deploy --confirm <確認の値>",
+          "channel": "production",
+          "versioned": false,
+          "manual_reason": "パイプラインが自分自身を自動で反映すると、push だけで反映の権限を変えられるようになるため"
+        },
+        {
+          "target": "自分で設置する人の AWS（設置のコマンド npm run nd-setup）",
+          "kind": "manual",
+          "trigger": "設置する人が npm run nd-setup -- diff の差分と確認の値を読み、npm run nd-setup -- deploy --confirm <確認の値> で反映する。このリポジトリのデプロイの工程では打たない",
+          "versioned": false,
+          "manual_reason": "設置する人が自分の AWS で差分を読んで反映するため"
         }
       ]
     },
