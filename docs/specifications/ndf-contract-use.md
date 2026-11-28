@@ -413,7 +413,7 @@ graph LR
 | 相手 | 使い方 |
 | --- | --- |
 | NDF のリポジトリ（`https://github.com/devbasex/ai-plugins`） | `git ls-remote` と `git fetch --depth 1 --no-tags` で、公開のリポジトリから資格情報なしで取得する。`GIT_TERMINAL_PROMPT=0` で認証の問い合わせを出さない |
-| CI（`.github/workflows/ndf-contract.yml`） | Pull Request・main への push・毎日の定期で照合を動かす。AWS の資格情報を持たない |
+| CI（`.github/workflows/ndf-contract.yml`） | Pull Request・main と develop への push・毎日の定期（デフォルトブランチの develop の定義）で照合を動かす。AWS の資格情報を持たない |
 
 ## エラー処理
 

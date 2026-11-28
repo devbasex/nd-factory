@@ -18,7 +18,7 @@ gitleaks の 1 回の探し方（飛ばされるファイルの探し直し、�
 | --- | --- | --- | --- |
 | Pull Request の探し（`leak-check`） | 公開のリポジトリの `pull_request` の実行 | 既定の規則と nd-factory の規則だけ。秘密を受けない | 誰でも。必須のチェックである |
 | 非公開の検査（`leak-check-secret`） | 検査用の非公開リポジトリの実行。NDF（このリポジトリの Pull Request をマージするツール）がマージの直前に起動する | 3 種類すべて。秘密は必須で、空なら落ちる | 非公開リポジトリに読み取りの権限を持つ人と NDF だけ |
-| main への push の探し（`leak-check-push`） | 公開のリポジトリの main への `push` の実行。環境 `leak-scan` を持つ | 3 種類すべて。実際の値の規則の当たりは件数だけを出す | 誰でも。必須のチェックではない |
+| main と develop への push の探し（`leak-check-push`） | 公開のリポジトリの main と develop への `push` の実行。環境 `leak-scan` を持つ | 3 種類すべて。実際の値の規則の当たりは件数だけを出す | 誰でも。必須のチェックではない |
 
 ## 用語
 
@@ -77,7 +77,7 @@ flowchart TB
 | 要素 | 責務 |
 | --- | --- |
 | `leak-check`（`ci.yml`） | Pull Request の実行だけで動く（`if: github.event_name == 'pull_request'`）。環境と秘密を持たない。`leak-scan.sh` を、今の木（`dir`）と分岐点から head まで（`git --range`）について、既定の規則と `.gitleaks.toml` で 2 回ずつ打つ。続けて、漏れの検査の結合のテスト（`npm run test:integration -- leak-scan`）を打つ |
-| `leak-check-push`（`ci.yml`） | main への push の実行だけで動く（`if: github.event_name == 'push'`）。`environment: leak-scan` を持ち、環境の秘密 `LEAK_CHECK_PATTERN` と変数 `LEAK_CHECK_REQUIRE_PATTERN` を受ける。`leak-scan-secret.sh dir --count-only` と `leak-scan-secret.sh git --count-only` を、前が失敗しても後を打つ形で打つ。`setup-node` と `npm ci` を持たず、依存を入れない |
+| `leak-check-push`（`ci.yml`） | main と develop への push の実行だけで動く（`if: github.event_name == 'push'`）。`environment: leak-scan` を持ち、環境の秘密 `LEAK_CHECK_PATTERN` と変数 `LEAK_CHECK_REQUIRE_PATTERN` を受ける。`leak-scan-secret.sh dir --count-only` と `leak-scan-secret.sh git --count-only` を、前が失敗しても後を打つ形で打つ。`setup-node` と `npm ci` を持たず、依存を入れない |
 | `leak-check-secret.yml` | `workflow_call` だけで起動する。入力の形を確かめ、公開のリポジトリを検査のコードのコミットでチェックアウトし、Pull Request の head とマージコミットを git の参照として取り込んで確かめ、マージコミットの木と分岐点から head までの履歴を取り出して、秘密を重ねた設定で探す |
 | 呼び出しのワークフローの見本（`leak-check-caller.yml`） | 持ち主が非公開リポジトリの `.github/workflows/` に写す正本。公開のリポジトリの `.github/workflows/` の外に置くので、公開のリポジトリでは動かない。設定の世代を確かめてから、`devbasex/nd-factory/.github/workflows/leak-check-secret.yml@main` を、6 つの入力と秘密を名前で渡して呼ぶ |
 | `leak-scan-secret.sh` | 秘密の正規表現から重ねた設定を組み、規則ごとに `leak-scan.sh` を打ち、`nd-real-value` の件数の行を出す。重ねた規則の名前と設定を組む処理を持つのは、このスクリプトだけである |
@@ -96,7 +96,7 @@ flowchart TB
 
 公開のリポジトリで、実際の値の正規表現を Pull Request の側の実行（`pull_request`）で使うと、次の 3 つが起きる。
 
-- fork の Pull Request は秘密を受けないので、途中のコミットにだけ入れて後で消した実際の値が探されない。マージの方法は squash なので、途中のコミットは main への push でも探されない（ https://github.com/devbasex/nd-factory/issues/96 ）
+- fork の Pull Request は秘密を受けないので、途中のコミットにだけ入れて後で消した実際の値が探されない。マージの方法は squash なので、途中のコミットは main と develop への push でも探されない（ https://github.com/devbasex/nd-factory/issues/96 ）
 - 同じリポジトリのブランチの Pull Request では、秘密を書いた設定のファイルを、Pull Request のチェックアウトのスクリプトが読める（同じ課題）
 - Dependabot の Pull Request は Dependabot の秘密しか受けないので、秘密を必須にすると毎回落ちる（ https://github.com/devbasex/nd-factory/issues/101 ）
 
@@ -110,9 +110,9 @@ flowchart TB
 | マージコミットの木を探す | base の木と head の木を別々に探しても、合わせた後の行で初めて当たる値を見落とす |
 | 履歴はパッチだけでなく、パスの名前と blob の中身も探す | gitleaks の `git` の探しはパッチを探すので、途中のコミットにだけ在ったパスの名前と、パッチに `Binary files differ` とだけ出るファイルの中身が探されない |
 | `git archive` を使わず、`git cat-file blob` で取り出す | `git archive` は対象のコミットの `.gitattributes` の `export-ignore`・`export-subst` に従うので、Pull Request の作者が探す対象を変えられる |
-| main への push の探しの秘密は、使えるブランチを main だけにした環境 `leak-scan` に置く | Pull Request の側の実行は Pull Request のマージの参照で動くので、ワークフローを書き換えて環境を指しても秘密を受けられない |
+| main と develop への push の探しの秘密は、使えるブランチを main と develop だけにした環境 `leak-scan` に置く | Pull Request の側の実行は Pull Request のマージの参照で動くので、ワークフローを書き換えて環境を指しても秘密を受けられない |
 | main への push の探しは、実際の値の規則の当たりを件数だけで出す | 公開の記録に場所を出すと、公開の main のどの行が実際の値かが分かる |
-| 止めるのは NDF が行うマージだけにし、ブランチの保護とルールセットは作らない | 非公開の検査の結果は公開のリポジトリのチェックにならないので、ルールセットから参照できない。main には今もブランチの保護が無い |
+| 非公開の検査で止めるのは NDF が行うマージだけにし、非公開の検査のためのルールセットは作らない | 非公開の検査の結果は公開のリポジトリのチェックにならないので、ルールセットから参照できない。main と develop のルールセット（直接の push の禁止と必須の CI。[全体の設計の決定 158](../design/platform.md#決定の記録)）は、非公開の検査を条件にしない |
 
 ## 対象範囲
 
@@ -277,7 +277,7 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | 検査用の非公開リポジトリ | `LEAK_CHECK_PATTERN` | Actions の秘密 | 呼び出しのワークフロー → `leak-check-secret.yml` |
 | 検査用の非公開リポジトリ | `LEAK_CHECK_GENERATION` | Actions の変数 | 呼び出しのワークフローのジョブ `generation` と NDF |
-| 公開のリポジトリの環境 `leak-scan`（使えるブランチは main だけ） | `LEAK_CHECK_PATTERN` | 環境の秘密 | `leak-check-push` |
+| 公開のリポジトリの環境 `leak-scan`（使えるブランチは main と develop だけにする） | `LEAK_CHECK_PATTERN` | 環境の秘密 | `leak-check-push` |
 | 環境 `leak-scan` か公開のリポジトリ | `LEAK_CHECK_REQUIRE_PATTERN` | 変数 | `leak-check-push`。`1` なら秘密が空のときに落ちる |
 
 - 公開のリポジトリの Actions の秘密と Dependabot の秘密には、`LEAK_CHECK_PATTERN` を置かない
@@ -365,10 +365,10 @@ NDF の側の機能はこのリポジトリの外にあり、まだ入ってい�
 
 ## セキュリティ
 
-- 実際の値の正規表現を受ける実行は、非公開リポジトリの実行と、main への push の実行だけである。Pull Request の側の実行は、ワークフローを書き換えても、非公開リポジトリの秘密も環境 `leak-scan` の秘密も読めない
+- 実際の値の正規表現を受ける実行は、非公開リポジトリの実行と、main と develop への push の実行だけである。Pull Request の側の実行は、ワークフローを書き換えても、非公開リポジトリの秘密も環境 `leak-scan` の秘密も読めない
 - 非公開の検査の成否・件数・当たりの場所は、非公開リポジトリの記録にだけ出る。外部の作者が公開の場所から分かるのは、Pull Request がマージされたかどうかだけである
 - 残る経路は次のとおりで、持ち主が見張る（[CI の検査の秘密と持ち主の操作](../operations/ci-checks.md) の「残る経路と持ち主が見張る点」）
-  - main に直に push できる人は、main の上のワークフローかスクリプトを書き換えて、環境 `leak-scan` の秘密を読めるか、次の非公開の検査で非公開リポジトリの秘密を外へ送れる。main にはブランチの保護が無い
+  - main か develop のルールセットを外せる人と、そこへ Pull Request をマージできる人は、その上のワークフローかスクリプトを書き換えて、環境 `leak-scan` の秘密を読める。main を書き換えれば、次の非公開の検査で非公開リポジトリの秘密を外へ送れる。ルールセットは直接の push を拒むが、レビューの承認は求めない
   - 公開のリポジトリに `main` という名前のタグを作れる人は、`@main` の解決をタグへ向けられる。NDF は `referenced_workflows` の SHA で結果を退けるが、秘密が渡ることは止められない
   - 非公開リポジトリに書き込みの権限を持つ人は、呼び出しのワークフローを書き換えて秘密を読める
   - GitHub の画面からのマージは、非公開の検査を通らない
@@ -388,8 +388,8 @@ NDF の側の機能はこのリポジトリの外にあり、まだ入ってい�
 | 当たりのファイルを手元で特定する（`export-tree.sh` と `leak-scan-secret.sh --details`） | 「当たりの場所を手元で引く」 |
 | 見本を変えたときの写し直し | 「見本の写し直し」 |
 
-- `leak-check-push` は依存を入れないので、main への push では漏れの検査の結合のテストを打たない。結合のテストは Pull Request の `leak-check` が打つ
-- 環境 `leak-scan` の秘密を変えるときは、世代の切り替えは要らない。main への push の探しは push のたびに今の秘密で動き、マージを決めないためである
+- `leak-check-push` は依存を入れないので、main と develop への push では漏れの検査の結合のテストを打たない。結合のテストは Pull Request の `leak-check` が打つ
+- 環境 `leak-scan` の秘密を変えるときは、世代の切り替えは要らない。main と develop への push の探しは push のたびに今の秘密で動き、マージを決めないためである
 - 非公開の検査は、取り出した木・`paths/`・履歴の各層・`git` の範囲のそれぞれで `leak-scan.sh` を 2 回打つ。`layers/` の層の数を n、`binary-text/` の層の数を m とすると、1 回の実行で 2 ×（3 + n + m）回になる。探し直す対象があれば、`leak-scan.sh` の 1 回につき gitleaks をもう 1 回打つ。同じパスを何度も変えた Pull Request ほど時間が延びる
 
 ## テスト観点
