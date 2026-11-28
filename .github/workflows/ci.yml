@@ -3,7 +3,7 @@ name: ci
 # AWS の資格情報を持たない。合成は作り物のアカウント・リージョン・設定のファイルで行う
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 
 permissions:
@@ -117,7 +117,7 @@ jobs:
         env:
           # 照合の語は秘密から受ける。リポジトリのファイルに置かない
           REF_CHECK_TERMS: ${{ secrets.REF_CHECK_TERMS }}
-          # 語を必須にするのは、変数で有効にした正本のリポジトリの中の実行（main への push と同じリポジトリの枝からの PR）だけ
+          # 語を必須にするのは、変数で有効にした正本のリポジトリの中の実行（main と develop への push と同じリポジトリの枝からの PR）だけ
           REF_CHECK_REQUIRE_TERMS: ${{ (vars.REF_CHECK_REQUIRE_TERMS == '1' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)) && '1' || '' }}
         run: npm run ref-check
 
@@ -155,7 +155,7 @@ jobs:
       - name: gitleaks の設定の結合のテスト
         run: npm run test:integration -- leak-scan
 
-  # main への push の漏れの検査。環境 leak-scan（使えるブランチは main だけ）の秘密で実際の値の規則を重ね、
+  # main と develop への push の漏れの検査。環境 leak-scan（使えるブランチは main と develop だけ）の秘密で実際の値の規則を重ね、
   # nd-real-value の当たりは件数だけを出す（#96 #101 の決定 8・9）。必須のチェックではない。
   # 依存を入れない（環境の秘密を持つジョブで依存の導入の処理を動かさない。結合のテストは Pull Request の leak-check が打つ）
   leak-check-push:

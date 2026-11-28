@@ -52,6 +52,12 @@ const digits = (length: number) => pick("0123456789", length);
 const lower = (length: number) => pick("abcdefghijklmnopqrstuvwxyz", length);
 const hex = (length: number) => pick("0123456789abcdef", length);
 const alnum = (length: number) => pick("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", length);
+/**
+ * 既定の規則 `generic-api-key` の除外の語（stopwords。小文字に直した値に含むと外す）を作れない文字だけの値。
+ * 母音・y・h・m・t・v・x・0 を除く（`html`・`md5`・`vpn`・`xxxxxx`・`000000` などを作らない）。
+ * 英数のすべての文字から選ぶと、40 字で 1% ほどが除外の語を含んで当たらない
+ */
+const genericSecret = (length: number) => pick("BCDFGJKLNPQRSWZbcdfgjklnpqrswz123456789", length);
 
 /** 架空の AWS のアカウント ID（許可の値に合わない 12 桁） */
 const fakeAccount = () => fake(() => digits(12), /^[0-9]{12}$/);
@@ -2094,7 +2100,7 @@ describe("履歴のバイナリと読み終えたことの確かめ（#98 の 2�
   }, TIMEOUT);
 
   it("要求の事象 2 の blob.bin が、履歴と今の木で元のパスで当たる", () => {
-    const secret = `aws_secret_access_key = "${alnum(40)}"\n`;
+    const secret = `aws_secret_access_key = "${genericSecret(40)}"\n`;
     const files = { "text.txt": secret, "blob.bin": nul(secret) };
     const { root, base, added } = addedAndRemoved(files);
     expect(hits(gitScan(root, DEFAULT_CONFIG, base))).toEqual([

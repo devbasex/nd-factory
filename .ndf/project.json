@@ -162,15 +162,15 @@
   },
   "branch_strategy": {
     "kind": "custom",
-    "release_strategy": "trunk",
+    "release_strategy": "merge_base_branch",
     "branches": {
       "production": "main",
-      "base": "main"
+      "base": "develop"
     },
     "sprint": {
-      "start": "production",
-      "integrate": "release",
-      "doc_prs": "sprint"
+      "start": "base",
+      "integrate": "check",
+      "doc_prs": "base"
     },
     "release": {
       "form": "service",
@@ -182,10 +182,33 @@
       "cd": null,
       "deliveries": [
         {
-          "target": "AWS（設置のコマンド npm run nd-setup と反映のパイプライン）",
-          "kind": "manual",
-          "trigger": "npm run nd-setup -- diff で差分と確認の値を示し、承認の後に npm run nd-setup -- deploy --confirm <確認の値>。運用する環境のアプリのスタックは反映のパイプラインの承認の後に反映される",
+          "target": "本番のリリース（main へのマージ。本番の環境ができるまで反映先は無い）",
+          "kind": "auto",
+          "trigger": "develop から main への Pull Request のマージを本番のリリースとする。本番の環境ができるまで、実際に反映される先は無い。反映のパイプラインの起点を develop へ切り替えるまでは、main への push でパイプラインが起動する（反映の段への遷移は止めてある）。この行は main へのマージの前にリリース承認ゲートを通すために置くので、消さず、手で反映の行にしない（https://github.com/devbasex/nd-factory/issues/205）",
+          "channel": "production",
           "versioned": false
+        },
+        {
+          "target": "検証環境のアプリのスタック（反映のパイプライン）",
+          "kind": "auto",
+          "trigger": "反映のパイプラインの起点を develop へ切り替えた後は、develop への push で準備から反映まで進む。パイプラインの個々の実行は承認を待たず、develop へのマージはリリースの承認を取らない。切り替えて反映を再開するまでは反映されない",
+          "channel": "base",
+          "versioned": false
+        },
+        {
+          "target": "検証環境の反映のパイプラインのスタック（設置のコマンド --stack pipeline）",
+          "kind": "manual",
+          "trigger": "npm run nd-setup -- diff --stack pipeline の差分と確認の値をリリース承認ゲートで承認した後に、npm run nd-setup -- deploy --confirm <確認の値>",
+          "channel": "base",
+          "versioned": false,
+          "manual_reason": "パイプラインが自分自身を自動で反映すると、push だけで反映の権限を変えられるようになるため"
+        },
+        {
+          "target": "自分で設置する人の AWS（設置のコマンド npm run nd-setup）",
+          "kind": "manual",
+          "trigger": "設置する人が npm run nd-setup -- diff の差分と確認の値を読み、npm run nd-setup -- deploy --confirm <確認の値> で反映する。このリポジトリのデプロイの工程では打たない",
+          "versioned": false,
+          "manual_reason": "設置する人が自分の AWS で差分を読んで反映するため"
         }
       ]
     },
@@ -196,13 +219,13 @@
       }
     ],
     "approval": {
-      "target": "production_pr",
+      "target": "release_pr",
       "via": "gate"
     },
     "merge": {
       "actor": "ndf",
       "method": "strict",
-      "commit": "squash",
+      "commit": "merge",
       "admin": false
     },
     "verify": null

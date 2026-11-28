@@ -5,7 +5,7 @@ name: ndf-contract
 # AWS の資格情報を持たない。NDF のリポジトリは公開のリポジトリとして読むだけ
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
   schedule:
     - cron: "17 3 * * *"
