@@ -844,6 +844,17 @@ describe("CI の定義", () => {
     expect(leakJobViolations(ci)).toEqual([]);
   });
 
+  it("push で起動するワークフローは、検証環境の起点の develop と本番の main の両方で起動する", () => {
+    const pushBranches = workflows.flatMap((workflow) => {
+      const push = (workflow.doc.on as { push?: { branches?: string[] } } | undefined)?.push;
+      return push ? [[workflow.path, push.branches]] : [];
+    });
+    expect(pushBranches.sort()).toEqual([
+      [join(".github", "workflows", "ci.yml"), ["main", "develop"]],
+      [join(".github", "workflows", "ndf-contract.yml"), ["main", "develop"]],
+    ]);
+  });
+
   it("秘密 LEAK_CHECK_PATTERN を読むジョブは leak-check-push と leak-check-secret だけ", () => {
     expect(patternSecretReaders(workflows).sort()).toEqual(
       [`${CI_PATH}#jobs.leak-check-push`, `${SECRET_WORKFLOW_PATH}#jobs.leak-check-secret`].sort(),
