@@ -173,7 +173,8 @@ export function deployBuildSpec(appStack: string, cdkVersion: string, guard: str
           `ACTUAL_DIGEST="$(cd cdk.out && ${ASSEMBLY_DIGEST_SHELL})"`,
           'echo "準備が作った要約値 $EXPECTED_DIGEST / 数え直した要約値 $ACTUAL_DIGEST"',
           'if [ -z "$EXPECTED_DIGEST" ] || [ "$ACTUAL_DIGEST" != "$EXPECTED_DIGEST" ]; then echo "合成の結果が準備したものと違うため反映しない"; exit 1; fi',
-          `cdk deploy --app cdk.out --require-approval never ${appStack}`,
+          // 前の値を引き継がせない。専用の bootstrap へ切り替える前からあるスタックは、旧い版のパラメーターの名前を持つ
+          `cdk deploy --app cdk.out --require-approval never --no-previous-parameters ${appStack}`,
         ],
       },
     },

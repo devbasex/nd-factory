@@ -336,8 +336,14 @@ describe("deployBuildSpec", () => {
     expect(spec).toContain(JSON.stringify(ASSEMBLY_DIGEST_SHELL).slice(1, -1));
     expect(spec).toContain("EXPECTED_DIGEST");
     expect(spec).toContain("exit 1");
-    expect(spec).toContain("cdk deploy --app cdk.out --require-approval never acme-test-app");
+    expect(spec).toContain("cdk deploy --app cdk.out --require-approval never --no-previous-parameters acme-test-app");
     expect(spec).toContain("aws-cdk@2.1148.1");
+  });
+
+  // 前の値を引き継ぐと、専用の bootstrap へ切り替える前からあるスタックは、旧い版のパラメーターの名前を渡し、
+  // 専用の実行のロールが読めずに反映が失敗する
+  it("前の反映のパラメーターの値を引き継がず、検査したテンプレートの既定の値で反映する", () => {
+    expect(commands.at(-1)).toContain("--no-previous-parameters");
   });
 
   it("合成を含まない", () => {
