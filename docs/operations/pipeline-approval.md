@@ -60,7 +60,7 @@
 
 承認した本文とは、パイプラインのスタックを反映した時点のコードが作る方針と境界である。検査はその要約値を持つ。実行の記録に失敗の理由を出すときは、操作と検査のケースを書き、ロールの名前と ARN は書かない。
 
-その後、要約値を数え直して準備の値（`EXPECTED_DIGEST`）と比べ、同じときだけ `cdk deploy --app cdk.out --require-approval never <prefix>-<environment>-app` を打つ。合成し直さない。要約値の作り方は設置のコマンドと同じで、[setup.md](setup.md) の「確認の値」にシェルの式がある。
+その後、要約値を数え直して準備の値（`EXPECTED_DIGEST`）と比べ、同じときだけ `cdk deploy --app cdk.out --require-approval never --no-previous-parameters <prefix>-<environment>-app` を打つ。合成し直さない。`--no-previous-parameters` は、前の反映のパラメーターの値を引き継がず、検査したテンプレートの既定の値で反映するために付ける。付けないと、アプリ専用の bootstrap へ切り替える前からあるスタックは、旧い bootstrap の版のパラメーターの名前（`BootstrapVersion`）を引き継ぎ、専用の実行のロールが読めずに反映が失敗する。要約値の作り方は設置のコマンドと同じで、[setup.md](setup.md) の「確認の値」にシェルの式がある。
 
 反映のプロジェクトのロール（名前は `<prefix>-<environment>-deploy-<region>`）が持つ権限は、アプリ専用の反映・公開・実行のロールの引き受け、2 つのパラメーターの読み取り、このパイプラインの実行の読み取り、アプリ専用の 2 つのロールの IAM の読み取りとシミュレーション、実行の方針と権限の境界の読み取り、成果物とログだけである。
 
