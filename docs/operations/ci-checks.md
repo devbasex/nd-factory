@@ -175,14 +175,15 @@ ref: refs/heads/main
 
 | 検査 | 動く実行 | 受ける秘密 | 結果が見える人 |
 | --- | --- | --- | --- |
-| `ref-check`（`ci.yml`） | Pull Request と main への push | `REF_CHECK_TERMS`（Actions の秘密。Dependabot の Pull Request では Dependabot の秘密） | 誰でも（公開の記録） |
+| `ref-check`（`ci.yml`） | Pull Request と、main と develop への push | `REF_CHECK_TERMS`（Actions の秘密。Dependabot の Pull Request では Dependabot の秘密） | 誰でも（公開の記録） |
 | `leak-check`（`ci.yml`） | Pull Request だけ | 受けない。既定の規則と `.gitleaks.toml` だけで、今の木と分岐点から head までを探す | 誰でも（公開の記録。必須のチェック） |
-| `leak-check-push`（`ci.yml`） | main への push だけ | 環境 `leak-scan` の秘密 `LEAK_CHECK_PATTERN` と変数 `LEAK_CHECK_REQUIRE_PATTERN` | 誰でも（公開の記録）。実際の値の規則 `nd-real-value` の当たりは件数の行（`leak-scan-secret: nd-real-value: <件数> 件`）だけで、場所を出さない。必須のチェックではない |
+| `leak-check-push`（`ci.yml`） | main と develop への push だけ | 環境 `leak-scan` の秘密 `LEAK_CHECK_PATTERN` と変数 `LEAK_CHECK_REQUIRE_PATTERN` | 誰でも（公開の記録）。実際の値の規則 `nd-real-value` の当たりは件数の行（`leak-scan-secret: nd-real-value: <件数> 件`）だけで、場所を出さない。必須のチェックではない |
 | 非公開の検査（`leak-check-secret.yml`） | NDF が Pull Request をマージする直前に、`<非公開リポジトリ>` の呼び出しのワークフローを起動したとき（持ち主が手で起動したときも）。NDF 11.0.43 は起動しないので、[#198](https://github.com/devbasex/nd-factory/issues/198) が入るまでは、持ち主が手で起動したときだけ動く | `<非公開リポジトリ>` の Actions の秘密 `LEAK_CHECK_PATTERN`（必須。空なら落ちる） | `<非公開リポジトリ>` に読み取りの権限を持つ人と NDF だけ。当たりは規則・`file-<番号>`・行・コミットで出し、ファイルの名前は出さない。公開の Pull Request のチェック・コメント・通知には何も出ない |
 
 - 非公開の検査は、Pull Request のマージコミットの木・分岐点から head までの各コミットのパッチ・その範囲のコミットに現れたすべてのパスの名前と中身を、既定の規則と、`.gitleaks.toml` に `nd-real-value` を重ねた設定で探す。動かすのは、公開のリポジトリの main の先頭（検査のコードのコミット）のスクリプトと設定だけで、Pull Request のコミットは読むだけである
 - Pull Request を誰が作ったか（fork・同じリポジトリのブランチ・Dependabot）で、どの検査の振る舞いも変わらない。起動した人で分ける条件は置かない（CI の定義のテストが落とす）
 - 非公開の検査の機能が入った NDF は、非公開の検査の成功を確かめられなければマージしない。NDF 11.0.43 はこの確かめをしないので、#198 が入るまで、通常の Pull Request に入った実際の値は機械では止まらない。結果は公開のリポジトリのチェックにならないので、`.ndf/project.json` の必須のチェック（`required_checks`）には載せない
+- `develop` へのマージは、#198 が入るまで非公開の検査を条件にしない（持ち主の決定、2026-11-27。[全体の設計の決定 158](../design/platform.md#決定の記録)）。そのため、起点を `develop` にした後は、公開の検査を含む必須の CI が通れば、非公開の検査をしていない変更も検証環境へ反映される。`main` へのマージは、非公開の検査の無いマージを認めるかを、リリースの承認のたびに持ち主へ問う
 
 ### 残る経路と持ち主が見張る点
 
@@ -190,7 +191,7 @@ ref: refs/heads/main
 
 | 経路 | 届くもの | 持ち主がすること |
 | --- | --- | --- |
-| main に直に push できる人（main にはブランチの保護が無いので、書き込みの権限を持つ人） | main の上のワークフローを書き換えて、環境 `leak-scan` の秘密を読める。`leak-check-secret.yml` かそれが動かすスクリプトに秘密を外へ送る手順を足せば、次に NDF が起動したときに `<非公開リポジトリ>` の秘密つきで動く | main への直の push を見張る |
+| main のルールセットを外せる人（直の push はルールセットが拒むが、リポジトリの管理の権限を持つ人はルールセットを外せる） | main の上のワークフローを書き換えて、環境 `leak-scan` の秘密を読める。`leak-check-secret.yml` かそれが動かすスクリプトに秘密を外へ送る手順を足せば、次に NDF が起動したときに `<非公開リポジトリ>` の秘密つきで動く | ルールセットの変更の履歴と、main への直の push を見張る |
 | 公開のリポジトリに `main` という名前のタグを作れる人 | 呼び出しのワークフローの `@main` の解決をタグへ向けられる（同じ名前のタグはブランチより優先される）。NDF は実際に動いた版を確かめて結果を退けるが、秘密が渡ることは止められない | `main` という名前のタグの作成を見張る |
 | `<非公開リポジトリ>` に書き込みの権限を持つ人 | 呼び出しのワークフローを書き換えて秘密を読める | 書き込みの権限を持つ人を最小にする |
 | GitHub の画面からのマージ | 非公開の検査を通らずにマージできる（止めるのは NDF が行うマージだけ） | 画面からマージしない |
@@ -210,7 +211,7 @@ ref: refs/heads/main
 
 - 公開のリポジトリの Actions の秘密には `LEAK_CHECK_PATTERN` を置かない。登録していれば消す（`pull_request` の実行の Pull Request のコードから読めるため）
 - **Dependabot の Pull Request で要る操作は無い。** Pull Request の側の `leak-check` は秘密を受けないので、Dependabot の Pull Request でも秘密の欠けで落ちない。Dependabot の Pull Request の全コミットは、ほかの Pull Request と同じく、NDF のマージの直前に非公開の検査で探す（非公開の検査の機能が入った NDF の場合。#198 が入るまでは探さない）。**Dependabot の秘密には `LEAK_CHECK_PATTERN` を登録しない**（Dependabot が起動した実行で、Pull Request のコードと更新した依存から読めるため）
-- 環境 `leak-scan` を使えるのは main への push の `leak-check-push` だけである。Pull Request の側の実行はマージの参照（`refs/pull/<番号>/merge`）で動くので、ワークフローを書き換えて環境を指しても秘密を受けられない
+- 環境 `leak-scan` を使えるのは main と develop への push の `leak-check-push` だけである。Pull Request の側の実行はマージの参照（`refs/pull/<番号>/merge`）で動くので、ワークフローを書き換えて環境を指しても秘密を受けられない
 
 ## NDF の認証の権限
 
@@ -298,7 +299,7 @@ NDF の認証は、`<非公開リポジトリ>` に対して次の権限を持�
      - 比較の API の呼び出しが失敗する
      - 比較の API の応答から `files` を取得できない
      - マージ先が main で、base の先頭を読み直した後に main が進み、比較の API に渡す main の先頭の SHA が検査に渡した base の SHA と違う。進んだ変更が「秘密を受けて動くコードと設定の一覧」のファイルを含まなくてもマージしない
-2. 1 本目をマージする前に、公開のリポジトリの環境 `leak-scan`（使えるブランチは main だけ）とその秘密 `LEAK_CHECK_PATTERN` を設定する。変数 `LEAK_CHECK_REQUIRE_PATTERN` は、この時点では `1` にしない
+2. 1 本目をマージする前に、公開のリポジトリの環境 `leak-scan`（使えるブランチは main と develop だけにする）とその秘密 `LEAK_CHECK_PATTERN` を設定する。変数 `LEAK_CHECK_REQUIRE_PATTERN` は、この時点では `1` にしない
 3. 1 本目の Pull Request を、マージの前に持ち主が手元で探す（下の「1 本目を手元で探す」）。**1 本目のマージから、NDF に非公開の検査の機能が入り、手順 6 で NDF の利用者の設定から非公開の検査を有効にするまで、NDF にほかの Pull Request をマージさせない。** 手で起動した探しの結果でもマージしない（今の NDF は、探した Pull Request の番号・head・マージ先・base の先頭の組を確かめずにマージするため）
 4. 1 本目のマージで起きた main への push の `leak-check-push` で、秘密の規則を使って当たりなく探し終えたことを確かめる。次の 3 つがすべてそろえば、確かめられたことになる
    - ジョブが成功している
